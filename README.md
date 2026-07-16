@@ -9,10 +9,13 @@ written down.
 Concretely, a "department" here is nothing exotic: **an existing coding-agent harness — Claude
 Code, Codex — pointed at a working directory whose instruction file is that one role's job.** The
 template doesn't build a runtime; it writes down the organization and projects each role onto a
-harness that already exists. So the method is: **put the organization into words the AI can act
-on** — and the payoff is concrete and vendor-neutral: the *same* guardrail blocks a real tool call
-on Claude Code and on Codex, because both share the pre-tool hook contract. No rewrite per vendor,
-no runtime to maintain.
+harness that already exists.
+
+So the design act reduces to one thing: **put the organization into words the AI can act on.**
+The payoff is concrete and vendor-neutral. The *same* neutral guardrail blocks a real tool call
+because Claude Code and Codex share the pre-tool hook contract — verified on the Claude Code CLI,
+and designed to block identically on Codex through that shared contract (the Codex run is the
+adopter's step, not yet exercised here). No rewrite per vendor, no bespoke per-vendor runtime.
 
 That is the load-bearing bet, and it is the opposite of the field's other "company of agents"
 frameworks (MetaGPT, ChatDev, CrewAI), which each build their own bespoke runtime. Here the harness
