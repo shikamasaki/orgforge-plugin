@@ -1,0 +1,29 @@
+# config.toml — Codex projection of the org's runtime settings. Drop at <repo>/.codex/config.toml.
+# Codex loads project-local config ONLY when the project is trusted (learn.chatgpt.com/docs/config-file).
+# This is the harness-map layer of PROJECTION.md for Codex: it maps the org's NEUTRAL role-settings
+# (template/role-settings.yaml — tier/effort/tools/tier-A-vs-B) onto Codex's concrete knobs. The
+# org's SCHEDULE (template/schedule.yaml) is still driven by an external cron/CI (R0 — no built-in
+# scheduler, same as Claude Code); this file only sets model/sandbox/approval/MCP per project.
+
+# neutral model_tier -> a concrete Codex model (adopter fills in the real names)
+model = "gpt-5.5"
+model_reasoning_effort = "medium"        # neutral effort -> minimal|low|medium|high|xhigh
+
+# Tier-A default: workspace-write sandbox is the ordinary dept substrate. A Tier-B (asset-touching)
+# dept needs a host that provides credential custody + an external watchdog (docs/01 §5); do NOT
+# grant danger-full-access to a maker.
+approval_policy = "on-request"           # untrusted|on-request|never
+sandbox_mode = "workspace-write"         # read-only|workspace-write|danger-full-access
+
+[sandbox_workspace_write]
+network_access = false                   # a maker touching the network is Tier-B; gate it
+
+# The per-department instruction file convention is AGENTS.md (see integrations/codex/AGENTS.md.tmpl).
+project_doc_fallback_filenames = ["AGENTS.md"]
+
+# Optional: expose the org's organ tools to Codex as an MCP server, so a department can call
+# `reconcile.py mandate` etc. as a first-class tool rather than shelling out. (An adopter wires
+# a thin MCP wrapper around tools/*.py; left as a stub here.)
+# [mcp_servers.org_organs]
+# command = "python3"
+# args = ["integrations/common/org_mcp_server.py"]

@@ -160,6 +160,17 @@ Decomposing from the organization (not from the parts) changes what you build:
    [template/moves.yaml](template/moves.yaml); doctrine and scopes evolve per
    [docs/07](docs/07-doctrine-and-knowledge.md) and [docs/08](docs/08-context-economy.md).
 
+**Track C — wire it to a real harness ([integrations/](integrations/)).** Step 5 above, made
+concrete for Claude Code and Codex. The organs become **direct harness features**: a `PreToolUse`
+hook (the *same* neutral `org_hook.py` on both harnesses — they share the exit-2 block contract)
+makes a blast-radius cap or a mandate check **actually block a real tool call**; a `SessionStart`
+hook injects the role's doctrine + conventions every cycle; departments run headless via
+`claude -p` / `codex exec` (the runner projects one neutral role onto either); a cron drives
+`tools/tick.py`, which detects a missed check so "the schedule stopped firing" is a paged fact.
+Ships as a Claude Code **plugin** (hooks + subagents + `/org-tick`, `/org-mandate` commands) and a
+Codex `.codex/` config — neutral core, one folder per harness. See
+[integrations/README.md](integrations/README.md).
+
 ## Status & honesty
 
 v0.4. This is a **framing + template**, distilled from published organizational theory and the

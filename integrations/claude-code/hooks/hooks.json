@@ -1,0 +1,18 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Write|Edit|MultiEdit",
+        "type": "command",
+        "command": "python3 \"${CLAUDE_PLUGIN_ROOT}\"/../common/org_hook.py"
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "",
+        "type": "command",
+        "command": "python3 \"${CLAUDE_PLUGIN_ROOT}\"/../common/org_session_start.py"
+      }
+    ]
+  }
+}
