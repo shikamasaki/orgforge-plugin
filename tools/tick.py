@@ -31,8 +31,8 @@ import os
 import re
 import sys
 
-ESCALATE = 10
-OK = 0
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _organ import ESCALATE, OK, read_events   # noqa: E402
 
 
 def _load_schedule(path):
@@ -90,19 +90,6 @@ def _interval_min(cadence):
     return None   # on_<event> — not clock-driven; the host fires it on the event, not the tick
 
 
-def _events(root):
-    log = os.path.join(root, "ledger.jsonl")
-    if not os.path.exists(log):
-        return []
-    out = []
-    with open(log, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                out.append(json.loads(line))
-    return out
-
-
 def _last_verify_seq(events, verify_class):
     last = None
     for e in events:
@@ -115,7 +102,7 @@ def cmd_plan(a):
     sched = _load_schedule(a.schedule_yaml)
     base = _interval_min(sched.get("base_interval", "every_5_min")) or 5
     now = a.now_min
-    events = _events(a.root)
+    events = read_events(a.root)
     mt = sched.get("missed_tick", {})
     grace = int(mt.get("grace_intervals", 2))
     esc_after = int(mt.get("escalate_after_consecutive", 3))

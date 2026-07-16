@@ -34,8 +34,8 @@ import json
 import os
 import sys
 
-ESCALATE = 10
-OK = 0
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _organ import ESCALATE, OK   # noqa: E402
 
 
 def _path(root):

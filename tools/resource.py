@@ -18,10 +18,12 @@ event; tick.py plans WHEN.
       holder silently (safe direction); escalates ONLY if reclaim would deactivate a
       CEO-founded/protected dept, or there is nowhere non-harmful to cut (scarcity crisis).
 
-  authority <root> [--now-tick N] [--hard-cap-scope S]        AUTHORITY-EXPIRED. Delegations
-      never decay → privilege-creep is the deepest overnight-compromise surface. Silently
-      renews in-TTL justified grants, auto-revokes/narrows stale/orphaned ones UNATTENDED (safe
-      direction); escalates ONLY to widen/renew past a hard cap (the risk-increasing direction).
+  authority <root> [--now-tick N] [--ttl-ticks N] [--hard-cap-scope S]   AUTHORITY-EXPIRED.
+      Delegations never decay → privilege-creep is the deepest overnight-compromise surface.
+      Silently renews in-TTL justified grants, auto-revokes/narrows stale/orphaned ones past
+      --ttl-ticks UNATTENDED (safe direction). The widen/renew-past-a-hard-cap escalation (the
+      risk-increasing direction) is a CALLER-side check against --hard-cap-scope — this tool only
+      narrows in the safe direction; it never widens, so it has no ESCALATE path of its own.
 
 Each prints the ledger event it would emit. Exit 0 = silent/safe; 10 = escalate.
 """
@@ -31,25 +33,8 @@ import json
 import os
 import sys
 
-ESCALATE = 10
-OK = 0
-
-
-def _events(root):
-    log = os.path.join(root, "ledger.jsonl")
-    if not os.path.exists(log):
-        return []
-    out = []
-    with open(log, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                out.append(json.loads(line))
-    return out
-
-
-def _emit(cls, payload):
-    print("LEDGER-EVENT " + json.dumps({"class": cls, "payload": payload}, ensure_ascii=False))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _organ import ESCALATE, OK, read_events, emit_event   # noqa: E402
 
 
 def _current_ranking(events):
@@ -75,7 +60,7 @@ def cmd_rank(a):
     # deterministic order: by weight desc, then id asc (stable, reproducible)
     ordered = sorted(pairs, key=lambda p: (-p[1], p[0]))
     new_order = [oid for oid, _ in ordered]
-    events = _events(a.root)
+    events = read_events(a.root)
     current = _current_ranking(events)
     if current == new_order:
         print(f"unchanged: recomputed order == current {new_order} — silent, no event, "
@@ -88,7 +73,7 @@ def cmd_rank(a):
     payload = {"ranking_id": rid, "ordered_objectives": ordered_objectives,
                "supersedes": current, "basis_event_ids":
                [b.strip() for b in (a.basis or "").split(",") if b.strip()]}
-    _emit("priority_ranking_set", payload)
+    emit_event("priority_ranking_set", payload)
     print(f"reordered: {current} -> {new_order}. Emitted (order changed). Escalate only if this "
           f"downranks a CEO-protected objective — that check is the caller's charter lookup.")
     # a pure reorder is not itself an escalation; charter-boundary crossing is a caller concern
@@ -97,7 +82,7 @@ def cmd_rank(a):
 
 def cmd_reclaim(a):
     """ALLOCATION-RECLAIM: measure a holder's yield from the ledger; reclaim if low/idle."""
-    events = _events(a.root)
+    events = read_events(a.root)
     # yield proxy: outputs produced per cycle the holder ran (cycle_completed.outputs / cycles)
     cycles = outputs = 0
     last_seq = -1
@@ -119,7 +104,7 @@ def cmd_reclaim(a):
     payload = {"holder": a.holder, "resource_type": a.resource, "from_level": "current",
                "to_level": "reduced", "yield_metric": round(yield_metric, 3),
                "ranking_ref": _current_ranking(events), "reason": reason}
-    _emit("allocation_reclaimed", payload)
+    emit_event("allocation_reclaimed", payload)
     if a.protected and a.holder in [p.strip() for p in a.protected.split(",")]:
         print(f"ESCALATE: reclaim from {a.holder} would touch a CEO-protected dept — cannot "
               f"auto-reclaim; queue for the CEO.", file=sys.stderr)
@@ -131,7 +116,7 @@ def cmd_reclaim(a):
 
 def cmd_authority(a):
     """AUTHORITY-EXPIRED: scan live grants; renew/revoke in the safe direction unattended."""
-    events = _events(a.root)
+    events = read_events(a.root)
     # live grants = scope_grant_changed with change in {open,widen} not later revoked/narrowed
     grants = {}   # seam -> (change, seq, grantor)
     for e in events:
@@ -156,7 +141,7 @@ def cmd_authority(a):
     payload = {"grants_reviewed": len(reviewed),
                "auto_narrowed": [r for r in reviewed if r["action"] == "narrow"],
                "renewed": [r for r in reviewed if r["action"] == "renew"]}
-    _emit("authority_reviewed", payload)
+    emit_event("authority_reviewed", payload)
     narrowed = payload["auto_narrowed"]
     if narrowed:
         print(f"auto-narrowed {len(narrowed)} stale grant(s) past TTL {a.ttl_ticks} — safe "

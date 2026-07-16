@@ -39,25 +39,8 @@ import json
 import os
 import sys
 
-ESCALATE = 10
-OK = 0
-
-
-def _events(root):
-    log = os.path.join(root, "ledger.jsonl")
-    if not os.path.exists(log):
-        return []
-    out = []
-    with open(log, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                out.append(json.loads(line))
-    return out
-
-
-def _emit(cls, payload):
-    print("LEDGER-EVENT " + json.dumps({"class": cls, "payload": payload}, ensure_ascii=False))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _organ import ESCALATE, OK, read_events, emit_event   # noqa: E402
 
 
 def cmd_premise(a):
@@ -73,7 +56,7 @@ def cmd_premise(a):
         status = "holds" if asserted == observed else "broken"
     payload = {"premise_id": a.premise_id, "asserted": asserted, "observed": observed,
                "status": status}
-    _emit("premise_reconciled", payload)
+    emit_event("premise_reconciled", payload)
     if status == "holds":
         print(f"holds: premise '{a.premise_id}' still matches the world ({observed}) — silent. "
               f"The telos rests on a live premise.")
@@ -92,7 +75,7 @@ def cmd_premise(a):
 
 def cmd_sunk(a):
     """SUNK-COURSE: count accumulated attempts + outcome trend for an OPEN course."""
-    events = _events(a.root)
+    events = read_events(a.root)
     attempts = 0
     outcomes = []
     still_open = True
@@ -123,7 +106,7 @@ def cmd_sunk(a):
                "outcome_trend": ("improving" if improving else "flat_or_worse"),
                "still_open": still_open,
                "decision": "continue" if (improving or not (over_attempts or over_cost)) else "abandon"}
-    _emit("sunk_course_reviewed", payload)
+    emit_event("sunk_course_reviewed", payload)
     if not still_open:
         print(f"closed: course '{a.course_id}' already closed — not a sunk-course concern.")
         return OK
@@ -141,7 +124,7 @@ def cmd_sunk(a):
 
 def cmd_frame(a):
     """FRAME-REVIEW: surface a double-loop question — accurate predictions against a drifting target."""
-    events = _events(a.root)
+    events = read_events(a.root)
     # a "near-target" decision: admission_decided(admit) whose predicted ~= observed (small delta),
     # i.e. single-loop is HAPPY. But if the aggregate RESULT those decisions proxy is trending away,
     # the frame itself may be wrong. We approximate "the result" as the mean observed_outcome trend.
@@ -173,7 +156,7 @@ def cmd_frame(a):
                "result_trend": "drifting" if drifting else "stable",
                "question": "predictions accurate against a target that may itself be wrong"
                            if drifting else None}
-    _emit("frame_review_raised", payload)
+    emit_event("frame_review_raised", payload)
     if not drifting:
         print(f"stable: {near_target} accurate predictions AND the result they proxy is stable "
               f"— the frame holds, silent.")

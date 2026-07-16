@@ -23,29 +23,12 @@ import json
 import os
 import sys
 
-ESCALATE = 10
-OK = 0
-
-
-def _events(root):
-    log = os.path.join(root, "ledger.jsonl")
-    if not os.path.exists(log):
-        return []
-    out = []
-    with open(log, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                out.append(json.loads(line))
-    return out
-
-
-def _emit(cls, payload):
-    print("LEDGER-EVENT " + json.dumps({"class": cls, "payload": payload}, ensure_ascii=False))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _organ import ESCALATE, OK, read_events, emit_event   # noqa: E402
 
 
 def cmd_delta(a):
-    events = _events(a.root)
+    events = read_events(a.root)
     # index predictions by candidate_id, from admission_decided(admit) with a predicted_outcome
     predicted = {}
     for e in events:
@@ -89,7 +72,7 @@ def cmd_delta(a):
     for d in deltas:
         rc = len(klass[(d["department"], d["delta_sign"])])
         d["recurrence_count"] = rc
-        _emit("outcome_delta", d)
+        emit_event("outcome_delta", d)
         if rc >= a.recurrence:
             escalate = True
     if escalate:

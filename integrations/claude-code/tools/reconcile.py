@@ -46,25 +46,8 @@ import json
 import os
 import sys
 
-ESCALATE = 10
-OK = 0
-
-
-def _events(root):
-    log = os.path.join(root, "ledger.jsonl")
-    if not os.path.exists(log):
-        return []
-    out = []
-    with open(log, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                out.append(json.loads(line))
-    return out
-
-
-def _emit(cls, payload):
-    print("LEDGER-EVENT " + json.dumps({"class": cls, "payload": payload}, ensure_ascii=False))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _organ import ESCALATE, OK, read_events, emit_event   # noqa: E402
 
 
 def _open_claims(events):
@@ -93,7 +76,7 @@ def _open_claims(events):
 
 def cmd_collision(a):
     """Reconcile the open claim set for overlapping territory among DIFFERENT peers."""
-    events = _events(a.root)
+    events = read_events(a.root)
     open_claims = _open_claims(events)
     if a.now_role and a.now_territory:
         open_claims = open_claims + [{"seq": 10**9, "role": a.now_role,
@@ -104,7 +87,7 @@ def cmd_collision(a):
         by_terr.setdefault(c["territory"], set()).add(c["role"])
     overlaps = {t: sorted(roles) for t, roles in by_terr.items() if len(roles) > 1}
     if not overlaps:
-        _emit("lateral_reconciled", {"observer_role": "collision-scan", "subjects": [],
+        emit_event("lateral_reconciled", {"observer_role": "collision-scan", "subjects": [],
                                      "reference": "open_claims", "result": "consistent",
                                      "divergence_kind": None, "evidence_event_ids": []})
         print(f"clear: {len(open_claims)} open claim(s), no two peers on the same territory "
@@ -115,7 +98,7 @@ def cmd_collision(a):
     # surface every overlap as divergent and default kind=duplicate (peer-resolvable); a true
     # contradiction is a semantic judgment the calling agent stamps.
     terr, roles = next(iter(overlaps.items()))
-    _emit("lateral_reconciled", {"observer_role": "collision-scan", "subjects": roles,
+    emit_event("lateral_reconciled", {"observer_role": "collision-scan", "subjects": roles,
                                  "reference": terr, "result": "divergent",
                                  "divergence_kind": "duplicate",
                                  "evidence_event_ids": []})
@@ -129,7 +112,7 @@ def cmd_collision(a):
 
 def cmd_stall(a):
     """Convert the ABSENCE of output on a depends_on edge into an explicit stall fact."""
-    events = _events(a.root)
+    events = read_events(a.root)
     # a dependency edge: a consumer role has bound work awaiting a producer's output. We detect
     # a stall as: a role emitted cycle_started but no cycle_completed within N subsequent cycles
     # of the whole org (a freshness window) — its work is in flight but not landing.
@@ -152,12 +135,12 @@ def cmd_stall(a):
             if elapsed >= a.freshness_cycles:
                 stalled.append({"role": role, "started_seq": sseq, "stalled_cycles": elapsed})
     if not stalled:
-        _emit("dependency_stall_raised", {"blocked_role": None, "result": "no_stall"})
+        emit_event("dependency_stall_raised", {"blocked_role": None, "result": "no_stall"})
         print(f"no stall: every started cycle completed within {a.freshness_cycles} cycles "
               f"— silent.")
         return OK
     worst = max(stalled, key=lambda s: s["stalled_cycles"])
-    _emit("dependency_stall_raised", {"blocked_role": worst["role"], "awaited_seam_id": None,
+    emit_event("dependency_stall_raised", {"blocked_role": worst["role"], "awaited_seam_id": None,
                                       "awaited_producer_role": None,
                                       "stalled_ticks": worst["stalled_cycles"],
                                       "downstream_impact": []})
@@ -176,7 +159,7 @@ def cmd_contract(a):
                "proposed_shape": a.proposed_shape or "(shape omitted)",
                "is_breaking": breaking, "dependents": dependents,
                "objection_deadline_tick": a.deadline_tick}
-    _emit("contract_change_proposed", payload)
+    emit_event("contract_change_proposed", payload)
     if not breaking:
         print(f"non-breaking: seam '{a.seam}' change announced to {dependents}. Silence=consent "
               f"after deadline {a.deadline_tick}; the change then proceeds. No CEO traffic.")
@@ -221,7 +204,7 @@ def cmd_mandate(a):
                 "its own mandate; this is the true exception the human must adjudicate")
     payload = {"subjects": subjects, "contested_decision": a.decision,
                "mandate_refs": order, "resolution": resolution, "evidence_ids": []}
-    _emit("mandate_conflict_raised", payload)
+    emit_event("mandate_conflict_raised", payload)
     if resolution in ("precedence_applies", "integrate"):
         print(f"{resolution}: {note}")
         return OK

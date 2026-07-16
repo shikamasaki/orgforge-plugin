@@ -34,37 +34,16 @@ Each command prints the ledger event it would emit (the payload from the discove
 sets its exit code so a host script can branch: 0 = silent/allow, 10 = escalate/hold/drift.
 """
 import argparse
-import json
 import os
 import sys
 
-ESCALATE = 10   # exit code: the exception surfaced — host enqueues / pages / halts
-OK = 0          # exit code: fail-quiet — nothing surfaces
-
-
-def _events(root):
-    log = os.path.join(root, "ledger.jsonl")
-    if not os.path.exists(log):
-        return []
-    out = []
-    with open(log, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                out.append(json.loads(line))
-    return out
-
-
-def _emit(event_class, payload):
-    """Print the ledger event this guardrail would append (via tools/ledger.py append).
-    The guardrail computes and decides; the host ledgers the verdict so it's auditable."""
-    print("LEDGER-EVENT " + json.dumps({"class": event_class, "payload": payload},
-                                       ensure_ascii=False))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _organ import ESCALATE, OK, read_events, emit_event   # noqa: E402
 
 
 def cmd_cap(a):
     """BLAST-RADIUS-CAP: sum committed exposure in the window for this dimension, then decide."""
-    events = _events(a.root)
+    events = read_events(a.root)
     committed = 0.0
     for e in events:
         if a.window_since and e["ts"] < a.window_since:
@@ -86,7 +65,7 @@ def cmd_cap(a):
         "decision": decision,
         "caused_by_event": a.caused_by,
     }
-    _emit("exposure_budget_checked", payload)
+    emit_event("exposure_budget_checked", payload)
     if decision == "hold":
         print(f"HOLD: {a.dimension} committed {committed} + requested {a.delta} = {would_be} "
               f"> cap {a.cap} — action blocked and enqueued to the approval queue (aggregate "
@@ -118,7 +97,7 @@ def cmd_reconcile(a):
         "magnitude": magnitude,
         "unaccounted_events": [],   # a fuller impl lists ledger-unexplained deltas; kept explicit
     }
-    _emit("state_reconciled", payload)
+    emit_event("state_reconciled", payload)
     if not drift:
         print(f"clean: {a.domain} ledger-belief == ground-truth ({expected}) — silent breadcrumb.")
         return OK
@@ -137,7 +116,7 @@ def cmd_reconcile(a):
 
 def cmd_staleref(a):
     """STALE-REFERENCE: which bound roles have NOT re-derived since the reference moved?"""
-    events = _events(a.root)
+    events = read_events(a.root)
     # find the trigger event's seq (when the reference moved)
     trigger_seq = None
     for e in events:
@@ -170,7 +149,7 @@ def cmd_staleref(a):
         "silent_duration_per_role": {r: cycles_since_trigger for r in stale},
         "result": "stale_found" if stale else "all_current",
     }
-    _emit("reference_staleness_checked", payload)
+    emit_event("reference_staleness_checked", payload)
     if not stale:
         print(f"all_current: every bound role re-derived since {a.trigger_event} — silent.")
         return OK

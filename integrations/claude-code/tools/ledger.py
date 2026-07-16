@@ -45,6 +45,9 @@ import json
 import os
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _organ import read_events   # noqa: E402
+
 # ── event classes with a required-prior constraint (ledger-schema §event_classes) ──
 # result_deployed{candidate_id==C} is INVALID without a prior refutation_attempted with
 # claim_id==C and verdict==survives. This is the one write-time invariant the schema states
@@ -91,16 +94,8 @@ def _paths(root):
 
 
 def _read_events(root):
-    log, _ = _paths(root)
-    if not os.path.exists(log):
-        return []
-    out = []
-    with open(log, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                out.append(json.loads(line))
-    return out
+    # the log path _paths(root)[0] == ledger_path(root); delegate to the shared reader.
+    return read_events(root)
 
 
 def _read_head(root):

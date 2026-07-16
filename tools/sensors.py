@@ -31,6 +31,9 @@ import json
 import os
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _organ import read_events   # noqa: E402
+
 # minimal YAML reader for sensors.yaml's flat list-of-maps (avoids a pyyaml dependency for a
 # tool that must run anywhere; sensors.yaml is intentionally simple). Falls back to pyyaml if
 # present. We only need id/judge/window/threshold/source_views/formula per sensor.
@@ -59,19 +62,6 @@ def _load_sensors(path):
     if cur:
         sensors.append(cur)
     return sensors
-
-
-def _events(root):
-    log = os.path.join(root, "ledger.jsonl")
-    if not os.path.exists(log):
-        return []
-    out = []
-    with open(log, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                out.append(json.loads(line))
-    return out
 
 
 # ── machine formulas: each returns (value, fired_bool, note) given the events + now ──
@@ -131,6 +121,10 @@ def f_context_utilization(events, now):
             "— pass grants to compute the ratio; not fired from ledger alone): " + str(summary))
 
 
+# NOTE: each formula above hardcodes its fire threshold (e.g. red_tape_ratio's > 0.35), which
+# sensors.yaml ALSO declares. They agree today, but the yaml value is intent-only — editing it
+# does NOT change behavior; the code threshold wins. Wiring s.get("threshold") would be a behavior
+# change, deliberately not done here. Keep the two in sync by hand until a follow-up unifies them.
 MACHINE = {
     "red_tape_ratio": f_red_tape_ratio,
     "doctrine_stale": f_doctrine_stale,
@@ -141,7 +135,7 @@ MACHINE = {
 
 def cmd_eval(a):
     sensors = _load_sensors(a.sensors_yaml)
-    events = _events(a.root)
+    events = read_events(a.root)
     if not sensors:
         print("eval: no sensors parsed from " + a.sensors_yaml, file=sys.stderr)
         return 2

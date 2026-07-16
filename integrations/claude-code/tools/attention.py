@@ -38,21 +38,8 @@ import json
 import os
 import sys
 
-ESCALATE = 10
-OK = 0
-
-
-def _events(root):
-    log = os.path.join(root, "ledger.jsonl")
-    if not os.path.exists(log):
-        return []
-    out = []
-    with open(log, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                out.append(json.loads(line))
-    return out
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _organ import ESCALATE, OK, read_events   # noqa: E402
 
 
 def _current_ranking(events):
@@ -117,7 +104,7 @@ def _aspiration_gap(events, item, aspiration):
 
 
 def cmd_select(a):
-    events = _events(a.root)
+    events = read_events(a.root)
     role = a.role
     ranking, ranking_id = _current_ranking(events)
     backlog = _backlog(events, role)

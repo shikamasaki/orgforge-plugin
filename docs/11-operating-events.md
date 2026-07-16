@@ -107,7 +107,7 @@ escalates only a role still stale past a cycle threshold — genuinely stuck, no
 `guardrails.py staleref` verified: a bound role 1 cycle stale gets a silent nudge; still stale
 after 5 cycles (> threshold 3) escalates as dormant-wrong.
 
-**Ledger event:** `reference.staleness_checked {trigger_event, bound_roles, stale_roles,
+**Ledger event:** `reference_staleness_checked {trigger_event, bound_roles, stale_roles,
 silent_duration_per_role, result(all_current|stale_found)}`.
 **Fire:** event-triggered by any reference change (doctrine admitted, charter edit, scope
 change, dept activate/deactivate). **Escalate:** only a role stuck past threshold.
