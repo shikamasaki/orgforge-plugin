@@ -1,0 +1,133 @@
+# organization.yaml — declare your agent system AS AN ORGANIZATION.
+#
+# This is the template's center of gravity: an org chart as data. Copy it, delete the example
+# departments, and describe your own system. Every top-level key is one of the seven organs from
+# THEORY.md, so filling this file out IS the decomposition. Comments explain each organ; the values
+# below are a worked example (a small autonomous research org) you should replace.
+
+# ── Organ 1: PURPOSE (telos) ────────────────────────────────────────────────
+# One sentence. Not a metric — a purpose. The metric lives one level below it (see admission).
+# This string should be delivered into every agent's context (see role.context_pack).
+purpose: >
+  Discover, express, and accumulate reusable, reproducible, economically-valuable material,
+  and combine it into results — growing a durable asset, not a pile of outputs.
+
+# The measurable proxy is held here, explicitly SUBORDINATE to purpose, and explicitly kept OUT
+# of any per-agent reward so it cannot be gamed (Organ 1 failure mode / Goodhart).
+objective_metric:
+  name: net-positive deployed results after costs
+  reward_agents_on_this: false          # non-negotiable: proxies are instruments, not incentives
+  gaming_defenses: [random-null, placebo, forward-out-of-sample test]
+
+# ── Organ 7: GROWTH STAGE (declare where you are; see docs/02-growth-stages.md) ──
+growth:
+  stage: direction                       # creativity | direction | delegation | coordination | collaboration
+  coordination_mechanism: direct_supervision   # Mintzberg: which mechanism dominates today
+  next_crisis_expected: autonomy         # what ends this stage — design toward it now
+  add_layer_when: "department count exceeds a supervisor's effective span (see structure.span)"
+
+# ── Organ 2: STRUCTURE (division of labor + span) ───────────────────────────
+structure:
+  # A supervisor's effective span. Start narrow; WIDEN it by investing in information flow
+  # (Organ 5), not by adding layers. Add exactly one middle layer only when count > span.
+  span:
+    default_effective_span: 8            # high-skill/high-context agents → wider span is safe
+  # The exploratory front is ORGANIC (may self-organize); the control layer is MECHANISTIC.
+  layers:
+    - name: supervisor
+      regime: mechanistic
+      role: supervisor                   # references a role below
+    - name: exploration_front
+      regime: organic                    # docs/03 — self-organization allowed HERE
+      departments: [miner, improver, recombiner, executor]
+    - name: control_layer
+      regime: mechanistic                # docs/03 — NEVER self-organizes
+      departments: [gate, skeptic]
+
+# ── Organ 6: CONTROL (separation of duties / Maker-Checker) ─────────────────
+# The three incompatible duties must not concentrate in one agent. List who holds each, and the
+# pairs where the Maker may NOT be its own Checker.
+separation_of_duties:
+  authorization: gate                    # who admits/approves
+  custody: ledger                        # the single protected source of truth (not an agent)
+  recording: ledger
+  maker_checker_forbidden_pairs:
+    - maker: executor
+      checker_must_not_be: executor      # discoverers never verify their own results
+    - maker: recombiner
+      checker_must_not_be: recombiner
+
+# ── Organ 5: INFORMATION FLOW (shared consciousness) ────────────────────────
+information_flow:
+  shared_record: append-only-ledger      # SSoT; derived views are regenerated, never hand-edited
+  context_delivery: context_pack         # run BEFORE every delegation (onboarding each cycle)
+  rule: "increase information sharing in the same proportion you increase autonomy"
+
+# ── Organ 2 detail + Organ 3/4 per member: THE DEPARTMENTS (roles) ──────────
+# Each department is a member with a profile (job description). See template/ROLE.md for the full
+# shape. `regime` says whether this member may self-organize. `context_pack` lists what must be
+# loaded into its perception (Organ 3) before it acts. `loop` is its cadence (Organ 4).
+roles:
+
+  - id: supervisor
+    regime: mechanistic
+    mission: >
+      Oversee each department's DIRECTION (not just liveness). When a department drifts, correct
+      its profile directly so the next scheduled run is fixed. See template/SUPERVISOR.md.
+    profile: template/SUPERVISOR.md
+    supervises: [miner, improver, recombiner, executor, gate, skeptic]
+    loop: { cadence: every_5_min, stop_condition: on_operator_instruction }
+
+  - id: miner
+    regime: organic
+    mission: Systematically search the data for candidate material; propose, do not judge.
+    context_pack: [purpose, nearby_deaths, coverage_map, live_findings]   # Organ 3 onboarding
+    functions: [organize, decide, implement, judge, review, operate]      # a member does all six
+    loop: { cadence: every_4_hours }
+    output_to: [gate]                     # Maker → Checker handoff
+
+  - id: improver
+    regime: organic
+    mission: Take promising-but-below-bar material and sharpen it.
+    context_pack: [purpose, nearby_deaths, death_causes, parked_inventory]
+    functions: [organize, decide, implement, judge, review, operate]
+    loop: { cadence: every_6_hours }
+    output_to: [gate]
+
+  - id: recombiner
+    regime: organic
+    mission: Combine net-positive, orthogonal parts into portfolio candidates.
+    context_pack: [purpose, parts_inventory, combination_history]
+    functions: [organize, decide, implement, judge, review, operate]
+    loop: { cadence: every_8_hours }
+    output_to: [gate]
+
+  - id: executor
+    regime: organic
+    mission: Write and run the experiments the backlog needs; hand results to the gate.
+    context_pack: [purpose, open_experiments, reusable_modules, gate_input_spec]
+    functions: [organize, decide, implement, judge, review, operate]
+    loop: { cadence: every_3_hours }
+    output_to: [gate]
+
+  - id: gate
+    regime: mechanistic                   # control: machine-decided, never self-organizing
+    mission: Admit or reject candidates against the purpose-grounded standard. The authorization duty.
+    context_pack: [purpose, admission_standard]
+    functions: [judge]                    # control members are narrow by design
+    loop: { cadence: on_candidate_arrival }
+
+  - id: skeptic
+    regime: mechanistic
+    mission: Adversarially attempt to refute every positive result before it is trusted. The Checker.
+    context_pack: [purpose, claim_under_review, refutation_checklist]
+    functions: [review, judge]
+    loop: { cadence: on_positive_result }
+
+# ── Organ 4 (system-level): the metabolism that runs it all ─────────────────
+# How the organization runs continuously and safely. Stop conditions are non-optional.
+runtime:
+  continuous: true
+  durable: true                           # survives crashes; resumes from the ledger
+  global_halt_flag: true                  # a single switch that stops all members
+  budget_guard: true                      # stop conditions: iteration/token caps, no-progress detection
