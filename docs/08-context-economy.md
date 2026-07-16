@@ -11,6 +11,16 @@
 
 ---
 
+> **Framing (read before the mechanisms): context packs are delivered by projection, not
+> assembled by a bespoke engine.** A "context pack" is a set of **files the projection
+> writes into the working directory before the consuming department's harness launches**
+> (docs/09 §2, docs/01 R2) — the intent block, the role's contract and doctrine, its
+> granted views, nearby failures. The "registrar" that does this is itself **a department
+> the host runs** on a schedule, not a runtime this repo ships; "pack assembly" is that
+> file-writing step, and "on the next cycle" / "on a cadence" is a schedule the **host
+> scheduler** realizes (docs/09 §4). Read the mechanisms below as *what files go where and
+> who is granted to read them* — need-to-know as file placement — not as a live gatekeeper.
+
 ## 1. The refinement of the Organ 5 rule
 
 McChrystal's shared consciousness is often misread as total transparency. What Team of
@@ -38,9 +48,11 @@ the constraints in force — present in **every** context pack, at every activat
 in identical wording. This is commander's intent from mission command (Auftragstaktik):
 the edge can act autonomously *because* it knows what outcome matters, without the center
 scripting the method. **Org-wide policy propagation is exactly an intent-block revision**:
-version-stamped in the ledger, distributed by the registrar on the next cycle, and
-never forked per department (one intent, everywhere, or coordination dissolves into
-local interpretations). Purpose changes are human-held (docs/06 §2.5); priority
+version-stamped in the ledger, then delivered by the registrar — a host-run department, not
+a runtime — writing the revised block into each role's working directory the next time the
+host launches that role on its schedule ("on the next cycle" = a host-realized schedule,
+docs/09 §2/§4), and never forked per department (one intent, everywhere, or coordination
+dissolves into local interpretations). Purpose changes are human-held (docs/06 §2.5); priority
 re-weighting within an unchanged purpose is charter-tier (proposed via the approval
 queue, adjudicated by humans).
 
@@ -50,15 +62,20 @@ A context pack is a **derived view of the ledger and knowledge base, not a feed*
 scope matrix in `organization.yaml` (`information_flow.scopes`) is deny-by-default: a
 role reads the views it has been granted and nothing else — least privilege, applied to
 information (Saltzer & Schroeder's need-to-know, imported from security because a
-misaligned optimizer with extra context is an attacker with extra reconnaissance). The
-standard pack formula, for every role:
+misaligned optimizer with extra context is an attacker with extra reconnaissance). This
+scoping is realized by **which files the projection writes into each working directory** —
+need-to-know as file placement — enforced structurally for every org (Tier A) and, for
+asset-touching orgs, by the host environment (Tier B), not by a runtime gatekeeper
+intercepting reads (docs/01 §5, docs/09 §5). The standard pack formula, for every role:
 
 > intent block + own contract & doctrine (docs/07) + **live state of adjacent
 > contracts** (its declared `depends_on` seams) + nearby failures relevant to its scope.
 
 Nothing else rides along by default. Every grant is recorded in the ledger; grants are
 **reviewed on a cadence and unused grants are revoked** (access recertification —
-scope creep is how need-to-know quietly becomes share-everything).
+scope creep is how need-to-know quietly becomes share-everything). "On a cadence" here is
+host-realized: a scheduled run of the responsible department (the host's scheduler firing
+it), declared as intent — this repo ships no scheduler (docs/09 §4).
 
 ### 2.3 Contract interfaces (how departments collaborate)
 
@@ -80,7 +97,11 @@ the receiving role gets the abstraction plus ledger/KB references it can expand 
 demand (the RAG pull of docs/07). Push what fits attention; let the reader pull depth.
 A budget forces the sender to do the distillation work once instead of exporting its
 processing load to every reader — Galbraith's lever again. Budgets are set per seam in
-the scope matrix and enforced at pack assembly by the registrar.
+the scope matrix and enforced at **pack assembly** — the registrar department's
+file-writing step, when the host launches it on its schedule, deciding what fits and what
+gets summarized-and-linked before the files land in the working dir (docs/09 §2/§4). The
+registrar is a host-run department applying the budget as it writes, not a runtime
+gatekeeper intercepting reads.
 
 ---
 
@@ -115,7 +136,9 @@ Need-to-know applies to the exploration front's *lateral* traffic. It never rest
 
 - **the control layer's read access** — the gate, skeptic, and supervisor see whatever
   their duties require, and a maker can never scope-fence its Checker out of the evidence
-  (that would be separation of duties defeated by information starvation);
+  (that would be separation of duties defeated by information starvation). This is
+  guaranteed structurally: the projection writes the evidence files into the checker's
+  working directory regardless of the maker's grants (Tier-A SoD, docs/09 §5);
 - **the ledger's completeness** — scoping governs who *reads* which views, never what
   gets *written*; the record stays whole (custody, Organ 6);
 - **the intent block** — no role is ever "not cleared" for the organization's purpose.
@@ -137,7 +160,12 @@ Need-to-know applies to the exploration front's *lateral* traffic. It never rest
 - Saltzer, J. & Schroeder, M. 1975 — "The Protection of Information in Computer
   Systems" (least privilege, need-to-know).
 
-*Status: the mechanisms are this repo's synthesis of the cited frames plus standard
-security practice; the sensor thresholds and budget sizes are unvalidated design
-parameters. Treat the dial metaphor seriously — both failure directions are real, and
-only a running system tells you where your dial sits.*
+*Status: this is a design for how the context economy **maps onto host-run departments**,
+not a runtime to build. Context packs are delivered by the projection writing files into
+each working directory before launch, and the registrar that does so is a department the
+host launches on a schedule (docs/09 §1/§2, docs/01 R2) — scoping, budgets, and grants are
+enforced structurally (Tier A) or by the host environment (Tier B), not by a bespoke
+gatekeeper (docs/09 §5). The mechanisms are this repo's synthesis of the cited frames plus
+standard security practice; the sensor thresholds and budget sizes are unvalidated design
+parameters. Treat the dial metaphor seriously — both failure directions are real, and only
+a running system tells you where your dial sits.*

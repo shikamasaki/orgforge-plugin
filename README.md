@@ -72,6 +72,7 @@ Decomposing from the organization (not from the parts) changes what you build:
 | [docs/07-doctrine-and-knowledge.md](docs/07-doctrine-and-knowledge.md) | The knowledge organ: market-watching boundary spanners feed a role-scoped knowledge base; each role's doctrine (べき論 — its current normative playbook) is updated through Maker/Checker and always loaded as context. |
 | [docs/08-context-economy.md](docs/08-context-economy.md) | Need-to-know information flow: scoped context packs, contract-interface collaboration, context budgets, and commander's-intent policy propagation. |
 | [docs/09-runtime.md](docs/09-runtime.md) | Execution: **delegate the heavy organs to the host harness, project the profile onto its instruction-file convention.** What the system adds (projection + skeleton + lint) vs. what the host provides (perception, tools, loop, scheduling, sandboxing). |
+| [docs/10-founding-rehearsal.md](docs/10-founding-rehearsal.md) | **S1, demonstrated:** a real RFP run end-to-end on a real host harness — maker, gate, and skeptic as three separate agents, no bespoke runtime — where the adversarial checker caught a genuine bug (a U+212A unicode edge case) the maker and gate both missed. Artifacts in [examples/founding-rehearsal/](examples/founding-rehearsal/). |
 
 **Playbooks & maps**
 
@@ -146,11 +147,16 @@ span of control, separation of duties) to agent design is where the literature i
 The design is **harness-neutral and delegation-first**: the heavy organs (perception, tools, loop,
 scheduling, sandboxing) are the host harness's job; this repo ships the skeleton, the profile
 projection, and the lint (docs/01, docs/09). The lint cross-validates all five data files and is the
-one part that runs today. **The honest boundary: the single most important open item is S1 —
-demonstrating one organization from this template actually launching and doing useful work on an
-existing harness, end to end, with nothing bespoke in the loop (docs/01 §4). Until that is shown, the
-template is a coherent design that has not yet been run.** The projection layer (which instruction-file
-conventions to target) and the client/delivery/company-layer surfaces (docs/01 §7) are the next work.
+one part that runs standalone today. **S1 — one organization from this template launching and doing
+useful work on an existing harness end-to-end, with nothing bespoke in the loop — has now been
+demonstrated once ([docs/10](docs/10-founding-rehearsal.md), artifacts in
+[examples/founding-rehearsal/](examples/founding-rehearsal/)): three departments ran as separate
+agents, the maker/checker separation held structurally, and the adversarial checker caught a real bug
+the maker and gate both missed.** That closes the load-bearing "has it ever run?" question. What
+remains: an automated projection layer (which instruction-file conventions to target — done by hand
+in the rehearsal), the Tier-B host-environment controls for asset-touching orgs, the multi-cycle
+elastic lifecycle at scale, and the client/delivery/company-layer surfaces (docs/01 §7). The fuller
+autonomy story is still ahead; the design is no longer unrun.
 The value of any org design is proven by whether the organization actually **produces**, not by the
 elegance of its chart. Treat this as scaffolding for that, not a substitute for it.
 
