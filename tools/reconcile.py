@@ -24,6 +24,17 @@ share one shape, one fire rule, one escalation rule (docs/11 §2.4):
       the deadline; objections route through the skeptic; escalate only unresolved objections or
       a breaking change to a charter-scoped dependency.
 
+  mandate <root> --subjects R,R --decision D --precedence R>R>R [--satisfiable BOOL]
+      MANDATE-CONFLICT (docs/13): two depts each acting INSIDE their granted authority reach
+      decisions that cannot both stand (growth says "ship", safety says "hold") — not a resource
+      grab, not a file collision. `collision` resolves by "one yields", legitimate only for a
+      DUPLICATE; a genuine CONTRADICTION it correctly refuses and dead-ends at "escalate". This
+      adjudicates it against a DECLARED mandate-precedence ordering (constitution.yaml, human-
+      written, agent-unwritable — passed here as --precedence): precedence-applies (silent) /
+      co-equal-both-satisfiable (integrate laterally) / co-equal-mutually-exclusive (escalate —
+      the true exception). Anchor: Follett (constructive conflict), Lawrence & Lorsch. Belongs to
+      Organ 6 — the repo ranked OBJECTIVES by weight but never precedence BETWEEN MANDATES.
+
 Every command obeys the fixed rule (docs/11 §0): silent when consistent (exit 0); lateral
 self-heal before the CEO; escalate the true exception (exit 10). Each prints the ledger event
 it would emit. This is a pure projection over tools/ledger.py; it ships no scheduler (R0) —
@@ -179,6 +190,46 @@ def cmd_contract(a):
     return ESCALATE
 
 
+def cmd_mandate(a):
+    """Adjudicate a genuine mandate contradiction against a DECLARED precedence ordering."""
+    subjects = [r.strip() for r in a.subjects.split(",") if r.strip()]
+    # precedence: "safety>growth>cost" — earlier = governs. Human-written in constitution.yaml.
+    order = [r.strip() for r in a.precedence.split(">") if r.strip()]
+    rank = {r: i for i, r in enumerate(order)}
+    # does declared precedence resolve it? the subject with the lowest rank governs.
+    ranked_subjects = [s for s in subjects if s in rank]
+    satisfiable = str(a.satisfiable).lower() in ("true", "1", "yes")
+    if len(ranked_subjects) < len(subjects):
+        # a subject not in the precedence ordering — cannot adjudicate deterministically
+        resolution = "escalate"
+        note = (f"a subject {[s for s in subjects if s not in rank]} is absent from the declared "
+                f"mandate precedence — the org never declared who governs; the human must, and "
+                f"add it to constitution.yaml mandate_precedence")
+    elif satisfiable:
+        resolution = "integrate"
+        note = ("co-equal but BOTH satisfiable — integrate laterally (Follett's integration: find "
+                "the option honoring both mandates); no CEO traffic")
+    elif len(set(rank[s] for s in ranked_subjects)) == len(ranked_subjects):
+        # distinct precedence ranks → precedence applies, highest governs
+        governs = min(ranked_subjects, key=lambda s: rank[s])
+        resolution = "precedence_applies"
+        note = (f"declared precedence resolves it: '{governs}' governs (rank {rank[governs]}); "
+                f"the contested decision follows its mandate — silent, no CEO traffic")
+    else:
+        resolution = "escalate"
+        note = ("co-equal mandates AND mutually exclusive — neither can yield without violating "
+                "its own mandate; this is the true exception the human must adjudicate")
+    payload = {"subjects": subjects, "contested_decision": a.decision,
+               "mandate_refs": order, "resolution": resolution, "evidence_ids": []}
+    _emit("mandate_conflict_raised", payload)
+    if resolution in ("precedence_applies", "integrate"):
+        print(f"{resolution}: {note}")
+        return OK
+    print(f"ESCALATE: mandate conflict on '{a.decision}' between {subjects} — {note}",
+          file=sys.stderr)
+    return ESCALATE
+
+
 def main(argv):
     p = argparse.ArgumentParser(prog="reconcile", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -201,6 +252,13 @@ def main(argv):
     q.add_argument("--dependents", required=True)
     q.add_argument("--proposed-shape", dest="proposed_shape")
     q.add_argument("--deadline-tick", dest="deadline_tick")
+
+    q = sub.add_parser("mandate"); q.set_defaults(fn=cmd_mandate)
+    q.add_argument("root")
+    q.add_argument("--subjects", required=True)
+    q.add_argument("--decision", required=True)
+    q.add_argument("--precedence", required=True)
+    q.add_argument("--satisfiable", default="false")
 
     a = p.parse_args(argv[1:])
     return a.fn(a)

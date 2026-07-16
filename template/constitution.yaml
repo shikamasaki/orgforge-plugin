@@ -160,3 +160,19 @@ invariants:
                                                # DECLARATION; the host must verify authorship —
                                                # Tier-B orgs lean on the host's tamper-evidence
                                                # (docs/06 §2.4; docs/01 R2, C4).
+
+# ── Mandate precedence — which mandate governs when two collide (docs/13 §3) ──
+# When two departments each act INSIDE their granted authority but reach decisions that cannot
+# both stand (safety says "hold", growth says "ship"), SOMETHING must say which mandate governs.
+# The repo ranks OBJECTIVES by weight (resource.py rank), but that is "what to fund first," NOT
+# "which mandate wins a contested action." That ordering is a HUMAN decision, declared here and
+# agent-unwritable (no_agent_writes_this_file). reconcile.py mandate reads it: a conflict the
+# precedence resolves is silent; a conflict between mandates NOT ordered here escalates to the
+# human — because the org never declared who governs, and only the human may. Anchor: Follett
+# (constructive conflict — integration where both are satisfiable), Lawrence & Lorsch.
+mandate_precedence:
+  # earlier governs later; list every mandate that can be a party to a contested action.
+  # Example — replace with YOUR org's real precedence and ledger the change as a charter edit:
+  order: [safety, correctness, growth, cost]
+  both_satisfiable_rule: integrate     # when both mandates CAN be honored, integrate laterally
+                                       # (Follett) rather than invoke precedence — no CEO traffic

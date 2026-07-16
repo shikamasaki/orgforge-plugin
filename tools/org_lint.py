@@ -388,6 +388,17 @@ def lint_constitution(con, lint):
     if rules.get("batch_adjudication_of_charter_items") is not False:
         lint.fail("CH", "charter.queue_rules.batch_adjudication_of_charter_items must "
                         "be false")
+    # mandate_precedence (docs/13 §3): the human-authored ordering reconcile.py mandate reads.
+    mp = con.get("mandate_precedence")
+    if mp is None:
+        lint.fail("CH", "constitution has no mandate_precedence — with none, every genuine "
+                        "mandate conflict (two depts each in-authority, decisions that can't "
+                        "both stand) either pages the human or resolves by merge-order accident "
+                        "(docs/13 §3). Declare who governs.")
+    elif not isinstance(mp.get("order"), list) or len(mp.get("order", [])) < 2:
+        lint.fail("CH", "constitution.mandate_precedence.order must list >= 2 mandates in "
+                        "governing order (earlier wins) — a one-item or missing order resolves "
+                        "nothing")
     walk_for_placeholder(con, "constitution", lint)
     return charter_items
 

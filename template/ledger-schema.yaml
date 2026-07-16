@@ -90,6 +90,14 @@ event_classes:
   attention_allocated:  { role, wip_limit, in_flight, ranking_id,
                           selected: [{candidate_id, objective, score, in_ranking}],
                           deferred: [{candidate_id, score}], reason }   # ATTENTION-ALLOCATION
+  # proxy-stack guards (docs/13) — is the org still solving the RIGHT problem?
+  premise_reconciled:   { premise_id, asserted, observed, status: holds|weakened|broken } # PREMISE/TELOS
+  sunk_course_reviewed: { course_id, attempts, cost, outcome_trend, still_open: bool,
+                          decision: continue|abandon }                          # SUNK-COURSE (Staw)
+  frame_review_raised:  { near_target_decisions, result_trend, question }        # DOUBLE-LOOP (Argyris)
+  mandate_conflict_raised: { subjects: [role], contested_decision, mandate_refs: [role],
+                             resolution: precedence_applies|integrate|escalate, evidence_ids: [ref] } # MANDATE-CONFLICT
+  convention_adopted:   { scope, settled_choice, owner, review_by }              # internal precedent (Nelson&Winter)
 
 # ── Cadence triggers: what `loop.cadence: on_<x>` may bind to ────────────────
 triggers:

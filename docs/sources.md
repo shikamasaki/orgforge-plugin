@@ -286,6 +286,33 @@ Operations management (the mechanical *how* — a separate register, kept distin
 coordination) do **not** address intra-unit work selection — they govern how interdependent work is
 linked, not which of a unit's own items is picked next. Do not cite them for docs/12.
 
+### Proxy-stack, conflict, and precedent (docs/13)
+
+Anchors for the five gaps a theory-coverage sweep found — "is the org still solving the right
+problem?" Applied at this repo's granularity as explicit synthesis, flagged, not claimed verbatim.
+
+- **[P] Weick (1979/1995), *The Social Psychology of Organizing* / *Sensemaking in Organizations*** —
+  **enactment**: organizations partly create the environment they then respond to; sensing whether the
+  premise still holds is an active, ongoing act. Anchor for PREMISE (docs/13 §1).
+- **[S] Aguilar (1967), *Scanning the Business Environment*, Macmillan** — environmental scanning; the
+  disciplined watch for the external shift that invalidates a strategy. Supports PREMISE.
+- **[P] Staw (1976), "Knee-deep in the Big Muddy: A Study of Escalating Commitment to a Chosen Course
+  of Action," *Organizational Behavior and Human Performance* 16(1): 27–44** — **escalation of
+  commitment**: decision-makers pour resources into a failing course rather than abandon a sunk
+  investment. Anchor for SUNK-COURSE (docs/13 §2).
+- **[P] Argyris & Schön (1978), *Organizational Learning: A Theory of Action Perspective*,
+  Addison-Wesley** — **single- vs double-loop learning**: single-loop corrects actions within a fixed
+  frame; double-loop questions the governing goal/assumption itself. Anchor for FRAME-REVIEW
+  (docs/13 §3) — a canonical framework the repo previously did not cite anywhere.
+- **[P] Follett (1925/1942), "Constructive Conflict," in *Dynamic Administration*** — conflict has
+  three settlements: **domination, compromise, integration**; integration (an option honoring both
+  parties) is the constructive one. Anchor for MANDATE-CONFLICT's "both satisfiable → integrate"
+  branch (docs/13 §4). Paired with **Lawrence & Lorsch (1967)** (already cited) on conflict-resolution
+  modes across differentiated units.
+- **[P] Nelson & Winter (1982), *An Evolutionary Theory of Economic Change*, Harvard** — **routines as
+  organizational memory**: an org's settled ways of doing things are where its operational knowledge
+  lives. Anchor for CONVENTIONS (docs/13 §5); reinforced by Cyert & March SOPs (already cited).
+
 ---
 
 *Preprint note:* arXiv IDs in the 2601–2606 range are 2026 preprints; treat **[S]** arXiv items as

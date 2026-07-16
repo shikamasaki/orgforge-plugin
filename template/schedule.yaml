@@ -138,6 +138,42 @@ checks:
     verify_event: attention_allocated
     escalates_to: ceo_on_coverage_gap
 
+  # ── proxy-stack guards (docs/13) — is the org still solving the RIGHT problem? ───────
+  - id: premise_check
+    tool: "alignment.py premise"
+    cadence: every_24_hours        # + the calling agent supplies the environmental snapshot
+    night_safe: true               # detecting a dead telos overnight is exactly when you want it
+    verify_event: premise_reconciled
+    escalates_to: charter_hold_pivot_or_sunset
+
+  - id: sunk_course
+    tool: "alignment.py sunk"
+    cadence: on_result_append      # edge: each accumulated attempt on an open course
+    night_safe: true               # abandoning a runaway is safe-direction; do it unattended
+    verify_event: sunk_course_reviewed
+    escalates_to: ceo_on_charter_scoped
+
+  - id: frame_review
+    tool: "alignment.py frame"
+    cadence: every_24_hours
+    night_safe: true
+    verify_event: frame_review_raised
+    escalates_to: charter_tier_question
+
+  - id: mandate_conflict
+    tool: "reconcile.py mandate"
+    cadence: on_contested_decision # edge: two in-authority decisions that can't both stand
+    night_safe: false              # adjudicating an un-precedenced mandate clash waits for morning
+    verify_event: mandate_conflict_raised
+    escalates_to: ceo_on_unordered_or_mutually_exclusive
+
+  - id: convention_stale
+    tool: "conventions.py stale"
+    cadence: every_24_hours
+    night_safe: true
+    verify_event: convention_adopted   # the store's proof-of-life event
+    escalates_to: owner_reconfirm
+
 # ── missed-tick policy (docs/11 §5.2) — the "it was SUPPOSED to run" guard ────────────
 # A check whose cadence made it DUE in the window but whose verify_event is ABSENT from the
 # ledger for that window is a MISS. A miss is not silent: tick.py reports it, and repeated
