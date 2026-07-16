@@ -246,6 +246,46 @@ this repo's own synthesis of the above; treat it as a design hypothesis, per the
   so it constrains — but does not refute — an org-first design. It remains **[S]** (a 2026 preprint, not
   peer-reviewed).
 
+### Attention allocation — intra-department work selection (docs/12)
+
+How a single department internally decides what to work on next. There is **no single named
+theory** for this; docs/12 synthesizes the organization-theory *attention* tradition with the
+operations-management *flow* tradition, and says so. These theories were formulated at the level of
+the decision-maker and the firm, not a department's private backlog — applying them at intra-unit
+granularity is a **down-scaling synthesis**, flagged as such, not a verbatim claim.
+
+Organization theory (why + how bounded cognition selects):
+- **[P] March & Simon (1958), *Organizations*, Wiley** — **sequential attention to goals**: a unit
+  attends to competing goals one at a time, in order, rather than jointly optimizing. The authors
+  later called the book "less a theory of choice than a theory of attention." The direct anchor for
+  taking the backlog as a *prefix* of a ranking.
+- **[P] Cyert & March (1963), *A Behavioral Theory of the Firm*, Prentice-Hall** — **problemistic
+  search** and **aspiration levels**: effort is triggered by a problem (performance below
+  aspiration) and searches locally, near the problem. The anchor for the problemistic-search boost.
+  (Also cited above for organizational slack.)
+- **[P] Ocasio (1997), "Towards an Attention-Based View of the Firm", *Strategic Management Journal*
+  18(S1): 187–206** — **situated attention**: what a decision-locus focuses on depends on the
+  situation/channel routing issues to it. The anchor for anchoring local choice to the org-wide
+  ranking. Refined in **[P] Ocasio (2011), "Attention to Attention", *Organization Science* 22(5):
+  1286–1296**. (Simon 1947 bounded rationality / attention-scarcity is already cited above; it is
+  the root of "attention is the scarce resource that forces selection.")
+- **[P] Cohen, March & Olsen (1972), "A Garbage Can Model of Organizational Choice", *ASQ* 17(1):
+  1–25** — the **contested counter-lens**: real intra-unit "prioritization" is often less deliberate
+  than a backlog model assumes; work attaches to whatever is temporally salient. Cited as the
+  caution the problemistic-search + situated-attention design is meant to defend against, not as a
+  law.
+
+Operations management (the mechanical *how* — a separate register, kept distinct):
+- **[S] Goldratt (1984), *The Goal*, North River Press** — **Theory of Constraints**: throughput is
+  set by the bottleneck; treat WIP as expense, not asset. Operations management, not org theory.
+- **[S] Anderson (2010), *Kanban: Successful Evolutionary Change*, Blue Hole Press** — **WIP limits
+  / pull**: cap concurrent work; pull the next item only when capacity frees. The anchor for the
+  WIP-limit mechanism. Management practice, not organizational theory of cognition.
+
+*Off-target note:* Mintzberg's coordination mechanisms (cited elsewhere for inter-unit
+coordination) do **not** address intra-unit work selection — they govern how interdependent work is
+linked, not which of a unit's own items is picked next. Do not cite them for docs/12.
+
 ---
 
 *Preprint note:* arXiv IDs in the 2601–2606 range are 2026 preprints; treat **[S]** arXiv items as

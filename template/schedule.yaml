@@ -130,6 +130,14 @@ checks:
     verify_event: outcome_delta
     escalates_to: ceo_on_systemic_recurrence
 
+  # ── intra-department attention allocation (docs/12) — tools/attention.py ────────────
+  - id: attention_select
+    tool: "attention.py select"
+    cadence: on_cycle_start         # edge: a department begins a cycle and must pick its next work
+    night_safe: true               # picking within the org ranking + WIP limit is safe-direction
+    verify_event: attention_allocated
+    escalates_to: ceo_on_coverage_gap
+
 # ── missed-tick policy (docs/11 §5.2) — the "it was SUPPOSED to run" guard ────────────
 # A check whose cadence made it DUE in the window but whose verify_event is ABSENT from the
 # ledger for that window is a MISS. A miss is not silent: tick.py reports it, and repeated

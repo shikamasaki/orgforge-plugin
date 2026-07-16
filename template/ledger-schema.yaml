@@ -86,6 +86,10 @@ event_classes:
                           delta_magnitude, delta_sign, department, recurrence_count } # OUTCOME-DELTA
   tick_planned:         { now_min, night: bool, due: [check_id], suspended: [check_id],
                           missed: [check_id] }   # tick.py's own run — a gap proves the host cron died
+  # intra-department attention allocation (docs/12) — how ONE dept picks what to work on next
+  attention_allocated:  { role, wip_limit, in_flight, ranking_id,
+                          selected: [{candidate_id, objective, score, in_ranking}],
+                          deferred: [{candidate_id, score}], reason }   # ATTENTION-ALLOCATION
 
 # ── Cadence triggers: what `loop.cadence: on_<x>` may bind to ────────────────
 triggers:
