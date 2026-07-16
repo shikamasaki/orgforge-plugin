@@ -51,6 +51,7 @@ The first five files are required; role-settings.yaml is an optional sixth (the 
 runtime settings). Omitting a required file is a violation, not a shortcut.
 Exit 0 = pass, 1 = violations, 2 = usage/parse error.
 """
+import os
 import re
 import sys
 
@@ -659,8 +660,71 @@ def lint_role_settings(rs, org, lint):
 
 # ── entry ────────────────────────────────────────────────────────────────────
 
+CADENCE_ANY = re.compile(r"^(every_\d+_(min|hours)|on_[a-z_]+)$")
+
+
+def lint_schedule(sched, ls, sn, lint):
+    """Guardrail for the LLM-owned schedule.yaml (docs/11 §5): keep its edits R0-safe and
+    night-safe, and keep the missed-tick guard well-formed. The registrar EDITS cadences; this
+    is what stops an edit from becoming an unsatisfiable or fail-open schedule."""
+    checks = sched.get("checks", [])
+    if not checks:
+        lint.fail("SCH", "schedule.yaml has no checks — nothing would ever be planned")
+        return
+    base = sched.get("base_interval", "")
+    if not CADENCE_ANY.match(base) or not base.startswith("every_"):
+        lint.fail("SCH", f"schedule base_interval '{base}' must be an every_<n>_min|hours timer")
+    def to_min(c):
+        m = re.match(r"every_(\d+)_min$", c)
+        if m: return int(m.group(1))
+        m = re.match(r"every_(\d+)_hours$", c)
+        if m: return int(m.group(1)) * 60
+        return None
+    base_min = to_min(base) or 5
+    classes = set((ls.get("event_classes", {}) if ls else {}) or {})
+    # night allowlist: which (sensor->move) pairs may run at night (sensors.yaml)
+    night_moves = set()
+    for s in (sn.get("sensors", []) if sn else []):
+        for mv in (s.get("preregistered_for_night", []) or []):
+            night_moves.add(mv)
+    seen = set()
+    for c in checks:
+        cid = c.get("id")
+        if not cid or cid in seen:
+            lint.fail("SCH", f"schedule check id missing or duplicated: {cid!r}")
+        seen.add(cid)
+        cadence = c.get("cadence", "")
+        if not CADENCE_ANY.match(cadence):
+            lint.fail("SCH", f"check '{cid}' cadence '{cadence}' is not a known form "
+                             f"(every_<n>_min|hours or on_<event>)")
+        cmin = to_min(cadence)
+        if cmin is not None and cmin < base_min:
+            lint.fail("SCH", f"check '{cid}' cadence {cadence} ({cmin}m) is finer than "
+                             f"base_interval {base_min}m — the host cron can NEVER fire it; "
+                             f"unsatisfiable schedule (docs/11 §5)")
+        # verify_event must name a real ledger class, or the missed-tick guard can't detect a miss
+        ve = c.get("verify_event")
+        if not ve:
+            lint.fail("SCH", f"check '{cid}' has no verify_event — a check with no ledger "
+                             f"proof-of-run cannot be missed-tick-detected ('it was supposed "
+                             f"to run' would stay a silent excuse, docs/11 §5.2)")
+        elif classes and ve not in classes:
+            lint.fail("SCH", f"check '{cid}' verify_event '{ve}' is not a declared ledger "
+                             f"event class — the missed-tick guard would never match it")
+        if "night_safe" not in c:
+            lint.fail("SCH", f"check '{cid}' must declare night_safe (true|false) — an "
+                             f"undeclared night policy defaults to fail-OPEN, which the "
+                             f"constitution forbids (delegated.night is fail-safe)")
+    # missed_tick policy must exist and be well-formed — it IS the anti-silent-skip guardrail
+    mt = sched.get("missed_tick")
+    if not isinstance(mt, dict) or "escalate_after_consecutive" not in mt:
+        lint.fail("SCH", "schedule.yaml missing a missed_tick policy with "
+                         "escalate_after_consecutive — without it a schedule the host "
+                         "silently stopped firing would never be detected (docs/11 §5.2)")
+
+
 def main(argv):
-    if len(argv) not in (6, 7):
+    if len(argv) not in (6, 7, 8):
         print(__doc__)
         return 2
     lint = Lint()
@@ -669,7 +733,15 @@ def main(argv):
     mv = load(argv[3], lint, "moves.yaml")
     ls = load(argv[4], lint, "ledger-schema.yaml")
     sn = load(argv[5], lint, "sensors.yaml")
-    rs = load(argv[6], lint, "role-settings.yaml") if len(argv) == 7 else None
+    # optional 7th/8th files: role-settings.yaml and schedule.yaml, in either order —
+    # distinguished by content (schedule has a `checks` key; role-settings has `role`/`tools`).
+    rs = sched = None
+    for extra in argv[6:]:
+        doc = load(extra, lint, os.path.basename(extra))
+        if isinstance(doc, dict) and "checks" in doc:
+            sched = doc
+        elif doc is not None:
+            rs = doc
     if org is not None:
         if "roles" not in org:
             lint.fail("SC", f"{argv[1]} does not look like an organization.yaml "
@@ -692,6 +764,8 @@ def main(argv):
             lint_moves_cite_defined_sensors(mv, sensor_ids, lint)
     if rs is not None and org is not None and "roles" in org:
         lint_role_settings(rs, org, lint)
+    if sched is not None:
+        lint_schedule(sched, ls, sn, lint)
     if lint.errs:
         print(f"org_lint: {len(lint.errs)} violation(s)")
         for e in lint.errs:

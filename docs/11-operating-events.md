@@ -112,7 +112,7 @@ silent_duration_per_role, result(all_current|stale_found)}`.
 **Fire:** event-triggered by any reference change (doctrine admitted, charter edit, scope
 change, dept activate/deactivate). **Escalate:** only a role stuck past threshold.
 
-### §2.4 Lateral reconciliation — the only net-new *information flow* (design, not yet coded)
+### §2.4 Lateral reconciliation — the only net-new *information flow* (running code: `tools/reconcile.py`)
 
 The horizontal team-sync residue. It splits by timing into three siblings that share one shape,
 one fire rule, and one escalation rule — a single **lateral seam family**, an extension of
@@ -146,43 +146,124 @@ three tiers):** `consistent` → write-and-silence; `divergent` but resolvable w
 scope → lateral self-heal, zero CEO traffic; `divergent` AND neither peer can yield without
 violating its mandate → up, and only as an approval-queue entry surfaced by the existing digest.
 
+[`tools/reconcile.py`](../tools/reconcile.py) implements all three over the ledger: `collision`
+(open `work_claimed` set → overlap → duplicate self-heals laterally, contradiction escalates),
+`stall` (a started-but-not-completed cycle past a freshness window → the silence-as-block made
+explicit), `contract` (a breaking seam change → the gate must not admit it until objections
+resolve). Verified: two peers on one territory surface as a lateral overlap (no CEO); a 3-cycle
+stall escalates; a breaking contract change escalates.
+
+## §2.5 Resource & learning events (running code: `tools/resource.py`, `tools/learning.py`)
+
+The §3 set below, of which these three have running code because a 24/7 org strands resources
+and repeats its own mistakes without them:
+
+- **PRIORITY-RANKING** ([`resource.py rank`](../tools/resource.py)) — the reference every
+  allocation reads. Emits `priority_ranking_set` **only when the order changed** (silent when a
+  recompute matches the current order — no event, no digest). Verified: a reorder emits; the same
+  order re-ranked is silent.
+- **ALLOCATION-RECLAIM** ([`resource.py reclaim`](../tools/resource.py)) — grants exist but
+  nothing takes them back; stranded resource is the dominant 24/7 waste. Reclaims from a low-yield
+  or idle holder in the safe direction, unattended, no CEO traffic; escalates only if it would
+  touch a CEO-protected dept. Verified: an idle holder is reclaimed silently.
+- **AUTHORITY-EXPIRED** ([`resource.py authority`](../tools/resource.py)) — delegations never
+  decay; privilege-creep is the deepest overnight-compromise surface. Auto-narrows stale grants
+  past their TTL unattended (safe direction); escalates only to *widen/renew* past a cap.
+- **OUTCOME-DELTA** ([`learning.py delta`](../tools/learning.py)) — doctrine is the outside world;
+  this is the org's own track record. Joins closed decisions to realized outcomes; silent when
+  predictions matched; escalates only when the **same delta class recurs** past a systemic
+  threshold ("how we operate is wrong"). Verified: three same-direction misses escalate as
+  systemic; a match is silent.
+
 ## §3 The rest of the discovery set — where each belongs
 
 The full essence-first sweep (five lenses: sync-alignment, control-safety, resource-priority,
 knowledge-learning, coordination-dependency) surfaced more events. Ranked, with honest routing:
 
-| Event | Essence | Home |
-|---|---|---|
-| **PRIORITY-RANKING** | every allocation MOVE is only correct relative to a current ranking; without one authoritative order, each dept funds yesterday's #1 | the reference the exec-review sensor reads; a `priority_ranking_set` event, re-emitted only when the order changes (Organ 7) |
-| **ALLOCATION-RECLAIM** | grants (`context_budget`, `model_tier`, dept-slot) are given but no event *takes them back* — stranded resource is the dominant 24/7 waste | a sensor on ledger-derived yield → an existing narrow/deactivate MOVE; net-new is the reclaim *event*, not a new organ |
-| **OUTCOME-DELTA** | doctrine imports *external* best-practice and is structurally blind to *this org's own* miscalibration; without a self-outcome event the org repeats its own mistakes | distinct from doctrine (which docs/07 fixes as outside-world only); a cadence reconciler joining closed decisions to realized outcomes, escalating only when the same delta recurs N times ("how we operate is wrong") |
-| **AUTHORITY-EXPIRED** | delegations are granted but never *decay*; a standing over-broad grant no one revisits is the deepest overnight-compromise surface | a cadence + event-triggered scan; auto-revokes/narrows in the safe direction unattended, escalates only to *widen/renew* past a cap |
-| **CONTEXT-TRANSFER** | on deactivation a dept's live state (open threads, why-we-chose-X) is in the ledger but not indexed for whoever inherits it | a deterministic reaction bound to any activate/deactivate MOVE (Organ 7); escalates only if it would orphan a live commitment |
-| **RECOVERY-PROVEN** | "reversible" claims never tested are not reversibility; prove the undo works before you need it | ship only if the org relies on rollback for its reversible-action claims; a low-frequency dry-run, escalating + reducing autonomy on failure |
+| Event | Essence | Home | Status |
+|---|---|---|---|
+| **PRIORITY-RANKING** | every allocation MOVE is only correct relative to a current ranking; without one authoritative order, each dept funds yesterday's #1 | the reference the exec-review sensor reads; a `priority_ranking_set` event, re-emitted only when the order changes (Organ 7) | **code** (`resource.py rank`) |
+| **ALLOCATION-RECLAIM** | grants (`context_budget`, `model_tier`, dept-slot) are given but no event *takes them back* — stranded resource is the dominant 24/7 waste | a sensor on ledger-derived yield → an existing narrow/deactivate MOVE; net-new is the reclaim *event*, not a new organ | **code** (`resource.py reclaim`) |
+| **OUTCOME-DELTA** | doctrine imports *external* best-practice and is structurally blind to *this org's own* miscalibration; without a self-outcome event the org repeats its own mistakes | distinct from doctrine (which docs/07 fixes as outside-world only); a cadence reconciler joining closed decisions to realized outcomes, escalating only when the same delta recurs N times ("how we operate is wrong") | **code** (`learning.py delta`) |
+| **AUTHORITY-EXPIRED** | delegations are granted but never *decay*; a standing over-broad grant no one revisits is the deepest overnight-compromise surface | a cadence + event-triggered scan; auto-revokes/narrows in the safe direction unattended, escalates only to *widen/renew* past a cap | **code** (`resource.py authority`) |
+| **CONTEXT-TRANSFER** | on deactivation a dept's live state (open threads, why-we-chose-X) is in the ledger but not indexed for whoever inherits it | a deterministic reaction bound to any activate/deactivate MOVE (Organ 7); escalates only if it would orphan a live commitment | design — a projection bound to a move; event class declared |
+| **RECOVERY-PROVEN** | "reversible" claims never tested are not reversibility; prove the undo works before you need it | ship only if the org relies on rollback for its reversible-action claims; a low-frequency dry-run, escalating + reducing autonomy on failure | design — **conditional** (only if the org relies on rollback) |
 
 **Dropped as human-ritual-only** (their information-role is already carried by the ledger causal
 chain, doctrine admission, the skeptic, or the digest): postmortem, risk-review, CAB,
 budget-review, capacity-forecast, backlog-grooming, onboarding, SLA-negotiation. None move
 information no organ already moves; adding them would only re-import human latency.
 
-## §4 What is code vs. design here (the honesty ledger)
+## §5 The self-driving schedule — and the guarantee that a check actually fires
+
+An org that runs 24/7 must decide *when* each check above runs, and must keep running while the
+human sleeps. The naive answer — ship a scheduler — violates R0 (docs/09 §4: "the system never
+ships a scheduler"). A scheduler is a stateful long-lived process; putting one in the repo would
+leak org state outside the ledger (breaking auditability), pin the repo to one host's timer, and
+make this "just another agent framework." So the schedule is split the same way every organ is:
+
+| | The repo ships (neutral, declarative, pure) | The host provides (drive, state, env-specific) |
+|---|---|---|
+| **the schedule's content** | [`template/schedule.yaml`](../template/schedule.yaml) — which check runs on which cadence/trigger, and whether it is night-safe | |
+| **one tick's plan** | [`tools/tick.py`](../tools/tick.py) — a **pure planner**: given schedule + now + ledger, which checks are DUE, night rules applied, which were MISSED | |
+| **the drive** | | a cron / CI / harness loop that invokes `tick.py plan` on the base interval, then runs the tools it names |
+
+The registrar (an LLM agent, organization.yaml) **owns** `schedule.yaml`: it edits the cadences
+to set the org's own schedule. The **lint is the guardrail on that ownership** — `org_lint.py`'s
+`SCH` checks reject any edit that would be unsatisfiable (a cadence finer than the host's base
+interval, which the cron could never fire), fail-open (a check missing its `night_safe` policy),
+or unverifiable (a `verify_event` that names no real ledger class). So "the LLM sets its own
+schedule" is real, and the guardrail keeps every such edit R0-safe and night-safe.
+
+**Night is fail-safe, not fail-open.** `tick.py --night` suspends every check not marked
+`night_safe`; for sensor→move checks the *tighter* of `schedule.night_safe` and the sensor's
+`preregistered_for_night` (sensors.yaml) wins. An undeclared night policy is a lint error, not a
+default-on — the constitution's `delegated.night` forbids fail-open.
+
+### §5.1–5.2 "It was supposed to run" is a detected fact, never an excuse
+
+The core guarantee. A schedule the host quietly stopped firing is **indistinguishable from an org
+that had nothing to do** — and that ambiguity is the exact failure this layer exists to remove.
+So each check declares a `verify_event`: the ledger event class whose presence *proves it ran* in
+its window. `tick.py` computes, for every due check, whether that proof exists — a due check with
+no matching event within the grace window is a **MISS**, and consecutive misses **escalate**
+(`wake_up_push` — a missing schedule is a page). `tick.py`'s own run emits `tick_planned`, so a
+gap in *that* stream proves the host cron itself died — the outermost dead-man's switch.
+
+Verified: with `chain_verify` due every 30 min but zero `heartbeat` events in the ledger,
+`tick.py plan` reports the miss and exits 10 (escalate). This is the direct answer to "don't say
+it was supposed to fire — make it actually fire": the tools don't *assume* the host called them;
+the planner *detects* when it didn't and pages. Fail-safe by construction.
+
+## §6 What is code vs. design here (the honesty ledger)
 
 To not repeat the "described as if built" gap this repo has been audited for:
 
-- **Running code:** BLAST-RADIUS-CAP, STATE-RECONCILED, STALE-REFERENCE
-  ([`tools/guardrails.py`](../tools/guardrails.py)) — each verified fail-quiet on the happy path
-  and exit-10 on the exception. These sit on [`tools/ledger.py`](../tools/ledger.py) (the
-  append-only hash-chained record + deterministic views/digest) and
-  [`tools/sensors.py`](../tools/sensors.py) (the machine sensors computed over the ledger).
-- **Design, not yet code:** the lateral reconciliation family (§2.4) and the §3 set. They are
-  articulated here with their event classes, fire conditions, and escalation rules, but the tools
-  that project and check them are not written. They are **flagged as design**, not narrated as if
-  operational.
-- **Delegated by R0:** the scheduler/cadence that calls any of these, and the external snapshot
-  STATE-RECONCILED diffs against, are the host's — this repo ships the pure check, never the loop.
+- **Running code, verified:** all three safety guardrails
+  ([`tools/guardrails.py`](../tools/guardrails.py) — BLAST-RADIUS-CAP, STATE-RECONCILED,
+  STALE-REFERENCE), the lateral reconciliation family
+  ([`tools/reconcile.py`](../tools/reconcile.py) — collision, stall, contract), the resource
+  events ([`tools/resource.py`](../tools/resource.py) — rank, reclaim, authority), self-learning
+  ([`tools/learning.py`](../tools/learning.py) — outcome delta), and the schedule planner with
+  its missed-tick guard ([`tools/tick.py`](../tools/tick.py)). Each verified fail-quiet on the
+  happy path and exit-10 on the exception. They sit on [`tools/ledger.py`](../tools/ledger.py)
+  (append-only hash chain + deterministic views/digest) and
+  [`tools/sensors.py`](../tools/sensors.py) (machine sensors over the ledger). The schedule
+  itself is declarative data ([`template/schedule.yaml`](../template/schedule.yaml)),
+  lint-guarded by `org_lint.py`'s `SCH` checks.
+- **Still design (honestly conditional):** CONTEXT-TRANSFER (a projection bound to an
+  activate/deactivate move) and RECOVERY-PROVEN (only meaningful if the org actually relies on
+  rollback for its reversible-action claims) — event classes declared, tools deliberately not
+  written until an adopter's system needs them. Flagged as design, not narrated as operational.
+- **Delegated by R0:** the cron/CI/harness loop that *drives* `tick.py` and invokes the tools it
+  names, and the external ground-truth snapshot STATE-RECONCILED diffs against, are the host's —
+  this repo ships the pure planner and the pure checks, never the loop that fires them. The
+  guarantee that a delegated tick actually fired is *not* left to trust: §5.2's missed-tick guard
+  detects and pages when it doesn't.
 
-*Status: §2.1–§2.3 are running, verified code; §2.4 and §3 are design with declared event
-classes; the routing claims (which ritual dissolves into which organ) are this repo's synthesis
-from the five-lens discovery sweep, to be verified against a running system. The governing rule
-(§0, reconcile by exception, never stop to meet) is a design commitment, realized in the three
-coded guardrails' exit-code contract and asserted for the rest.*
+*Status: §2.1–§2.5 and §5 are running, verified code; the two §3 conditionals are design with
+declared event classes; the routing claims (which ritual dissolves into which organ) are this
+repo's synthesis from the five-lens discovery sweep, to be verified against a running system. The
+governing rule (§0, reconcile by exception, never stop to meet) is realized in every coded tool's
+exit-code contract, and the self-driving guarantee (§5.2) is realized in tick.py's missed-tick
+escalation — "it was supposed to run" is a detected fact, not an assumption.*

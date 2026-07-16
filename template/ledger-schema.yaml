@@ -76,6 +76,16 @@ event_classes:
                              stalled_ticks, downstream_impact: [ref] }             # DEPENDENCY-STALL
   contract_change_proposed: { seam_id, producer_role, current_hash, proposed_shape,
                               is_breaking: bool, dependents: [role], objection_deadline_tick } # CONTRACT-CHANGE
+  # resource, learning, and the schedule planner (docs/11 §3, §5)
+  priority_ranking_set: { ranking_id, ordered_objectives: [{objective_id, rank, weight,
+                          rationale_hash}], supersedes, basis_event_ids: [ref] }   # PRIORITY-RANKING
+  allocation_reclaimed: { holder, resource_type, from_level, to_level, yield_metric,
+                          ranking_ref, reason }                                     # ALLOCATION-RECLAIM
+  authority_reviewed:   { grants_reviewed, auto_narrowed: [ref], renewed: [ref] }   # AUTHORITY-EXPIRED
+  outcome_delta:        { decision_event_id, predicted_outcome, observed_outcome,
+                          delta_magnitude, delta_sign, department, recurrence_count } # OUTCOME-DELTA
+  tick_planned:         { now_min, night: bool, due: [check_id], suspended: [check_id],
+                          missed: [check_id] }   # tick.py's own run — a gap proves the host cron died
 
 # ── Cadence triggers: what `loop.cadence: on_<x>` may bind to ────────────────
 triggers:
