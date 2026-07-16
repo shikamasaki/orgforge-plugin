@@ -1,0 +1,75 @@
+# constitution.yaml — the charter: what the organization may NEVER decide for itself.
+#
+# organization.yaml is the org chart — the org may rewrite it (through moves.yaml, within
+# these bounds). THIS file is the 定款 (articles of incorporation): written by humans,
+# readable by every agent, writable by NO agent. The two-layer law (docs/03) applied to
+# edit authority: exploration self-organizes, the control skeleton is designed — and the
+# rules of self-modification are the most control-critical thing in the system.
+#
+# Three authorization tiers (docs/06 §2.1). Every action an agent can take falls in
+# exactly one. When humans are away, tier behavior is: delegated → execute now;
+# charter → queue a ringi, continue other work; irreversible → prepare fully, hold.
+
+# ── Tier 1: DELEGATED — execute immediately, record in ledger ────────────────
+delegated:
+  # The exploration front's entire organic space (docs/03 §4): decomposition,
+  # methods, hypothesis generation, effort allocation, lateral communication.
+  exploration: unrestricted_within_budget
+  # Structural moves the org may make on its own — referenced from moves.yaml,
+  # each gated by its preconditions and the audit lint.
+  structural_moves:
+    - activate_department        # within span budget only
+    - deactivate_department      # never a control role while exploration is active
+    - widen_span_via_context
+    - edit_organic_profile       # the supervisor's coaching power — ORGANIC roles only
+  # Night operation: what delegated authority looks like unattended.
+  night:
+    exploration_token_cap_per_window: SET_ME     # e.g. 2_000_000 tokens / 8h window
+    no_progress_rule:
+      same_signal_same_move_max: 3               # then suspend that line, file a ringi
+    safe_mode_on_undefined_signal:
+      exploration: continue
+      admission: suspend                          # make freely; promote nothing
+
+# ── Tier 2: CHARTER (稟議) — agents propose, humans decide, queue never blocks ─
+charter:
+  # Changes here require human adjudication. Agents file a ringi item (diagnosis +
+  # proposed diff + expected effect) and continue with other legal moves.
+  items:
+    - separation_of_duties_matrix         # the SoD map in organization.yaml
+    - mechanistic_role_profiles           # gate, skeptic, supervisor job descriptions
+    - admission_standard                  # what "passing" means (Organ 1 grounding)
+    - delegation_bounds                   # this file's Tier-1 contents themselves
+    - moves_catalog                       # adding/changing legal moves
+    - add_layer                           # hierarchy is charter-tier: the last resort
+    - purpose_revision                    # Organ 1 is human-held, always
+  ringi_queue: ledger://ringi             # append-only; adjudicated each morning
+  morning_digest:
+    generated_from: ledger
+    style: report_by_exception            # 1 line if on course; detail for reorgs,
+                                          # ringi items, held irreversibles, anomalies
+    human_read_budget: 15_minutes         # if it takes longer, fix the digest
+
+# ── Tier 3: IRREVERSIBLE HOLD — prepare fully, execute only on human approval ─
+irreversible:
+  # Overnight: advance each to one step before the point of no return.
+  held_actions:
+    - production_deploy
+    - external_publication                # anything leaving the boundary is published
+    - asset_movement                      # funds, credentials, data exports
+    - ledger_schema_change
+    - sunset                              # the org never adjudicates its own death
+  prepare_up_to: staged_and_verified      # build, test, stage, diff — approve-only state
+
+# ── Escalation channels — strictly two, never mixed ─────────────────────────
+escalation:
+  digest: [reorg_commits, ringi_items, held_irreversibles, anomalies, budget_report]
+  wake_up_push: [global_halt, safety_limit_tripped, ledger_anomaly]   # nothing else
+
+# ── Invariants — no tier may touch these; violations are global-halt events ──
+invariants:
+  - ledger_append_only: true
+  - no_knowledge_outside_ledger: true          # the anti-属人化 invariant (docs/05 §5)
+  - control_never_dormant_while_exploring: true
+  - maker_never_own_checker: true
+  - no_agent_writes_this_file: true

@@ -26,6 +26,16 @@ growth:
   next_crisis_expected: autonomy         # what ends this stage — design toward it now
   add_layer_when: "department count exceeds a supervisor's effective span (see structure.span)"
 
+# ── Elastic activation (docs/05): design fully, run elastically ─────────────
+# The chart below is the COMPLETE ideal org — every department the purpose will ever
+# need, declared up front (design is cheap). `active:` per role is the current
+# activation state; it changes only through moves.yaml, gated by tools/org_lint.py.
+# A dormant department = its profile + ledger history, at zero cost, losslessly
+# re-activatable. The control skeleton is never dormant while anything explores.
+elastic:
+  constitution: template/constitution.yaml   # the charter — no agent writes it
+  moves_catalog: template/moves.yaml         # the only legal reorg vocabulary
+
 # ── Organ 2: STRUCTURE (division of labor + span) ───────────────────────────
 structure:
   # A supervisor's effective span. Start narrow; WIDEN it by investing in information flow
@@ -71,6 +81,7 @@ roles:
 
   - id: supervisor
     regime: mechanistic
+    active: true
     mission: >
       Oversee each department's DIRECTION (not just liveness). When a department drifts, correct
       its profile directly so the next scheduled run is fixed. See template/SUPERVISOR.md.
@@ -80,6 +91,7 @@ roles:
 
   - id: miner
     regime: organic
+    active: true
     mission: Systematically search the data for candidate material; propose, do not judge.
     context_pack: [purpose, nearby_deaths, coverage_map, live_findings]   # Organ 3 onboarding
     functions: [organize, decide, implement, judge, review, operate]      # a member does all six
@@ -88,6 +100,7 @@ roles:
 
   - id: improver
     regime: organic
+    active: true
     mission: Take promising-but-below-bar material and sharpen it.
     context_pack: [purpose, nearby_deaths, death_causes, parked_inventory]
     functions: [organize, decide, implement, judge, review, operate]
@@ -96,6 +109,7 @@ roles:
 
   - id: recombiner
     regime: organic
+    active: false   # latent: activates on demand_signal (moves.yaml)
     mission: Combine net-positive, orthogonal parts into portfolio candidates.
     context_pack: [purpose, parts_inventory, combination_history]
     functions: [organize, decide, implement, judge, review, operate]
@@ -104,6 +118,7 @@ roles:
 
   - id: executor
     regime: organic
+    active: true
     mission: Write and run the experiments the backlog needs; hand results to the gate.
     context_pack: [purpose, open_experiments, reusable_modules, gate_input_spec]
     functions: [organize, decide, implement, judge, review, operate]
@@ -112,6 +127,7 @@ roles:
 
   - id: gate
     regime: mechanistic                   # control: machine-decided, never self-organizing
+    active: true
     mission: Admit or reject candidates against the purpose-grounded standard. The authorization duty.
     context_pack: [purpose, admission_standard]
     functions: [judge]                    # control members are narrow by design
@@ -119,6 +135,7 @@ roles:
 
   - id: skeptic
     regime: mechanistic
+    active: true
     mission: Adversarially attempt to refute every positive result before it is trusted. The Checker.
     context_pack: [purpose, claim_under_review, refutation_checklist]
     functions: [review, judge]

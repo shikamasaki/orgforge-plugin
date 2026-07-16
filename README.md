@@ -55,6 +55,12 @@ Decomposing from the organization (not from the parts) changes what you build:
 | [docs/02-growth-stages.md](docs/02-growth-stages.md) | Greiner-based playbook: which organ to add at each stage of growth. |
 | [docs/03-organic-vs-mechanistic.md](docs/03-organic-vs-mechanistic.md) | Resolving "designed structure vs self-organization" via a two-layer split. |
 | [docs/04-failure-modes.md](docs/04-failure-modes.md) | The failure modes organizational theory warns about, mapped to agent orgs. |
+| [docs/05-elastic-organization.md](docs/05-elastic-organization.md) | Why "no salary cost" changes everything (and what it doesn't): design the ideal org fully on day one, run it elastically. |
+| [docs/06-lifecycle-operations.md](docs/06-lifecycle-operations.md) | Cradle to grave: founding from an RFP, 24-hour autonomous operation (ringi queue, night safe mode), maintenance, handover, sunset. |
+| [template/FOUNDER.md](template/FOUNDER.md) | The founding process: RFP → purpose → inverse-Conway architecture → output contracts → full latent org, minimally activated. |
+| [template/constitution.yaml](template/constitution.yaml) | The charter (定款): delegated / charter(稟議) / irreversible-hold tiers, night rules, invariants. Written by humans, writable by no agent. |
+| [template/moves.yaml](template/moves.yaml) | The legal-move catalog: every structural change the org may make, with preconditions, tier, and reversal. |
+| [tools/org_lint.py](tools/org_lint.py) | The audit gate: every founding/reorg commit is machine-checked against the theory (Goodhart, span, SoD, control-never-dormant). |
 | [docs/sources.md](docs/sources.md) | Every citation, with primary/secondary honestly distinguished. |
 
 ## How to use it

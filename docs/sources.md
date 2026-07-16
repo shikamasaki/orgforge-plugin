@@ -78,6 +78,24 @@ node this repo occupies — **classical management theory as the top-down decomp
 harness and loop** — is thin-to-empty in the literature. That is an *opportunity to connect existing
 parts*, not a claim of blank-slate invention.
 
+## The elastic organization (docs/05 — which constraints transfer, which vanish)
+
+- **[P] Coase — *The Nature of the Firm*** (firm boundaries set by coordination/transaction
+  costs, not capital). https://en.wikipedia.org/wiki/The_Nature_of_the_Firm
+- **[P] Brooks — *The Mythical Man-Month* / Brooks's law** (communication channels n(n−1)/2).
+  https://en.wikipedia.org/wiki/Brooks%27s_law
+- **[P] Ashby — law of requisite variety** (controller capacity must match controlled variety;
+  grounds "control scales with active exploration"). https://en.wikipedia.org/wiki/Variety_(cybernetics)
+- **[P] Cyert & March — organizational slack** (*A Behavioral Theory of the Firm*; latent
+  departments are free slack for agent orgs). https://en.wikipedia.org/wiki/A_Behavioral_Theory_of_the_Firm
+- **[S] Project-based organization (the "Hollywood model")** — a human precedent for full latent
+  capability + per-project activation. https://en.wikipedia.org/wiki/Project-based_organization
+- **[P] Separation of duties in Japanese corporate practice — 稟議 (ringi)** as the asynchronous
+  approval queue pattern behind docs/06 §2. https://en.wikipedia.org/wiki/Ringi-sho
+
+*The Family A (financial/frictional) vs Family B (coordination) constraint split in docs/05 is
+this repo's own synthesis of the above; treat it as a design hypothesis, per the repo's stance.*
+
 ## The strongest counter-argument (do not ignore it)
 
 - **[S] "Drop the Hierarchy and Roles: How Self-Organizing LLM Agents Outperform Designed

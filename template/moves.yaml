@@ -1,0 +1,97 @@
+# moves.yaml — the legal-move catalog: every structural change the org may make,
+# with its preconditions, authorization tier, and reversal.
+#
+# The org never free-edits its own chart. A reorg is: a sensor fires → a move whose
+# preconditions match is selected → the diff passes tools/org_lint.py → the commit lands
+# on organization.yaml. Anything not in this catalog is not a legal reorg. (Adding a move
+# IS itself charter-tier — see constitution.yaml.)
+#
+# Sensors referenced below are the crisis signals of docs/02 §4 made measurable:
+#   supervisor_saturation   — review depth dropping / rubber-stamp rate rising
+#   blocked_on_center       — capable departments idle awaiting central decisions
+#   divergence              — duplicate work / contradictory conventions across teams
+#   red_tape_ratio          — gate+reporting tokens ÷ task tokens above threshold
+#   queue_empty             — a department idle for a full review cycle
+#   demand_signal           — work arriving that matches a latent department's contract
+
+moves:
+
+  - id: activate_department
+    tier: delegated
+    preconditions:
+      - demand_signal for a latent department's contract
+      - coasean_gate: work is recurring OR would dilute an active generalist's
+          context pack OR requires SoD independence (docs/05 §4)
+      - span_check: supervisor's active count stays within effective span
+      - control_check: department's named Checker is (or becomes) active with it
+    effect: set active: true; deliver context pack; ledger the rationale
+    reverse: deactivate_department
+
+  - id: deactivate_department
+    tier: delegated
+    preconditions:
+      - queue_empty for a full review cycle, OR its contract is admitted/absorbed
+      - not a control role while any exploration remains active
+    effect: set active: false; profile and ledger history persist (lossless dormancy)
+    reverse: activate_department          # returns with full institutional memory
+
+  - id: widen_span_via_context
+    tier: delegated
+    preconditions: [supervisor_saturation]
+    effect: invest in Organ 5 — sharper direction flags, better context packs,
+      standardized handoff formats — to raise effective span WITHOUT hierarchy
+    reverse: none needed (strictly improving)
+    note: MUST be attempted before add_layer (docs/02 §3, the span gate)
+
+  - id: delegate_authority
+    tier: delegated
+    preconditions: [blocked_on_center]
+    effect: push method decisions down to the department; center specifies outputs only
+    reverse: recentralize (rare; ledger the reason)
+
+  - id: add_coordination_gate
+    tier: delegated
+    preconditions: [divergence]
+    effect: shared convention / cross-team context pack / review gate at the seam
+    reverse: lighten_gate
+
+  - id: lighten_gate
+    tier: delegated
+    preconditions: [red_tape_ratio]
+    effect: replace a formal gate with mutual adjustment where context is already shared
+    reverse: add_coordination_gate
+    guard: never lightens Maker/Checker admission — that is not a coordination gate
+
+  - id: add_layer
+    tier: charter                          # hierarchy is the LAST resort — human decides
+    preconditions:
+      - supervisor_saturation persisting AFTER widen_span_via_context was applied
+      - split point is a natural domain boundary
+    effect: insert exactly one sub-supervisor for one cluster
+    reverse: remove_layer
+
+  - id: remove_layer
+    tier: delegated                        # flattening is safe; deepening is not
+    preconditions:
+      - the layer can no longer name the load it relieves (docs/04 §4)
+    effect: dissolve the sub-supervisor; departments report to the parent again
+    reverse: add_layer (via charter)
+
+  - id: enter_maintenance
+    tier: charter
+    preconditions:
+      - all RFP contracts admitted; residual work is corrective
+    effect: exploration front to latent; activate the watch set (monitor+fixer+checker)
+    reverse: reactivation via activate_department on a new demand_signal
+
+  - id: prepare_handover
+    tier: charter
+    preconditions: [successor designated by humans]
+    effect: generate the succession package from the ledger (docs/06 §4.2)
+    reverse: none (package generation is read-only)
+
+  - id: sunset
+    tier: irreversible                     # prepared by the org, executed by humans only
+    preconditions: [handover complete or explicitly waived by humans]
+    effect: deactivate all; archive ledger read-only; retire constitution instance
+    reverse: re-founding from the archive (a new organization, with inherited memory)
