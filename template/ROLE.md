@@ -1,8 +1,12 @@
-# ROLE / PROFILE TEMPLATE — a member's job description
+# ROLE / PROFILE TEMPLATE — one member's job, articulated
 
-A *profile* is the job description for one department (one member of the organization). It is the
-artifact a supervisor edits to coach a member (see `SUPERVISOR.md`). Think of it as an HR document,
-not a prompt: it defines the role, the onboarding, the duties, and the reporting line.
+A *profile* articulates **one member's job** — the piece of the division of labor that, in a
+human company, a person absorbs from a job description plus culture plus a manager's coaching,
+mostly tacitly. An AI has none of that tacit scaffolding, so the job must be written down in
+full: what this member is *for*, what it must load before acting, its duties, what standard its
+output must meet, and who checks it. It is the artifact a supervisor edits to coach a member
+(see `SUPERVISOR.md`). Think of it as an HR document made fully explicit — role, onboarding,
+duties, reporting line — because "explicit enough for an AI to act on" is the whole point.
 
 Concretely, a profile is the **harness-neutral source of truth** for what one member does, authored
 once here. To run the department, the profile is **projected** into whatever host harness will run

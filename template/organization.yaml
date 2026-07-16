@@ -1,9 +1,16 @@
-# organization.yaml — declare your agent system AS AN ORGANIZATION.
+# organization.yaml — THE DIVISION OF LABOR AND INFORMATION FLOW, ARTICULATED.
 #
-# This is the template's center of gravity: an org chart as data. Copy it, delete the example
-# departments, and describe your own system. Every top-level key is one of the seven organs from
-# THEORY.md, so filling this file out IS the decomposition. Comments explain each organ; the values
-# below are a worked example (a small autonomous research org) you should replace.
+# A human company knows tacitly who owns which deliverable, who needs to know what, and how
+# work is checked. An AI doesn't — it acts only on what's written. This file writes it down:
+# the goal (purpose/intent), who does what to what standard (roles + contracts), who may know
+# what in what amount (information_flow.scopes), and who checks whom (separation_of_duties).
+# Fill it out and you have articulated the organization the AI will run. Every top-level key
+# names one of the tacit organizational things THEORY.md says must be made explicit; the
+# values below are a worked example (a small autonomous research org) you should replace.
+#
+# This renders to a permissioned dataflow graph on the host harness (Conway's law: the
+# who-talks-to-whom you write here BECOMES the system's structure) — the graph is the medium,
+# the articulation is the message (docs/11 §1).
 #
 # Glossary: "role" = "department" = "member" — one declared unit of the division of labor.
 # A department may be one agent or a self-organizing pool behind one contract; the chart

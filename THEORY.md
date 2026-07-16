@@ -1,41 +1,86 @@
-# THEORY — Decomposing an Agent System from the Organization Down
+# THEORY — Articulating the Organization So AI Can Run It
 
-> The claim of this repository: a multi-agent AI system **is an organization**, and the right way
-> to design one is to **decompose it top-down from what an organization needs**, not to assemble
-> it bottom-up from separately-invented parts (prompt → context → harness → loop). When you
-> decompose from the top, the harness and the loop **fall out as two organs among seven** — and
-> you also recover the organs a parts-first view structurally cannot see.
+> **The claim of this repository, in one sentence:** in a world where AI does the work
+> around the clock with minimal human steering, designing an agent system reduces to
+> **putting the organization into words** — writing down, explicitly enough for an AI to
+> act on, the things a human company runs on *without* writing them down: what we are
+> trying to do, who knows what, who does what, what may be decided where, and which
+> decisions the human at the top still makes.
+>
+> That is the whole idea. Everything else — harness, loop, context engineering, the yaml
+> files, the lint — is downstream of it.
 
-This document is the core. Everything else in the repo (`template/`, the growth-stage playbook, the
-failure-mode catalog, the elastic-organization model and the lifecycle/operations spec, the
-knowledge/doctrine organ and the context economy — `docs/05`–`docs/08` — and the machine audit,
-`tools/org_lint.py`) is an application of it.
+## 0. Why it reduces to articulation
 
----
+Consider what an LLM agent system actually needs to produce good work, and notice that
+each need is something a human organization already solves — but solves **tacitly**:
 
-## 0. Method: why top-down, and why it matters
+- **Context / information flow.** An agent, like an employee, produces output aligned to
+  the goal only if the *right information reaches it in the right amount*. Too little and
+  it hallucinates the missing context; too much and the goal is buried. This is exactly
+  what an organization's information flow is *for* — and in a human org it runs largely on
+  culture, hallway conversation, and a manager's sense of "who needs to know this."
+- **Division of labor.** Without a clear split of *who owns what deliverable to what
+  standard*, the output is a coarse, essence-missing average — the same way an
+  undifferentiated human team produces mush. Roles are how an org avoids that.
+- **The metabolism (the loop).** The rhythm of picking up work, acting, checking, and
+  correcting — an organization's operating cadence, which in a human firm is "just how we
+  work," never spelled out.
+- **The substrate (the harness).** What a member can perceive, act on, and remember — the
+  desk, the tools, the files. Change the desk and you change the job.
+- **Intent and the decision line.** The organization exists *for* something, and — this is
+  the load-bearing part for a 24/7 AI system — **the human at the top decides the few
+  essential things and delegates the thousand small ones.** A CEO does not adjudicate
+  every judgment; the art of running a company is drawing the line between what the top
+  decides and what the field is trusted to decide. Humans draw that line by feel.
 
-There are two ways to arrive at a complex artifact.
+Here is the pivot. **A human organization can leave all of this tacit** — carried in
+experience, culture, and the air in the room — because humans read context, absorb norms,
+and fill gaps on their own. **An AI cannot.** An AI reads only what you give it. So the
+moment you hand the work to AI to run autonomously, every one of these tacit things has to
+become *explicit* — written down in a form the AI can act on. The goal has to be stated,
+not felt. "Who needs to know this" has to be a rule, not an instinct. "This is mine to
+decide, that goes up to the human" has to be a declared boundary, not a manager's judgment.
 
-**Bottom-up (part-assembly).** You notice a useful pattern, name it, harden it, and later try to
-compose it with other patterns you named. This is how agent engineering actually happened:
-*prompt engineering* (2023) → *context engineering* (what the model sees, 2024–25) → *harness
-engineering* (the scaffolding around the model, 2026) → *loop engineering* (the control loop that
-reruns the model, 2026). Each is real and useful. But part-assembly has a structural blind spot:
-**you can only compose the parts you happened to invent.** Nothing in "harness + loop" ever forces
-you to ask *how many agents can one supervisor actually oversee before review quality collapses?*
-— because span of control is not a harness concept or a loop concept. It is an **organizational**
-concept, and a parts-first vocabulary has no slot for it.
+**So designing an agent organization = articulating, in machine-actionable form, the tacit
+organizational knowledge a human company runs on.** That is what this repository is: a
+template for that articulation. `organization.yaml` articulates the division of labor;
+`constitution.yaml` articulates the decision line (what the human decides vs. what is
+delegated); `ROLE.md` articulates each member's job; the intent block articulates the goal;
+the context packs articulate "who needs to know what." The lint checks that the
+articulation is coherent. None of it is a new runtime — it is the organization, said out
+loud so an AI can run it.
 
-**Top-down (first-principles decomposition).** You name the whole first — here, *an organization* —
-and ask *what must this whole have, necessarily, to exist and function?* Each answer is an organ.
-The organs are not a wish-list; they are what the definition of the whole entails. This is the same
-discipline as decomposing a strategy from its purpose, or building a large machine from small
-composable wheels that each snap onto a shared interface: **the root is primary, the parts hang off
-it.** Harness and loop are two such wheels.
+## 0.1 The engineering vocabulary, relocated
 
-The payoff of top-down is not elegance. It is **completeness and ordering**: it tells you what you
-are missing, and it tells you what to build next.
+The industry named its concepts bottom-up — *prompt* (2023) → *context engineering*
+(2024–25) → *harness engineering* (2026) → *loop engineering* (2026) — as tactical parts.
+Each is real. But read against the pivot above, each is **a fragment of an organizational
+act that a human firm performs tacitly**:
+
+- *Context engineering* is articulating **information flow** — getting the right
+  information, in the right amount, to the member who needs it.
+- *Harness engineering* is articulating the **substrate** — what a member perceives, acts
+  on, remembers.
+- *Loop engineering* is articulating the **metabolism** — the operating cadence.
+
+The parts are not wrong; they are *under-scoped*. Assembled bottom-up, they never force the
+questions that decide whether the output is any good: is the goal actually propagated? is
+the division of labor clear, or is the output coarse and essence-missing? **which decisions
+does the human still make, and which run unattended?** Those are organizational questions,
+and a parts-first vocabulary has no slot for them. Naming the whole — *the organization* —
+and asking what must be *articulated* for an AI to run it puts every part in its place and
+surfaces the ones the parts-first view left tacit.
+
+> A note on the "seven organs" that follow. Earlier drafts of this document claimed the
+> seven were *derived top-down from a definition, complete and ordered* — a proof that the
+> list is exhaustive. That claim was overbuilt (see docs/11): there is no completeness
+> theorem, and the list is better read as **a checklist of the things a human organization
+> runs on tacitly and an AI organization must have articulated** — distilled from a century
+> of how organizations succeed and fail, and cross-validated against where multi-agent LLM
+> systems actually break (they break at information flow, role clarity, and verification —
+> exactly the tacit things; see docs/11 §0). Read the organs as *what must be put into
+> words*, not as a derivation that proves itself.
 
 ---
 

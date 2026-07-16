@@ -1,15 +1,28 @@
-# constitution.yaml — the charter (定款): what the organization may NEVER decide for itself.
+# constitution.yaml — THE DECISION LINE, ARTICULATED.
 #
-# organization.yaml is the org chart — the org may rewrite it (through moves.yaml, within
-# these bounds). THIS file is the articles of incorporation: written by humans, readable
-# by every agent, writable by NO agent. The two-layer law (docs/03) applied to edit
-# authority: exploration self-organizes; the control skeleton is designed; and the rules
-# of self-modification are the most control-critical thing in the system.
+# This is the load-bearing file for a 24/7 AI organization. A human CEO does not adjudicate
+# every judgment — the art of running a company is drawing the line between "this I decide"
+# and "this the field is trusted to decide," and delegating the thousand small calls so the
+# top can focus on the few essential ones. Humans draw that line by feel. An AI cannot feel
+# it — so here it is WRITTEN DOWN: for every kind of decision, whether the AI runs it now, or
+# raises it and keeps working, or prepares it and waits for the human. That is what lets the
+# system run around the clock with the human deciding only what actually matters.
 #
-# Three authorization tiers (docs/06 §2.1). Every action falls in exactly one. Tier
-# BEHAVIOR is fixed in docs/06; the authoritative ITEM LISTS are here and only here.
-# Overnight: delegated → execute now; charter → queue a proposal, keep working;
-# irreversible → prepare fully, hold for a human.
+# (This articulated decision line also happens to be the control skeleton — separating what
+# self-organizes from what the human governs, docs/03. But its PURPOSE is delegation, not
+# audit: it exists so the human is freed to the essential decisions, not to catch cheats.
+# Calibrate it to risk — full ceremony for high-stakes/irreversible work, light touch for
+# cheap reversible work; see docs/01 §5 and docs/11 §3. Over-governing every trivial call
+# recreates the bottleneck delegation was meant to remove.)
+#
+# organization.yaml is the org chart (the division of labor) — the org may rewrite it through
+# moves.yaml, within these bounds. THIS file is the articles of incorporation: written by
+# humans, readable by every agent, writable by NO agent.
+#
+# Three authorization tiers (docs/06 §2.1). Every action falls in exactly one. Tier BEHAVIOR
+# is fixed in docs/06; the authoritative ITEM LISTS are here and only here.
+# Overnight: delegated → execute now; charter → raise a proposal and keep working;
+# irreversible → prepare fully, hold for the human.
 #
 # NOTE: values below are a worked example. Replace them; the audit lint fails on any
 # leftover "SET_ME"-style placeholder in an instance.

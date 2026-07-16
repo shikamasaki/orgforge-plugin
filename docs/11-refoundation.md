@@ -12,52 +12,67 @@
 
 ## 0. The one-sentence result
 
-**The template's *instinct* is vindicated by the newest empirical evidence; its *derivation*
-is not.** Multi-agent LLM systems really do fail primarily at coordination and reliability
-— the "Why Do Multi-Agent LLM Systems Fail?" study (MASFT, arXiv:2503.13657) finds ~35% of
-failures are specification/role, ~40% inter-agent misalignment, ~25% verification, "no
-single category dominates," and calls them *fundamental design flaws, not implementation
-gaps*. That is exactly the class of problem organizational theory addresses, and the MASFT
-authors themselves reach for organizational theory (High-Reliability-Organization theory) to
-fix it. So "structure matters, coordination failures are the real risk" is **correct**. But
-the *specific* way this template derived its structure — top-down from classical human
-management theory (Mintzberg configurations, Greiner growth-crises, span-of-control numbers),
-treating those as a completeness-generating derivation — is the part the literature says to
-reframe. The lens, the lineage, and several load-bearing citations were wrong or overstated.
+**The template's core thesis is vindicated by the newest empirical evidence; its
+*derivation* was overbuilt and several load-bearing citations were mis-sourced.** The
+thesis (THEORY.md, as re-anchored): designing an agent system that runs autonomously
+reduces to **articulating, in machine-actionable form, the tacit organizational knowledge
+a human company runs on** — the goal, the information flow, the division of labor, and the
+decision line between what the human decides and what is delegated. The evidence backs this
+directly: the "Why Do Multi-Agent LLM Systems Fail?" study (MASFT, arXiv:2503.13657) finds
+multi-agent LLM failures are ~35% specification/role, ~40% inter-agent misalignment, ~25%
+verification — "fundamental design flaws, not implementation gaps." **Every one of those is
+a tacit organizational thing left un-articulated**: unclear roles, information that didn't
+reach the right member, work no one verified. The MASFT authors themselves reach for
+organizational theory (High-Reliability-Organization theory) to fix it. So the diagnosis
+"put the organization into words or the output is coarse and mis-aligned" is *correct and
+empirically supported*. What was wrong: the *claim to have derived seven organs top-down,
+complete and ordered* (there is no such proof), and several classical citations (Burns &
+Stalker, span numbers, SoD-as-universal) that were mis-remembered or over-applied. The
+**instinct and the problem selection are right; the scaffolding around them was too heavy
+and partly mis-sourced.**
 
 ---
 
-## 1. The lens correction: dataflow + capabilities is primary; organization is a *governing* lens
+## 1. The lens correction: articulation is primary; the dataflow graph is its *output form*
 
-The reviewer critique that "once AI removes headcount cost and reorg friction, organization
-stops being the right primary lens" is **substantially correct**, and the literature is
-specific about it:
+A reviewer argued that "once AI removes headcount cost and reorg friction, the primary lens
+should be a permissioned dataflow graph, not organization." A previous version of this
+document over-corrected toward that view. The correction to the correction, which is
+faithful to the template's actual thesis:
 
-- **Conway's law dissolves the org/architecture dichotomy for agents.** For humans, the org
-  chart (who-talks-to-whom) and the system architecture are two objects you must fight to
-  align (the inverse-Conway maneuver). For agents, you draw the communication graph directly
-  and freely — so **the org chart *is* the dataflow graph.** There is no independent "organization"
-  to design first; designing the graph *is* designing the org.
-- **Builders and systems researchers already design from the graph.** Anthropic's production
-  multi-agent system frames everything as orchestrator-worker dataflow and reports token usage
-  alone explains ~80% of performance variance; the 2026 "Scheduler-Theoretic Framework for LLM
-  Agent Execution" (arXiv:2604.11378) deliberately models coordination as task scheduling and
-  *avoids* team/role metaphors. The primitive everyone actually builds on is **a permissioned
-  computation graph**: nodes = agent/tool invocations, edges = context + control flow,
-  capabilities = per-node tool/permission scope.
-- **But the reviewer overshoots** by reducing the residual to "access control." MASFT's ~40%
-  inter-agent-misalignment and ~25% verification failures are *not* solved by a permissioned
-  dataflow graph plus access control — they are failures of **coordination under interdependence
-  and of reliability**, which is precisely what organizational (and specifically HRO) theory is
-  for. "The Organizational Behavior of Agentic AI" (arXiv:2606.30986) lands on the same both/and:
-  agent collectives are "partial organisational analogues" sustained "not by motivation, identity,
-  trust… but by **context architecture**," and finds shared-state forms *outperform* human-imitation
-  hierarchies/committees.
+- **The dataflow graph is real, but it is the *output* of articulation, not a rival to it.**
+  Conway's law is the key: a system's structure mirrors the communication structure of
+  whoever builds it. For agents, the communication graph you *write down* (who tells whom
+  what, in what amount) simply *becomes* the dataflow graph the system runs. So "organization"
+  and "dataflow graph" are **not two competing primary lenses — they are the same object seen
+  twice**: the organization is the *intent* (why this member needs this information, why this
+  is a separate role), the dataflow graph is the *rendered form*. You do not choose between
+  them; you articulate the organization and the graph falls out. The reviewer's "graph is
+  primary" mistakes the rendered artifact for the design act.
+- **The design act everyone actually performs is articulation, whether or not they call it
+  that.** Anthropic's production multi-agent system reports token usage explains ~80% of
+  performance variance — i.e. *getting the right information in the right amount to each agent*
+  dominates, which is precisely the information-flow articulation this template centers. When
+  builders "design the graph," what they are doing *is* deciding who-knows-what and who-does-
+  what — an organizational articulation wearing engineering clothes.
+- **Access control alone is not enough — which is the point.** MASFT's ~40% inter-agent
+  misalignment and ~25% verification failures are *not* fixed by a permissioned graph plus
+  permissions. They are failures of **coordination under interdependence and of reliability** —
+  exactly the tacit organizational content this template exists to make explicit. "The
+  Organizational Behavior of Agentic AI" (arXiv:2606.30986) confirms the mechanism: agent
+  collectives are sustained "not by motivation, identity, trust… but by **context
+  architecture**" — i.e. by how well the organization has been put into words — and shared-state
+  (well-articulated) forms *outperform* human-imitation hierarchies.
 
-**Reframed thesis.** *The primary lens is a permissioned dataflow graph (the substrate every
-builder uses). Organization is a **governing lens over that graph** — and only its
-coordination/reliability/normative content transfers, because that content is about
-interdependence, which agents have, not about labor cost or careers, which they don't.*
+**Reframed thesis (kept, not demoted).** *The primary act is articulating the organization —
+the goal, the information flow, the division of labor, the decision line — in a form an AI can
+run. The permissioned dataflow graph is what that articulation renders to; it is the medium,
+not the message. The parts of classical org theory that transfer are the ones about
+**interdependence and coordination** (which agents have); the parts that don't are the ones
+about labor cost, careers, and reorg friction (which agents don't). The MAS-institutional
+tradition — MOISE+'s structural / functional / **deontic** dimensions — is the precise,
+computational vocabulary for that articulation, and it already unifies "who does what" with
+"who may do what," so access control is part of the articulation, not a rival to it.*
 
 ## 2. The lineage correction: cite MAS-institutional theory, not (only) classical management theory
 
@@ -161,11 +176,13 @@ After all corrections, a real, defensible core survives — and it is worth ship
    **Lawrence & Lorsch + ambidexterity** (differentiate regimes *and pay the integration cost*), not
    Burns & Stalker, and supported by the counter-paper (arXiv 2603.28990), which actually found a
    **hybrid** protocol wins — mildly *strengthening* the two-layer stance.
-3. **Coordination-and-reliability as the real risk** — vindicated by MASFT; this is the template's
-   truest contribution and should be foregrounded.
-4. **The lint** — a runnable type-checker over the graph manifest is genuinely useful and unique; it
-   should check *graph/coordination* invariants (every maker routes to a distinct checker, no dormant
-   control while exploring, no scope smuggling), which it already does.
+3. **Articulation-of-the-organization as the design act, and coordination/reliability as the real
+   risk** — vindicated by MASFT; systems fail exactly where the organization was left tacit (roles,
+   information flow, verification). Foreground this: the template's job is to make those explicit.
+4. **The lint** — a runnable type-checker over the *articulated organization* (organization.yaml et al.)
+   is genuinely useful and unique; it checks that the articulation is coherent (every maker routes to a
+   distinct checker, no dormant control while exploring, no scope smuggling — i.e. the division of labor
+   and decision line are consistent), which it already does.
 5. **Harness delegation** (docs/09) — correct and important.
 6. **The failure-mode catalog** (docs/04) — the single most practically useful artifact, and now
    cross-validated against MASFT's empirical taxonomy.
@@ -185,17 +202,26 @@ After all corrections, a real, defensible core survives — and it is worth ship
 
 ## 7. The net reframing (what this template *is*, honestly)
 
-> A **permissioned dataflow graph** for LLM agents (nodes, edges, context, capabilities) —
-> that is the substrate — **plus a risk-calibrated coordination-and-reliability layer** whose
-> design heuristics are drawn from organizational theory (best sourced from MAS-institutional
-> theory + HRO, with classical management theory as re-parameterized heuristics, not law) —
-> **plus a runnable lint** that checks the graph's coordination invariants — **run on existing
-> harnesses**. Its truest claim is not "an agent system is an organization" (a metaphor that
-> holds only in the coordination subspace) but "**agent systems fail at coordination and
-> reliability, and here is a risk-calibrated, lint-checkable way to design against those
-> failures on top of the dataflow graph you were already building.**"
+> This template is **a way to articulate — in machine-actionable form — the tacit
+> organizational knowledge an autonomous AI system must have to produce good work**: the goal
+> (intent), who-knows-what (information flow), who-does-what-to-what-standard (division of
+> labor), and the decision line between what the human at the top decides and what runs
+> delegated and unattended. That articulation *renders to* a permissioned dataflow graph on an
+> existing harness (the graph is the medium, not the message — Conway's law), and a **runnable
+> lint** checks the articulation is coherent. Its truest claim is not the ontological "an agent
+> system *is* an organization," but the operational one: **"in a world where AI runs the work
+> around the clock with the human deciding only the essential things, designing the system
+> reduces to putting the organization into words an AI can act on — and multi-agent systems
+> fail precisely when that articulation is missing or coarse (unclear roles, information that
+> didn't arrive, work no one verified)."** The classical org theory is the *source of hard-won
+> vocabulary and failure modes* for doing that articulation well — used as re-parameterized
+> heuristics for agents (interdependence transfers; labor cost and careers don't), best sourced
+> from the MAS-institutional tradition (MOISE+'s structural/functional/deontic) with the classic
+> management texts as illustration, not law.
 
 *Status: this refoundation is itself a set of claims to test, but it is now grounded in an actual
 literature read (sources in docs/sources.md, marked ✓ where verified). The honest through-line: the
-template's problem selection was right, its theoretical derivation was overbuilt and mis-sourced, and
-the durable core is smaller, sharper, and more defensible than the original framing claimed.*
+template's problem selection and core thesis (articulate the organization for the AI) were right and
+are empirically supported (MASFT); the earlier claim to a complete top-down *derivation* was
+overbuilt, and several classical citations were mis-sourced — corrected here. The durable core is the
+articulation itself, sharper and better-grounded than the original framing.*

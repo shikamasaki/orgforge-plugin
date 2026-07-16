@@ -1,46 +1,52 @@
 # org-first-agents
 
-**Design multi-agent AI systems the way you design an organization — top-down from
-organizational theory — instead of assembling bottom-up from separately-invented parts.**
+**In a world where AI runs the work around the clock and the human decides only the essential
+things, designing an agent system reduces to one act: putting the organization into words an AI
+can act on.** This repository is a template for that articulation.
 
-> Harness engineering and loop engineering are not co-equal disciplines to "combine."
-> They are two of the **organs you get when you decompose an organization from first
-> principles.** This repository does that decomposition, and ships it as a reusable template.
+> A human company runs on things it never writes down — what we're trying to do, who needs to
+> know what, who owns which deliverable, and which calls the boss makes vs. delegates. People
+> carry that tacitly, in culture and judgment. An AI can't: it acts only on what you give it. So
+> the moment AI runs the org autonomously, all of that tacit knowledge has to become **explicit**.
+> That is the whole design problem — and this template is how you write it down.
 
 ---
 
 ## The thesis in one paragraph
 
-The agent-building industry invented its vocabulary **bottom-up**: prompt engineering, then
-*context engineering* (what the model sees), then *harness engineering* (the scaffolding around
-the model), then *loop engineering* (the control loop that reruns it). Each was named as a
-tactical pattern (2024–2026). But a multi-agent system **is an organization** — members with
-roles, a division of labor, supervision, incentives, and a growth path. Organizations have been
-studied for a century. If you start from the question *"what must any organization have to exist
-and function?"* and decompose, the harness and the loop **fall out as necessary organs** — and
-so do several organs a harness/loop-only view **misses**: structure (span of control, hierarchy),
-incentives/control (separation of duties, anti-gaming), information flow (Conway's law), and
-growth (Greiner's stages). Organization is the **first principle**; harness and loop are
-**small, composable wheels** that hang off it.
+An LLM agent produces work aligned to the goal only if the **right information reaches it in the
+right amount** (context) and the **division of labor is clear** (roles) — otherwise the output is
+a coarse, essence-missing average. Those are organizational problems, and a human company solves
+them *tacitly*, through culture, hallway conversation, and a manager's sense of who-needs-to-know
+and who-decides-what. The agent-building industry re-invented fragments of this bottom-up —
+*context engineering* (information flow), *harness engineering* (the substrate a member perceives
+and acts through), *loop engineering* (the operating cadence) — but as tactical parts, never
+forcing the questions that decide whether the output is any good: *is the goal actually
+propagated? is the division of labor clear? and — for a 24/7 system — which decisions does the
+human still make, and which run unattended?* Those are the tacit organizational things, and an AI
+can only act on them if they are **articulated**. So the design act is: articulate the goal, the
+information flow, the division of labor, and the decision line — explicitly, for the AI. The
+empirical backing is direct: multi-agent LLM systems fail mostly at role clarity, information
+flow, and verification (the MASFT study) — precisely the tacit things left un-said.
 
 See **[THEORY.md](THEORY.md)** for the full decomposition. This is an **organizing frame and a
 template, not a silver bullet** — the honest research map (who has done what, and where the real
 white space is) is in [docs/sources.md](docs/sources.md).
 
-> **Read this caveat before believing the thesis.** After a deep literature read (structure,
-> control, and multi-agent-systems theory), the thesis above needed correcting — see
-> **[docs/11-refoundation.md](docs/11-refoundation.md)**. The honest version: the **primary** lens for
-> agent systems is a *permissioned dataflow graph* (nodes, edges, context, capabilities — what
-> builders actually design from); "organization" is a **governing lens over that graph**, and only its
-> *coordination-and-reliability* content transfers (agents have interdependence, but not labor cost,
-> careers, or reorg friction — the constraints that give a human org chart its shape). The empirical
-> backing is real: multi-agent LLM systems fail mostly at coordination and verification (the MASFT
-> study), which is exactly what this content addresses. But the *derivation* — "seven organs derived
-> top-down, complete and ordered" — is a retrofitted checklist, not a proof, and several classical
-> citations were mis-sourced (e.g. Burns & Stalker do **not** license the two-layer split — Lawrence &
-> Lorsch do, *with* an integration cost; separation of duties is risk-calibrated in COSO, not a
-> universal). The durable core is smaller and sharper than the original framing claimed. docs/11 is the
-> corrected map; the rest of the docs are being brought into line with it.
+> **Read this caveat before believing the framing.** After a deep literature read (structure,
+> control, and multi-agent-systems theory) the framing was corrected — see
+> **[docs/11-refoundation.md](docs/11-refoundation.md)**. The corrected version *strengthens* the core
+> thesis rather than replacing it: the design act is **articulating the organization** (goal,
+> information flow, division of labor, and the decision line between what the human decides and what
+> runs delegated) in a form an AI can act on. That articulation *renders to* a permissioned dataflow
+> graph on an existing harness — the graph is the medium, not the message (Conway's law: the
+> communication structure you write down becomes the system's structure). The empirical backing is
+> real: multi-agent LLM systems fail mostly at coordination, role clarity, and verification (the MASFT
+> study) — i.e. exactly where the organization was left *tacit*. What was over-claimed: the "seven
+> organs derived top-down, complete and ordered" (a retrofitted checklist, not a proof), and several
+> classical citations were mis-sourced (e.g. Burns & Stalker do **not** license the two-layer split —
+> Lawrence & Lorsch do, *with* an integration cost; separation of duties is risk-calibrated in COSO,
+> not a universal). docs/11 is the corrected map; the remaining docs are being brought into line.
 
 **Harness-neutral by construction.** Because harness and loop are organs the industry *already
 built* (Claude Code, Codex, and their kin are runnable harnesses), this template does not build a
