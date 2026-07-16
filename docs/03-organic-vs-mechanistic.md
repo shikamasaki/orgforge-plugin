@@ -158,6 +158,37 @@ This is the machine form of **Maker-Checker**: the maker proposes, an independen
 checker admits. Let the pool self-organize *how it makes*, never *who checks* —
 and never let the maker and checker become the same process.
 
+### 3.1.1 The six functions — and why an organic role's `judge` is not the gate's `judge`
+
+Each role in `organization.yaml` declares a `functions:` list drawn from a fixed
+vocabulary. These name **capability breadth inside a role's own vertical**, *not* the
+cross-cutting authority that Maker-Checker rides on. The distinction is load-bearing and
+was previously tacit (only a code comment stated it) — so, in the spirit of this repo,
+it is written down:
+
+- **organize** — decompose the work in one's own domain and sequence it.
+- **decide** — choose an approach *within the vertical* (which method, which lead to pursue).
+- **implement** — produce the deliverable.
+- **judge** — assess *one's own draft* against the bar before submitting it. For an organic
+  maker this is a **maker-internal self-quality step**, upstream of the gate. It is **not**
+  admission authority.
+- **review** — re-read and refine one's own output (organic), or — for a mechanistic
+  checker — adversarially examine *another* role's output (skeptic). Same word, opposite
+  facing, decided by regime, not by the list.
+- **operate** — run and maintain what one owns (experiments, watches, corrective fixes).
+
+The critical non-collapse: **a miner carrying `judge` does not judge for admission.** The
+only judgment that promotes work into the trusted store is held by the control layer —
+`gate` (`functions: [judge]`) and `skeptic` (`[review, judge]`), both *mechanistic*, both
+reached by routing (`output_to: gate` → `skeptic`), with `result_deployed` requiring a
+prior `refutation_attempted{verdict: survives}` in the ledger. So "the maker grades its own
+homework" is closed by **regime + routing + the SoD duty table**, regardless of the
+function list. This is why an organic role keeps the *full* six-function set (§4): broad
+capability *within its silo* is what lets the exploration front self-organize its interior;
+narrowing it to one function would re-impose the fixed-role rigidity §1 argues *loses*.
+**Cross-cutting judgment — is this output on-purpose, admit or reject? — belongs only to the
+upper layers; it must not leak down into the field.**
+
 ### 3.2 Why self-organizing the control layer guarantees gaming
 
 The failure is not hypothetical; it is forced by incentives. **Goodhart's law** —

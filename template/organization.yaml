@@ -182,6 +182,10 @@ roles:
       checker: gate
       depends_on: []
     context_pack: [intent_block, doctrine, nearby_deaths, coverage_map, live_findings]
+    # organic roles carry the full function set = broad capability WITHIN their silo (needed to
+    # self-organize the interior, docs/03 §4). judge/review here = maker-internal self-review,
+    # NOT admission authority — cross-cutting "admit/reject vs the purpose" is the gate's alone
+    # (docs/03 §3.1.1). Function breadth ≠ cross-cutting authority; the latter stays in the upper layers.
     functions: [organize, decide, implement, judge, review, operate]
     loop: { cadence: every_4_hours }
     output_to: [gate]                     # Maker → Checker handoff

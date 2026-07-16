@@ -39,6 +39,36 @@ So the rule becomes:
 > shared *data*.** Every member always holds the intent and its own contract's
 > neighborhood; everything else is pulled on demand, by grant.
 
+### 1.1 Knowledge and viewpoint are separated *by layer* — the field stays narrow-and-deep
+
+The need-to-know rule is not only horizontal (peers don't read each other's details). It is
+also **vertical**, and the vertical separation is deliberate in *both* directions:
+
+- **The field is siloed narrow-and-deep.** An exploration-front role reads only the few
+  views of its own vertical (miner: `coverage_map, live_findings, nearby_deaths` — three
+  views, one budget), so its attention is forced *down* its silo, not *across*. Narrow scope
+  is what buys depth; widen it and the specialist thins into a generalist.
+- **The upper layers do NOT accumulate the field's knowledge, and this is correct, not a
+  gap.** A supervisor reads `direction_flags, sensor_readings`, never a maker's
+  `coverage_map`; the control layer holds no per-role doctrine (that would be *doctrine
+  capture* — a self-taught gate, docs/07). The upper layers hold a *cross-cutting* picture
+  (direction, sensor state, the full evidence trail for the item under review), not a copy
+  of the field's domain knowledge. **The boss does not need to know what the specialist
+  knows; the boss needs to know whether the specialist's output is on-purpose.**
+- **Cross-cutting viewpoint does not leak down.** Only the intent (the compact abstraction,
+  §2.1) is broadcast downward; the *cross-cutting judgment* — is this output serving the
+  purpose, admit or reject? — stays in the upper layers (gate, skeptic, supervisor). It is
+  not handed to the field. If a specialist were fed the org-wide outcome picture and told to
+  judge its own work against the purpose, it would start optimizing across the whole rather
+  than deepening its silo — the field would go wide-and-shallow, which is the failure this
+  separation exists to prevent. **The specialist produces; the upper layer judges whether the
+  output meets the goal and admits or rejects it.**
+
+So the layered rule: *intent flows down, details are pulled sideways on grant, cross-cutting
+judgment stays up, and no layer accumulates another layer's knowledge.* The field is kept
+narrow-and-deep on purpose; the breadth lives — and only lives — where the authority to
+judge across silos lives.
+
 ## 2. The four mechanisms
 
 ### 2.1 The intent block (the one broadcast)
