@@ -25,7 +25,8 @@
 # What this file declares is INTENT (who/what/checks, cadences, scopes); the chosen host
 # enforces it. Swap harnesses and only the projection changes — nothing in this skeleton.
 #
-# Validate with:  python3 tools/org_lint.py organization.yaml constitution.yaml moves.yaml
+# Validate with:  python3 tools/org_lint.py organization.yaml constitution.yaml moves.yaml \
+#                   ledger-schema.yaml sensors.yaml [role-settings.yaml]
 
 # ── Organ 1: PURPOSE (telos) ────────────────────────────────────────────────
 # One sentence. Not a metric — a purpose. The metric lives one level below it (see admission).
@@ -135,7 +136,7 @@ information_flow:
 # Each role: regime (may it self-organize?), active (elastic state), profile_lineage
 # (anti-puppet-checker — a checker must never share lineage with its makers),
 # contract (the deliverable slice of the RFP: what it owes, to what standard, judged by
-# whom — docs/06 §1.3), context_pack (Organ 3 onboarding), loop (Organ 4 cadence),
+# whom — docs/06 §1, step 3), context_pack (Organ 3 onboarding), loop (Organ 4 cadence),
 # doctrine (docs/07 — its current normative playbook, loaded every cycle).
 # Each role's `loop.cadence` below is a SCHEDULE THE HOST SCHEDULER REALIZES (a cron, a CI
 # trigger, or the harness's own loop — docs/09 §4), not a timer this file runs; and each

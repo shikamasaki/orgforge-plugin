@@ -40,7 +40,9 @@ fires the next tick. There is no bespoke supervisor runtime.
    Fold these into a small set of **direction flags**.
 
 2. **Intervene on drift.** For each flag:
-   - *stuck / stale* → check the runtime and the dispatcher; restart the organ.
+   - *stuck / stale* → the department missed its cadence; the loop and dispatch are the
+     host's (docs/09), so surface it as a liveness flag for the operator / host scheduler to
+     act on — the supervisor diagnoses direction, it does not restart processes.
    - *wrong direction, organic role* → **edit the department's profile** (`ROLE.md` instance,
      outside its discipline preamble) directly to fix the root cause, or issue an interrupting
      correction. The fix lands on the **next** scheduled run — you are changing the job

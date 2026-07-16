@@ -181,7 +181,8 @@ lost.
 - Keep exploration/discovery phases **organic**: loose procedure, wide latitude,
   emergence allowed. Reserve mechanistic rigor for phases that are genuinely stable
   and repeatable (validation, deployment, reporting). Match the regime to the nature
-  of the work, not to a uniform house style.
+  of the work, not to a uniform house style. (Running both regimes in one org is
+  Lawrence & Lorsch differentiation–integration, with its integration cost — docs/03 §2.)
 
 ---
 

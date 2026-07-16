@@ -569,12 +569,16 @@ is never a substitute for delivering.
 
 ### See also
 
-- `template/organization.yaml` — the org as declarative data.
+- `docs/01-requirements.md` — the product spec: actors, jobs, success criteria, the threat model, R0/R−1.
+- `template/organization.yaml` — the division of labor and information flow, articulated as data.
 - `template/ROLE.md` — a member's job description (profile).
 - `template/SUPERVISOR.md` — the supervision loop (the 1-on-1 that corrects profiles).
 - `template/FOUNDER.md` — the founding process: RFP → full latent org, minimally activated.
-- `template/constitution.yaml` — the human-written charter: decision tiers, night rules, invariants.
+- `template/constitution.yaml` — the decision line, articulated: tiers, night rules, invariants.
 - `template/moves.yaml` — the legal-move catalog: every structural change the org may make.
+- `template/ledger-schema.yaml` — the shared record: event classes, derived views, pack assembly.
+- `template/sensors.yaml` — the crisis signals, as measurements.
+- `template/PROJECTION.md` + `template/role-settings.yaml` — rendering the articulated org onto a host harness.
 - `docs/02-growth-stages.md` — which organ to add at each stage.
 - `docs/03-organic-vs-mechanistic.md` — the two-layer law in full.
 - `docs/04-failure-modes.md` — the failure modes, cataloged.
@@ -582,5 +586,7 @@ is never a substitute for delivering.
 - `docs/06-lifecycle-operations.md` — founding to sunset: 24-hour operation, the approval queue, handover.
 - `docs/07-doctrine-and-knowledge.md` — the knowledge organ: boundary spanners, role-scoped doctrine.
 - `docs/08-context-economy.md` — need-to-know information flow: scoped context packs, budgets, commander's intent.
-- `tools/org_lint.py` — the machine audit of `organization.yaml`, `constitution.yaml`, and `moves.yaml`.
+- `docs/09-runtime.md` — execution: delegate the loop to the host, project the profile.
+- `docs/10-founding-rehearsal.md` — the first end-to-end run (S1), with artifacts.
+- `tools/org_lint.py` — the machine audit: cross-validates all five data files (+ optional role-settings).
 - `docs/sources.md` — every citation, primary/secondary distinguished.

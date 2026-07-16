@@ -243,7 +243,16 @@ Practical checklist for any agent organization built from this template:
 - [ ] Is there an explicit **gate** between "an agent produced this" and "the
       system trusts this"?
 - [ ] Are **maker and checker** different agents/processes, with the checker
-      independent of the maker's incentives?
+      independent of the maker's incentives? (The lint enforces distinct profile
+      lineage; the checker also holds **read/verify tools only** — default-deny, so a
+      renamed write tool cannot make it a maker.)
+- [ ] Does the **adversarial checker** (skeptic) actually gate deployment? A result
+      may only deploy after a `survives` verdict (the ledger schema requires it, and the
+      lint checks the gate routes admitted positives to the skeptic — the skeptic cannot
+      be a disconnected role).
+- [ ] Does the adversarial checker run a **different model family** from the maker/gate
+      it judges? Same base model, same blind spots — a different prompt is not a different
+      error distribution (the lint enforces this when `model_family` is declared).
 - [ ] Is the **ledger** write-controlled away from the agents it evaluates?
 - [ ] Are **authorization, custody, and recording** held by separate actors?
 - [ ] Can any **safety limit or admission threshold** be changed by the agents it

@@ -49,18 +49,22 @@ roles:
 
   - role: gate                          # CHECKER of high-stakes admission — warrants the judge tier
     model_tier: judge
+    model_family: family-A              # a NEUTRAL family label — the projection maps it to a
+                                        # concrete vendor family; only relative distinctness matters
     effort: high
     context_budget_tokens: 40000
     stop: { goal: "admit / reject decided against the admission standard", max_iterations: 4 }
-    tools: { allow: [read, run_tests], deny: [write, network, deploy, secrets] }  # judges, does not implement
+    tools: { allow: [read, run_tests] }   # read/verify only — checkers cannot implement (default-deny)
     output: { format: json_schema, json_schema: { verdict: "admit|reject|park", reasons: "list[str]" } }
 
   - role: skeptic                       # adversarial CHECKER — judge tier, method is free (docs/03 §2)
     model_tier: judge
+    model_family: family-B              # DIFFERENT family from the gate/maker: an adversarial checker
+                                        # on the same base model shares their blind spots (docs/03 §3)
     effort: high
     context_budget_tokens: 40000
     stop: { goal: "refuted / survives decided for the admitted positive", max_iterations: 6 }
-    tools: { allow: [read, run_tests], deny: [write, network, deploy, secrets] }
+    tools: { allow: [read, run_tests] }
     output: { format: json_schema, json_schema: { verdict: "refuted|survives", cases_tried: "list", defect: "str?" } }
 
   - role: supervisor

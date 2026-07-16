@@ -19,7 +19,9 @@ against the invariants that must hold for the articulation to be coherent:
   O5   ledger custody   — custody/recording are the ledger, not an agent
   O6   separation       — SoD block mandatory; authorization mechanistic, non-implementing;
                           no self-routing; makers never route to a forbidden checker;
-                          every organic maker routes to >=1 mechanistic checker
+                          every organic maker routes to >=1 mechanistic checker; an
+                          adversarial checker exists and the gate routes admitted positives
+                          to it (the deploy path cannot skip refutation)
   O6c  lineage          — a contract's checker and the authorization holder must not share
                           profile lineage with the makers they judge (anti-puppet-checker)
   O6b  control awake    — control roles (mechanistic layers ∪ SoD holders ∪ contract
@@ -40,7 +42,9 @@ against the invariants that must hold for the articulation to be coherent:
                           night-preregistered moves are delegated-tier and fed by the sensor
   RS   role-settings    — (optional 6th file) every active role has neutral runtime settings;
                           budgets match the scope grant; tiers A|B and model_tier neutral
-                          (no vendor strings); no checker is granted write/implement
+                          (no vendor strings); checkers restricted to read/verify tools
+                          (default-deny, not a blocklist); the tier flag may not understate an
+                          asset-touching scope; the skeptic's model_family differs from the gate's
 
 Usage:  org_lint.py organization.yaml constitution.yaml moves.yaml ledger-schema.yaml sensors.yaml [role-settings.yaml]
 The first five files are required; role-settings.yaml is an optional sixth (the projection's
@@ -265,6 +269,27 @@ def check_sod(org, roles, control_ids, lint):
             lint.fail("O6", f"organic maker '{rid}' routes to no mechanistic checker — "
                             f"its output enters trusted state unchecked")
 
+    # The adversarial review path must be wired: the authorization holder (gate) must route
+    # admitted positives to an independent adversarial checker (skeptic) before deploy. The
+    # ledger schema makes result_deployed require a `survives` verdict; this ensures the org
+    # actually has a role positioned to produce one, and that the gate hands off to it.
+    # Without this, the skeptic is a role no admitted result ever reaches.
+    skeptics = [rid for rid, r in roles.items()
+                if r.get("regime") == "mechanistic"
+                and "review" in (r.get("functions") or [])
+                and rid != auth]
+    if not skeptics:
+        lint.fail("O6", "no adversarial checker (a mechanistic role with function 'review', "
+                        "distinct from the authorization holder) — admitted positives would "
+                        "deploy without the refutation the ledger schema requires (docs/03 §3)")
+    elif auth_role is not None:
+        reachable = set(auth_role.get("output_to", []))
+        if not (reachable & set(skeptics)):
+            lint.fail("O6", f"authorization holder '{auth}' does not route admitted positives to "
+                            f"any adversarial checker {skeptics} — the deploy path skips "
+                            f"refutation the ledger schema requires (result_deployed needs a "
+                            f"prior 'survives'). Add the skeptic to '{auth}'.output_to.")
+
 
 def check_contracts(org, roles, lint):
     auth = (org.get("separation_of_duties") or {}).get("authorization")
@@ -279,7 +304,7 @@ def check_contracts(org, roles, lint):
         if not isinstance(contract, dict) or not contract.get("checker"):
             lint.fail("O7", f"organic maker '{rid}' has no contract naming its checker — "
                             f"contracts are how departments work independently toward "
-                            f"the RFP (docs/06 §1.3)")
+                            f"the RFP (docs/06 §1, step 3)")
             continue
         checker = contract["checker"]
         checker_role = roles.get(checker)
@@ -522,6 +547,15 @@ def lint_moves_cite_defined_sensors(mv, sensor_ids, lint):
 
 VALID_TIERS_RS = {"A", "B"}
 
+# A checker only reads and re-derives; anything outside this allowlist makes it a maker.
+# This is default-deny, not a blocklist — a renamed write tool cannot slip past.
+CHECKER_ALLOWED_TOOLS = {"read", "run_tests", "web_read"}
+
+# Capabilities that touch assets/production/the boundary. A role that holds any of these
+# is Tier-B by definition — the tier flag cannot understate the capability scope.
+ASSET_TOUCHING_TOOLS = {"deploy", "secrets", "network", "asset_movement",
+                        "external_publish", "production_deploy"}
+
 
 def _scope_budgets(org):
     """role -> pack_budget_tokens from information_flow.scopes.grants."""
@@ -535,14 +569,18 @@ def _scope_budgets(org):
 
 def lint_role_settings(rs, org, lint):
     """RS — the articulated runtime settings must be coherent with the org chart:
-    every role present, budgets matching the scope grant, tiers valid, checkers not
-    granted write/implement, and no vendor model strings leaking into the neutral layer."""
+    every role present, budgets matching the scope grant, tiers valid, checkers restricted
+    to read/verify tools (default-deny, not a blocklist), the tier flag not understating an
+    asset-touching scope, the adversarial checker decorrelated from the maker/gate it judges,
+    and no vendor model strings leaking into the neutral layer."""
     raw = rs.get("roles")
     if not isinstance(raw, list) or not raw:
         lint.fail("RS", "role-settings.yaml has no roles: list")
         return
     org_roles = {r["id"]: r for r in (org or {}).get("roles", []) if isinstance(r, dict) and "id" in r}
     budgets = _scope_budgets(org or {})
+    auth = (org.get("separation_of_duties") or {}).get("authorization") if org else None
+    families = {}   # role -> model_family, for the decorrelation check
     seen = set()
     for i, s in enumerate(raw):
         if not isinstance(s, dict) or "role" not in s:
@@ -550,6 +588,8 @@ def lint_role_settings(rs, org, lint):
             continue
         rid = s["role"]
         seen.add(rid)
+        if s.get("model_family"):
+            families[rid] = s["model_family"]
         if org_roles and rid not in org_roles:
             lint.fail("RS", f"role-settings names '{rid}', absent from organization.yaml — "
                             f"the settings articulate a role the org chart doesn't declare")
@@ -566,13 +606,49 @@ def lint_role_settings(rs, org, lint):
             lint.fail("RS", f"role '{rid}' context_budget_tokens {b} != its scope grant "
                             f"{budgets[rid]} in organization.yaml — the information budget is "
                             f"articulated in two places and they disagree (docs/08)")
-        # a checker/authorization holder must not be granted write/implement in its settings
-        allow = ((s.get("tools") or {}).get("allow")) or []
-        is_control = org_roles.get(rid, {}).get("regime") == "mechanistic"
-        auth = (org.get("separation_of_duties") or {}).get("authorization") if org else None
-        if (is_control or rid == auth) and ("write" in allow or "implement" in allow):
-            lint.fail("RS", f"control role '{rid}' is granted write/implement in role-settings — "
-                            f"a checker that can implement is a maker checking its own work (Organ 6)")
+
+        allow = set(((s.get("tools") or {}).get("allow")) or [])
+        org_role = org_roles.get(rid, {})
+        # A checker of OTHERS' work is the authorization holder (gate) or a MECHANISTIC
+        # adversarial reviewer (skeptic — mechanistic + 'review'). An organic maker's own
+        # 'review' function is self-review of its own output, not checking others, so it is
+        # not subject to the read-only allowlist. The supervisor coaches and the registrar
+        # authors diffs (Maker of reorg diffs, gate-admitted) — neither is an admission checker.
+        is_mechanistic = org_role.get("regime") == "mechanistic"
+        is_checker = rid == auth or (is_mechanistic and "review" in (org_role.get("functions") or []))
+
+        # A checker is DEFAULT-DENY: only read/verify tools. A renamed write tool
+        # ("edit_files", "publish") is not on the allowlist, so it cannot slip past —
+        # unlike a blocklist of the literal words write/implement.
+        if is_checker:
+            escapes = allow - CHECKER_ALLOWED_TOOLS
+            if escapes:
+                lint.fail("RS", f"checker role '{rid}' is granted non-verification tools "
+                                f"{sorted(escapes)} — a checker may only read and re-derive "
+                                f"(allowed: {sorted(CHECKER_ALLOWED_TOOLS)}); anything else "
+                                f"makes it a maker checking its own work (Organ 6)")
+
+        # The tier flag may not UNDERSTATE the capability scope: a role that can touch
+        # assets/production/the boundary is Tier-B, whatever the flag says.
+        asset_caps = allow & ASSET_TOUCHING_TOOLS
+        if asset_caps and tier != "B":
+            lint.fail("RS", f"role '{rid}' is granted asset-touching tools {sorted(asset_caps)} "
+                            f"but is tier {tier!r} — asset-touching work is Tier-B by definition "
+                            f"and needs a host that provides custody/sandboxing (docs/01 §5). "
+                            f"The tier flag cannot understate the scope.")
+
+    # Correlated-failure defense: the adversarial checker (skeptic) must not run the SAME
+    # model family as the maker/gate it judges — same model, same blind spots. Only checked
+    # when model_family is declared; declaring it is how you opt into decorrelation.
+    skeptic_fam = families.get("skeptic")
+    if skeptic_fam is not None:
+        for other in ("gate",):
+            if families.get(other) == skeptic_fam:
+                lint.fail("RS", f"skeptic and '{other}' share model_family '{skeptic_fam}' — an "
+                                f"adversarial checker on the same base model shares the maker's "
+                                f"blind spots (a different prompt is not a different error "
+                                f"distribution). Give the skeptic a different model_family.")
+
     # every ACTIVE org role should have settings (dormant ones may be omitted)
     if org_roles:
         for rid, r in org_roles.items():
@@ -621,7 +697,8 @@ def main(argv):
         for e in lint.errs:
             print("  " + e)
         return 1
-    print("org_lint: pass — the chart obeys its own theory")
+    print("org_lint: pass — the articulation is internally consistent "
+          "(runtime enforcement is the host's; see docs/09)")
     return 0
 
 

@@ -68,6 +68,10 @@ one vendor's parameter names here; the mapping table (§3) does that.
 role: miner
 model_tier: worker          # judge | worker | cheap — a NEUTRAL tier, mapped to a concrete
                             # model per harness (§3). Do NOT name a vendor model here.
+model_family: family-A      # NEUTRAL family label (§3 maps it to a concrete vendor family).
+                            # Only relative distinctness matters: the adversarial checker
+                            # (skeptic) must declare a DIFFERENT family from the gate/maker it
+                            # judges — same base model, same blind spots. The lint enforces it.
 effort: medium              # low | medium | high — reasoning depth intent; mapped per harness
 context_budget_tokens: 20000  # must match this role's information_flow.scopes grant (docs/08)
 stop:
@@ -105,6 +109,9 @@ model_tier:                            # neutral tier -> concrete model for THIS
   judge:  <the strongest model this harness offers>
   worker: <a mid model>
   cheap:  <a fast/cheap model>
+model_family:                          # neutral family label -> a concrete vendor model family,
+  family-A: <one vendor family>        # so the skeptic (family-B) really is a different base model
+  family-B: <a DIFFERENT vendor family>  # from the gate/maker (family-A) — decorrelates blind spots
 effort:                                # neutral effort -> this harness's control
   low: ...   medium: ...   high: ...
 tools:                                 # neutral capability names -> this harness's tool ids/permissions

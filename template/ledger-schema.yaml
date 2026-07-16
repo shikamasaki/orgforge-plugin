@@ -36,7 +36,11 @@ event_classes:
   candidate_submitted:  { maker, candidate_id, contract_ref, evidence: [ref] }
   admission_decided:    { gate, candidate_id, verdict: admit|reject|park, standard_ref, evidence: [ref] }
   refutation_attempted: { skeptic, claim_id, verdict: refuted|survives, checklist_ref }
-  result_deployed:      { candidate_id, net_effect_ref }
+  # A result may only deploy AFTER the skeptic refuted-and-failed (verdict: survives) for it.
+  # requires_prior makes the skeptic load-bearing: without a `survives` for this candidate_id,
+  # a result_deployed event is INVALID (the deploy path cannot skip adversarial review).
+  result_deployed:      { candidate_id, net_effect_ref,
+                          requires_prior: "refutation_attempted{claim_id==candidate_id, verdict==survives}" }
   result_retired:       { candidate_id, cause }
   # structure (Organ 7 / moves)
   sensor_reading:       { sensor, value, window, inputs_ref }
