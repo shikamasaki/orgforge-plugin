@@ -4,52 +4,51 @@
 that keeps working while you sleep, with you deciding only the essential calls.** This repository
 is a template for getting there. The hard part isn't the model; it's that a system left running
 unattended drifts, duplicates, over-spends, and ships the wrong thing unless the org it runs as is
-written down. So the method is: **put the organization into words the AI can act on.**
+written down.
+
+Concretely, a "department" here is nothing exotic: **an existing coding-agent harness — Claude
+Code, Codex — pointed at a working directory whose instruction file is that one role's job.** The
+template doesn't build a runtime; it writes down the organization and projects each role onto a
+harness that already exists. So the method is: **put the organization into words the AI can act
+on** — and the payoff is concrete and vendor-neutral: the *same* guardrail blocks a real tool call
+on Claude Code and on Codex, because both share the pre-tool hook contract. No rewrite per vendor,
+no runtime to maintain.
+
+That is the load-bearing bet, and it is the opposite of the field's other "company of agents"
+frameworks (MetaGPT, ChatDev, CrewAI), which each build their own bespoke runtime. Here the harness
+and the loop are organs the industry *already built*, so the template ships only a thin neutral
+core — the org skeleton as declarative data, a **projection** of each role onto its harness's
+instruction-file convention, and a machine audit of the skeleton. What the product must do is
+**[docs/01-requirements.md](docs/01-requirements.md)** (read it before judging the repo: a design
+or review is measured against it first).
 
 > A human company runs on things it never writes down — what we're trying to do, who needs to
 > know what, who owns which deliverable, and which calls the boss makes vs. delegates. People
-> carry that tacitly, in culture and judgment. An AI can't: what it reads is what it acts on, and
-> what it infers unwritten is unreliable and un-auditable. So the moment AI runs the work
-> autonomously, the load-bearing tacit knowledge has to become **explicit** — that is the design
-> problem this template solves so the system can run 24/7 without a human in every loop.
+> carry that tacitly. An AI can't: what it reads is what it acts on, and what it infers unwritten
+> is unreliable and un-auditable — so the moment AI runs the work autonomously, the load-bearing
+> tacit knowledge has to become **explicit**.
 
 ---
 
-## The thesis in one paragraph
+## Why the org, not the parts
 
-An LLM agent produces work aligned to the goal only if the **right information reaches it in the
-right amount** (context) and the **division of labor is clear** (roles) — otherwise the output is
-a coarse, essence-missing average, and over a 24/7 run those small misalignments compound. Those
-are organizational problems. The agent-building industry re-invented fragments of the answer
-bottom-up — *context engineering*, *harness engineering*, *loop engineering* — as tactical parts,
-without forcing the questions that decide whether an unattended system stays on-goal: *is the goal
-actually propagated? is the division of labor clear? which decisions does the human still make, and
-which run unattended?* This template centers on those. It borrows the large frames the field
-already has — classical management theory (Mintzberg, Greiner, span of control, separation of
-duties) applied top-down to agent design, where that grounding is still thin — and turns them into
-**machine-checkable constraints**: an org chart the lint validates, a decision line the projection
-enforces, a separation of duties a hook actually blocks on. The empirical backing is direct:
-multi-agent LLM systems fail mostly at role clarity, information flow, and verification (the MASFT
-study) — precisely the tacit things left un-said.
+An LLM agent produces aligned work only if the **right information reaches it in the right amount**
+(context) and the **division of labor is clear** (roles) — otherwise the output is a coarse,
+essence-missing average, and over a 24/7 run those small misalignments compound. Those are
+organizational problems. The industry re-invented fragments bottom-up — *context engineering*,
+*harness engineering*, *loop engineering* — without forcing the questions that decide whether an
+unattended system stays on-goal: *is the goal propagated? is the division of labor clear? which
+decisions stay with the human, which run unattended?* This template centers on those, and it does
+so by borrowing the large frames the field already has — classical management theory (Mintzberg,
+Greiner, span of control, separation of duties), where that grounding is still thin for agents —
+and turning them into **machine-checkable constraints**: an org chart the lint validates, a
+decision line the projection enforces, a separation of duties a hook actually blocks on. The
+empirical backing is direct: multi-agent LLM systems fail mostly at role clarity, information flow,
+and verification (the MASFT study) — precisely the tacit things left un-said. See
+**[THEORY.md](THEORY.md)** for the full picture (its §0–§1 are the core; the rest is reference);
+the research map is in [docs/sources.md](docs/sources.md).
 
-The articulation and the permissioned dataflow graph it renders to on an existing harness are **one
-object seen twice, not rivals** (Conway's law: the communication structure you write down becomes
-the system's structure). See **[THEORY.md](THEORY.md)** for the full picture; the research map is in
-[docs/sources.md](docs/sources.md).
-
-**Harness-neutral by construction — the load-bearing bet.** Every "company of agents" framework
-(MetaGPT, ChatDev, CrewAI, and their kin) builds its own bespoke runtime. This one does the
-opposite: because the harness and the loop are organs the industry *already built* (Claude Code,
-Codex, and their kin are runnable harnesses), the template **delegates the heavy organs to whatever
-existing coding-agent harness runs each department** and ships a thin neutral core — the org
-skeleton as declarative data, a **projection** of each role onto that harness's own instruction-file
-convention, and a machine audit of the skeleton. The payoff is concrete: the *same* neutral
-guardrail blocks a real tool call on Claude Code and on Codex, because both share the pre-tool hook
-contract — no rewrite per vendor, no runtime to maintain. That requirement, and everything the
-product must do, is **[docs/01-requirements.md](docs/01-requirements.md)** (read it before judging
-the repo: a design or review is measured against it first).
-
-## Why this framing is not just aesthetics
+## What decomposing from the org tells you that harness+loop can't
 
 Decomposing from the organization (not from the parts) changes what you build:
 
@@ -143,7 +142,8 @@ tools are its machine-checkable proof; the templates are what you fill in for yo
 
 **Track A — manual (the v0.1 spirit).** You design and operate the org by hand:
 
-1. Read [THEORY.md](THEORY.md) once — it is short and it is the point.
+1. Read [THEORY.md](THEORY.md) §0–§1 once — they are short and they are the point (the rest is
+   reference you can pull as needed).
 2. Copy [template/organization.yaml](template/organization.yaml) and describe **your** system as an
    organization: what are the departments, who supervises whom, where is the Maker/Checker line,
    what growth stage are you in.
@@ -201,7 +201,7 @@ useful work on an existing harness end-to-end, with nothing bespoke in the loop 
 demonstrated once ([docs/10](docs/10-founding-rehearsal.md), artifacts in
 [examples/founding-rehearsal/](examples/founding-rehearsal/)): three departments ran as separate
 agents, the maker/checker separation held structurally, and the adversarial checker caught a real bug
-the maker and gate both missed.** That closes the load-bearing "has it ever run?" question. What
+the maker and gate both missed.** That answers the load-bearing "has it ever run?" question. What
 remains: an automated projection layer (which instruction-file conventions to target — done by hand
 in the rehearsal), the Tier-B host-environment controls for asset-touching orgs, the multi-cycle
 elastic lifecycle at scale, and the client/delivery/company-layer surfaces (docs/01 §7). The fuller
