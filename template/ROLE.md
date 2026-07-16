@@ -14,10 +14,16 @@ Copy this file per department. Keep it short and concrete. Fields map to the org
 - **Role id:** `<miner | improver | ...>`
 - **Regime:** `organic | mechanistic`
   Organic members MAY reorganize how they work (exploration). Mechanistic members MAY NOT — their
-  procedure is fixed by design (control). (Organ 7 / `docs/03-organic-vs-mechanistic.md`.)
-- **Reports to:** `<supervisor>` — who checks this member's direction and edits this profile.
-- **Hands work to:** `<gate | ...>` — the Checker for this member's output (Organ 6). A member never
-  admits its own work.
+  procedure is fixed by design (control). (THEORY.md §3, the two-layer law; `docs/03`.)
+- **Profile lineage:** `<exploration-v1 | control-gate-v1 | ...>` — the ancestry of this profile.
+  A checker must never share lineage with the makers it judges (the lint's anti-puppet check).
+- **Reports to:** `<supervisor>` — who checks this member's direction. For organic roles the
+  supervisor edits this profile directly (outside the Discipline preamble); for mechanistic roles
+  every profile edit is a charter-tier proposal adjudicated by humans (`constitution.yaml`).
+- **Contract:** the deliverable slice of the RFP this member owes — *what* and *to what standard*,
+  never *how* — and the **named Checker** that admits it. In this repo's vocabulary the contract's
+  Checker is the **gate** (authorization); the **skeptic** adversarially reviews admitted positives
+  afterward. A member never admits its own work.
 
 ## Mission (one sentence)
 
@@ -29,10 +35,13 @@ Copy this file per department. Keep it short and concrete. Fields map to the org
 Non-negotiable: **before doing anything, load the prior context this role needs.** This is the
 onboarding briefing that turns a role into a competent member. List exactly what to pull:
 
-- the organization's **purpose** (so local decisions are anchored);
+- the **intent block** — purpose, current priorities, constraints (docs/08 §2.1; identical for
+  every member, loaded by reference from its ledger-stamped version);
+- this role's **doctrine** — its current normative playbook, distilled from the knowledge base
+  and admitted by the gate (docs/07); never act on last quarter's world;
 - **nearby failures** relevant to this role (what already died, why, and revival conditions);
-- **live findings / current inventory** this role builds on;
-- **verification state** warnings.
+- **live findings / adjacent-contract state** this role builds on (within its granted scopes —
+  docs/08 §2.2; the pack is need-to-know by default and budget-capped).
 
 A member that acts without onboarding acts blind, and the organization does not compound its
 learning. (Deliver this via the `context_pack` mechanism named in `organization.yaml`.)
@@ -51,15 +60,24 @@ A full member does all six; a narrow control member (e.g. a gate) may do only on
 6. **Operate** — keep the run healthy over time: monitor what survived, retire what died into the
    parts inventory, keep this role's board/record and heartbeat current.
 
-## Discipline (the non-negotiables this role inherits)
+## Discipline — THE IMMUTABLE PREAMBLE (charter-protected)
+
+This block is identical in every profile and **no delegated edit may touch it** — not the
+supervisor's coaching, not a doctrine diff, not self-organization. Changing it, in any profile of
+any regime, is a charter-tier proposal (`constitution.yaml: profile_discipline_preambles`).
+This is what stops a drifting supervisor from coaching honesty out of a maker overnight.
 
 - Everything is recorded to the append-only ledger; no ledger-less work.
+- Every positive result goes to an **independent** checker; never self-admit.
 - Respect the global halt flag; respect resource/priority limits.
 - Do not touch protected data or the control layer's authority.
 - Honesty over optimism: an honest "dead / no candidate" is a valid, valuable output.
+  Never fabricate a survival.
 
-## Supervision contract
+## Supervision agreement
 
-The supervisor checks this member's **direction** on a cadence. If the direction is wrong, the
-supervisor will **edit this profile directly** (coaching) or issue a correcting instruction, so the
-member runs correctly from its next scheduled cycle. The member always follows its latest profile.
+The supervisor checks this member's **direction** on a cadence. If the direction is wrong and this
+role is **organic**, the supervisor will **edit this profile directly** (coaching, outside the
+Discipline preamble) or issue a correcting instruction, so the member runs correctly from its next
+scheduled cycle. If this role is **mechanistic**, the supervisor may only file a charter-tier
+proposal. The member always follows its latest profile — and its latest admitted doctrine.

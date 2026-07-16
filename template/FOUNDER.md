@@ -22,10 +22,12 @@ authority are separated for the same reason authorization and custody are (Organ
 ### 1. Distill the telos (Organ 1)
 
 Restate the RFP as a one-sentence purpose. Derive the **admission standard** from the
-RFP's acceptance criteria, and the **objective metric** as a subordinate instrument
-(`reward_agents_on_this: false`, always). If the RFP contains only metrics and no
-purpose, that is a founding-blocker: return it to the humans — an org founded on a proxy
-is Goodhart-doomed from birth (THEORY.md, Organ 1).
+RFP's acceptance criteria — and **every criterion must reference at least one
+gaming-defense instrument** (nulls, placebos, forward tests); a criterion that is a bare
+number is a proxy an optimizer will satisfy without serving. Hold the **objective
+metric** as a subordinate instrument (`reward_agents_on_this: false`, always). If the
+RFP contains only metrics and no purpose, that is a founding-blocker: return it to the
+humans — an org founded on a proxy is Goodhart-doomed from birth (THEORY.md, Organ 1).
 
 ### 2. Derive architecture, then org (inverse Conway)
 
@@ -57,19 +59,35 @@ Contract rules:
 ### 4. Design fully, activate minimally (docs/05)
 
 Enumerate **every** department the RFP will ever need — including the maintenance-phase
-watch and the handover packager — and declare them all, latent. Then compute the first
-activation set: the smallest group of departments the first milestone requires, plus the
-control skeleton (gate, skeptic, supervisor — active whenever anything is). Check the
-set against the span budget; if it exceeds a supervisor's span on day one, the RFP's
-first milestone is too big — split the milestone, not the rule.
+watch and the handover packager — and declare them all, latent. Seed each role's
+**doctrine** (docs/07: the starting normative playbook, with provenance) and the
+**scope matrix** (docs/08: deny-by-default grants matching the contract seams). Then
+compute the first activation set: the smallest group of departments the first milestone
+requires, plus the control skeleton (gate, skeptic, supervisor, registrar — active
+whenever anything is). Check the set against the span budget; if it exceeds a
+supervisor's span on day one, the RFP's first milestone is too big — split the
+milestone, not the rule.
+
+The day-one chart is a **revisable hypothesis, not a prophecy**. Contingency theory and
+emergent-strategy work (Mintzberg & Waters 1985) — and this repo's own docs/03 — say the
+right structure is usually discovered by working the problem. The elastic model absorbs
+this: the latent chart is cheap to amend through the moves catalog, and being wrong
+about a future department costs a diff, not a reorg. Design ambitiously *because* the
+design is revisable, not because it is final.
 
 ## Outputs
 
-1. `organization.yaml` instance — full latent chart, activation flags, SoD matrix,
-   span budget, contracts referenced per role.
-2. Ledger genesis entries — the RFP, the purpose, the contracts, the founding rationale.
-3. The founding commit — which must pass `tools/org_lint.py` like every reorg commit
-   after it. **An org cannot be born violating the rules it will be held to.**
+1. `organization.yaml` instance — full latent chart, activation flags, SoD matrix with a
+   forbidden-pair entry for **every** maker, profile lineages, span budget, contracts
+   (deliverable / standard / named checker / depends_on) per role, scope grants.
+2. Ledger genesis entries — the RFP, the purpose, the contracts, seeded doctrines with
+   provenance, the founding rationale.
+3. The founding commit — which must pass `tools/org_lint.py` **and receive human
+   charter approval** (`constitution.yaml: founding_commit`). The lint checks the
+   chart's shape; only a human can judge whether an acceptance criterion is a gameable
+   proxy — and Stinchcombe's imprinting result says founding conditions persist, so this
+   is the cheapest moment to get control right. **An org cannot be born violating the
+   rules it will be held to — nor without the humans signing the rules.**
 
 ## What the founder must NOT do
 

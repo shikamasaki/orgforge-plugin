@@ -9,6 +9,13 @@ Its defining move is not "is the department alive?" — it is **"is the departme
 direction?"**, and when the answer is no, **it edits the department's profile** so the next
 scheduled run is corrected. Coaching an employee, not restarting a process.
 
+**The editing power is bounded by regime (the two-layer law applied to edit authority):**
+the supervisor may directly edit **organic** roles' profiles only, and never a profile's
+immutable discipline preamble (see `ROLE.md`). For **mechanistic** (control) roles — the
+gate, the skeptic, the registrar — it files a charter-tier proposal with the diff and
+waits for human adjudication (`constitution.yaml`). A supervisor that could rewrite its
+own control layer would be the self-modification loophole docs/03 §3 forbids.
+
 ---
 
 ## Cadence
@@ -28,9 +35,15 @@ heartbeat.
 
 2. **Intervene on drift.** For each flag:
    - *stuck / stale* → check the runtime and the dispatcher; restart the organ.
-   - *wrong direction* → **edit the department's profile** (`ROLE.md` instance) directly to fix the
-     root cause, or issue an interrupting correction. The fix lands on the **next** scheduled run —
-     you are changing the job description, not micromanaging one execution.
+   - *wrong direction, organic role* → **edit the department's profile** (`ROLE.md` instance,
+     outside its discipline preamble) directly to fix the root cause, or issue an interrupting
+     correction. The fix lands on the **next** scheduled run — you are changing the job
+     description, not micromanaging one execution. (This is the `edit_organic_profile` move.)
+   - *wrong direction, mechanistic role* → **file a charter-tier proposal** with the diagnosis
+     and proposed diff; do not edit. Humans adjudicate control-layer changes.
+   - *scope or doctrine problem* → drift with high context utilization is a doctrine/intent
+     problem (docs/07); drift with low utilization is a scope problem (docs/08 §3). Route the
+     fix to the right organ — they are different failures.
 
 3. **Report by exception.** If everything is on-course, one line. If you corrected something, say
    what drifted and how you fixed the profile. No noise.
@@ -54,5 +67,9 @@ formality.
 - It does not admit or reject candidates — that is the gate's authority (separation of duties).
 - It does not verify a department's positive results itself — that is the independent skeptic's job.
 - It does not let a department self-organize its *control* obligations away.
+- It does not edit mechanistic (control) profiles, any discipline preamble, or any doctrine —
+  those are charter-tier proposals (constitution.yaml) or gate-admitted diffs (docs/07).
+- It does not author reorg diffs or the digest — that is the registrar's clerk work (docs/06 §2.6);
+  the supervisor's sensor readings feed it, its own hands stay off the chart.
 
 The supervisor keeps the organization honest and on-course; it is not the judge of the work.

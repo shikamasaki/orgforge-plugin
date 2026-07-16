@@ -7,7 +7,9 @@
 > you also recover the organs a parts-first view structurally cannot see.
 
 This document is the core. Everything else in the repo (`template/`, the growth-stage playbook, the
-failure-mode catalog) is an application of it.
+failure-mode catalog, the elastic-organization model and the lifecycle/operations spec, the
+knowledge/doctrine organ and the context economy — `docs/05`–`docs/08` — and the machine audit,
+`tools/org_lint.py`) is an application of it.
 
 ---
 
@@ -44,6 +46,10 @@ Define an **organization** minimally, in a way that is neutral between humans an
 > An organization is a **coordinated division of labor directed at a purpose**, persisting over
 > time, whose members have bounded capabilities and imperfect alignment with the purpose.
 
+(This definition is compressed, not invented: it condenses Barnard (1938) — "a system of
+consciously coordinated activities of two or more persons" — and the *bounded capabilities* clause
+is Simon's bounded rationality.)
+
 Every clause is load-bearing, and every clause forces an organ:
 
 - **purpose** → the organization needs a *telos* that grounds every local decision (Organ 1).
@@ -74,11 +80,14 @@ necessary and were simply harder to see from inside the tooling.
 
 ### Organ 1 — Purpose (telos)
 
-**Human org.** A firm exists for something. Peter Drucker's *management by objectives* and its
-descendant OKRs both start here: goals cascade from the top so that a local decision at the edge can
-be checked against the purpose. Crucially, mature practice **separates the goal from the reward**
-(OKRs are deliberately not tied to compensation) precisely to stop people from gaming the number
-instead of pursuing the goal.
+**Human org.** A firm exists for something. Peter Drucker's *management by objectives* (1954) and
+its descendant OKRs both start here: goals cascade from the top so that a local decision at the edge
+can be checked against the purpose. But the two differ on the point this organ turns on. MBO as
+historically practiced was routinely coupled to appraisal and pay — the coupling Deming famously
+attacked — and that coupled form is the cautionary case: reward the number and people manage the
+number. It is modern OKR practice (Doerr/Google) that deliberately **separates the goal from the
+reward** (OKRs are not tied to compensation) precisely to stop people from gaming the number instead
+of pursuing the goal.
 
 **Derivation.** The definition begins with *directed at a purpose*. Without an explicit, propagated
 telos, a division of labor has nothing to divide *toward*; every other organ becomes unanchored.
@@ -127,7 +136,7 @@ check them — review degrades to rubber-stamping, and because review is where f
 caught (Organ 6), exceeding span silently disables the control system. Over-correct with too many
 layers and you pay the **tall-structure tax**: latency and, for agents specifically, a token cost
 that multiplies with each orchestration hop (multi-agent systems can consume on the order of 15× a
-single agent's tokens). The load-bearing rule: **invest in information flow (Organ 5) to widen span
+chat interaction's tokens — roughly 4× a single agent's). The load-bearing rule: **invest in information flow (Organ 5) to widen span
 and stay flat; add exactly one middle layer, at a natural domain boundary, only when department
 count genuinely exceeds the supervisor's effective span.** Hierarchy is the last resort, not the
 first.
@@ -209,9 +218,9 @@ execution; a supervision cadence (the 1-on-1 rhythm — see `template/SUPERVISOR
 Two classic results govern this organ. **Conway's law**: a system's architecture inevitably mirrors
 the communication structure of the organization that builds it — so the wiring of who-talks-to-whom
 *becomes* the shape of the product. And McChrystal's **shared consciousness**: distributed autonomy
-is only safe when paired with pervasive information sharing — *"empowered execution without shared
-consciousness is dangerous,"* because a member with authority but not context will act confidently
-in the wrong direction.
+is only safe when paired with pervasive information sharing — to paraphrase the argument of *Team of
+Teams*, empowered execution without shared consciousness is dangerous — because a member with
+authority but not context will act confidently in the wrong direction.
 
 **Derivation.** *Coordinated* is explicit in the definition. Coordination is information flow. And
 because the organization persists over time, the flow must include a channel *across* time — memory
@@ -373,6 +382,12 @@ Note that harness+loop (step 2) is the *earliest* and most visible milestone —
 the industry saw and named those organs first. The organization only *becomes* an organization at
 step 3, when division of labor and control appear.
 
+One qualification from the elastic model (`docs/05-elastic-organization.md`): under that model, this
+sequence is an **activation order, not a construction order**. The full chart — every organ, every
+latent department — is designed at founding (`template/FOUNDER.md`), and steps 2–5 describe which
+parts of that latent organization come alive when. The ordering logic above still holds; what changes
+is that "build next" becomes "activate next."
+
 ---
 
 ## 6. What this is, and what it is not
@@ -399,7 +414,15 @@ is never a substitute for delivering.
 - `template/organization.yaml` — the org as declarative data.
 - `template/ROLE.md` — a member's job description (profile).
 - `template/SUPERVISOR.md` — the supervision loop (the 1-on-1 that corrects profiles).
+- `template/FOUNDER.md` — the founding process: RFP → full latent org, minimally activated.
+- `template/constitution.yaml` — the human-written charter: decision tiers, night rules, invariants.
+- `template/moves.yaml` — the legal-move catalog: every structural change the org may make.
 - `docs/02-growth-stages.md` — which organ to add at each stage.
 - `docs/03-organic-vs-mechanistic.md` — the two-layer law in full.
 - `docs/04-failure-modes.md` — the failure modes, cataloged.
+- `docs/05-elastic-organization.md` — the elastic model: design the full org at founding, run it elastically.
+- `docs/06-lifecycle-operations.md` — founding to sunset: 24-hour operation, the approval queue, handover.
+- `docs/07-doctrine-and-knowledge.md` — the knowledge organ: boundary spanners, role-scoped doctrine.
+- `docs/08-context-economy.md` — need-to-know information flow: scoped context packs, budgets, commander's intent.
+- `tools/org_lint.py` — the machine audit of `organization.yaml`, `constitution.yaml`, and `moves.yaml`.
 - `docs/sources.md` — every citation, primary/secondary distinguished.

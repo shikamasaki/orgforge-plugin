@@ -4,10 +4,16 @@
 # departments, and describe your own system. Every top-level key is one of the seven organs from
 # THEORY.md, so filling this file out IS the decomposition. Comments explain each organ; the values
 # below are a worked example (a small autonomous research org) you should replace.
+#
+# Glossary: "role" = "department" = "member" — one declared unit of the division of labor.
+# A department may be one agent or a self-organizing pool behind one contract; the chart
+# doesn't care. Layers group roles by regime; `layers[].role` declares a singleton layer.
+#
+# Validate with:  python3 tools/org_lint.py organization.yaml constitution.yaml moves.yaml
 
 # ── Organ 1: PURPOSE (telos) ────────────────────────────────────────────────
 # One sentence. Not a metric — a purpose. The metric lives one level below it (see admission).
-# This string should be delivered into every agent's context (see role.context_pack).
+# Delivered to every role as part of the intent block (docs/08 §2.1).
 purpose: >
   Discover, express, and accumulate reusable, reproducible, economically-valuable material,
   and combine it into results — growing a durable asset, not a pile of outputs.
@@ -19,22 +25,27 @@ objective_metric:
   reward_agents_on_this: false          # non-negotiable: proxies are instruments, not incentives
   gaming_defenses: [random-null, placebo, forward-out-of-sample test]
 
-# ── Organ 7: GROWTH STAGE (declare where you are; see docs/02-growth-stages.md) ──
+# ── Organ 7: GROWTH STAGE (a diagnostic label, not a ratchet — see docs/02, docs/05) ──
 growth:
-  stage: direction                       # creativity | direction | delegation | coordination | collaboration
+  stage: creativity                      # creativity | direction | delegation | coordination | collaboration
   coordination_mechanism: direct_supervision   # Mintzberg: which mechanism dominates today
-  next_crisis_expected: autonomy         # what ends this stage — design toward it now
-  add_layer_when: "department count exceeds a supervisor's effective span (see structure.span)"
+  next_crisis_expected: leadership       # what ends this stage — design toward it now
+  # Under the elastic model stages are ACTIVATION LEVELS and transitions run both ways.
+  # A layer is added only via the charter-tier add_layer move, only after
+  # widen_span_via_context has been attempted (docs/02 §3; template/moves.yaml).
 
 # ── Elastic activation (docs/05): design fully, run elastically ─────────────
 # The chart below is the COMPLETE ideal org — every department the purpose will ever
-# need, declared up front (design is cheap). `active:` per role is the current
-# activation state; it changes only through moves.yaml, gated by tools/org_lint.py.
-# A dormant department = its profile + ledger history, at zero cost, losslessly
-# re-activatable. The control skeleton is never dormant while anything explores.
+# need, INCLUDING the maintenance watch and the handover packager, declared up front
+# (design is cheap). `active:` per role is the current activation state; it changes only
+# through moves.yaml, authored by the registrar, gated by tools/org_lint.py and the gate.
+# A dormant department = its profile + doctrine + ledger history, at zero cost,
+# losslessly re-activatable. The control skeleton is never dormant while anything explores.
 elastic:
   constitution: template/constitution.yaml   # the charter — no agent writes it
   moves_catalog: template/moves.yaml         # the only legal reorg vocabulary
+  founded_by: template/FOUNDER.md            # provenance of this chart
+  rfp: ledger://genesis/rfp                  # the purpose's source document
 
 # ── Organ 2: STRUCTURE (division of labor + span) ───────────────────────────
 structure:
@@ -43,66 +54,124 @@ structure:
   span:
     default_effective_span: 8            # high-skill/high-context agents → wider span is safe
   # The exploratory front is ORGANIC (may self-organize); the control layer is MECHANISTIC.
+  # Every role must belong to exactly one layer — unlayered roles fail the lint.
   layers:
     - name: supervisor
       regime: mechanistic
-      role: supervisor                   # references a role below
+      role: supervisor                   # singleton layer
     - name: exploration_front
       regime: organic                    # docs/03 — self-organization allowed HERE
-      departments: [miner, improver, recombiner, executor]
+      departments: [miner, improver, recombiner, executor, curator, watch, packager]
     - name: control_layer
       regime: mechanistic                # docs/03 — NEVER self-organizes
-      departments: [gate, skeptic]
+      departments: [gate, skeptic, registrar]
 
 # ── Organ 6: CONTROL (separation of duties / Maker-Checker) ─────────────────
-# The three incompatible duties must not concentrate in one agent. List who holds each, and the
-# pairs where the Maker may NOT be its own Checker.
+# The three incompatible duties must not concentrate in one agent. Every maker gets a
+# forbidden-pair entry (no maker checks itself); the lint additionally requires every
+# organic maker's contract to name a mechanistic checker with a DIFFERENT profile lineage.
 separation_of_duties:
   authorization: gate                    # who admits/approves
   custody: ledger                        # the single protected source of truth (not an agent)
   recording: ledger
   maker_checker_forbidden_pairs:
-    - maker: executor
-      checker_must_not_be: executor      # discoverers never verify their own results
-    - maker: recombiner
-      checker_must_not_be: recombiner
+    - { maker: miner,      checker_must_not_be: miner }
+    - { maker: improver,   checker_must_not_be: improver }
+    - { maker: recombiner, checker_must_not_be: recombiner }
+    - { maker: executor,   checker_must_not_be: executor }
+    - { maker: curator,    checker_must_not_be: curator }
+    - { maker: watch,      checker_must_not_be: watch }
+    - { maker: packager,   checker_must_not_be: packager }
+    - { maker: registrar,  checker_must_not_be: registrar }   # the clerk's diffs are gate-admitted
 
-# ── Organ 5: INFORMATION FLOW (shared consciousness) ────────────────────────
+# ── Organ 5: INFORMATION FLOW (shared consciousness, on a budget — docs/07, docs/08) ──
 information_flow:
   shared_record: append-only-ledger      # SSoT; derived views are regenerated, never hand-edited
-  context_delivery: context_pack         # run BEFORE every delegation (onboarding each cycle)
-  rule: "increase information sharing in the same proportion you increase autonomy"
+  knowledge_base: role-scoped-kb         # external knowledge, gate-admitted, provenance'd (docs/07)
+  context_delivery: context_pack         # assembled by the registrar BEFORE every cycle
+  # The refined Organ 5 rule (docs/08): broadcast the intent, need-to-know the details.
+  intent_block:
+    contains: [purpose, current_priorities, constraints_in_force]
+    version: ledger-stamped              # loaded by reference, never copied into profiles
+    in_every_pack: true
+  scopes:                                # deny-by-default seam grants (docs/08 §2.2)
+    default: deny
+    grants:                              # who may read which derived views, and the pack budget
+      - { role: miner,      views: [coverage_map, live_findings, nearby_deaths],    pack_budget_tokens: 20000 }
+      - { role: improver,   views: [parked_inventory, death_causes, nearby_deaths], pack_budget_tokens: 20000 }
+      - { role: recombiner, views: [parts_inventory, combination_history],          pack_budget_tokens: 20000 }
+      - { role: executor,   views: [open_experiments, reusable_modules, gate_input_spec], pack_budget_tokens: 20000 }
+      - { role: curator,    views: [doctrine_gaps, watch_sources, doctrine_ttl_board],    pack_budget_tokens: 20000 }
+      - { role: supervisor, views: [direction_flags, sensor_readings, recent_ledger_census], pack_budget_tokens: 30000 }
+      # control-layer scopes are charter-tier to change; a maker can never scope-fence
+      # its Checker out of the evidence (docs/08 §4)
+      - { role: gate,       views: [admission_standard, candidate_under_review, full_evidence_trail], pack_budget_tokens: 40000 }
+      - { role: skeptic,    views: [claim_under_review, refutation_checklist, full_evidence_trail],   pack_budget_tokens: 40000 }
+      - { role: registrar,  views: [sensor_readings, moves_catalog, proposal_queue, ledger_census],   pack_budget_tokens: 30000 }
+  recertification: weekly                # unused grants are revoked (docs/08 §3)
 
 # ── Organ 2 detail + Organ 3/4 per member: THE DEPARTMENTS (roles) ──────────
-# Each department is a member with a profile (job description). See template/ROLE.md for the full
-# shape. `regime` says whether this member may self-organize. `context_pack` lists what must be
-# loaded into its perception (Organ 3) before it acts. `loop` is its cadence (Organ 4).
+# Each role: regime (may it self-organize?), active (elastic state), profile_lineage
+# (anti-puppet-checker — a checker must never share lineage with its makers),
+# contract (the deliverable slice of the RFP: what it owes, to what standard, judged by
+# whom — docs/06 §1.3), context_pack (Organ 3 onboarding), loop (Organ 4 cadence),
+# doctrine (docs/07 — its current normative playbook, loaded every cycle).
 roles:
 
   - id: supervisor
     regime: mechanistic
     active: true
+    profile_lineage: control-supervisor-v1
     mission: >
-      Oversee each department's DIRECTION (not just liveness). When a department drifts, correct
-      its profile directly so the next scheduled run is fixed. See template/SUPERVISOR.md.
+      Oversee each department's DIRECTION (not just liveness). For ORGANIC roles, correct
+      drift by editing the profile (outside its immutable preamble) so the next run is
+      fixed; for MECHANISTIC roles, file a charter-tier proposal instead — never edit
+      directly. See template/SUPERVISOR.md.
     profile: template/SUPERVISOR.md
-    supervises: [miner, improver, recombiner, executor, gate, skeptic]
+    supervises: [miner, improver, recombiner, executor, curator, watch, packager, gate, skeptic, registrar]
+    context_pack: [intent_block, direction_flags, sensor_readings, recent_ledger_census]
     loop: { cadence: every_5_min, stop_condition: on_operator_instruction }
+
+  - id: registrar
+    regime: mechanistic
+    active: true
+    profile_lineage: control-registrar-v1
+    mission: >
+      The org clerk (docs/06 §2.6): evaluate sensors from ledger-recorded readings, select
+      legal moves, author reorg diffs (as Maker — the lint and the gate admit them),
+      assemble context packs within budget, generate the deterministic morning digest with
+      its mandatory census, and service the approval queue. Approves nothing, ever.
+    context_pack: [intent_block, sensor_readings, moves_catalog, proposal_queue, ledger_census]
+    functions: [organize, implement, operate]
+    loop: { cadence: every_30_min }
+    output_to: [gate]                     # reorg diffs are candidates like any other
 
   - id: miner
     regime: organic
     active: true
+    profile_lineage: exploration-v1
     mission: Systematically search the data for candidate material; propose, do not judge.
-    context_pack: [purpose, nearby_deaths, coverage_map, live_findings]   # Organ 3 onboarding
-    functions: [organize, decide, implement, judge, review, operate]      # a member does all six
+    contract:
+      deliverable: candidate material meeting the gate's input spec
+      standard: reproducible, provenance-complete, honestly-labeled candidates
+      checker: gate
+      depends_on: []
+    context_pack: [intent_block, doctrine, nearby_deaths, coverage_map, live_findings]
+    functions: [organize, decide, implement, judge, review, operate]
     loop: { cadence: every_4_hours }
     output_to: [gate]                     # Maker → Checker handoff
 
   - id: improver
     regime: organic
     active: true
+    profile_lineage: exploration-v1
     mission: Take promising-but-below-bar material and sharpen it.
-    context_pack: [purpose, nearby_deaths, death_causes, parked_inventory]
+    contract:
+      deliverable: sharpened candidates from the parked inventory
+      standard: measurable improvement over the parked version, honestly attributed
+      checker: gate
+      depends_on: [miner]
+    context_pack: [intent_block, doctrine, nearby_deaths, death_causes, parked_inventory]
     functions: [organize, decide, implement, judge, review, operate]
     loop: { cadence: every_6_hours }
     output_to: [gate]
@@ -110,8 +179,14 @@ roles:
   - id: recombiner
     regime: organic
     active: false   # latent: activates on demand_signal (moves.yaml)
+    profile_lineage: exploration-v1
     mission: Combine net-positive, orthogonal parts into portfolio candidates.
-    context_pack: [purpose, parts_inventory, combination_history]
+    contract:
+      deliverable: portfolio candidates from admitted, orthogonal parts
+      standard: combination logic recorded; components individually net-positive
+      checker: gate
+      depends_on: [miner, improver]
+    context_pack: [intent_block, doctrine, parts_inventory, combination_history]
     functions: [organize, decide, implement, judge, review, operate]
     loop: { cadence: every_8_hours }
     output_to: [gate]
@@ -119,32 +194,94 @@ roles:
   - id: executor
     regime: organic
     active: true
+    profile_lineage: exploration-v1
     mission: Write and run the experiments the backlog needs; hand results to the gate.
-    context_pack: [purpose, open_experiments, reusable_modules, gate_input_spec]
+    contract:
+      deliverable: honest experiment verdicts for the open backlog
+      standard: survive/watch/dead reported against the standard battery; no fabricated survivals
+      checker: gate
+      depends_on: [miner, improver]
+    context_pack: [intent_block, doctrine, open_experiments, reusable_modules, gate_input_spec]
     functions: [organize, decide, implement, judge, review, operate]
     loop: { cadence: every_3_hours }
+    output_to: [gate]
+
+  - id: curator
+    regime: organic
+    active: true
+    profile_lineage: exploration-v1
+    mission: >
+      The boundary spanner (docs/07): watch declared external sources on cadence, file
+      intelligence items into the knowledge base with full provenance, and PROPOSE
+      doctrine diffs per affected role. Never writes doctrine directly — the gate admits.
+    contract:
+      deliverable: gate-admitted doctrine diffs and provenance-complete intelligence items
+      standard: every item carries source, retrieval date, confidence, affected roles; TTL set
+      checker: gate
+      depends_on: []
+    context_pack: [intent_block, doctrine, doctrine_gaps, watch_sources, doctrine_ttl_board]
+    functions: [organize, decide, implement, judge, review, operate]
+    loop: { cadence: every_12_hours }
+    output_to: [gate]
+
+  - id: watch
+    regime: organic
+    active: false   # latent: the maintenance-phase set (enter_maintenance activates it)
+    profile_lineage: exploration-v1
+    mission: Maintenance watch — monitor admitted results in operation; fix corrective issues.
+    contract:
+      deliverable: liveness monitoring and corrective fixes for admitted results
+      standard: incidents ledgered with root cause; fixes verified before handoff
+      checker: gate
+      depends_on: [executor]
+    context_pack: [intent_block, doctrine, live_findings, open_experiments]
+    functions: [organize, decide, implement, judge, review, operate]
+    loop: { cadence: every_2_hours }
+    output_to: [gate]
+
+  - id: packager
+    regime: organic
+    active: false   # latent: activates with prepare_handover (charter)
+    profile_lineage: exploration-v1
+    mission: Assemble the succession package from the ledger (docs/06 §4.2) — read-only.
+    contract:
+      deliverable: the succession package (purpose/intent history, contracts + admission
+        records, profiles + doctrines, scope matrix, open-risk register)
+      standard: regenerable from the ledger by anyone; nothing hand-authored
+      checker: gate
+      depends_on: []
+    context_pack: [intent_block, doctrine, recent_ledger_census]
+    functions: [organize, implement, review]
+    loop: { cadence: on_handover_preparation }
     output_to: [gate]
 
   - id: gate
     regime: mechanistic                   # control: machine-decided, never self-organizing
     active: true
-    mission: Admit or reject candidates against the purpose-grounded standard. The authorization duty.
-    context_pack: [purpose, admission_standard]
+    profile_lineage: control-gate-v1
+    mission: >
+      Admit or reject candidates against the purpose-grounded standard. The authorization
+      duty — for work candidates, doctrine diffs (docs/07), and the registrar's reorg diffs
+      alike. Admitted positives are handed to the skeptic for adversarial review.
+    context_pack: [intent_block, admission_standard, candidate_under_review, full_evidence_trail]
     functions: [judge]                    # control members are narrow by design
     loop: { cadence: on_candidate_arrival }
+    output_to: [skeptic]                  # positives go to the adversarial checker
 
   - id: skeptic
     regime: mechanistic
     active: true
-    mission: Adversarially attempt to refute every positive result before it is trusted. The Checker.
-    context_pack: [purpose, claim_under_review, refutation_checklist]
+    profile_lineage: control-skeptic-v1
+    mission: Adversarially attempt to refute every positive result before it is trusted.
+    context_pack: [intent_block, claim_under_review, refutation_checklist, full_evidence_trail]
     functions: [review, judge]
     loop: { cadence: on_positive_result }
 
 # ── Organ 4 (system-level): the metabolism that runs it all ─────────────────
 # How the organization runs continuously and safely. Stop conditions are non-optional.
+# Night windows, token caps, and safe-mode rules live in the constitution (delegated.night).
 runtime:
   continuous: true
   durable: true                           # survives crashes; resumes from the ledger
   global_halt_flag: true                  # a single switch that stops all members
-  budget_guard: true                      # stop conditions: iteration/token caps, no-progress detection
+  budget_guard: true                      # caps + no-progress detection; schedule: constitution

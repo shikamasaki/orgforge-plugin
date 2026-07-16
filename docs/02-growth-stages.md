@@ -1,4 +1,4 @@
-# Growth-Stage Playbook
+# 02 — Growth-Stage Playbook
 
 *How to scale an agent organization the way a company scales — and which organ or
 layer to add at each stage.*
@@ -42,6 +42,12 @@ sequence.
 
 ## 2. The stages, mapped to an agent org
 
+> **Read this section through the elastic model (docs/05).** Under that model the stages
+> below are **activation levels**, not a one-way maturation ladder: transitions run in
+> *both* directions — de-scaling is a first-class move — and structural moves execute
+> only through the moves catalog (template/moves.yaml), gated by the audit lint. This
+> document is the diagnostic lens; docs/05 is the operating rule.
+
 Below, each Greiner phase is mapped to a corresponding shape of agent organization.
 For each stage: **(a)** what is happening, **(b)** the crisis that ends it, and
 **(c)** the organ or layer to add next.
@@ -56,6 +62,10 @@ Mintzberg's vocabulary of how work gets coordinated (see Sources):
 - **Standardization of outputs** — units are judged on results, not method
   (divisionalized form).
 - **Mutual adjustment** — coordination by ongoing informal communication (adhocracy).
+
+Note that Mintzberg's configurations are contingent types — shapes fitted to different
+circumstances — not maturation stages; pairing them with Greiner's sequence below is
+this repo's mapping, not Mintzberg's claim.
 
 ### Stage 0 — The single agent
 
@@ -74,8 +84,12 @@ delegates to a small number of specialists.
 
 **(a) What happens.** An orchestrator agent directs a handful of specialist agents
 directly. Coordination is **direct supervision**: the orchestrator holds the plan,
-assigns work, and integrates results. This maps to Greiner's *creativity* phase — output
-grows through informal, hands-on direction.
+assigns work, and integrates results. The mapping to Greiner's *creativity* phase is
+loose, and worth being honest about: Greiner defines creativity by the *absence* of
+professional management — which is exactly what produces the leadership crisis — so only
+the informal, hands-on directing here corresponds to creativity. A formalized
+orchestrator that explicitly holds the plan is already the transition toward the
+*direction* phase's resolution.
 
 **(b) The crisis (leadership / span).** As the number of specialists grows, the single
 orchestrator becomes the bottleneck. It cannot attend to every agent's output with

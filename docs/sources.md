@@ -7,24 +7,108 @@ novelty claim.
 
 ## Classical organizational theory (the top-down side)
 
-- **[P] Mintzberg — organizational configurations & coordination mechanisms.**
-  https://www.myorganisationalbehaviour.com/mintzbergs-organizational-configurations/ ·
+For each theory, the primary text is cited as **[P]**; the web links that earlier versions of this
+file mislabeled as primary are retained as **[S]** (convenience summary).
+
+- **[P] Mintzberg (1979), *The Structuring of Organizations*, Prentice-Hall** — configurations &
+  coordination mechanisms.
+  [S] Convenience summaries: https://www.myorganisationalbehaviour.com/mintzbergs-organizational-configurations/ ·
   https://www.mindtools.com/apfv1rk/mintzbergs-organizational-configurations/
-- **[P] Span of control.** https://en.wikipedia.org/wiki/Span_of_control
-- **[P] Conway's law.** https://en.wikipedia.org/wiki/Conway%27s_law
-- **[P] Separation of duties (SoD) / internal control (SOX/COSO lineage).**
-  https://en.wikipedia.org/wiki/Separation_of_duties · https://www.techtarget.com/whatis/definition/segregation-of-duties-SoD
-- **[P] Goodhart's law / metric gaming.** https://kpitree.co/guides/frameworks/goodharts-law ·
+- **[P] Graicunas (1933), "Relationship in Organization"; reprinted in Gulick & Urwick (eds.),
+  *Papers on the Science of Administration* (1937)** — span of control (with Urwick's advocacy).
+  [S] Convenience summary: https://en.wikipedia.org/wiki/Span_of_control
+- **[P] Conway (1968), "How Do Committees Invent?", *Datamation*** — Conway's law.
+  [S] Convenience summary: https://en.wikipedia.org/wiki/Conway%27s_law
+- **Separation of duties (SoD) / internal control.** The authoritative lineage is the COSO
+  *Internal Control — Integrated Framework* (1992, rev. 2013) and SOX practice rather than a single
+  classic text.
+  [S] Convenience summaries: https://en.wikipedia.org/wiki/Separation_of_duties ·
+  https://www.techtarget.com/whatis/definition/segregation-of-duties-SoD
+- **[P] Goodhart (1975)** — the original formulation: "Any observed statistical regularity will
+  tend to collapse once pressure is placed upon it for control purposes." **[P] Strathern (1997),
+  "'Improving Ratings': Audit in the British University System", *European Review* 5(3)** — the
+  popular phrasing "when a measure becomes a target, it ceases to be a good measure" is Strathern's,
+  not Goodhart's.
+  [S] Convenience summaries: https://kpitree.co/guides/frameworks/goodharts-law ·
   https://explainx.ai/blog/specification-gaming-goodharts-law-ai-metrics
-- **[P] Burns & Stalker — mechanistic vs organic (contingency theory).**
-  https://www.valuebasedmanagement.net/methods_burns_mechanistic_organic_systems.html
-- **[P] Greiner — growth stages / the crisis at each phase.** https://www.mindtools.com/aks7u4n/the-greiner-curve/ ·
+- **[P] Burns & Stalker (1961), *The Management of Innovation*, Tavistock** — mechanistic vs
+  organic (contingency theory).
+  [S] Convenience summary: https://www.valuebasedmanagement.net/methods_burns_mechanistic_organic_systems.html
+- **[P] Greiner (1972), "Evolution and Revolution as Organizations Grow", *Harvard Business
+  Review*** — growth stages / the crisis at each phase.
+  [S] Convenience summaries: https://www.mindtools.com/aks7u4n/the-greiner-curve/ ·
   https://mbaknol.com/strategic-management/greiners-model-of-organizational-growth-phases-of-organizational-growth-and-crisis/
-- **[P] McChrystal — Team of Teams (shared consciousness + empowered execution).**
-  https://www.mcchrystalgroup.com/about/team-of-teams/empowered-execution
-- **[P] Galbraith Star Model; Drucker MBO / OKR; RACI.**
-  https://strategicmanagementinsight.com/tools/galbraiths-star-model-explained/ ·
-  https://mooncamp.com/glossary/management-by-objectives-mbo · https://en.wikipedia.org/wiki/Responsibility_assignment_matrix
+- **[P] McChrystal, Collins, Silverman & Fussell (2015), *Team of Teams*, Portfolio/Penguin** —
+  shared consciousness + empowered execution.
+  [S] Convenience summary: https://www.mcchrystalgroup.com/about/team-of-teams/empowered-execution
+- **[P] Galbraith (1973), *Designing Complex Organizations*, Addison-Wesley; and (1974),
+  "Organization Design: An Information Processing View", *Interfaces* 4(3)** — the Star Model and
+  the information-processing view.
+  [S] Convenience summary: https://strategicmanagementinsight.com/tools/galbraiths-star-model-explained/
+- **[P] Drucker (1954), *The Practice of Management*, Harper** — management by objectives. (The
+  goal/reward decoupling the repo leans on is modern OKR practice, Doerr/Google — not MBO, which was
+  historically coupled to appraisal and pay, per Deming's criticism.)
+  [S] Convenience summaries: https://mooncamp.com/glossary/management-by-objectives-mbo ·
+  RACI: https://en.wikipedia.org/wiki/Responsibility_assignment_matrix
+
+### Classical theory added in v0.3
+
+- **[P] Barnard (1938), *The Functions of the Executive*, Harvard University Press** — the
+  definition of an organization THEORY.md §1 compresses.
+- **[P] Simon (1947), *Administrative Behavior*, Macmillan** — bounded rationality; **and (1962),
+  "The Architecture of Complexity", *Proceedings of the American Philosophical Society* 106(6)** —
+  near-decomposability, which supports the latent-modular design in docs/05.
+- **[P] Penrose (1959), *The Theory of the Growth of the Firm*, Blackwell.**
+- **[P] Lawrence & Lorsch (1967), *Organization and Environment*, Harvard Business School Press** —
+  differentiation/integration: the real source for running different regimes in different subunits.
+- **[P] March (1991), "Exploration and Exploitation in Organizational Learning", *Organization
+  Science* 2(1).**
+- **[P] Tushman & O'Reilly (1996), "Ambidextrous Organizations", *California Management Review*
+  38(4)** — structural ambidexterity, including its integration-cost findings.
+- **[P] Williamson (1975), *Markets and Hierarchies*, Free Press; and (1985), *The Economic
+  Institutions of Capitalism*, Free Press** — transaction-cost economics beyond Coase.
+- **[P] Starkey, Barnatt & Tempest (2000), "Beyond Networks and Hierarchies: Latent Organizations
+  in the U.K. Television Industry", *Organization Science* 11(3)** — the term "latent organization"
+  originates here.
+- **[P] DeFillippi & Arthur (1998), "Paradox in Project-Based Enterprise: The Case of Film Making",
+  *California Management Review* 40(2)** — project-based production, the "Hollywood model" primary.
+- **[P] Becker & Murphy (1992), "The Division of Labor, Coordination Costs, and Knowledge",
+  *Quarterly Journal of Economics* 107(4).**
+- **[P] Stinchcombe (1965), "Social Structure and Organizations", in March (ed.), *Handbook of
+  Organizations*, Rand McNally** — imprinting; liability of newness.
+- **[P] Whetten (1980), "Organizational Decline: A Neglected Topic in Organizational Science",
+  *Academy of Management Review* 5(4).**
+- **[P] Hannan & Freeman (1977), "The Population Ecology of Organizations", *American Journal of
+  Sociology* 82(5); and (1989), *Organizational Ecology*, Harvard University Press** —
+  organizational mortality.
+- **[P] Mintzberg & Waters (1985), "Of Strategies, Deliberate and Emergent", *Strategic Management
+  Journal* 6(3).**
+
+### Knowledge & doctrine (docs/07)
+
+- **[P] Tushman (1977), "Special Boundary Roles in the Innovation Process", *Administrative Science
+  Quarterly* 22(4)** — boundary spanning; the curator role's theoretical basis.
+- **[P] Cohen & Levinthal (1990), "Absorptive Capacity: A New Perspective on Learning and
+  Innovation", *Administrative Science Quarterly* 35(1).**
+- **[P] Nonaka & Takeuchi (1995), *The Knowledge-Creating Company*, Oxford University Press** — the
+  SECI knowledge-conversion cycle.
+- **[P] Polanyi (1966), *The Tacit Dimension*, Routledge.**
+- **[P] Aguilar (1967), *Scanning the Business Environment*, Macmillan** — environmental scanning.
+- Mintzberg's **standardization of skills** (professional bureaucracy; see Mintzberg 1979 above) is
+  the coordination mechanism that doctrine implements.
+
+### Context economy (docs/08)
+
+- **[P] Parnas (1972), "On the Criteria To Be Used in Decomposing Systems into Modules",
+  *Communications of the ACM* 15(12)** — information hiding.
+- **[P] Galbraith (1974)** — information-processing view of org design (cited above).
+- **[P] Simon (1971), "Designing Organizations for an Information-Rich World", in Greenberger
+  (ed.), *Computers, Communications, and the Public Interest*, Johns Hopkins Press** — "a wealth of
+  information creates a poverty of attention."
+- **[P] Mission command / commander's intent** (Auftragstaktik); US Army ADP 6-0 *Mission Command*
+  as the doctrinal reference.
+- **[P] Saltzer & Schroeder (1975), "The Protection of Information in Computer Systems",
+  *Proceedings of the IEEE* 63(9)** — least privilege / need-to-know.
 
 ## Agent engineering (the bottom-up side the industry named)
 
@@ -40,6 +124,8 @@ novelty claim.
   https://arxiv.org/abs/2309.02427
 - **[P] Anthropic multi-agent research system** (orchestrator-worker; the ~15× token cost).
   https://www.anthropic.com/engineering/multi-agent-research-system
+  Note: ~15× refers to tokens vs a chat interaction; single agents ≈4× chat — so multi-agent vs
+  single-agent is ≈4×.
 - **[S] awesome-harness-engineering** (community field-list). https://github.com/ai-boost/awesome-harness-engineering
 - **[S] LangGraph durable execution / agent middleware.** https://www.langchain.com/blog/langchain-langgraph-1dot0
 
@@ -76,25 +162,39 @@ organization×agents link exists but is **almost entirely principal-agent theory
 Mintzberg/Greiner/span/SoD applied to LLM agent design returns essentially nothing. So the specific
 node this repo occupies — **classical management theory as the top-down decomposition that places
 harness and loop** — is thin-to-empty in the literature. That is an *opportunity to connect existing
-parts*, not a claim of blank-slate invention.
+parts*, not a claim of blank-slate invention. As of v0.3, the classical theories are cited from
+their primary texts directly (earlier versions of this file labeled web summaries **[P]**; those
+links are now honestly demoted to **[S]** convenience summaries).
 
 ## The elastic organization (docs/05 — which constraints transfer, which vanish)
 
-- **[P] Coase — *The Nature of the Firm*** (firm boundaries set by coordination/transaction
-  costs, not capital). https://en.wikipedia.org/wiki/The_Nature_of_the_Firm
-- **[P] Brooks — *The Mythical Man-Month* / Brooks's law** (communication channels n(n−1)/2).
-  https://en.wikipedia.org/wiki/Brooks%27s_law
-- **[P] Ashby — law of requisite variety** (controller capacity must match controlled variety;
-  grounds "control scales with active exploration"). https://en.wikipedia.org/wiki/Variety_(cybernetics)
-- **[P] Cyert & March — organizational slack** (*A Behavioral Theory of the Firm*; latent
-  departments are free slack for agent orgs). https://en.wikipedia.org/wiki/A_Behavioral_Theory_of_the_Firm
+- **[P] Coase (1937), "The Nature of the Firm", *Economica* 4(16)** (firm boundaries set by
+  coordination/transaction costs, not capital).
+  [S] Convenience summary: https://en.wikipedia.org/wiki/The_Nature_of_the_Firm
+- **[P] Brooks (1975), *The Mythical Man-Month*, Addison-Wesley** — Brooks's law (communication
+  channels n(n−1)/2).
+  [S] Convenience summary: https://en.wikipedia.org/wiki/Brooks%27s_law
+- **[P] Ashby (1956), *An Introduction to Cybernetics*, Chapman & Hall** — law of requisite variety
+  (controller capacity must match controlled variety; grounds "control scales with active
+  exploration").
+  [S] Convenience summary: https://en.wikipedia.org/wiki/Variety_(cybernetics)
+- **[P] Cyert & March (1963), *A Behavioral Theory of the Firm*, Prentice-Hall** — organizational
+  slack (latent departments are free slack for agent orgs).
+  [S] Convenience summary: https://en.wikipedia.org/wiki/A_Behavioral_Theory_of_the_Firm
 - **[S] Project-based organization (the "Hollywood model")** — a human precedent for full latent
   capability + per-project activation. https://en.wikipedia.org/wiki/Project-based_organization
-- **[P] Separation of duties in Japanese corporate practice — 稟議 (ringi)** as the asynchronous
-  approval queue pattern behind docs/06 §2. https://en.wikipedia.org/wiki/Ringi-sho
+  (For primaries, see Starkey/Barnatt/Tempest 2000 and DeFillippi & Arthur 1998 above.)
 
 *The Family A (financial/frictional) vs Family B (coordination) constraint split in docs/05 is
 this repo's own synthesis of the above; treat it as a design hypothesis, per the repo's stance.*
+
+## Decision practice (docs/06)
+
+- **[S] 稟議 (ringi)** — Japanese written-proposal approval practice; docs/06 borrows only the
+  asynchronous written-proposal aspect (agents propose in writing, authority above decides). Real
+  ringi is a consensus-formation system (nemawashi, sequential seals) and is typically slow and
+  blocking; the repo's mechanism is closer to a delegation-of-authority (決裁権限) matrix plus an
+  approval queue. https://en.wikipedia.org/wiki/Ringi-sho
 
 ## The strongest counter-argument (do not ignore it)
 

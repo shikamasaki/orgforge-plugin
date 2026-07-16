@@ -1,153 +1,415 @@
 #!/usr/bin/env python3
 """org_lint — the audit gate every founding/reorg commit must pass.
 
-Checks an organization.yaml (and optionally its constitution.yaml) against the
-invariants the theory says must hold mechanically, not by anyone's restraint:
+Validates the org chart (organization.yaml), the charter (constitution.yaml), and the
+move catalog (moves.yaml) against the invariants the theory says must hold mechanically:
 
-  O1  Goodhart guard      — no agent is rewarded on the objective metric
-  O2  span budget         — no supervisor's ACTIVE reports exceed effective span
-  O2b regime consistency  — layer regime matches each member role's regime
-  O5  ledger custody      — custody/recording are the ledger, not an agent
-  O6  separation of duties— no maker routes output to itself; authorization is
-                            mechanistic and never held by an implementing role
-  O6b control-never-dormant — while any organic role is active, the supervisor
-                            and every control-layer role are active
-  CH  charter sanity      — constitution invariants present and set true
+  SC   schema           — required keys, unique ids, typed fields; absence is failure,
+                          never a silent pass
+  O1   Goodhart guard   — no agent rewarded on the objective metric; gaming defenses set
+  O2   span budget      — active reports within each supervisor's resolvable span
+  O2b  regime layers    — every role sits in a layer whose regime matches its own
+  O5   ledger custody   — custody/recording are the ledger, not an agent
+  O6   separation       — SoD block mandatory; authorization mechanistic, non-implementing;
+                          no self-routing; makers never route to a forbidden checker;
+                          every organic maker routes to >=1 mechanistic checker
+  O6c  lineage          — a contract's checker and the authorization holder must not share
+                          profile lineage with the makers they judge (anti-puppet-checker)
+  O6b  control awake    — control roles (mechanistic layers ∪ SoD holders ∪ contract
+                          checkers) never dormant while any organic role is active
+  O7   contracts        — every organic maker has a contract naming a mechanistic checker
+                          that is not itself
+  CH   charter sanity   — invariants present/true, sunset held, founding_commit charter,
+                          no placeholders (SET_ME), queue rules on
+  MV   move catalog     — parses, tiers valid, delegated lists cross-match constitution
 
-Usage:  org_lint.py path/to/organization.yaml [path/to/constitution.yaml]
-Exit 0 = pass, 1 = violations found.
+Usage:  org_lint.py organization.yaml constitution.yaml moves.yaml
+All three files are required; omitting one is a violation, not a shortcut.
+Exit 0 = pass, 1 = violations, 2 = usage/parse error.
 """
 import sys
 
 import yaml
 
+VALID_REGIMES = {"organic", "mechanistic"}
+VALID_TIERS = {"delegated", "charter", "irreversible"}
 
-def fail(msgs, code, msg):
-    msgs.append(f"[{code}] {msg}")
+
+class Lint:
+    def __init__(self):
+        self.errs = []
+
+    def fail(self, code, msg):
+        self.errs.append(f"[{code}] {msg}")
 
 
-def lint_org(org):
-    errs = []
-    roles = {r["id"]: r for r in org.get("roles", [])}
-    layers = org.get("structure", {}).get("layers", [])
-    sod = org.get("separation_of_duties", {})
+def load(path, lint, label):
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+    except FileNotFoundError:
+        lint.fail("SC", f"{label} file not found: {path}")
+        return None
+    except yaml.YAMLError as e:
+        lint.fail("SC", f"{label} is not valid YAML ({path}): {e}")
+        return None
+    if not isinstance(data, dict):
+        lint.fail("SC", f"{label} must be a YAML mapping: {path}")
+        return None
+    return data
 
-    # O1 — Goodhart guard
+
+# ── organization.yaml ────────────────────────────────────────────────────────
+
+def lint_org(org, lint):
+    roles = check_schema(org, lint)
+    if roles is None:
+        return None
+    check_goodhart(org, lint)
+    check_layers_and_span(org, roles, lint)
+    control_ids = collect_control_ids(org, roles, lint)
+    check_sod(org, roles, control_ids, lint)
+    check_contracts(org, roles, lint)
+    check_control_awake(roles, control_ids, lint)
+    return roles
+
+
+def check_schema(org, lint):
+    raw = org.get("roles")
+    if not isinstance(raw, list) or not raw:
+        lint.fail("SC", "organization.yaml has no roles: list — nothing to lint")
+        return None
+    roles, seen = {}, set()
+    for i, r in enumerate(raw):
+        if not isinstance(r, dict) or "id" not in r:
+            lint.fail("SC", f"roles[{i}] has no id")
+            continue
+        rid = r["id"]
+        if rid in seen:
+            lint.fail("SC", f"duplicate role id '{rid}' — ambiguous charts don't lint")
+            continue
+        seen.add(rid)
+        if r.get("regime") not in VALID_REGIMES:
+            lint.fail("SC", f"role '{rid}' regime must be one of {sorted(VALID_REGIMES)}")
+        if not isinstance(r.get("active", None), bool):
+            lint.fail("SC", f"role '{rid}' needs active: true|false (a bare bool — "
+                            f"strings like \"false\" are truthy and lie)")
+        roles[rid] = r
+    return roles
+
+
+def is_active(role):
+    return role.get("active") is True
+
+
+def check_goodhart(org, lint):
     metric = org.get("objective_metric", {})
     if metric.get("reward_agents_on_this") is not False:
-        fail(errs, "O1", "objective_metric.reward_agents_on_this must be false — "
-             "a proxy handed out as reward is a Goodhart trap (THEORY.md Organ 1)")
+        lint.fail("O1", "objective_metric.reward_agents_on_this must be present and false — "
+                        "a proxy handed out as reward is a Goodhart trap (THEORY.md Organ 1)")
+    defenses = metric.get("gaming_defenses")
+    if not isinstance(defenses, list) or not defenses:
+        lint.fail("O1", "objective_metric.gaming_defenses must be a non-empty list "
+                        "(nulls, placebos, forward tests — docs/04 §2)")
 
-    # O2 — span budget over ACTIVE reports only (dormant departments cost no span)
-    span = org.get("structure", {}).get("span", {}).get("default_effective_span")
+
+def check_layers_and_span(org, roles, lint):
+    layers = org.get("structure", {}).get("layers", [])
+    covered = set()
+    for layer in layers:
+        regime = layer.get("regime")
+        if regime not in VALID_REGIMES:
+            lint.fail("O2b", f"layer '{layer.get('name', '?')}' needs a regime "
+                             f"({sorted(VALID_REGIMES)}) — an unregimed layer exempts "
+                             f"its members from every regime check")
+            continue
+        members = list(layer.get("departments", []))
+        if "role" in layer:
+            members.append(layer["role"])
+        for dep in members:
+            covered.add(dep)
+            role = roles.get(dep)
+            if role is None:
+                lint.fail("O2b", f"layer '{layer.get('name')}' references unknown role '{dep}'")
+            elif role.get("regime") != regime:
+                lint.fail("O2b", f"role '{dep}' is {role.get('regime')} but sits in "
+                                 f"{regime} layer '{layer.get('name')}'")
+    for rid in roles:
+        if rid not in covered:
+            lint.fail("O2b", f"role '{rid}' belongs to no layer — unlayered roles escape "
+                             f"the organic/mechanistic regime checks")
+
+    default_span = org.get("structure", {}).get("span", {}).get("default_effective_span")
     for r in roles.values():
         reports = r.get("supervises", [])
         if not reports:
             continue
-        active = [x for x in reports if roles.get(x, {}).get("active", True)]
-        r_span = r.get("effective_span", span)
-        if r_span is not None and len(active) > r_span:
-            fail(errs, "O2", f"supervisor '{r['id']}' has {len(active)} active reports "
-                 f"> effective span {r_span} — widen span via context or file a "
-                 f"charter-tier add_layer ringi (docs/02 §3)")
-        for x in reports:
-            if x not in roles:
-                fail(errs, "O2", f"supervisor '{r['id']}' supervises unknown role '{x}'")
+        span = r.get("effective_span", default_span)
+        if not isinstance(span, int):
+            lint.fail("O2", f"supervisor '{r['id']}' has no resolvable integer span "
+                            f"(set structure.span.default_effective_span or "
+                            f"effective_span on the role) — an absent span is an "
+                            f"unbounded one")
+            continue
+        unknown = [x for x in reports if x not in roles]
+        for x in unknown:
+            lint.fail("O2", f"supervisor '{r['id']}' supervises unknown role '{x}'")
+        active = [x for x in reports if x in roles and is_active(roles[x])]
+        if len(active) > span:
+            lint.fail("O2", f"supervisor '{r['id']}' has {len(active)} active reports "
+                            f"> effective span {span} — widen span via context or file "
+                            f"a charter-tier add_layer proposal (docs/02 §3)")
 
-    # O2b — layer regime must match member regime
-    for layer in layers:
-        for dep in layer.get("departments", []) + (
-            [layer["role"]] if "role" in layer else []
-        ):
-            role = roles.get(dep)
-            if role is None:
-                fail(errs, "O2b", f"layer '{layer['name']}' references unknown role '{dep}'")
-            elif role.get("regime") != layer.get("regime"):
-                fail(errs, "O2b", f"role '{dep}' is {role.get('regime')} but sits in "
-                     f"{layer.get('regime')} layer '{layer['name']}'")
 
-    # O5 — custody and recording live in the ledger, not in any agent
+def collect_control_ids(org, roles, lint):
+    """Control set = mechanistic layers ∪ every mechanistic role ∪ SoD holders ∪
+    contract checkers. Layer membership alone is spoofable by omission (review finding)."""
+    control = set()
+    for layer in org.get("structure", {}).get("layers", []):
+        if layer.get("regime") == "mechanistic":
+            control.update(layer.get("departments", []))
+            if "role" in layer:
+                control.add(layer["role"])
+    for rid, r in roles.items():
+        if r.get("regime") == "mechanistic":
+            control.add(rid)
+        checker = (r.get("contract") or {}).get("checker")
+        if checker:
+            control.add(checker)
+    sod = org.get("separation_of_duties", {})
+    if sod.get("authorization") is not None:
+        control.add(sod["authorization"])
+    for pair in sod.get("maker_checker_forbidden_pairs", []):
+        if isinstance(pair, dict) and pair.get("checker_must_not_be"):
+            pass  # forbidden names are exclusions, not members
+    return {c for c in control if c in roles}
+
+
+def check_sod(org, roles, control_ids, lint):
+    sod = org.get("separation_of_duties")
+    if not isinstance(sod, dict):
+        lint.fail("O6", "separation_of_duties block is missing — an org without a "
+                        "declared SoD map has no control system to audit (docs/03 §3.1)")
+        return
+    for duty in ("authorization", "custody", "recording"):
+        if duty not in sod:
+            lint.fail("O6", f"separation_of_duties.{duty} is missing — all three "
+                            f"incompatible duties must be assigned")
     for duty in ("custody", "recording"):
-        holder = sod.get(duty)
-        if holder in roles:
-            fail(errs, "O5", f"{duty} is held by agent '{holder}' — it must be the "
-                 f"ledger (a protected store, not a member)")
+        if sod.get(duty) in roles:
+            lint.fail("O5", f"{duty} is held by agent '{sod[duty]}' — it must be the "
+                            f"ledger (a protected store, not a member)")
 
-    # O6 — separation of duties
     auth = sod.get("authorization")
-    if auth is not None:
-        auth_role = roles.get(auth)
-        if auth_role is None:
-            fail(errs, "O6", f"authorization holder '{auth}' is not a declared role")
-        else:
-            if auth_role.get("regime") != "mechanistic":
-                fail(errs, "O6", f"authorization holder '{auth}' must be mechanistic — "
-                     f"an organic gate self-organizes toward its own dissolution (docs/03 §3.2)")
-            if "implement" in auth_role.get("functions", []):
-                fail(errs, "O6", f"authorization holder '{auth}' also implements — "
-                     f"maker and checker have collapsed into one agent")
+    auth_role = roles.get(auth) if auth else None
+    if auth is not None and auth_role is None:
+        lint.fail("O6", f"authorization holder '{auth}' is not a declared role")
+    if auth_role is not None:
+        if auth_role.get("regime") != "mechanistic":
+            lint.fail("O6", f"authorization holder '{auth}' must be mechanistic — an "
+                            f"organic gate self-organizes toward its own dissolution "
+                            f"(docs/03 §3.2)")
+        if "implement" in auth_role.get("functions", []):
+            lint.fail("O6", f"authorization holder '{auth}' also implements — maker and "
+                            f"checker have collapsed into one agent")
+
+    # Self-routing: universal, not only for declared pairs (review finding).
+    for rid, r in roles.items():
+        if rid in r.get("output_to", []):
+            lint.fail("O6", f"role '{rid}' routes output to itself — self-verification "
+                            f"is not verification (docs/04 §5)")
+
+    # Forbidden pairs: the maker must not route to the named forbidden checker,
+    # and must not hold the authorization duty.
     for pair in sod.get("maker_checker_forbidden_pairs", []):
         maker = pair.get("maker")
         forbidden = pair.get("checker_must_not_be")
         maker_role = roles.get(maker)
         if maker_role is None:
-            fail(errs, "O6", f"forbidden-pair maker '{maker}' is not a declared role")
+            lint.fail("O6", f"forbidden-pair maker '{maker}' is not a declared role")
             continue
-        if forbidden in maker_role.get("output_to", []) and forbidden == maker:
-            fail(errs, "O6", f"'{maker}' routes output to itself")
+        if forbidden in maker_role.get("output_to", []):
+            lint.fail("O6", f"maker '{maker}' routes output to '{forbidden}', which its "
+                            f"forbidden-pair entry bars from checking it")
         if maker == auth:
-            fail(errs, "O6", f"maker '{maker}' holds the authorization duty")
+            lint.fail("O6", f"maker '{maker}' holds the authorization duty")
 
-    # O6b — control never dormant while exploration is active
-    organic_active = [r["id"] for r in roles.values()
-                      if r.get("regime") == "organic" and r.get("active", True)]
-    if organic_active:
-        control_ids = set()
-        for layer in layers:
-            if layer.get("regime") == "mechanistic":
-                control_ids.update(layer.get("departments", []))
-                if "role" in layer:
-                    control_ids.add(layer["role"])
-        for cid in sorted(control_ids):
-            if not roles.get(cid, {}).get("active", True):
-                fail(errs, "O6b", f"control role '{cid}' is dormant while organic roles "
-                     f"{organic_active} are active — SoD disabled by scheduling (docs/05 §3)")
-    return errs
+    # Every organic maker must route to at least one mechanistic checker.
+    for rid, r in roles.items():
+        if r.get("regime") != "organic" or not r.get("output_to"):
+            continue
+        checkers = [t for t in r["output_to"]
+                    if roles.get(t, {}).get("regime") == "mechanistic"]
+        if not checkers:
+            lint.fail("O6", f"organic maker '{rid}' routes to no mechanistic checker — "
+                            f"its output enters trusted state unchecked")
 
 
-def lint_constitution(con):
-    errs = []
+def check_contracts(org, roles, lint):
+    auth = (org.get("separation_of_duties") or {}).get("authorization")
+    for rid, r in roles.items():
+        lineage = r.get("profile_lineage")
+        if not lineage:
+            lint.fail("SC", f"role '{rid}' has no profile_lineage — lineage is how the "
+                            f"lint detects puppet checkers (O6c)")
+        if r.get("regime") != "organic" or not r.get("output_to"):
+            continue
+        contract = r.get("contract")
+        if not isinstance(contract, dict) or not contract.get("checker"):
+            lint.fail("O7", f"organic maker '{rid}' has no contract naming its checker — "
+                            f"contracts are how departments work independently toward "
+                            f"the RFP (docs/06 §1.3)")
+            continue
+        checker = contract["checker"]
+        checker_role = roles.get(checker)
+        if checker == rid:
+            lint.fail("O7", f"'{rid}' names itself as its contract's checker")
+        elif checker_role is None:
+            lint.fail("O7", f"'{rid}' names unknown checker '{checker}'")
+        else:
+            if checker_role.get("regime") != "mechanistic":
+                lint.fail("O7", f"'{rid}' contract checker '{checker}' is not mechanistic")
+            if (checker_role.get("profile_lineage")
+                    and checker_role.get("profile_lineage") == r.get("profile_lineage")):
+                lint.fail("O6c", f"checker '{checker}' shares profile lineage "
+                                 f"'{r.get('profile_lineage')}' with maker '{rid}' — a "
+                                 f"cloned checker rubber-stamps by construction")
+        if auth and roles.get(auth, {}).get("profile_lineage") \
+                and roles[auth].get("profile_lineage") == r.get("profile_lineage"):
+            lint.fail("O6c", f"authorization holder '{auth}' shares profile lineage with "
+                             f"maker '{rid}'")
+
+
+def check_control_awake(roles, control_ids, lint):
+    organic_active = sorted(r["id"] for r in roles.values()
+                            if r.get("regime") == "organic" and is_active(r))
+    if not organic_active:
+        return
+    for cid in sorted(control_ids):
+        if not is_active(roles[cid]):
+            lint.fail("O6b", f"control role '{cid}' is dormant while organic roles "
+                             f"{organic_active} are active — SoD disabled by a "
+                             f"scheduling decision (docs/05 §3)")
+
+
+# ── constitution.yaml ────────────────────────────────────────────────────────
+
+REQUIRED_INVARIANTS = ["ledger_append_only", "no_knowledge_outside_ledger",
+                       "control_never_dormant_while_exploring", "maker_never_own_checker",
+                       "no_agent_writes_this_file"]
+
+
+def walk_for_placeholder(node, path, lint):
+    if isinstance(node, str) and "SET_ME" in node:
+        lint.fail("CH", f"placeholder left unset at {path} — an unset charter is not a "
+                        f"charter")
+    elif isinstance(node, dict):
+        for k, v in node.items():
+            walk_for_placeholder(v, f"{path}.{k}", lint)
+    elif isinstance(node, list):
+        for i, v in enumerate(node):
+            walk_for_placeholder(v, f"{path}[{i}]", lint)
+
+
+def lint_constitution(con, lint):
     inv = con.get("invariants", [])
-    required = ["ledger_append_only", "no_knowledge_outside_ledger",
-                "control_never_dormant_while_exploring", "maker_never_own_checker",
-                "no_agent_writes_this_file"]
     present = {}
-    for item in inv:
-        if isinstance(item, dict):
-            present.update(item)
-    for key in required:
+    if isinstance(inv, dict):
+        present = inv
+    elif isinstance(inv, list):
+        for item in inv:
+            if isinstance(item, dict):
+                present.update(item)
+    for key in REQUIRED_INVARIANTS:
         if present.get(key) is not True:
-            fail(errs, "CH", f"constitution invariant '{key}' missing or not true")
-    held = con.get("irreversible", {}).get("held_actions", [])
-    if "sunset" not in held:
-        fail(errs, "CH", "sunset is not on the irreversible hold list — "
-             "an org must not adjudicate its own death (docs/06 §4.3)")
-    return errs
+            lint.fail("CH", f"constitution invariant '{key}' missing or not true")
 
+    charter_items = (con.get("charter") or {}).get("items", []) or []
+    if "founding_commit" not in charter_items:
+        lint.fail("CH", "founding_commit is not a charter item — an org must not be "
+                        "born without human sign-off (docs/06 §1)")
+    held = (con.get("irreversible") or {}).get("held_actions", []) or []
+    if "sunset" not in held:
+        lint.fail("CH", "sunset is not on the irreversible hold list — an org must not "
+                        "adjudicate its own death (docs/06 §4.3)")
+    rules = (con.get("charter") or {}).get("queue_rules", {}) or {}
+    for rule in ("one_concern_per_proposal", "one_open_proposal_per_subject",
+                 "dedup_identical_diffs"):
+        if rules.get(rule) is not True:
+            lint.fail("CH", f"charter.queue_rules.{rule} must be true — the approval "
+                            f"queue is floodable without it (docs/06 §2.2)")
+    if rules.get("batch_adjudication_of_charter_items") is not False:
+        lint.fail("CH", "charter.queue_rules.batch_adjudication_of_charter_items must "
+                        "be false")
+    walk_for_placeholder(con, "constitution", lint)
+    return charter_items
+
+
+# ── moves.yaml ───────────────────────────────────────────────────────────────
+
+def lint_moves(mv, con, lint):
+    moves = mv.get("moves")
+    if not isinstance(moves, list) or not moves:
+        lint.fail("MV", "moves.yaml has no moves: list")
+        return
+    by_id = {}
+    for m in moves:
+        mid = m.get("id")
+        if not mid:
+            lint.fail("MV", "a move has no id")
+            continue
+        if mid in by_id:
+            lint.fail("MV", f"duplicate move id '{mid}'")
+        by_id[mid] = m
+        if m.get("tier") not in VALID_TIERS:
+            lint.fail("MV", f"move '{mid}' tier must be one of {sorted(VALID_TIERS)}")
+        for pc in m.get("preconditions", []) or []:
+            if isinstance(pc, dict) and "judgment" in pc \
+                    and pc.get("judge") not in ("human", "llm"):
+                lint.fail("MV", f"move '{mid}' has a judgment precondition without "
+                                f"judge: human|llm — undecided judgments default to "
+                                f"nobody, which means the maker")
+
+    if con is None:
+        return
+    declared = (con.get("delegated") or {}).get("structural_moves", []) or []
+    for mid in declared:
+        m = by_id.get(mid)
+        if m is None:
+            lint.fail("MV", f"constitution delegates '{mid}' but moves.yaml has no such "
+                            f"move — a phantom power is an ungoverned one")
+        elif m.get("tier") != "delegated":
+            lint.fail("MV", f"constitution delegates '{mid}' but moves.yaml tiers it "
+                            f"'{m.get('tier')}' — the two files disagree on authority")
+    for mid, m in by_id.items():
+        if m.get("tier") == "delegated" and mid not in declared:
+            lint.fail("MV", f"move '{mid}' is delegated in moves.yaml but absent from "
+                            f"the constitution's delegated list — no tier, no legality")
+
+
+# ── entry ────────────────────────────────────────────────────────────────────
 
 def main(argv):
-    if len(argv) < 2:
+    if len(argv) != 4:
         print(__doc__)
         return 2
-    errs = []
-    with open(argv[1]) as f:
-        errs += lint_org(yaml.safe_load(f))
-    if len(argv) > 2:
-        with open(argv[2]) as f:
-            errs += lint_constitution(yaml.safe_load(f))
-    if errs:
-        print(f"org_lint: {len(errs)} violation(s)")
-        for e in errs:
+    lint = Lint()
+    org = load(argv[1], lint, "organization.yaml")
+    con = load(argv[2], lint, "constitution.yaml")
+    mv = load(argv[3], lint, "moves.yaml")
+    if org is not None:
+        if "roles" not in org:
+            lint.fail("SC", f"{argv[1]} does not look like an organization.yaml "
+                            f"(no roles key) — check argument order: org constitution moves")
+        else:
+            lint_org(org, lint)
+    if con is not None:
+        lint_constitution(con, lint)
+    if mv is not None:
+        lint_moves(mv, con, lint)
+    if lint.errs:
+        print(f"org_lint: {len(lint.errs)} violation(s)")
+        for e in lint.errs:
             print("  " + e)
         return 1
     print("org_lint: pass — the chart obeys its own theory")

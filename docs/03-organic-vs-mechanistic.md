@@ -69,7 +69,7 @@ Map this onto an agent organization and the two layers separate cleanly:
 - **The exploration front — discovery and generation — faces an uncertain,
   dynamic environment.** The best decomposition is unknown in advance. This layer
   should be **organic**: let agents self-organize. This is exactly the regime the
-  reproving paper studies, and its conclusion holds here.
+  self-organization paper studies, and its conclusion holds here.
 
 - **The control layer — verification, admission, safety, and fraud prevention —
   faces a stability-critical environment.** Its job is to be consistent,
@@ -77,7 +77,7 @@ Map this onto an agent organization and the two layers separate cleanly:
   centrally designed, highly formalized, and *not* subject to renegotiation by
   the agents it governs.
 
-The reproving paper measures **problem-solving efficiency**. That lives entirely
+The self-organization paper measures **problem-solving efficiency**. That lives entirely
 in the organic exploration layer. It says nothing about verification integrity,
 admission control, or fraud resistance — because those were not part of its task.
 So the two-layer design does not contradict the paper. It **agrees** with it on
@@ -97,9 +97,10 @@ vulnerability. The reason is not a preference for hierarchy; it is that certain
 guarantees are **structurally impossible** if the governed agents can rewrite the
 governance.
 
-### 3.1 Segregation of duties (the non-negotiable core)
+### 3.1 Separation of duties (SoD) — the non-negotiable core
 
-Internal-control practice separates three functions so that no single actor can
+Internal-control practice — separation of duties (also "segregation of duties") —
+separates three functions so that no single actor can
 both commit and conceal a wrong action
 (<https://en.wikipedia.org/wiki/Separation_of_duties>):
 
@@ -127,8 +128,9 @@ and never let the maker and checker become the same process.
 
 ### 3.2 Why self-organizing the control layer guarantees gaming
 
-The failure is not hypothetical; it is forced by incentives. **Goodhart's law**:
-*when a measure becomes a target, it ceases to be a good measure*
+The failure is not hypothetical; it is forced by incentives. **Goodhart's law** —
+in Strathern's (1997) formulation, *"when a measure becomes a target, it ceases
+to be a good measure"*
 (<https://kpitree.co/guides/frameworks/goodharts-law>). Agents are optimizers,
 and the more authority you delegate, the more surface they have to optimize the
 *proxy* rather than the *goal* — the classic **principal-agent** problem.
@@ -138,7 +140,7 @@ who verifies and what "passing" means, the cheapest optimization available is
 **not to solve the task better — it is to weaken the check**. A self-organizing
 control layer optimizes toward its own dissolution, because a looser gate scores
 higher on the immediate objective than an honest one does. Dissolving
-segregation of duties via self-organization is, in effect, **re-legalizing
+separation of duties via self-organization is, in effect, **re-legalizing
 fraud**.
 
 ### 3.3 The non-negotiable list
@@ -165,8 +167,8 @@ guarantee it was supposed to provide is already gone.
 ## 4. What SHOULD self-organize
 
 Everything the control layer does **not** govern should be handed to
-self-organization — and forcing structure there is the mistake the reproving
-paper correctly warns against.
+self-organization — and forcing structure there is the mistake the
+self-organization paper correctly warns against.
 
 Inside the exploration front, let the agents decide:
 
@@ -239,4 +241,6 @@ verifying — and clarity about which is which.
   Maker-Checker). Wikipedia.
   <https://en.wikipedia.org/wiki/Separation_of_duties>
 - *Goodhart's Law* (and the principal-agent problem of delegated optimization).
+  The familiar one-line phrasing is Marilyn Strathern's (1997) formulation, not
+  Goodhart's own words.
   <https://kpitree.co/guides/frameworks/goodharts-law>

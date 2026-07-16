@@ -1,75 +1,126 @@
-# constitution.yaml — the charter: what the organization may NEVER decide for itself.
+# constitution.yaml — the charter (定款): what the organization may NEVER decide for itself.
 #
 # organization.yaml is the org chart — the org may rewrite it (through moves.yaml, within
-# these bounds). THIS file is the 定款 (articles of incorporation): written by humans,
-# readable by every agent, writable by NO agent. The two-layer law (docs/03) applied to
-# edit authority: exploration self-organizes, the control skeleton is designed — and the
-# rules of self-modification are the most control-critical thing in the system.
+# these bounds). THIS file is the articles of incorporation: written by humans, readable
+# by every agent, writable by NO agent. The two-layer law (docs/03) applied to edit
+# authority: exploration self-organizes; the control skeleton is designed; and the rules
+# of self-modification are the most control-critical thing in the system.
 #
-# Three authorization tiers (docs/06 §2.1). Every action an agent can take falls in
-# exactly one. When humans are away, tier behavior is: delegated → execute now;
-# charter → queue a ringi, continue other work; irreversible → prepare fully, hold.
+# Three authorization tiers (docs/06 §2.1). Every action falls in exactly one. Tier
+# BEHAVIOR is fixed in docs/06; the authoritative ITEM LISTS are here and only here.
+# Overnight: delegated → execute now; charter → queue a proposal, keep working;
+# irreversible → prepare fully, hold for a human.
+#
+# NOTE: values below are a worked example. Replace them; the audit lint fails on any
+# leftover "SET_ME"-style placeholder in an instance.
 
 # ── Tier 1: DELEGATED — execute immediately, record in ledger ────────────────
 delegated:
-  # The exploration front's entire organic space (docs/03 §4): decomposition,
-  # methods, hypothesis generation, effort allocation, lateral communication.
+  # The exploration front's entire organic space (docs/03 §4): decomposition, methods,
+  # hypothesis generation, effort allocation, lateral communication within granted seams.
   exploration: unrestricted_within_budget
-  # Structural moves the org may make on its own — referenced from moves.yaml,
-  # each gated by its preconditions and the audit lint.
+  # Structural moves the org may make on its own. This list MUST match moves.yaml
+  # entries with `tier: delegated` — the lint cross-checks both directions.
   structural_moves:
-    - activate_department        # within span budget only
-    - deactivate_department      # never a control role while exploration is active
+    - activate_department          # within span budget; never activates around SoD
+    - deactivate_department        # never a control role while exploration is active
     - widen_span_via_context
-    - edit_organic_profile       # the supervisor's coaching power — ORGANIC roles only
+    - edit_organic_profile         # supervisor coaching — ORGANIC roles, non-preamble sections only
+    - delegate_authority
+    - add_coordination_gate
+    - lighten_gate                 # never the admission gate — lint-guarded
+    - remove_layer                 # only if the parent passes the post-merge span check
+    - update_doctrine              # organic-role doctrine, after gate admission (docs/07)
+    - adjust_context_scope         # organic↔organic seams only (docs/08)
   # Night operation: what delegated authority looks like unattended.
   night:
-    exploration_token_cap_per_window: SET_ME     # e.g. 2_000_000 tokens / 8h window
+    exploration_token_cap_per_window: 2000000   # tokens per 8h window — example, set your own
     no_progress_rule:
-      same_signal_same_move_max: 3               # then suspend that line, file a ringi
-    safe_mode_on_undefined_signal:
-      exploration: continue
-      admission: suspend                          # make freely; promote nothing
+      same_signal_same_move_max: 3     # then suspend that line and file ONE proposal (dedup'd)
+    safe_mode:                          # FAIL-SAFE, not fail-open (docs/06 §2.4)
+      admission_default: suspend        # admission proceeds ONLY on exact pre-registered
+      admit_only_on: exact_preregistered_sensor_match   # sensor matches; surprises suspend
+      exploration: continue             # making stays cheap and reversible
+      classification_of_signals: mechanistic_and_ledgered  # the org cannot relabel a
+                                                           # surprise as "defined" to keep admitting
 
-# ── Tier 2: CHARTER (稟議) — agents propose, humans decide, queue never blocks ─
+# ── Tier 2: CHARTER (approval queue) — agents propose, humans decide ──────────
+# Inspired by the written-proposal aspect of 稟議 (ringi): agents propose in writing with
+# diagnosis + diff + expected effect; one accountable human adjudicates. No consensus round.
 charter:
-  # Changes here require human adjudication. Agents file a ringi item (diagnosis +
-  # proposed diff + expected effect) and continue with other legal moves.
   items:
-    - separation_of_duties_matrix         # the SoD map in organization.yaml
-    - mechanistic_role_profiles           # gate, skeptic, supervisor job descriptions
-    - admission_standard                  # what "passing" means (Organ 1 grounding)
-    - delegation_bounds                   # this file's Tier-1 contents themselves
-    - moves_catalog                       # adding/changing legal moves
-    - add_layer                           # hierarchy is charter-tier: the last resort
-    - purpose_revision                    # Organ 1 is human-held, always
-  ringi_queue: ledger://ringi             # append-only; adjudicated each morning
+    - founding_commit                   # the org cannot be born without human sign-off (docs/06 §1)
+    - separation_of_duties_matrix       # the SoD map in organization.yaml
+    - mechanistic_role_profiles         # gate, skeptic, supervisor, registrar job descriptions
+    - profile_discipline_preambles      # the immutable block in EVERY profile (ROLE.md), any regime
+    - admission_standard                # what "passing" means (Organ 1 grounding)
+    - mechanistic_role_doctrine         # what the control layer is taught (docs/07)
+    - control_layer_context_scopes      # a maker may never scope-fence its Checker (docs/08 §4)
+    - intent_block_revision             # org-wide priorities under an unchanged purpose (docs/08 §2.1)
+    - purpose_revision                  # Organ 1 is human-held, always
+    - delegation_bounds                 # this file's Tier-1 contents themselves
+    - moves_catalog                     # adding/changing legal moves
+    - add_layer                         # hierarchy is charter-tier: the last resort
+    - lifecycle_transitions             # enter_maintenance, prepare_handover
+  queue: ledger://proposals             # append-only; adjudicated each morning
+  queue_rules:                          # anti-flooding, anti-bundling (docs/06 §2.2)
+    one_concern_per_proposal: true      # multi-subject diffs are auto-rejected and split
+    one_open_proposal_per_subject: true
+    dedup_identical_diffs: true
+    batch_adjudication_of_charter_items: false   # each gets its own human read, untimed
   morning_digest:
-    generated_from: ledger
-    style: report_by_exception            # 1 line if on course; detail for reorgs,
-                                          # ringi items, held irreversibles, anomalies
-    human_read_budget: 15_minutes         # if it takes longer, fix the digest
+    generated_by: registrar             # mechanistic clerk (docs/06 §2.6)
+    deterministic_projection: true      # anyone re-running it gets the same document
+    mandatory_census: all_ledger_event_class_counts   # activity cannot be hidden by curation
+    then_exceptions: [reorg_commits, open_proposals, held_irreversibles, anomalies, budget_report]
+    human_read_budget_minutes: 15       # applies to the digest ONLY — never to charter decisions
 
 # ── Tier 3: IRREVERSIBLE HOLD — prepare fully, execute only on human approval ─
 irreversible:
-  # Overnight: advance each to one step before the point of no return.
   held_actions:
     - production_deploy
-    - external_publication                # anything leaving the boundary is published
-    - asset_movement                      # funds, credentials, data exports
+    - external_publication              # anything leaving the boundary is published
+    - asset_movement                    # funds, credentials, data exports
     - ledger_schema_change
-    - sunset                              # the org never adjudicates its own death
-  prepare_up_to: staged_and_verified      # build, test, stage, diff — approve-only state
+    - sunset                            # the org never adjudicates its own death (docs/06 §4.3)
+  prepare_up_to: staged_and_verified    # build, test, stage, diff — approve-only state
+  staging_guards:
+    no_asset_materialization_at_boundary: true   # staging stops BEFORE secrets/data/funds
+                                                 # are assembled at the edge
+    max_concurrent_held_per_class: 3             # the night cannot stage 50 to swamp review
+    each_held_action_carries: checker_signed_effect_diff
+
+# ── Knowledge & context rules (docs/07, docs/08) ─────────────────────────────
+knowledge:
+  external_content_is_untrusted: true   # nothing external enters always-loaded context
+  doctrine_admission: gate              # without mechanistic admission (anti-poisoning)
+  provenance_required: [source, retrieved_at, confidence, affected_roles]
+  doctrine_claims_carry_ttl: true       # stale doctrine fires the doctrine_stale sensor
+  self_serving_doctrine_is_charter: true  # a diff touching the proposer's own discipline
+                                          # or any threshold the gate uses is charter-tier
+context:
+  scopes_default: deny                  # need-to-know (docs/08 §2.2)
+  grants_recorded_in_ledger: true
+  grant_recertification_cadence: weekly # unused grants are revoked
+  intent_block_in_every_pack: true      # no role is "not cleared" for the purpose
+  pack_budgets_enforced_by: registrar
 
 # ── Escalation channels — strictly two, never mixed ─────────────────────────
 escalation:
-  digest: [reorg_commits, ringi_items, held_irreversibles, anomalies, budget_report]
+  digest: [reorg_commits, open_proposals, held_irreversibles, anomalies, budget_report]
   wake_up_push: [global_halt, safety_limit_tripped, ledger_anomaly]   # nothing else
+  watchdog:                             # docs/06 §2.4 — the backstop is NOT self-reported
+    outside_org_write_authority: true   # external monitor over the append-only store
+    dead_mans_switch: true              # missing invariants-hold heartbeat is itself a page
+    heartbeat_interval_minutes: 30
 
 # ── Invariants — no tier may touch these; violations are global-halt events ──
 invariants:
   - ledger_append_only: true
-  - no_knowledge_outside_ledger: true          # the anti-属人化 invariant (docs/05 §5)
+  - no_knowledge_outside_ledger: true          # the anti-person-dependence (属人化) invariant
+                                               # (docs/05 §5 — enforced by discipline + audit)
   - control_never_dormant_while_exploring: true
   - maker_never_own_checker: true
-  - no_agent_writes_this_file: true
+  - no_agent_writes_this_file: true            # enforce via repo protection + CI identity check;
+                                               # the lint verifies declaration, the runtime must
+                                               # verify authorship (docs/06 §2.4 watchdog)
