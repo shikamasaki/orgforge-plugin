@@ -168,7 +168,13 @@ Need-to-know applies to the exploration front's *lateral* traffic. It never rest
   their duties require, and a maker can never scope-fence its Checker out of the evidence
   (that would be separation of duties defeated by information starvation). This is
   guaranteed structurally: the projection writes the evidence files into the checker's
-  working directory regardless of the maker's grants (Tier-A SoD, docs/09 §5);
+  working directory regardless of the maker's grants (Tier-A SoD, docs/09 §5). **The budget
+  cannot do it either.** The over-budget summarize-and-link rule (§2.4) applies to the
+  exploration front, NOT to a checker's `full_evidence_trail`: lossily summarizing a large
+  candidate's evidence away is the same SoD-by-starvation attack, committed through a size
+  knob instead of a scope grant. Over budget, a control-layer pack gets the *whole* trail
+  chunked/paginated (or more budget), never a lossy summary — a checker admits on the full
+  evidence or the org raises the budget, it never admits on a summary of what it wasn't shown;
 - **the ledger's completeness** — scoping governs who *reads* which views, never what
   gets *written*; the record stays whole (custody, Organ 6);
 - **the intent block** — no role is ever "not cleared" for the organization's purpose.

@@ -237,6 +237,41 @@ because the humans, not the org, own the judgment that its purpose is spent. The
 reverse door stays open: an archived org plus its ledger is a template plus experience,
 and can be re-founded.
 
+### 4.4 Re-founding — the CEO tears down and rebuilds, assets intact
+
+Between reorganizing at the edges (moves.yaml) and dying (sunset) sits the move only the
+human at the top may make: **on noticing a *root* problem in how the org is shaped, tear down
+the role structure wholesale and re-found it with new roles — while keeping every accumulated
+asset.** This is the top of the authority hierarchy. Section-chiefs scale within a section,
+dept-heads within a department (§scale-authority / docs/05); the CEO may reshape the *whole
+chart*, and only the CEO may, because it re-mints the SoD skeleton and the decision line that
+found the org (a founding-tier act, Stinchcombe imprinting again).
+
+What "assets intact" means precisely — the structure is what changes; **the assets are
+custody-of-the-ledger, not property of any role**, so they survive a total re-map:
+
+- **The ledger** (`custody: ledger`, not an agent) is the single source of truth. Tearing down
+  every role does not touch it; the append-only history, admitted results, and event chain
+  persist by construction (docs/05 §5, the *no-knowledge-outside-the-ledger* invariant).
+- **Doctrine** (each role's accumulated べき論) is **role-keyed** (`<root>/<role>.json`), so a
+  re-found that renames or re-splits roles must **re-map doctrine to the new roles, not orphan
+  it.** The refound diff therefore carries an explicit `doctrine_remap: {old_role: new_role}`;
+  claims whose `affected_roles` no longer name a live role are re-homed by the map, and any
+  claim left unmapped is surfaced to the human (never silently dropped) before the re-found
+  commits. This is the one asset that structure-change can lose, so it is the one the move
+  guards explicitly.
+- **Admitted results, contracts, the intent history, the supervisor's coaching record** are all
+  ledger-derived views — they re-project onto whatever new roles are granted them; nothing is
+  lost, it is re-scoped.
+
+**Re-founding is charter-tier and human-executed** — it is a founding act, so it inherits
+founding's rule: humans author the new structure inside the *unchanged* constitution (the
+constitution outlives the re-found; if the charter itself is wrong, that is a separate,
+higher act), the new founding commit passes the lint, and the re-found is one atomic ledgered
+event so a crash mid-re-found leaves the old structure intact (the ledger's append-only chain
+is never half-written). *It survives being torn down because the thing that holds the value —
+the ledger — was never part of the structure being torn down.*
+
 ---
 
 ## 5. Interlocks (why this doesn't violate the repo's own rules)

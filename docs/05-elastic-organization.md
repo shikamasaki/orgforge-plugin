@@ -214,6 +214,38 @@ full review cycle, whose function has been absorbed by a standing convention
 (standardization replacing supervision — Mintzberg's own progression), or whose product
 phase has passed (see docs/06, maintenance and sunset).
 
+### 4.1 Who may scale — authority scoped to span (§scale-authority)
+
+The activation/deactivation *decision* above is separate from the *authority to make it*.
+That authority is **the same for every manager; only the scope differs** — a section-chief may
+scale within their section, a dept-head within their department, the CEO across the whole
+chart. It is one primitive with a range parameter, not a different power per rank.
+
+The range is not a new field: **a manager's scale scope is exactly the transitive closure of
+its `supervises:`** (organization.yaml). A dept-head supervises section-chiefs and therefore,
+transitively, their sections; the nesting composes for free. The rule the lint (O2c) and the
+scale moves enforce:
+
+> A role may activate / deactivate / re-scope a department **only if that department lies in
+> the transitive closure of the role's `supervises:`.** (`requester_scope_covers_target`.)
+
+Two guards keep this from becoming a back door. **The regime boundary:** an organic manager's
+closure may never contain a control role — no dept-head can deactivate the gate/skeptic
+"within its span" (O2c fails closed on this). **The span gate stays upstream:** this decides
+*who may scale an existing layer*, not *when a layer may exist* — a supervisory layer is still
+minted only by charter-tier `add_layer` after `widen_span_via_context` is tried first (docs/02
+§3). Critically, do **not** pre-build a multi-level `supervises:` tree to "give managers someone
+to be": design the *departments* fully (§5.1) but let the supervisory tree stay single-level
+until `add_layer` earns each level under load — scale scope is *derived from* whatever tree
+`add_layer` actually produced, never a place to author aspirational hierarchy. Built
+conditionally, scoped scale-authority is fully compatible with "stay flat, widen span first";
+built eagerly, it rebuilds the tall-structure tax through the back door.
+
+At the top of this hierarchy sits the human CEO, whose scope is the whole chart and who alone
+may **re-found** — tear the structure down and rebuild it with new roles, assets intact
+(docs/06 §4.4). Same primitive, widest scope, plus the founding-tier ceremony that re-scoping
+the whole org demands.
+
 ---
 
 ## 5. Rules of the elastic organization (summary)

@@ -80,6 +80,9 @@ charter:
     - delegation_bounds                 # this file's Tier-1 contents themselves
     - moves_catalog                     # adding/changing legal moves
     - add_layer                         # hierarchy is charter-tier: the last resort
+    - refound                           # tear down & rebuild the whole chart, assets intact — a
+                                        # founding act; only the CEO/human reshapes the whole org
+                                        # (docs/06 §4.4). The constitution itself outlives it.
     - lifecycle_transitions             # enter_maintenance, prepare_handover
   queue: ledger://proposals             # append-only; adjudicated each morning
   queue_rules:                          # anti-flooding, anti-bundling (docs/06 §2.2)

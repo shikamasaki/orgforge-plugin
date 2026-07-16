@@ -97,7 +97,7 @@ def lint_org(org, lint):
     check_sod(org, roles, control_ids, lint)
     check_contracts(org, roles, lint)
     check_control_awake(roles, control_ids, lint)
-    return roles
+    return roles, control_ids
 
 
 def check_schema(org, lint):
@@ -209,6 +209,47 @@ def collect_control_ids(org, roles, lint):
         if isinstance(pair, dict) and pair.get("checker_must_not_be"):
             pass  # forbidden names are exclusions, not members
     return {c for c in control if c in roles}
+
+
+# scale moves — the ones that (de)activate/reshape a department. A manager may execute one only
+# within its span-of-authority (docs/05 §scale-authority): the target must lie in the transitive
+# closure of the requester's `supervises:`. A section-chief scales its section; a dept-head
+# supervises section-chiefs and thus, transitively, their sections — "the same authority, only the
+# scope differs." add_layer mints new authority, so it stays charter-tier and is NOT in this set.
+SCALE_MOVES = {"activate_department", "deactivate_department", "adjust_context_scope"}
+
+
+def check_scale_scope(org, roles, control_ids, mv, lint):
+    """O2c — hierarchical scale authority. (1) every scale move must carry the
+    requester_scope_covers_target precondition (the lint guarantees the guard is PRESENT; the
+    runtime evaluates the closure against the ledgered initiator, docs/09). (2) no organic
+    manager's supervises-closure may contain a control role — else a dept-head could deactivate
+    the control skeleton 'within its span'."""
+    def closure(rid, seen=None):
+        seen = seen if seen is not None else set()
+        for x in roles.get(rid, {}).get("supervises", []) or []:
+            if x not in seen:
+                seen.add(x)
+                closure(x, seen)
+        return seen
+
+    for m in (mv.get("moves", []) if mv else []):
+        if m.get("id") in SCALE_MOVES:
+            checks = [pc.get("check") for pc in m.get("preconditions", []) or []
+                      if isinstance(pc, dict)]
+            if "requester_scope_covers_target" not in checks:
+                lint.fail("O2c", f"scale move '{m['id']}' lacks the "
+                                 f"requester_scope_covers_target precondition — scaling with no "
+                                 f"span-of-authority check lets any manager scale any department "
+                                 f"(docs/05 §scale-authority)")
+    # regime guard: an organic manager must never have a control role in its scale reach
+    for rid, r in roles.items():
+        if r.get("regime") == "organic":
+            crossed = control_ids.intersection(closure(rid))
+            if crossed:
+                lint.fail("O2c", f"organic role '{rid}' supervises-closure reaches control "
+                                 f"role(s) {sorted(crossed)} — a dept-head could deactivate the "
+                                 f"control skeleton within its span (regime boundary, docs/03)")
 
 
 def check_sod(org, roles, control_ids, lint):
@@ -482,10 +523,16 @@ def lint_org_against_schema(org, views, triggers, lint):
         if not isinstance(grant.get("pack_budget_tokens"), int):
             lint.fail("CP", f"scope grant for '{role}' has no integer pack_budget_tokens "
                             f"— an unbudgeted pack is an unbounded one (docs/08 §2.4)")
+    # the universal pack items (carried by every role WITHOUT a per-role grant) are DECLARED in
+    # information_flow.universal_pack_items — read them, don't hardcode, so the code and the
+    # articulation cannot silently disagree (the CP authority-control hole: a pack item that is
+    # injected but not granted unenforces deny-by-default).
+    universal = set((org.get("information_flow", {}) or {}).get("universal_pack_items",
+                                                                 ["intent_block", "doctrine"]))
     for r in org.get("roles", []):
         rid = r.get("id", "?")
         for item in r.get("context_pack", []) or []:
-            if item in ("intent_block", "doctrine"):
+            if item in universal:
                 continue
             if item not in views:
                 lint.fail("LS", f"role '{rid}' context_pack names undefined view '{item}'")
@@ -759,11 +806,13 @@ def main(argv):
                             f"(no roles key) — check argument order: org constitution "
                             f"moves ledger-schema sensors")
         else:
-            lint_org(org, lint)
+            _org_roles, _org_control = lint_org(org, lint)
     if con is not None:
         lint_constitution(con, lint)
     if mv is not None:
         lint_moves(mv, con, lint)
+        if org is not None and "roles" in org:
+            check_scale_scope(org, _org_roles, _org_control, mv, lint)
     views, triggers = (set(), set())
     if ls is not None:
         views, triggers = lint_ledger_schema(ls, lint)

@@ -38,10 +38,15 @@ moves:
       - check: span_check_on_supervisor
       - check: named_checker_active_with_it     # a maker never activates without its Checker
       - check: requester_is_not_target_checker_maker   # no dept (de)activates its own checker
+      - check: requester_scope_covers_target    # TARGET must lie in the transitive closure of the
+                                                # initiator's supervises: — a manager scales only
+                                                # within its span-of-authority (docs/05 §scale-authority)
     effect:
       patch:
         - { role: TARGET, set: { active: true } }
       side_effects: [deliver_context_pack_with_current_doctrine, ledger_rationale]
+      initiated_by_supervisor: REQUESTER        # whose scale authority this is exercised under —
+                                                # ledgered so the closure check has an auditable input
     reverse: deactivate_department
 
   - id: deactivate_department
@@ -52,10 +57,12 @@ moves:
         judge: llm
       - check: not_a_control_role_while_exploration_active
       - check: requester_is_not_maker_checked_by_target   # makers cannot starve their Checker off
+      - check: requester_scope_covers_target    # scale only within span-of-authority (docs/05)
     effect:
       patch:
         - { role: TARGET, set: { active: false } }
       side_effects: [profile_and_ledger_history_persist]   # lossless dormancy
+      initiated_by_supervisor: REQUESTER
     reverse: activate_department        # returns with full institutional memory
 
   - id: widen_span_via_context
@@ -98,8 +105,11 @@ moves:
       - sensor: context_utilization                      # narrowing/revocation (docs/08 s3)
       - check: both_ends_of_seam_are_organic             # control-layer scopes are charter-tier
       - check: grant_recorded_in_ledger
+      - check: requester_scope_covers_target    # a manager may re-scope only within its span-of-
+                                                # authority — both seam ends in its supervises-closure
     effect:
       prose: "open, widen, narrow, or revoke a seam grant in information_flow.scopes; recertified on cadence"
+      initiated_by_supervisor: REQUESTER
     reverse: restore_previous_scope
 
   - id: delegate_authority
@@ -178,4 +188,24 @@ moves:
         judge: human
     effect:
       prose: "deactivate all; archive ledger read-only; retire the constitution instance"
-    reverse: re_founding_from_archive   # a new organization, with inherited memory
+    reverse: refound                    # a new organization, with inherited memory
+
+  - id: refound
+    tier: charter                       # a FOUNDING act — humans author the new structure inside
+                                        # the unchanged constitution; only the CEO/human may reshape
+                                        # the whole chart (docs/06 §4.4). Re-mints the SoD skeleton.
+    preconditions:
+      - judgment: "a ROOT problem in how the org is shaped (not an edge that a scale/reorg move
+          fixes) — the human decides the structure itself is wrong"
+        judge: human
+      - check: doctrine_remap_covers_every_live_claim   # every role-keyed doctrine claim maps to a
+                                                        # new role or is surfaced to the human; none
+                                                        # silently orphaned (docs/06 §4.4)
+      - check: new_structure_passes_lint                # the new chart passes org_lint like any founding
+    effect:
+      prose: "tear down the role structure and re-found with new roles, ASSETS INTACT — the ledger
+        (custody, not a role) persists untouched; doctrine is re-mapped {old_role: new_role};
+        admitted results / contracts / intent history re-project onto the new roles. One atomic
+        ledgered event so a crash mid-refound leaves the old structure intact."
+      side_effects: [ledger_persists_untouched, doctrine_remapped, refounding_commit_ledgered]
+    reverse: refound                    # itself — a re-found is reversed by another re-found

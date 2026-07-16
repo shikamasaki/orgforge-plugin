@@ -114,6 +114,13 @@ information_flow:
     contains: [purpose, current_priorities, constraints_in_force]
     version: ledger-stamped              # loaded by reference, never copied into profiles
     in_every_pack: true
+  # The two special pack items every role carries WITHOUT a per-role scope grant (docs/08 §2.1,
+  # ledger-schema.yaml special_pack_items): the intent (broadcast) and the role's OWN doctrine
+  # (its own べき論, per-role — not another role's). Declaring them here makes the lint's
+  # exemption articulated, not a hidden hardcode: a context_pack may contain a special item OR a
+  # granted view, nothing else. `doctrine` is per-role by construction (tools/doctrine.py keys
+  # the store by role), so carrying it does not cross the need-to-know boundary.
+  universal_pack_items: [intent_block, doctrine]
   scopes:                                # deny-by-default seam grants (docs/08 §2.2)
     default: deny
     grants:                              # who may read which derived views, and the pack budget

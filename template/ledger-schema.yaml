@@ -55,6 +55,9 @@ event_classes:
   intelligence_filed:   { curator, item_ref, provenance, affected_roles }
   scope_grant_changed:  { seam: {from, to}, change: open|widen|narrow|revoke, grantor }
   intent_revised:       { version, diff_ref, human }
+  refounding_committed: { old_structure_ref, new_structure_ref, doctrine_remap: {old_role: new_role},
+                          unmapped_claims_surfaced: [claim_id], human }   # docs/06 §4.4 — atomic re-found,
+                          # assets intact: the ledger persists, doctrine is re-mapped, none orphaned
   digest_generated:     { window, census: {class: count}, exceptions_ref }
   anomaly_detected:     { detector, description, matched_pattern: pattern_id|none }
   # operating events (docs/11) — the recurring checks a 24/7 unattended org needs beyond
