@@ -14,8 +14,9 @@
 #     (NOT machine-decidable; judge:human items queue a proposal instead of executing).
 #   effect / reverse: structured where machine-applicable, prose where not (yet).
 #
-# Sensors (crisis signals of docs/02 s4 made measurable; formulas are the v0.3 stubs —
-# a sensors.yaml with data sources and thresholds is the known missing spec):
+# Sensors (crisis signals of docs/02 s4 made measurable): every sensor named below is
+# DEFINED in template/sensors.yaml — source views, formula, window, threshold, judge,
+# and night pre-registration. The lint cross-checks this catalog against it. Summary:
 #   supervisor_saturation  - rubber-stamp rate rising / review depth per report falling
 #   blocked_on_center      - time departments idle awaiting central decisions
 #   divergence             - duplicate-work rate / contradictory conventions across seams

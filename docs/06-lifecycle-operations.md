@@ -263,7 +263,9 @@ and can be re-founded.
   newness).
 - Whetten, D. 1980 (organizational decline); Hannan & Freeman (organizational ecology).
 
-*Status: this is the newest and least-tested layer of the repo. The tier behaviors,
-queue rules, and safe-mode defaults are design commitments, not validated results; the
-sensor formulas and runtime that would enforce them are specified in outline only
-(see moves.yaml and the honest gaps listed in README's status section).*
+*Status: this is among the newest and least-tested layers of the repo. The tier
+behaviors, queue rules, and safe-mode defaults are design commitments, not validated
+results. The sensor formulas live in template/sensors.yaml, the ledger and pack
+machinery in template/ledger-schema.yaml, and the enforcing runtime is specified with a
+conformance checklist in docs/09-runtime.md — specified, not yet shipped as code (see
+README's status section for the honest boundary).*

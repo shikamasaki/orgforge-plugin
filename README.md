@@ -55,6 +55,7 @@ Decomposing from the organization (not from the parts) changes what you build:
 | [docs/06-lifecycle-operations.md](docs/06-lifecycle-operations.md) | Cradle to grave: founding from an RFP, 24-hour autonomous operation (an approval queue with a delegation-of-authority (決裁権限) matrix — inspired by the written-proposal aspect of 稟議 (*ringi*), not its consensus formation — plus night safe mode), maintenance, handover, sunset. |
 | [docs/07-doctrine-and-knowledge.md](docs/07-doctrine-and-knowledge.md) | The knowledge organ: market-watching boundary spanners feed a role-scoped knowledge base; each role's doctrine (べき論 — its current normative playbook) is updated through Maker/Checker and always loaded as context. |
 | [docs/08-context-economy.md](docs/08-context-economy.md) | Need-to-know information flow: scoped context packs, contract-interface collaboration, context budgets, and commander's-intent policy propagation. |
+| [docs/09-runtime.md](docs/09-runtime.md) | The runtime spec: mediated actions, fail-safe tier classification, the ledger as event bus, halt/watchdog, determinism obligations — with a testable conformance checklist. |
 
 **Playbooks & maps**
 
@@ -75,12 +76,14 @@ Decomposing from the organization (not from the parts) changes what you build:
 | [template/FOUNDER.md](template/FOUNDER.md) | The founding process: RFP → purpose → inverse-Conway architecture → output contracts → full latent org, minimally activated. |
 | [template/constitution.yaml](template/constitution.yaml) | The charter (定款, *teikan* — articles of incorporation): delegated / charter/*ringi* (稟議 — an approval queue inspired by Japanese written-proposal practice) / irreversible-hold tiers, night rules, invariants. Written by humans, writable by no agent. |
 | [template/moves.yaml](template/moves.yaml) | The legal-move catalog: every structural change the org may make, with preconditions, tier, and reversal. |
+| [template/ledger-schema.yaml](template/ledger-schema.yaml) | The single source of truth, specified: event classes, hash-chained envelope, derived views (the only context-pack vocabulary), pack assembly, proposal & digest shapes. |
+| [template/sensors.yaml](template/sensors.yaml) | Every crisis signal as a measurement: source views, formula, window, threshold, machine/llm judge, and the night-preregistration list. |
 
 **Tools**
 
 | Path | What it is |
 |---|---|
-| [tools/org_lint.py](tools/org_lint.py) | The audit gate: meant to run as the gate on every founding/reorg commit (run it as a pre-commit check; it validates organization.yaml, constitution.yaml, and moves.yaml) against the theory (Goodhart, span, SoD, control-never-dormant). |
+| [tools/org_lint.py](tools/org_lint.py) | The audit gate: meant to run as the gate on every founding/reorg commit (run it as a pre-commit check; it cross-validates all five data files — organization, constitution, moves, ledger-schema, sensors) against the theory (Goodhart, span, SoD, control-never-dormant, need-to-know packs). |
 
 ## How to use it
 
@@ -119,10 +122,12 @@ runtime substrates like AIOS, automated agent design like ADAS/DGM) already exis
 here is **the top-down organizational decomposition that places them** — and, per the research in
 [docs/sources.md](docs/sources.md), applying *classical* management theory (Mintzberg, Greiner,
 span of control, separation of duties) to agent design is where the literature is currently thin.
-Docs 05–08 and the constitution/moves/lint layer are the newest and least-tested material in the
-repo — treat them accordingly. The lint enforces state invariants (SoD, span,
-control-never-dormant, schema); transition/tier enforcement and the ledger/sensor runtime are
-specified but not yet implemented.
+Docs 05–09 and the constitution/moves/ledger-schema/sensors/lint layer are the newest and
+least-tested material in the repo — treat them accordingly. The lint cross-validates all five data
+files (state invariants, SoD, span, control-never-dormant, pack/grant consistency, sensor and
+cadence definitions); the runtime that would enforce them at execution time is **specified with a
+testable conformance checklist ([docs/09-runtime.md](docs/09-runtime.md)) but not shipped as code**
+— unticked conformance items are the honest boundary of what the system currently guarantees.
 The value of any org design is proven by whether the organization actually **produces**, not by the
 elegance of its chart. Treat this as scaffolding for that, not a substitute for it.
 

@@ -21,12 +21,22 @@ move catalog (moves.yaml) against the invariants the theory says must hold mecha
                           that is not itself
   CH   charter sanity   — invariants present/true, sunset held, founding_commit charter,
                           no placeholders (SET_ME), queue rules on
-  MV   move catalog     — parses, tiers valid, delegated lists cross-match constitution
+  MV   move catalog     — parses, tiers valid, delegated lists cross-match constitution;
+                          every cited sensor is defined
+  LS   ledger schema    — envelope/classes/views/triggers present; every view referenced
+                          by scopes, context packs, or sensors exists
+  CP   context packs    — every pack entry is intent_block, doctrine, or a view GRANTED
+                          to that role (a pack cannot smuggle an ungranted view)
+  CA   cadences         — every loop cadence parses (every_<n>_<min|hours> or a declared
+                          on_<trigger>)
+  SN   sensors          — each sensor has formula/window/threshold and judge machine|llm;
+                          night-preregistered moves are delegated-tier and fed by the sensor
 
-Usage:  org_lint.py organization.yaml constitution.yaml moves.yaml
-All three files are required; omitting one is a violation, not a shortcut.
+Usage:  org_lint.py organization.yaml constitution.yaml moves.yaml ledger-schema.yaml sensors.yaml
+All five files are required; omitting one is a violation, not a shortcut.
 Exit 0 = pass, 1 = violations, 2 = usage/parse error.
 """
+import re
 import sys
 
 import yaml
@@ -387,26 +397,148 @@ def lint_moves(mv, con, lint):
                             f"the constitution's delegated list — no tier, no legality")
 
 
+# ── ledger-schema.yaml ───────────────────────────────────────────────────────
+
+def lint_ledger_schema(ls, lint):
+    for key in ("envelope", "event_classes", "views", "triggers"):
+        if not isinstance(ls.get(key), dict) or not ls.get(key):
+            lint.fail("LS", f"ledger-schema.yaml has no {key} — the ledger's vocabulary "
+                            f"is incomplete")
+    env = ls.get("envelope", {})
+    for key in ("fields", "write_control"):
+        if key not in env:
+            lint.fail("LS", f"ledger-schema envelope has no {key}")
+    wc = env.get("write_control", {})
+    if wc.get("append_only") is not True:
+        lint.fail("LS", "ledger-schema write_control.append_only must be true")
+    classes = set(ls.get("event_classes", {}) or {})
+    for vid, view in (ls.get("views", {}) or {}).items():
+        for cls in (view or {}).get("from", []):
+            if cls != "*" and cls not in classes:
+                lint.fail("LS", f"view '{vid}' derives from undeclared event class '{cls}'")
+    return set(ls.get("views", {}) or {}), set(ls.get("triggers", {}) or {})
+
+
+CADENCE_TIMER = re.compile(r"^every_\d+_(min|hours)$")
+
+
+def lint_org_against_schema(org, views, triggers, lint):
+    grants_by_role = {}
+    for grant in ((org.get("information_flow", {}) or {}).get("scopes", {}) or {}) \
+            .get("grants", []) or []:
+        role = grant.get("role")
+        grants_by_role[role] = set(grant.get("views", []))
+        for v in grant.get("views", []):
+            if v not in views:
+                lint.fail("LS", f"scope grant for '{role}' references undefined view '{v}'")
+        if not isinstance(grant.get("pack_budget_tokens"), int):
+            lint.fail("CP", f"scope grant for '{role}' has no integer pack_budget_tokens "
+                            f"— an unbudgeted pack is an unbounded one (docs/08 §2.4)")
+    for r in org.get("roles", []):
+        rid = r.get("id", "?")
+        for item in r.get("context_pack", []) or []:
+            if item in ("intent_block", "doctrine"):
+                continue
+            if item not in views:
+                lint.fail("LS", f"role '{rid}' context_pack names undefined view '{item}'")
+            elif item not in grants_by_role.get(rid, set()):
+                lint.fail("CP", f"role '{rid}' context_pack includes view '{item}' it has "
+                                f"no scope grant for — packs cannot smuggle ungranted "
+                                f"views (docs/08 §2.2)")
+        cadence = (r.get("loop") or {}).get("cadence")
+        if cadence is None:
+            lint.fail("CA", f"role '{rid}' has no loop.cadence")
+        elif not CADENCE_TIMER.match(str(cadence)):
+            if str(cadence).startswith("on_"):
+                if str(cadence)[3:] not in triggers:
+                    lint.fail("CA", f"role '{rid}' cadence '{cadence}' binds to no "
+                                    f"declared trigger (ledger-schema triggers)")
+            else:
+                lint.fail("CA", f"role '{rid}' cadence '{cadence}' matches neither "
+                                f"every_<n>_<min|hours> nor on_<trigger>")
+
+
+# ── sensors.yaml ─────────────────────────────────────────────────────────────
+
+def lint_sensors(sn, mv, views, lint):
+    sensors = sn.get("sensors")
+    if not isinstance(sensors, list) or not sensors:
+        lint.fail("SN", "sensors.yaml has no sensors: list")
+        return set()
+    moves_by_id = {m.get("id"): m for m in (mv or {}).get("moves", []) or []}
+    ids = set()
+    for s in sensors:
+        sid = s.get("id")
+        if not sid:
+            lint.fail("SN", "a sensor has no id")
+            continue
+        if sid in ids:
+            lint.fail("SN", f"duplicate sensor id '{sid}'")
+        ids.add(sid)
+        for key in ("formula", "window", "threshold"):
+            if not s.get(key):
+                lint.fail("SN", f"sensor '{sid}' has no {key} — an unmeasurable sensor "
+                                f"is a vibe, and vibes don't gate moves")
+        if s.get("judge") not in ("machine", "llm"):
+            lint.fail("SN", f"sensor '{sid}' judge must be machine|llm")
+        for v in s.get("source_views", []) or []:
+            if v not in views:
+                lint.fail("SN", f"sensor '{sid}' reads undefined view '{v}'")
+        feeds = s.get("feeds_moves", []) or []
+        for mid in feeds:
+            if mid not in moves_by_id:
+                lint.fail("SN", f"sensor '{sid}' feeds unknown move '{mid}'")
+        for mid in s.get("preregistered_for_night", []) or []:
+            if mid not in feeds:
+                lint.fail("SN", f"sensor '{sid}' preregisters move '{mid}' it does not "
+                                f"feed — night patterns must be exact (docs/06 §2.4)")
+            elif moves_by_id.get(mid, {}).get("tier") != "delegated":
+                lint.fail("SN", f"sensor '{sid}' preregisters non-delegated move '{mid}' "
+                                f"for unattended nights — charter moves queue, always")
+    return ids
+
+
+def lint_moves_cite_defined_sensors(mv, sensor_ids, lint):
+    for m in (mv or {}).get("moves", []) or []:
+        for pc in m.get("preconditions", []) or []:
+            if isinstance(pc, dict) and "sensor" in pc \
+                    and pc["sensor"] not in sensor_ids:
+                lint.fail("MV", f"move '{m.get('id')}' cites undefined sensor "
+                                f"'{pc['sensor']}' — define it in sensors.yaml")
+
+
 # ── entry ────────────────────────────────────────────────────────────────────
 
 def main(argv):
-    if len(argv) != 4:
+    if len(argv) != 6:
         print(__doc__)
         return 2
     lint = Lint()
     org = load(argv[1], lint, "organization.yaml")
     con = load(argv[2], lint, "constitution.yaml")
     mv = load(argv[3], lint, "moves.yaml")
+    ls = load(argv[4], lint, "ledger-schema.yaml")
+    sn = load(argv[5], lint, "sensors.yaml")
     if org is not None:
         if "roles" not in org:
             lint.fail("SC", f"{argv[1]} does not look like an organization.yaml "
-                            f"(no roles key) — check argument order: org constitution moves")
+                            f"(no roles key) — check argument order: org constitution "
+                            f"moves ledger-schema sensors")
         else:
             lint_org(org, lint)
     if con is not None:
         lint_constitution(con, lint)
     if mv is not None:
         lint_moves(mv, con, lint)
+    views, triggers = (set(), set())
+    if ls is not None:
+        views, triggers = lint_ledger_schema(ls, lint)
+        if org is not None and "roles" in org:
+            lint_org_against_schema(org, views, triggers, lint)
+    if sn is not None:
+        sensor_ids = lint_sensors(sn, mv, views, lint)
+        if mv is not None:
+            lint_moves_cite_defined_sensors(mv, sensor_ids, lint)
     if lint.errs:
         print(f"org_lint: {len(lint.errs)} violation(s)")
         for e in lint.errs:

@@ -1,0 +1,121 @@
+# ledger-schema.yaml — the single source of truth, specified.
+#
+# The ledger is Organ 5's shared record and Organ 6's custody+recording holder. This file
+# defines its envelope (tamper evidence), its event classes (the org's complete factual
+# vocabulary — if it isn't an event class, it didn't happen), its derived views (the ONLY
+# things context packs may contain), and how packs are assembled. Views are regenerated
+# from events, never hand-edited. The runtime that serves this schema is specified in
+# docs/09-runtime.md; the lint cross-checks every reference in organization.yaml,
+# moves.yaml, and sensors.yaml against this file.
+
+# ── Envelope: every event, no exceptions ─────────────────────────────────────
+envelope:
+  fields:
+    id: uuid                       # idempotency key (at-least-once delivery, dedup on id)
+    seq: monotonic_integer         # assigned by the ledger service, gapless per ledger
+    ts: rfc3339_utc
+    actor: role_id | human:<name> | system:<component>   # from runtime identity, NEVER from payload
+    class: one_of_event_classes_below
+    payload: class_specific_object
+    prev_hash: sha256              # hash chain: tamper evidence
+    hash: sha256                   # H(prev_hash || canonical_json(id,seq,ts,actor,class,payload))
+  write_control:
+    append_only: true
+    single_writer: ledger_service  # agents call append(); they never hold the file/store
+    actor_identity_source: runtime_session   # an agent cannot claim another's actor id
+    verification: external_watchdog_replays_hash_chain   # docs/06 §2.4, docs/09 §5
+
+# ── Event classes: the org's complete factual vocabulary ────────────────────
+event_classes:
+  # metabolism (Organ 4)
+  cycle_started:        { role, pack_manifest_id }
+  cycle_completed:      { role, tokens: {task, gate, reporting}, outputs: [ref], views_referenced: [view_id] }
+  heartbeat:            { component, invariants_hold: bool }
+  halt_tripped:         { trigger, scope: global|role }
+  # work (Organs 2/6)
+  candidate_submitted:  { maker, candidate_id, contract_ref, evidence: [ref] }
+  admission_decided:    { gate, candidate_id, verdict: admit|reject|park, standard_ref, evidence: [ref] }
+  refutation_attempted: { skeptic, claim_id, verdict: refuted|survives, checklist_ref }
+  result_deployed:      { candidate_id, net_effect_ref }
+  result_retired:       { candidate_id, cause }
+  # structure (Organ 7 / moves)
+  sensor_reading:       { sensor, value, window, inputs_ref }
+  move_executed:        { move_id, tier, diff_ref, precondition_evidence: [sensor_reading.id], lint_report_ref }
+  proposal_filed:       { subject, diff_ref, diagnosis, expected_effect, dedup_key }
+  proposal_adjudicated: { proposal_id, decision: approve|reject|amend, human }
+  irreversible_staged:  { action_class, effect_diff_ref, checker_signature }
+  irreversible_executed: { staged_id, human }
+  # profiles, doctrine, scopes (Organs 3/5, docs/07-08)
+  profile_edited:       { role, diff_ref, editor, section: body|preamble }
+  doctrine_diff_admitted: { role, claims: [{claim, provenance: {source, retrieved_at, confidence}, review_by}] }
+  intelligence_filed:   { curator, item_ref, provenance, affected_roles }
+  scope_grant_changed:  { seam: {from, to}, change: open|widen|narrow|revoke, grantor }
+  intent_revised:       { version, diff_ref, human }
+  digest_generated:     { window, census: {class: count}, exceptions_ref }
+  anomaly_detected:     { detector, description, matched_pattern: pattern_id|none }
+
+# ── Cadence triggers: what `loop.cadence: on_<x>` may bind to ────────────────
+triggers:
+  candidate_arrival:      candidate_submitted
+  positive_result:        admission_decided   # filtered verdict == admit
+  handover_preparation:   move_executed       # filtered move_id == prepare_handover
+  operator_instruction:   human               # out-of-band; runtime-delivered
+
+# ── Derived views: the ONLY vocabulary of context packs and scope grants ─────
+# Each view: which classes it derives from, and its shape. Regenerated, never edited.
+views:
+  live_findings:        { from: [admission_decided, result_deployed], shape: currently-admitted results and their state }
+  nearby_deaths:        { from: [admission_decided, refutation_attempted, result_retired], shape: recent rejections/refutations adjacent to the reader's contract, with causes }
+  death_causes:         { from: [admission_decided, result_retired], shape: aggregated failure causes }
+  coverage_map:         { from: [candidate_submitted], shape: searched vs unsearched territory }
+  parked_inventory:     { from: [admission_decided], shape: verdict == park, with park reasons }
+  parts_inventory:      { from: [admission_decided, result_retired], shape: admitted orthogonal components }
+  combination_history:  { from: [candidate_submitted, admission_decided], shape: tried combinations and outcomes }
+  open_experiments:     { from: [candidate_submitted, cycle_completed], shape: backlog awaiting execution }
+  reusable_modules:     { from: [cycle_completed], shape: shared implementation assets }
+  gate_input_spec:      { from: [intent_revised, proposal_adjudicated], shape: the current candidate submission format }
+  doctrine_gaps:        { from: [doctrine_diff_admitted, cycle_completed], shape: roles whose doctrine is thin or expiring }
+  doctrine_ttl_board:   { from: [doctrine_diff_admitted], shape: claims by review_by date }
+  watch_sources:        { from: [intelligence_filed, doctrine_diff_admitted], shape: declared external sources and their yield }
+  direction_flags:      { from: [cycle_completed, sensor_reading], shape: per-role direction verdicts for the supervisor }
+  sensor_readings:      { from: [sensor_reading], shape: latest value per sensor with window }
+  ledger_census:        { from: ["*"], shape: counts of every event class, all time }
+  recent_ledger_census: { from: ["*"], shape: counts of every event class, current window }
+  admission_standard:   { from: [intent_revised, proposal_adjudicated], shape: the purpose-grounded standard, current version }
+  candidate_under_review: { from: [candidate_submitted], shape: the one candidate the gate is judging, full submission }
+  claim_under_review:   { from: [admission_decided], shape: the admitted positive under adversarial review }
+  refutation_checklist: { from: [intent_revised, proposal_adjudicated], shape: the skeptic's current battery }
+  full_evidence_trail:  { from: ["*"], shape: everything touching the item under review — control roles only }
+  moves_catalog:        { from: [proposal_adjudicated], shape: current legal moves (mirror of moves.yaml at its adopted version) }
+  proposal_queue:       { from: [proposal_filed, proposal_adjudicated], shape: open proposals by subject }
+
+# ── Context-pack assembly (docs/08; executed by the registrar) ───────────────
+context_pack:
+  algorithm: |
+    1. intent block, by reference to its latest intent_revised version (never copied).
+    2. the role's current doctrine (doctrine_diff_admitted, folded; TTL-expired claims flagged).
+    3. each view granted to the role in organization.yaml information_flow.scopes.grants,
+       rendered fresh from the ledger.
+    4. budget check: if the rendered pack exceeds pack_budget_tokens, summarize the
+       overflowing views and attach ledger refs for pull-based drill-down — never
+       silently truncate, never drop the intent or the contract.
+    5. write a pack manifest (what was included, which versions, what was summarized)
+       and ledger it via cycle_started.pack_manifest_id.
+  special_pack_items: [intent_block, doctrine]   # the only non-view pack entries
+  pull_interface: a role may query any view it is GRANTED, mid-cycle, for drill-down;
+    queries outside its grants are denied and ledgered (blocked_on_missing_context feeds
+    on these denials)
+
+# ── Proposal (approval-queue) item & digest shapes ───────────────────────────
+proposal_item:
+  fields: { subject: one_charter_item, diff_ref, diagnosis, expected_effect, dedup_key }
+  rules_ref: constitution charter.queue_rules
+digest:
+  deterministic: true              # same window + same ledger ⇒ byte-identical digest
+  sections:
+    - census: counts of EVERY event class in the window (mandatory, uncurated)
+    - reorg_commits: all move_executed with diffs
+    - open_proposals: proposal_queue view
+    - held_irreversibles: irreversible_staged not yet executed
+    - anomalies: anomaly_detected + any census count outside its trailing band
+    - budget_report: tokens by role and category vs caps

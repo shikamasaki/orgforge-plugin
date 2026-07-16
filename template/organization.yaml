@@ -102,6 +102,8 @@ information_flow:
       - { role: recombiner, views: [parts_inventory, combination_history],          pack_budget_tokens: 20000 }
       - { role: executor,   views: [open_experiments, reusable_modules, gate_input_spec], pack_budget_tokens: 20000 }
       - { role: curator,    views: [doctrine_gaps, watch_sources, doctrine_ttl_board],    pack_budget_tokens: 20000 }
+      - { role: watch,      views: [live_findings, open_experiments],                     pack_budget_tokens: 20000 }
+      - { role: packager,   views: [recent_ledger_census],                                pack_budget_tokens: 30000 }
       - { role: supervisor, views: [direction_flags, sensor_readings, recent_ledger_census], pack_budget_tokens: 30000 }
       # control-layer scopes are charter-tier to change; a maker can never scope-fence
       # its Checker out of the evidence (docs/08 §4)
