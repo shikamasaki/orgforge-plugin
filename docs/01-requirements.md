@@ -10,12 +10,30 @@
 
 ## 0. The first principle, stated as a requirement
 
-The repository's own thesis (THEORY.md) is that **harness and loop are organs the
-industry already built** — Claude Code, Codex, and their kin are runnable harnesses with
-context management, tool mediation, and a control loop. The decomposition's whole point
-is that you *place* those existing wheels, not that you re-forge them.
+The repository's thesis (THEORY.md, as re-anchored): **in a world where AI runs the work
+around the clock and the human decides only the essential things, designing the system
+reduces to *articulating* — in a form an AI can act on — the tacit organizational
+knowledge a human company runs on: the goal, the information flow, the division of labor,
+and the decision line between what the human decides and what is delegated.** That gives
+the deepest requirement:
 
-That yields the load-bearing requirement, from which everything else follows:
+> **R−1 (the articulation requirement) — The system's job is to make the tacit explicit.**
+> Everything a human org leaves unwritten (what we're trying to do, who needs to know
+> what in what amount, who owns which deliverable to what standard, which decisions the
+> human makes vs. delegates) must be written down in machine-actionable form, because an
+> AI acts only on what it is given. `organization.yaml` articulates the division of labor
+> and information flow; `constitution.yaml` articulates the decision line; `ROLE.md`
+> articulates each member's job; the intent block articulates the goal. If any of these is
+> left tacit or coarse, the output is mis-aligned or essence-missing — which is exactly
+> where multi-agent LLM systems empirically fail (MASFT: ~40% inter-agent misalignment,
+> ~35% role/spec, ~25% verification). The articulation *renders to* a permissioned
+> dataflow graph on the host harness (Conway's law), but the design act is the
+> articulation, not the graph.
+
+And R−1 constrains *how* the system runs, which is R0: the harness and loop are organs the
+industry already built — Claude Code, Codex, and their kin are runnable harnesses with
+context management, tool mediation, and a control loop. You *place* those existing wheels;
+you do not re-forge them. So the load-bearing runtime requirement:
 
 > **R0 — The system must let an LLM agent run autonomously on an EXISTING harness, with
 > no new runtime to build first.** What this repository ships is (a) the organization's

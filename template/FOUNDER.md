@@ -1,12 +1,15 @@
 # FOUNDER — from RFP to organization (the founding process)
 
-The founder is the process that runs **once per organization**, at the cradle. Input: an
-RFP (or any statement of what must be built) plus the constitution template. Output: a
-complete, lint-passing, mostly-latent organization — after which the founder itself goes
-dormant and the organization runs autonomously within its constitution.
+The founder is the process that runs **once per organization**, at the cradle. Its job is
+the core act of this repo: **take an RFP and articulate an organization from it** — write
+down, explicitly enough for an AI to run, the goal, the division of labor, the information
+flow, and the decision line the RFP implies but does not spell out. Input: an RFP (or any
+statement of what must be built) plus the constitution template. Output: a complete,
+lint-passing, mostly-latent organization — the tacit made explicit — after which the
+founder itself goes dormant and the organization runs autonomously within its constitution.
 
-The founder designs the org; it never runs it. Founding authority and operating
-authority are separated for the same reason authorization and custody are (Organ 6).
+The founder *articulates* the org; it never runs it. Founding authority and operating
+authority are separated (part of the decision line, Organ 6).
 
 ---
 

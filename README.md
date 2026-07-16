@@ -117,6 +117,8 @@ Decomposing from the organization (not from the parts) changes what you build:
 | [template/moves.yaml](template/moves.yaml) | The legal-move catalog: every structural change the org may make, with preconditions, tier, and reversal. |
 | [template/ledger-schema.yaml](template/ledger-schema.yaml) | The single source of truth, specified: event classes, hash-chained envelope, derived views (the only context-pack vocabulary), pack assembly, proposal & digest shapes. |
 | [template/sensors.yaml](template/sensors.yaml) | Every crisis signal as a measurement: source views, formula, window, threshold, machine/llm judge, and the night-preregistration list. |
+| [template/PROJECTION.md](template/PROJECTION.md) | **The LLM-config layer** — how the articulated org renders into each harness's actual config: what goes into a department's instruction file (CLAUDE.md / AGENTS.md / …), and the neutral→per-harness settings map. The one harness-specific layer; everything above it is neutral. |
+| [template/role-settings.yaml](template/role-settings.yaml) | The neutral model/runtime settings per role — model *tier* (not vendor string), effort, capability scope (the deontic "who may do what"), stop condition, output form. Risk-calibrated; lint-checked (optional 6th file) for coherence with the org chart. |
 
 **Tools**
 

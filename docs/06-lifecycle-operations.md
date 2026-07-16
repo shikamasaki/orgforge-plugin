@@ -1,10 +1,16 @@
 # 06 — Lifecycle & Operations: Cradle to Grave, 24 Hours a Day
 
-> This document operationalizes the repo: how an agent organization is **founded from an
-> RFP**, how it **runs around the clock without a human in the loop**, how it **scales
-> and shrinks elastically** (docs/05), and how it **ends** — maintenance, handover,
-> sunset. The design goal: the humans work their 8 hours on *judgment*; the organization
-> works 24 on *everything else*.
+> This document operationalizes the repo's decision line (docs/11; THEORY Organ 6): how an
+> agent organization is **founded from an RFP**, how it **runs around the clock with the
+> human deciding only the essential things**, how it **scales and shrinks elastically**
+> (docs/05), and how it **ends** — maintenance, handover, sunset. The design goal restates
+> the whole thesis operationally: a human CEO decides the few essential things and delegates
+> the thousand small ones, drawing that line *by feel*; here the line is **written down** so
+> the AI can run the small decisions unattended while the human's 8 hours go to the
+> essential ones. Everything below — the three tiers, the approval queue, the morning digest
+> — is that articulated decision line in operation. Calibrate it to risk (docs/01 §5,
+> docs/11 §3): the ceremony is for the stakes that warrant it, not for every trivial call —
+> over-governing recreates the bottleneck delegation was meant to remove.
 
 The lifecycle state machine (edges marked ⚖ require human adjudication — they are
 charter- or irreversible-tier):

@@ -1,8 +1,15 @@
 #!/usr/bin/env python3
-"""org_lint — the audit gate every founding/reorg commit must pass.
+"""org_lint — checks the ARTICULATED ORGANIZATION is coherent.
 
-Validates the org chart (organization.yaml), the charter (constitution.yaml), and the
-move catalog (moves.yaml) against the invariants the theory says must hold mechanically:
+This is the gate every founding/reorg commit passes. The repo's thesis is that designing an
+agent org = articulating (in machine-actionable form) the tacit organizational knowledge a
+human company runs on (THEORY.md; docs/11): the goal, the division of labor, the information
+flow, and the decision line. This tool checks that articulation is internally consistent —
+that the division of labor, the need-to-know information flow, and the decision line the yaml
+files write down don't contradict each other. It validates the org chart (organization.yaml),
+the charter/decision-line (constitution.yaml), the move catalog (moves.yaml), the ledger
+schema, the sensors, and — optionally — the projection's runtime settings (role-settings.yaml)
+against the invariants that must hold for the articulation to be coherent:
 
   SC   schema           — required keys, unique ids, typed fields; absence is failure,
                           never a silent pass
@@ -31,9 +38,13 @@ move catalog (moves.yaml) against the invariants the theory says must hold mecha
                           on_<trigger>)
   SN   sensors          — each sensor has formula/window/threshold and judge machine|llm;
                           night-preregistered moves are delegated-tier and fed by the sensor
+  RS   role-settings    — (optional 6th file) every active role has neutral runtime settings;
+                          budgets match the scope grant; tiers A|B and model_tier neutral
+                          (no vendor strings); no checker is granted write/implement
 
-Usage:  org_lint.py organization.yaml constitution.yaml moves.yaml ledger-schema.yaml sensors.yaml
-All five files are required; omitting one is a violation, not a shortcut.
+Usage:  org_lint.py organization.yaml constitution.yaml moves.yaml ledger-schema.yaml sensors.yaml [role-settings.yaml]
+The first five files are required; role-settings.yaml is an optional sixth (the projection's
+runtime settings). Omitting a required file is a violation, not a shortcut.
 Exit 0 = pass, 1 = violations, 2 = usage/parse error.
 """
 import re
@@ -507,10 +518,73 @@ def lint_moves_cite_defined_sensors(mv, sensor_ids, lint):
                                 f"'{pc['sensor']}' — define it in sensors.yaml")
 
 
+# ── role-settings.yaml (optional 6th file — the projection's neutral runtime settings) ──
+
+VALID_TIERS_RS = {"A", "B"}
+
+
+def _scope_budgets(org):
+    """role -> pack_budget_tokens from information_flow.scopes.grants."""
+    out = {}
+    for g in ((org.get("information_flow", {}) or {}).get("scopes", {}) or {}) \
+            .get("grants", []) or []:
+        if isinstance(g, dict) and "role" in g:
+            out[g["role"]] = g.get("pack_budget_tokens")
+    return out
+
+
+def lint_role_settings(rs, org, lint):
+    """RS — the articulated runtime settings must be coherent with the org chart:
+    every role present, budgets matching the scope grant, tiers valid, checkers not
+    granted write/implement, and no vendor model strings leaking into the neutral layer."""
+    raw = rs.get("roles")
+    if not isinstance(raw, list) or not raw:
+        lint.fail("RS", "role-settings.yaml has no roles: list")
+        return
+    org_roles = {r["id"]: r for r in (org or {}).get("roles", []) if isinstance(r, dict) and "id" in r}
+    budgets = _scope_budgets(org or {})
+    seen = set()
+    for i, s in enumerate(raw):
+        if not isinstance(s, dict) or "role" not in s:
+            lint.fail("RS", f"role-settings roles[{i}] has no role")
+            continue
+        rid = s["role"]
+        seen.add(rid)
+        if org_roles and rid not in org_roles:
+            lint.fail("RS", f"role-settings names '{rid}', absent from organization.yaml — "
+                            f"the settings articulate a role the org chart doesn't declare")
+        tier = s.get("tier", (rs.get("defaults", {}) or {}).get("tier"))
+        if tier is not None and tier not in VALID_TIERS_RS:
+            lint.fail("RS", f"role '{rid}' tier must be A or B (docs/01 §5)")
+        mt = s.get("model_tier")
+        if mt is not None and mt not in ("judge", "worker", "cheap"):
+            lint.fail("RS", f"role '{rid}' model_tier must be judge|worker|cheap (a NEUTRAL "
+                            f"tier, not a vendor model — docs/11 §2)")
+        # budget must match the org's scope grant (or the info-flow articulation is inconsistent)
+        b = s.get("context_budget_tokens")
+        if rid in budgets and b is not None and budgets[rid] is not None and b != budgets[rid]:
+            lint.fail("RS", f"role '{rid}' context_budget_tokens {b} != its scope grant "
+                            f"{budgets[rid]} in organization.yaml — the information budget is "
+                            f"articulated in two places and they disagree (docs/08)")
+        # a checker/authorization holder must not be granted write/implement in its settings
+        allow = ((s.get("tools") or {}).get("allow")) or []
+        is_control = org_roles.get(rid, {}).get("regime") == "mechanistic"
+        auth = (org.get("separation_of_duties") or {}).get("authorization") if org else None
+        if (is_control or rid == auth) and ("write" in allow or "implement" in allow):
+            lint.fail("RS", f"control role '{rid}' is granted write/implement in role-settings — "
+                            f"a checker that can implement is a maker checking its own work (Organ 6)")
+    # every ACTIVE org role should have settings (dormant ones may be omitted)
+    if org_roles:
+        for rid, r in org_roles.items():
+            if r.get("active") is True and rid not in seen:
+                lint.fail("RS", f"active role '{rid}' has no role-settings block — its runtime "
+                                f"knobs (model tier, stop, tools) are un-articulated")
+
+
 # ── entry ────────────────────────────────────────────────────────────────────
 
 def main(argv):
-    if len(argv) != 6:
+    if len(argv) not in (6, 7):
         print(__doc__)
         return 2
     lint = Lint()
@@ -519,6 +593,7 @@ def main(argv):
     mv = load(argv[3], lint, "moves.yaml")
     ls = load(argv[4], lint, "ledger-schema.yaml")
     sn = load(argv[5], lint, "sensors.yaml")
+    rs = load(argv[6], lint, "role-settings.yaml") if len(argv) == 7 else None
     if org is not None:
         if "roles" not in org:
             lint.fail("SC", f"{argv[1]} does not look like an organization.yaml "
@@ -539,6 +614,8 @@ def main(argv):
         sensor_ids = lint_sensors(sn, mv, views, lint)
         if mv is not None:
             lint_moves_cite_defined_sensors(mv, sensor_ids, lint)
+    if rs is not None and org is not None and "roles" in org:
+        lint_role_settings(rs, org, lint)
     if lint.errs:
         print(f"org_lint: {len(lint.errs)} violation(s)")
         for e in lint.errs:
