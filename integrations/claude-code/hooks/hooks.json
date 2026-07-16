@@ -3,15 +3,22 @@
     "PreToolUse": [
       {
         "matcher": "Bash|Write|Edit|MultiEdit",
-        "type": "command",
-        "command": "python3 \"${CLAUDE_PLUGIN_ROOT}\"/../common/org_hook.py"
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/org_hook.py\""
+          }
+        ]
       }
     ],
     "SessionStart": [
       {
-        "matcher": "",
-        "type": "command",
-        "command": "python3 \"${CLAUDE_PLUGIN_ROOT}\"/../common/org_session_start.py"
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/org_session_start.py\""
+          }
+        ]
       }
     ]
   }

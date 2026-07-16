@@ -37,10 +37,36 @@ integrations/
 
 ## Claude Code — install as a plugin
 
+The repo ships a marketplace manifest at `.claude-plugin/marketplace.json` pointing at the plugin
+in `integrations/claude-code/`. The plugin is **self-contained**: `build.sh` bundles the organ
+`tools/`, the hook `scripts/`, and the `template/` data files into the plugin root, because a
+Claude Code plugin can only reference paths under `${CLAUDE_PLUGIN_ROOT}` (external paths are not
+copied to the install cache). Regenerate the bundle after editing the neutral source:
+
 ```bash
-# from a marketplace or a local path; the plugin bundles hooks + agents + commands
-/plugin install project org-first-agents        # checks into the repo for the team
+integrations/claude-code/build.sh            # sync neutral source -> plugin bundle
+integrations/claude-code/build.sh --check    # CI gate: fail if the bundle drifted
+claude plugin validate integrations/claude-code --strict   # verify the manifest (passes)
 ```
+
+Install from the marketplace (local path works for testing):
+
+```bash
+/plugin marketplace add /path/to/org-first-agents      # or the git URL
+/plugin install org-first-agents@org-first-agents
+```
+
+Or load it directly for a headless run without installing:
+
+```bash
+echo "your prompt" | ORG_LEDGER_ROOT=/path/to/ledger \
+  claude -p --plugin-dir integrations/claude-code --allowedTools "Bash"
+```
+
+**Verified on the real CLI (v2.1.211):** `--plugin-dir` loads the plugin, the `PreToolUse` hook
+fires with the real event JSON, and Claude Code **honors the hook's `deny` + exit 2** — a tool
+call is actually blocked and the reason reaches the model. (Confirmed both that the hook fires and
+that a `deny` blocks; the blast-radius rule blocks an over-cap external write specifically.)
 
 Set the org's state location so the guardrails have something to judge against:
 

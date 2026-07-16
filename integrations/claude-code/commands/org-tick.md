@@ -10,15 +10,15 @@ Ledger root: `${ORG_LEDGER_ROOT}` (must be set).
 
 ## Plan the tick (which checks are due / suspended / MISSED)
 
-!`python3 "${CLAUDE_PROJECT_DIR}/tools/tick.py" plan "${ORG_LEDGER_ROOT}" "${CLAUDE_PROJECT_DIR}/template/schedule.yaml" --now-min ${1:-0} ${2}`
+!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/tick.py" plan "${ORG_LEDGER_ROOT}" "${CLAUDE_PLUGIN_ROOT}/template/schedule.yaml" --now-min ${1:-0} ${2}`
 
 ## Evaluate the machine sensors over the ledger
 
-!`python3 "${CLAUDE_PROJECT_DIR}/tools/sensors.py" eval "${ORG_LEDGER_ROOT}" "${CLAUDE_PROJECT_DIR}/template/sensors.yaml" --now 2026-07-16T12:00:00Z`
+!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/sensors.py" eval "${ORG_LEDGER_ROOT}" "${CLAUDE_PLUGIN_ROOT}/template/sensors.yaml" --now 2026-07-16T12:00:00Z`
 
 ## Verify the ledger chain (tamper evidence + the watchdog heartbeat)
 
-!`python3 "${CLAUDE_PROJECT_DIR}/tools/ledger.py" verify "${ORG_LEDGER_ROOT}"`
+!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/ledger.py" verify "${ORG_LEDGER_ROOT}"`
 
 Based on the above:
 - If any check is **MISSED** past threshold, this is "it was supposed to run" — surface it as an escalation (the host cron may be down). Do not treat silence as success.

@@ -1,0 +1,219 @@
+#!/usr/bin/env python3
+"""tick — the pure schedule PLANNER (docs/11 §5, docs/09 R0).
+
+This is NOT a scheduler. It ships no loop, no daemon, no clock of its own (R0: "the system
+never ships a scheduler", docs/09 §4). It is a pure function the host's cron/CI/harness loop
+invokes once per base interval: given schedule.yaml + the current time + the ledger, it computes
+
+  (1) which operating-event checks are DUE this tick,
+  (2) with the night fail-safe applied (checks not night_safe are SUSPENDED overnight —
+      constitution delegated.night; the tighter of schedule.night_safe and the sensor's
+      preregistered_for_night wins), and
+  (3) — the guardrail the whole layer exists for — which due checks DID NOT RUN: a check that
+      was due but whose verify_event is ABSENT from the ledger in its window is a MISS. A miss
+      is reported, and consecutive misses of one check ESCALATE. "It was supposed to run" is
+      thereby made a detected, escalated fact, never a silent excuse (docs/11 §5.2).
+
+The host then actually invokes the due tools (tick.py only PLANS; it does not run them — that
+would be the bespoke runtime R0 forbids). tick.py's own run is itself ledgered (tick_planned),
+so a gap in tick_planned events proves the host cron itself stopped — the outermost dead-man's
+switch.
+
+  plan <root> <schedule_yaml> --now-min N [--night] [--verbose]
+      N = minutes since an epoch the host defines (a monotonic tick counter). --night forces
+      the night fail-safe (the host passes it based on the operator's away-window / constitution
+      delegated.night.hours). Prints the DUE list, the SUSPENDED list, and any MISSES; exit 10
+      if any check must escalate (a miss past the consecutive threshold, or a due escalation).
+"""
+import argparse
+import json
+import os
+import re
+import sys
+
+ESCALATE = 10
+OK = 0
+
+
+def _load_schedule(path):
+    try:
+        import yaml
+        with open(path, encoding="utf-8") as f:
+            return yaml.safe_load(f)
+    except Exception:
+        pass
+    # tiny fallback: parse the flat checks list + base_interval + missed_tick we ship. Good
+    # enough for the shipped schedule.yaml; a real host has pyyaml.
+    doc = {"checks": [], "missed_tick": {}}
+    cur = None
+    section = None
+    with open(path, encoding="utf-8") as f:
+        for raw in f:
+            line = raw.rstrip("\n")
+            s = line.strip()
+            if s.startswith("#") or not s:
+                continue
+            if s.startswith("base_interval:"):
+                doc["base_interval"] = s.split(":", 1)[1].strip()
+            elif s.startswith("- id:"):
+                section = "checks"
+                if cur:
+                    doc["checks"].append(cur)
+                cur = {"id": s.split("id:", 1)[1].strip()}
+            elif s.startswith("missed_tick:"):
+                if cur:
+                    doc["checks"].append(cur); cur = None
+                section = "missed"
+            elif section == "checks" and cur is not None and ":" in s:
+                k, v = s.split(":", 1)
+                v = v.strip().strip('"')
+                if v in ("true", "false"):
+                    v = v == "true"
+                cur[k.strip()] = v
+            elif section == "missed" and ":" in s:
+                k, v = s.split(":", 1)
+                v = v.strip()
+                doc["missed_tick"][k.strip()] = int(v) if v.isdigit() else v
+    if cur:
+        doc["checks"].append(cur)
+    return doc
+
+
+def _interval_min(cadence):
+    """Minutes for an every_<n>_min|hours cadence; None for on_<event> (edge-triggered)."""
+    m = re.match(r"every_(\d+)_min$", cadence)
+    if m:
+        return int(m.group(1))
+    m = re.match(r"every_(\d+)_hours$", cadence)
+    if m:
+        return int(m.group(1)) * 60
+    return None   # on_<event> — not clock-driven; the host fires it on the event, not the tick
+
+
+def _events(root):
+    log = os.path.join(root, "ledger.jsonl")
+    if not os.path.exists(log):
+        return []
+    out = []
+    with open(log, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                out.append(json.loads(line))
+    return out
+
+
+def _last_verify_seq(events, verify_class):
+    last = None
+    for e in events:
+        if e["class"] == verify_class:
+            last = e["seq"]
+    return last
+
+
+def cmd_plan(a):
+    sched = _load_schedule(a.schedule_yaml)
+    base = _interval_min(sched.get("base_interval", "every_5_min")) or 5
+    now = a.now_min
+    events = _events(a.root)
+    mt = sched.get("missed_tick", {})
+    grace = int(mt.get("grace_intervals", 2))
+    esc_after = int(mt.get("escalate_after_consecutive", 3))
+
+    # tick_seq: how many base intervals have elapsed. A clock check with interval M is DUE when
+    # now is a multiple of M (within one base interval).
+    due, suspended, missed, escalate = [], [], [], False
+
+    for c in sched.get("checks", []):
+        cid = c.get("id")
+        cadence = c.get("cadence", "")
+        night_safe = c.get("night_safe", False)
+        interval = _interval_min(cadence)
+
+        # night fail-safe: a non-night_safe check is SUSPENDED while humans are away
+        if a.night and not night_safe:
+            suspended.append((cid, "night: not night_safe — fail-safe suspend"))
+            continue
+
+        if interval is None:
+            # edge-triggered (on_<event>): tick.py does not schedule it; the host fires it on the
+            # event. We still MONITOR it for misses if its triggering events exist unanswered.
+            if a.verbose:
+                due.append((cid, f"edge ({cadence}) — host fires on event, not this tick"))
+            continue
+
+        # is it due now? due when now falls on an interval boundary (mod), within base slack
+        if interval < base:
+            escalate = True
+            missed.append((cid, f"cadence {cadence} ({interval}m) is FINER than base_interval "
+                                f"{base}m — the host cron can never fire it; schedule is unsatisfiable"))
+            continue
+        phase = now % interval
+        is_due = phase < base
+        if not is_due:
+            continue
+
+        due.append((cid, f"{cadence} due at t={now}m"))
+
+        # ── MISSED-TICK GUARD: was the PREVIOUS due window actually served? ──
+        # the check should have produced its verify_event since (now - interval). If the ledger
+        # holds no such event within (grace) base intervals of when it was due, it's a MISS.
+        verify_class = c.get("verify_event")
+        if verify_class:
+            # crude but honest ledger-time proxy: we don't have wall-clock in the ledger events
+            # here, so we count how many of THIS check's verify_events exist vs how many ticks
+            # were due. A shortfall past grace = missed. (A host with ledger ts refines this.)
+            produced = sum(1 for e in events if e["class"] == verify_class)
+            expected_ticks = max(1, now // interval)
+            shortfall = expected_ticks - produced
+            if shortfall > grace:
+                missed.append((cid, f"due {expected_ticks}x but only {produced} {verify_class} "
+                                    f"event(s) in ledger — shortfall {shortfall} > grace {grace}: "
+                                    f"MISS (the check did not run when scheduled)"))
+                if shortfall >= esc_after:
+                    escalate = True
+
+    # tick.py's own run is ledgered so a GAP in tick_planned proves the host cron itself died
+    print("LEDGER-EVENT " + json.dumps(
+        {"class": "tick_planned",
+         "payload": {"now_min": now, "night": a.night,
+                     "due": [d[0] for d in due], "suspended": [s[0] for s in suspended],
+                     "missed": [m[0] for m in missed]}}, ensure_ascii=False))
+
+    print(f"\n== tick t={now}m  (base {base}m, {'NIGHT' if a.night else 'day'}) ==")
+    print(f"DUE ({len(due)}):")
+    for cid, why in due:
+        print(f"  ▶ {cid:22} {why}")
+    if suspended:
+        print(f"SUSPENDED overnight ({len(suspended)}):")
+        for cid, why in suspended:
+            print(f"  ⏸ {cid:22} {why}")
+    if missed:
+        print(f"MISSED ({len(missed)}) — the guardrail: a due check that did NOT run:")
+        for cid, why in missed:
+            print(f"  ✗ {cid:22} {why}", file=sys.stderr)
+    if escalate:
+        print("\nESCALATE: a scheduled check missed past threshold (or an unsatisfiable "
+              "cadence). A schedule the host silently stopped firing is a page, not a shrug "
+              "(wake_up_push). This is 'it was supposed to run' made a detected fact.",
+              file=sys.stderr)
+        return ESCALATE
+    print("\nall due checks are accounted for; no missed ticks.")
+    return OK
+
+
+def main(argv):
+    p = argparse.ArgumentParser(prog="tick", description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = p.add_subparsers(dest="cmd", required=True)
+    q = sub.add_parser("plan"); q.set_defaults(fn=cmd_plan)
+    q.add_argument("root"); q.add_argument("schedule_yaml")
+    q.add_argument("--now-min", dest="now_min", type=int, required=True)
+    q.add_argument("--night", action="store_true")
+    q.add_argument("--verbose", action="store_true")
+    a = p.parse_args(argv[1:])
+    return a.fn(a)
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

@@ -11,9 +11,9 @@ Contested decision: **$2**
 
 The precedence ordering is human-authored and agent-unwritable — it lives in `constitution.yaml` under `mandate_precedence.order`. Read it, then adjudicate:
 
-!`python3 -c "import yaml,os; c=yaml.safe_load(open(os.environ['CLAUDE_PROJECT_DIR']+'/template/constitution.yaml')); mp=c.get('mandate_precedence',{}); print('precedence:', '>'.join(mp.get('order',[]))); print('both_satisfiable_rule:', mp.get('both_satisfiable_rule'))"`
+!`python3 -c "import yaml,os; c=yaml.safe_load(open(os.environ['CLAUDE_PLUGIN_ROOT']+'/template/constitution.yaml')); mp=c.get('mandate_precedence',{}); print('precedence:', '>'.join(mp.get('order',[]))); print('both_satisfiable_rule:', mp.get('both_satisfiable_rule'))"`
 
-!`python3 "${CLAUDE_PROJECT_DIR}/tools/reconcile.py" mandate "${ORG_LEDGER_ROOT}" --subjects "$1" --decision "$2" --precedence "$(python3 -c "import yaml,os; print('>'.join(yaml.safe_load(open(os.environ['CLAUDE_PROJECT_DIR']+'/template/constitution.yaml'))['mandate_precedence']['order']))")"`
+!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/reconcile.py" mandate "${ORG_LEDGER_ROOT}" --subjects "$1" --decision "$2" --precedence "$(python3 -c "import yaml,os; print('>'.join(yaml.safe_load(open(os.environ['CLAUDE_PLUGIN_ROOT']+'/template/constitution.yaml'))['mandate_precedence']['order']))")"`
 
 Interpret the result:
 - **precedence_applies** → the higher mandate governs; the contested decision follows it. Silent, no human page.
