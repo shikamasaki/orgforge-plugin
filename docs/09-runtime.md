@@ -142,7 +142,6 @@ The first box is the one that matters: **until an org from this template actuall
 and does useful work on an existing harness with nothing bespoke in the loop, R0 is unmet.**
 That, not spec completeness, is the definition of done.
 
-*Status: this document describes delegation, not a runtime to build. The remaining
-implementation work is the projection layer (docs/01 §7 open question 1) and one
-end-to-end demonstration on a real host harness (docs/01 S1) — deliberately small, because
-the heavy organs are the host's, not ours.*
+*Status: the remaining implementation work is the projection layer (docs/01 §7 open
+question 1) and broader end-to-end demonstration on a real host harness (docs/01 S1–S6) —
+deliberately small, because the heavy organs are the host's, not ours.*

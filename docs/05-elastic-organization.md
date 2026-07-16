@@ -152,11 +152,10 @@ weakened:
   not.
 - **Cloud auto-scaling / scale-to-zero**: the direct engineering analog; the org chart
   is the deployment manifest, departments are services, activation is load-driven.
-- **Organizational slack** (Cyert & March) — with a correction to how this repo once
-  used the term. Slack is definitionally *paid* excess: payments to coalition members
-  beyond what is needed to keep them in the coalition. A zero-cost dormant profile is
-  standby capacity, not slack. The honest claim is that latent departments deliver what
-  slack is used to *buy* — adaptive capacity — without slack's carrying cost.
+- **Organizational slack** (Cyert & March): slack is definitionally *paid* excess —
+  payments to coalition members beyond what is needed to keep them in the coalition. A
+  zero-cost dormant profile is standby capacity, not slack. Latent departments deliver
+  what slack is used to *buy* — adaptive capacity — without slack's carrying cost.
 
 ### What the growth-stage playbook becomes
 
@@ -203,8 +202,7 @@ latent specialist** (spin-up + coordination overhead, clean context). Call it th
 division-of-labor decision, not a Coasean firm-boundary decision — there is no market on
 either side of it. The right reference is Becker & Murphy (1992): the degree of
 specialization is limited by the coordination costs among specialists, not by the extent
-of the market. (The `coasean_gate` precondition key in moves.yaml keeps its historical
-name.) The rule:
+of the market. The rule:
 
 > Activate the specialist when the work is (a) recurring rather than one-shot, or
 > (b) far enough from any active department's profile that stretching would dilute its

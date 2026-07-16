@@ -184,7 +184,7 @@ def check_layers_and_span(org, roles, lint):
 
 def collect_control_ids(org, roles, lint):
     """Control set = mechanistic layers ∪ every mechanistic role ∪ SoD holders ∪
-    contract checkers. Layer membership alone is spoofable by omission (review finding)."""
+    contract checkers. Layer membership alone is spoofable by omission."""
     control = set()
     for layer in org.get("structure", {}).get("layers", []):
         if layer.get("regime") == "mechanistic":
@@ -234,7 +234,7 @@ def check_sod(org, roles, control_ids, lint):
             lint.fail("O6", f"authorization holder '{auth}' also implements — maker and "
                             f"checker have collapsed into one agent")
 
-    # Self-routing: universal, not only for declared pairs (review finding).
+    # Self-routing: universal, not only for declared pairs.
     for rid, r in roles.items():
         if rid in r.get("output_to", []):
             lint.fail("O6", f"role '{rid}' routes output to itself — self-verification "

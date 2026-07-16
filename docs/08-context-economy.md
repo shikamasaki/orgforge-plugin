@@ -160,12 +160,12 @@ Need-to-know applies to the exploration front's *lateral* traffic. It never rest
 - Saltzer, J. & Schroeder, M. 1975 — "The Protection of Information in Computer
   Systems" (least privilege, need-to-know).
 
-*Status: this is a design for how the context economy **maps onto host-run departments**,
-not a runtime to build. Context packs are delivered by the projection writing files into
-each working directory before launch, and the registrar that does so is a department the
-host launches on a schedule (docs/09 §1/§2, docs/01 R2) — scoping, budgets, and grants are
-enforced structurally (Tier A) or by the host environment (Tier B), not by a bespoke
-gatekeeper (docs/09 §5). The mechanisms are this repo's synthesis of the cited frames plus
+*Status: this is a design for how the context economy **maps onto host-run departments**.
+Context packs are delivered by the projection writing files into each working directory
+before launch, and the registrar that does so is a department the host launches on a
+schedule (docs/09 §1/§2, docs/01 R2) — scoping, budgets, and grants are enforced
+structurally (Tier A) or by the host environment (Tier B), not by a bespoke gatekeeper
+(docs/09 §5). The mechanisms are this repo's synthesis of the cited frames plus
 standard security practice; the sensor thresholds and budget sizes are unvalidated design
 parameters. Treat the dial metaphor seriously — both failure directions are real, and only
 a running system tells you where your dial sits.*

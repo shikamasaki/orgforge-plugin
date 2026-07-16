@@ -163,9 +163,12 @@ Concretely, the system succeeds when:
 - **S6 — A night of autonomous operation is auditable in ≤15 minutes** and no
   irreversible action fired without human approval.
 
-The honest status line for the repo is: **S1 is not yet demonstrated.** That is the
-single most important open item, and R0 says it is *the* item — the design must first be
-one an agent can actually run.
+The honest status line for the repo: **S1 has been demonstrated once** — a small Tier-A
+RFP run end-to-end on an existing harness, three departments as separate agents, with the
+maker/checker separation holding structurally (docs/10). S2–S6 — scale, on-time delivery,
+unit economics, and unattended 24-hour operation — remain to be shown. R0 says a runnable
+design is the first requirement; that bar is now cleared for the smallest case, and the
+frontier is scale and autonomy.
 
 ---
 
@@ -245,8 +248,6 @@ This requirements pass reframes documents that were written runtime-first:
 - **Reviews** must cite the threat tier (§5) and treat R0/S1 — *does it actually run on an
   existing harness?* — as the first question, ahead of any spec-completeness finding.
 
-*Status: this is the product spec the rest of the repository is now accountable to. Where
-an older document contradicts it, this file wins until that document is revised. The
-deepest requirement is the simplest: an LLM must be able to pick up this template and
-run — autonomously, on a harness that already exists — and that is exactly what the
-current draft cannot yet do.*
+*This is the product spec the rest of the repository is accountable to. The deepest
+requirement is the simplest: an LLM picks up this template and runs — autonomously, on a
+harness that already exists.*
