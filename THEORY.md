@@ -166,6 +166,16 @@ it structure. **Organizationally, the harness is Organ 3: the anatomy that turns
 into a member that can actually do work.** *Context engineering* is a sub-part of this organ — the
 curation of what enters perception each cycle.
 
+**This organ is not ours to build — it already exists, and that is the whole point.** Claude Code,
+Codex, and their kin *are* runnable harnesses: they supply perception, tools, memory, and the
+control loop. The decomposition's job is to *place* those existing wheels, not re-forge them
+(README's thesis, made literal). So a department in this template is not a bespoke process; it is an
+**existing harness pointed at a working directory whose instruction file is this role's projected
+profile.** The system delegates Organ 3 to the host harness and adds only a thin *projection* of the
+neutral profile onto that harness's instruction-file convention. Reimplementing the harness would
+contradict the thesis — see `docs/01-requirements.md` (R0, the harness-neutrality requirement) and
+`docs/09-runtime.md` (delegate + project).
+
 **Failure mode.** Give an agent authority (a role) without the substrate to exercise it well and you
 get confident, well-formed, wrong work — the equivalent of an employee empowered to decide but
 without access to the information the decision needs. Under-provision perception and the agent
@@ -198,6 +208,13 @@ makes the anatomy do something over time.** It sits *above* the harness in the s
 how often and how long the harness is exercised — which is why some practitioners describe the
 harness as containing the loop and others the reverse; from the organization's view they are simply
 adjacent organs, anatomy and metabolism.
+
+**Like the harness, the loop is delegated, not built.** Stop conditions, iteration caps, token
+budgets, and self-scheduling are things the host harness and host environment already do. This
+template *declares* the loop's intent — a role's cadence, its stop goal, its budget window — and the
+host realizes it with its own scheduler and loop controls (`docs/09-runtime.md` §4). "24-hour
+autonomous operation" is the host running the declared schedule unattended, with the operator's
+approval queue holding charter/irreversible actions — not a daemon this repository ships.
 
 **Failure mode.** A loop with no stop condition is the runaway autonomous agent that burns budget
 going nowhere; a loop with no continuity is a system that forgets and restarts on every crash; a

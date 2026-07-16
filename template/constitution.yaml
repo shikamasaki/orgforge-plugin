@@ -38,6 +38,12 @@ delegated:
     no_progress_rule:
       same_signal_same_move_max: 3     # then suspend that line and file ONE proposal (dedup'd)
     safe_mode:                          # FAIL-SAFE, not fail-open (docs/06 §2.4)
+      # HOW THIS IS ENFORCED (docs/01 §5 tiers; docs/09 §5): for a Tier-A org, the night
+      # admission default is enforced STRUCTURALLY + BY THE APPROVAL QUEUE — no department's
+      # projection gives it its own admission authority, so a surprise cannot be self-admitted.
+      # For a Tier-B (asset-touching) org, the HOST ENVIRONMENT additionally provides the
+      # sandboxing/custody that makes "suspend on surprise" tamper-resistant. The constitution
+      # DECLARES the requirement; the chosen host satisfies it (docs/01 R2, C4).
       admission_default: suspend        # admission proceeds ONLY on exact pre-registered
       admit_only_on: exact_preregistered_sensor_match   # sensor matches; surprises suspend
       exploration: continue             # making stays cheap and reversible
@@ -110,17 +116,34 @@ escalation:
   digest: [reorg_commits, open_proposals, held_irreversibles, anomalies, budget_report]
   wake_up_push: [global_halt, safety_limit_tripped, ledger_anomaly]   # nothing else
   watchdog:                             # docs/06 §2.4 — the backstop is NOT self-reported
+    # A REQUIREMENT ON THE HOST, tier-dependent (docs/01 §5; docs/09 §5). This block declares
+    # that an out-of-org backstop must exist; it does not implement one in this repo (that was
+    # the earlier draft's mistake, forbidden by docs/01 R0/C4). For a Tier-A org, the checker-
+    # independence and no-self-admission this guards are enforced structurally + by the approval
+    # queue. For a Tier-B (asset-touching) org, the HOST ENVIRONMENT provides the external
+    # monitor / tamper-evidence / custody these keys ask for. The constitution states the
+    # requirement; the chosen host satisfies it (docs/01 R2, C4).
     outside_org_write_authority: true   # external monitor over the append-only store
     dead_mans_switch: true              # missing invariants-hold heartbeat is itself a page
     heartbeat_interval_minutes: 30
 
 # ── Invariants — no tier may touch these; violations are global-halt events ──
+# HOW ENFORCED, by tier (docs/01 §5; docs/09 §5): these are REQUIREMENTS ON THE HOST, not a
+# runtime this repo builds. For a Tier-A org, maker_never_own_checker and the append-only
+# discipline are enforced STRUCTURALLY (which files the projection writes into which working
+# dir — no self-admission is possible) + BY THE APPROVAL QUEUE + the lint. For a Tier-B
+# (asset-touching) org, the HOST ENVIRONMENT supplies the sandboxing, tamper-evidence, and
+# custody that make these invariants unfakeable at runtime. The constitution declares the
+# invariant; the chosen host satisfies it at its tier (docs/01 R2, C4).
 invariants:
   - ledger_append_only: true
   - no_knowledge_outside_ledger: true          # the anti-person-dependence (属人化) invariant
                                                # (docs/05 §5 — enforced by discipline + audit)
   - control_never_dormant_while_exploring: true
   - maker_never_own_checker: true
-  - no_agent_writes_this_file: true            # enforce via repo protection + CI identity check;
-                                               # the lint verifies declaration, the runtime must
-                                               # verify authorship (docs/06 §2.4 watchdog)
+  - no_agent_writes_this_file: true            # a REQUIREMENT ON THE HOST: satisfied via repo
+                                               # protection + CI/host identity checks the chosen
+                                               # environment provides. The lint verifies the
+                                               # DECLARATION; the host must verify authorship —
+                                               # Tier-B orgs lean on the host's tamper-evidence
+                                               # (docs/06 §2.4; docs/01 R2, C4).

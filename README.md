@@ -27,6 +27,16 @@ See **[THEORY.md](THEORY.md)** for the full decomposition. This is an **organizi
 template, not a silver bullet** — the honest research map (who has done what, and where the real
 white space is) is in [docs/sources.md](docs/sources.md).
 
+**Harness-neutral by construction.** Because harness and loop are organs the industry *already
+built* (Claude Code, Codex, and their kin are runnable harnesses), this template does not build a
+runtime — it **delegates the heavy organs to whatever existing coding-agent harness runs each
+department**, and ships only three thin things: the organization's skeleton as declarative data, a
+**projection** of each role's neutral profile onto that harness's own instruction-file convention,
+and a machine audit of the skeleton. An LLM agent must be able to pick this up and run autonomously
+on a harness that already exists — that requirement, and everything the product must do, is the
+subject of **[docs/01-requirements.md](docs/01-requirements.md)** (read it before judging the repo:
+a design or review is measured against it first).
+
 ## Why this framing is not just aesthetics
 
 Decomposing from the organization (not from the parts) changes what you build:
@@ -46,16 +56,22 @@ Decomposing from the organization (not from the parts) changes what you build:
 
 ## What's in here
 
+**Start here**
+
+| Path | What it is |
+|---|---|
+| [docs/01-requirements.md](docs/01-requirements.md) | **The product spec** — actors (client vs operator vs department vs host harness), jobs-to-be-done, success criteria, the two-tier threat model, and the load-bearing requirement (R0): an LLM must run autonomously on an *existing* harness, no bespoke runtime. A design or review is judged against this first. |
+
 **Core theory**
 
 | Path | What it is |
 |---|---|
-| [THEORY.md](THEORY.md) | The core: organization → seven organs (harness & loop are two of them). |
+| [THEORY.md](THEORY.md) | The core: organization → seven organs (harness & loop are two of them, delegated to existing harnesses — not rebuilt). |
 | [docs/05-elastic-organization.md](docs/05-elastic-organization.md) | Why "no salary cost" changes everything (and what it doesn't): design the ideal org fully on day one, run it elastically. |
 | [docs/06-lifecycle-operations.md](docs/06-lifecycle-operations.md) | Cradle to grave: founding from an RFP, 24-hour autonomous operation (an approval queue with a delegation-of-authority (決裁権限) matrix — inspired by the written-proposal aspect of 稟議 (*ringi*), not its consensus formation — plus night safe mode), maintenance, handover, sunset. |
 | [docs/07-doctrine-and-knowledge.md](docs/07-doctrine-and-knowledge.md) | The knowledge organ: market-watching boundary spanners feed a role-scoped knowledge base; each role's doctrine (べき論 — its current normative playbook) is updated through Maker/Checker and always loaded as context. |
 | [docs/08-context-economy.md](docs/08-context-economy.md) | Need-to-know information flow: scoped context packs, contract-interface collaboration, context budgets, and commander's-intent policy propagation. |
-| [docs/09-runtime.md](docs/09-runtime.md) | The runtime spec: mediated actions, fail-safe tier classification, the ledger as event bus, halt/watchdog, determinism obligations — with a testable conformance checklist. |
+| [docs/09-runtime.md](docs/09-runtime.md) | Execution: **delegate the heavy organs to the host harness, project the profile onto its instruction-file convention.** What the system adds (projection + skeleton + lint) vs. what the host provides (perception, tools, loop, scheduling, sandboxing). |
 
 **Playbooks & maps**
 
@@ -101,33 +117,40 @@ Decomposing from the organization (not from the parts) changes what you build:
    editing a mechanistic (control-layer) profile is a charter-tier change, not a supervision tweak.
 5. Consult [docs/02-growth-stages.md](docs/02-growth-stages.md) before adding a department or a layer.
 
-**Track B — autonomous founding (v0.3).** The org designs and runs itself inside human-written law:
+**Track B — autonomous founding (v0.4).** The org designs and runs itself inside human-written law,
+**on an existing harness**:
 
-1. Humans author [template/constitution.yaml](template/constitution.yaml) from the template — the
+1. Read [docs/01-requirements.md](docs/01-requirements.md) — it fixes what "runs autonomously" means
+   and that the heavy organs are delegated to the host harness, not built.
+2. Humans author [template/constitution.yaml](template/constitution.yaml) from the template — the
    charter no agent may write.
-2. Hand an RFP to the founder process ([template/FOUNDER.md](template/FOUNDER.md)); it produces the
-   full latent org plus its output contracts.
-3. The founding commit must pass [tools/org_lint.py](tools/org_lint.py) **and** human charter
+3. Hand an RFP to the founder process ([template/FOUNDER.md](template/FOUNDER.md)); it produces the
+   full latent org plus its output contracts and each department's **neutral profile**.
+4. The founding commit must pass [tools/org_lint.py](tools/org_lint.py) **and** human charter
    approval.
-4. The org runs 24 hours a day within the constitution ([docs/06-lifecycle-operations.md](docs/06-lifecycle-operations.md)),
-   reorganizing itself only through moves declared in [template/moves.yaml](template/moves.yaml).
-5. Doctrine and context scopes evolve per [docs/07-doctrine-and-knowledge.md](docs/07-doctrine-and-knowledge.md)
-   and [docs/08-context-economy.md](docs/08-context-economy.md).
+5. **Project** each active department's profile onto the host harness that will run it (its
+   instruction-file convention — [docs/09-runtime.md](docs/09-runtime.md) §2), and let that harness
+   supply the loop, tools, and scheduling. The org runs within the constitution
+   ([docs/06-lifecycle-operations.md](docs/06-lifecycle-operations.md)), reorganizing only through
+   [template/moves.yaml](template/moves.yaml); doctrine and scopes evolve per
+   [docs/07](docs/07-doctrine-and-knowledge.md) and [docs/08](docs/08-context-economy.md).
 
 ## Status & honesty
 
-v0.3. This is a **framing + template**, distilled from published organizational theory and the
+v0.4. This is a **framing + template**, distilled from published organizational theory and the
 current agent-engineering literature. The parts (principal-agent theory, harness/loop engineering,
 runtime substrates like AIOS, automated agent design like ADAS/DGM) already exist; the contribution
 here is **the top-down organizational decomposition that places them** — and, per the research in
 [docs/sources.md](docs/sources.md), applying *classical* management theory (Mintzberg, Greiner,
 span of control, separation of duties) to agent design is where the literature is currently thin.
-Docs 05–09 and the constitution/moves/ledger-schema/sensors/lint layer are the newest and
-least-tested material in the repo — treat them accordingly. The lint cross-validates all five data
-files (state invariants, SoD, span, control-never-dormant, pack/grant consistency, sensor and
-cadence definitions); the runtime that would enforce them at execution time is **specified with a
-testable conformance checklist ([docs/09-runtime.md](docs/09-runtime.md)) but not shipped as code**
-— unticked conformance items are the honest boundary of what the system currently guarantees.
+The design is **harness-neutral and delegation-first**: the heavy organs (perception, tools, loop,
+scheduling, sandboxing) are the host harness's job; this repo ships the skeleton, the profile
+projection, and the lint (docs/01, docs/09). The lint cross-validates all five data files and is the
+one part that runs today. **The honest boundary: the single most important open item is S1 —
+demonstrating one organization from this template actually launching and doing useful work on an
+existing harness, end to end, with nothing bespoke in the loop (docs/01 §4). Until that is shown, the
+template is a coherent design that has not yet been run.** The projection layer (which instruction-file
+conventions to target) and the client/delivery/company-layer surfaces (docs/01 §7) are the next work.
 The value of any org design is proven by whether the organization actually **produces**, not by the
 elegance of its chart. Treat this as scaffolding for that, not a substitute for it.
 

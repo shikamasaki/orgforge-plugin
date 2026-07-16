@@ -9,6 +9,15 @@
 # A department may be one agent or a self-organizing pool behind one contract; the chart
 # doesn't care. Layers group roles by regime; `layers[].role` declares a singleton layer.
 #
+# ── HARNESS-NEUTRALITY (docs/01 R2) ─────────────────────────────────────────
+# This chart is HARNESS-AGNOSTIC. Nothing here assumes a specific vendor or a bespoke
+# runtime. Each department RUNS ON AN EXISTING CODING-AGENT HARNESS (Claude Code, Codex,
+# any general coding agent), which reads that department's PROJECTED PROFILE as its
+# instruction file (docs/09 §2). The heavy organs — perception, tools, the control loop,
+# scheduling, budgets — are supplied BY THAT HOST HARNESS/ENVIRONMENT, not by this file.
+# What this file declares is INTENT (who/what/checks, cadences, scopes); the chosen host
+# enforces it. Swap harnesses and only the projection changes — nothing in this skeleton.
+#
 # Validate with:  python3 tools/org_lint.py organization.yaml constitution.yaml moves.yaml
 
 # ── Organ 1: PURPOSE (telos) ────────────────────────────────────────────────
@@ -41,6 +50,9 @@ growth:
 # through moves.yaml, authored by the registrar, gated by tools/org_lint.py and the gate.
 # A dormant department = its profile + doctrine + ledger history, at zero cost,
 # losslessly re-activatable. The control skeleton is never dormant while anything explores.
+# Each ACTIVE department runs on a host harness reading its projected profile (docs/09 §2);
+# `active:` is declared intent that the host's scheduler/launcher realizes, not a process
+# this file spins up.
 elastic:
   constitution: template/constitution.yaml   # the charter — no agent writes it
   moves_catalog: template/moves.yaml         # the only legal reorg vocabulary
@@ -118,6 +130,9 @@ information_flow:
 # contract (the deliverable slice of the RFP: what it owes, to what standard, judged by
 # whom — docs/06 §1.3), context_pack (Organ 3 onboarding), loop (Organ 4 cadence),
 # doctrine (docs/07 — its current normative playbook, loaded every cycle).
+# Each role's `loop.cadence` below is a SCHEDULE THE HOST SCHEDULER REALIZES (a cron, a CI
+# trigger, or the harness's own loop — docs/09 §4), not a timer this file runs; and each
+# role runs on a host harness reading its projected profile (docs/09 §2).
 roles:
 
   - id: supervisor
@@ -282,8 +297,16 @@ roles:
 # ── Organ 4 (system-level): the metabolism that runs it all ─────────────────
 # How the organization runs continuously and safely. Stop conditions are non-optional.
 # Night windows, token caps, and safe-mode rules live in the constitution (delegated.night).
+#
+# IMPORTANT (docs/09 §3–§4): every key below is DECLARED INTENT handed to the host
+# harness/environment, NOT a runtime this file's system implements. The system does not
+# ship a scheduler, a durability layer, a halt switch, or a budget daemon — it names the
+# requirement, and the CHOSEN HOST enforces it: continuous/durable operation is the host
+# running the schedule unattended and resuming from the host-provided ledger store; the
+# halt flag and budget guard map onto the host's own stop conditions and token/turn caps.
+# Keep these keys as intent; do not read them as "build this." (docs/09 §3–§4.)
 runtime:
-  continuous: true
-  durable: true                           # survives crashes; resumes from the ledger
-  global_halt_flag: true                  # a single switch that stops all members
-  budget_guard: true                      # caps + no-progress detection; schedule: constitution
+  continuous: true                        # intent: host runs the schedule unattended (docs/09 §4)
+  durable: true                           # intent: host survives crashes; resumes from the ledger store
+  global_halt_flag: true                  # intent: host provides a single stop signal for all members
+  budget_guard: true                      # intent: host's token/turn caps + no-progress; schedule: constitution

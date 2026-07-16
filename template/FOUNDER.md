@@ -56,6 +56,12 @@ Contract rules:
 - Every RFP requirement traces to a contract; an uncovered requirement is a silent gap —
   the completeness check runs both directions.
 
+The founder produces the **neutral profiles** (ROLE.md instances) for these departments — not a
+runtime. **Running the org means projecting those profiles onto the chosen host harness(es)** and
+letting that harness supply the perceive→decide→act loop, the tools, and the scheduling (docs/01
+R0/R2; docs/09 §2). The founder never builds an execution engine; it authors the harness-neutral
+source of truth that a host harness will read.
+
 ### 4. Design fully, activate minimally (docs/05)
 
 Enumerate **every** department the RFP will ever need — including the maintenance-phase
@@ -88,6 +94,15 @@ design is revisable, not because it is final.
    proxy — and Stinchcombe's imprinting result says founding conditions persist, so this
    is the cheapest moment to get control right. **An org cannot be born violating the
    rules it will be held to — nor without the humans signing the rules.**
+
+## Founding is not "done" until it can LAUNCH
+
+Spec completeness is **not** the bar. The founding is not finished until the minimal first
+activation set can actually **launch on an existing host harness** — its profiles projected into that
+harness's instruction files, reading their context-pack files, doing a cycle of real contract work,
+with nothing bespoke in the loop (docs/01 S1/J2). A lint-passing, charter-approved chart that has
+never been demonstrated to run is still provisional: R0 makes "it actually runs on a harness that
+already exists," not "it is fully specified," the definition of done.
 
 ## What the founder must NOT do
 

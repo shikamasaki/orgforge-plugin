@@ -24,6 +24,12 @@ Run on a fixed interval (e.g. every few minutes for a fast autonomous org; longe
 Between runs, remain available to the operator. The interval is the organization's supervisory
 heartbeat.
 
+The supervisor is **itself a department running on a host harness**, on a cadence — not a special
+always-on daemon. Its "cadence" is a schedule the **host scheduler realizes** (a cron, a CI trigger,
+the harness's own loop; docs/09 §4), the same way every other department's cadence is realized. It
+runs on its projected profile like any member, does one supervision cycle, and stops until the host
+fires the next tick. There is no bespoke supervisor runtime.
+
 ## What one supervision cycle does
 
 1. **Read direction, not just liveness.** For each department, pull two things:

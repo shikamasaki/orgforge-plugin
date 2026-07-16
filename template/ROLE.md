@@ -1,9 +1,18 @@
 # ROLE / PROFILE TEMPLATE — a member's job description
 
 A *profile* is the job description for one department (one member of the organization). It is the
-artifact a supervisor edits to coach a member (see `SUPERVISOR.md`). In an agent system the profile
-is the agent's prompt — but think of it as an HR document, not a prompt: it defines the role, the
-onboarding, the duties, and the reporting line.
+artifact a supervisor edits to coach a member (see `SUPERVISOR.md`). Think of it as an HR document,
+not a prompt: it defines the role, the onboarding, the duties, and the reporting line.
+
+Concretely, a profile is the **harness-neutral source of truth** for what one member does, authored
+once here. To run the department, the profile is **projected** into whatever host harness will run
+it — into that harness's own instruction-file convention (a Claude Code repo reads `CLAUDE.md`; a
+Codex repo reads `AGENTS.md`; other harnesses have their own). The harness then reads its projected
+file on launch exactly the way it would read a prompt — so the old intuition "the profile is the
+agent's prompt" still holds — but the neutral profile is **canonical** and the per-harness files are
+**regenerated views, never hand-forked** (the same derived-view discipline the ledger already uses,
+Organ 5). Swapping harnesses changes only which instruction file gets generated, nothing in this
+profile. (docs/01 R2; docs/09 §2.)
 
 Copy this file per department. Keep it short and concrete. Fields map to the organs in `THEORY.md`.
 
@@ -31,6 +40,12 @@ Copy this file per department. Keep it short and concrete. Fields map to the org
 > Generators say "propose, do not judge" — admission belongs to the control layer.
 
 ## Onboarding — load before acting (Organ 3, the harness)
+
+Perception, tools, and memory (Organ 3) are provided **by the host harness**, not by this system.
+This profile does not run a bespoke context-assembly process; it **declares what context to load**,
+and the projection **writes those files into the working directory before launch** for the harness
+to read. "Assembling the context pack" is exactly that file-writing step, not a custom runtime.
+(docs/09 §2–§3.)
 
 Non-negotiable: **before doing anything, load the prior context this role needs.** This is the
 onboarding briefing that turns a role into a competent member. List exactly what to pull:
