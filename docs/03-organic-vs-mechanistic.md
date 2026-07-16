@@ -47,9 +47,8 @@ The apparent contradiction dissolves once we stop treating "the organization" as
 a single thing to be either designed or self-organized. Real organizations run
 **two layers with opposite requirements**, and the debate conflates them.
 
-This is not a new idea. It is essentially Burns & Stalker's distinction between
-**mechanistic** and **organic** management systems
-(<https://www.valuebasedmanagement.net/methods_burns_mechanistic_organic_systems.html>):
+The **organic / mechanistic vocabulary** for the two regimes comes from Burns &
+Stalker's *The Management of Innovation* (1961):
 
 | | **Organic** | **Mechanistic** |
 |---|---|---|
@@ -59,12 +58,35 @@ This is not a new idea. It is essentially Burns & Stalker's distinction between
 | Communication | lateral, negotiated | vertical, hierarchical |
 | Strength | innovation, adaptation, discovery | consistency, control, reliability |
 
-Burns & Stalker's insight was that **neither system is universally superior** —
-the correct choice depends on the environment. Their work is often read as
-"organic is more modern / better," but that is a misreading; their actual claim
-is *contingency*. The right structure depends on what the work demands.
+Their contingency insight — **neither system is universally superior; the right one
+depends on the environment** — is real and load-bearing. But an honest reading (see
+docs/11 and the deep literature note) requires a correction the earlier draft of this
+document got wrong:
 
-Map this onto an agent organization and the two layers separate cleanly:
+> ⚠️ **Burns & Stalker do NOT license running organic and mechanistic regimes inside
+> *one* organization.** Their unit of analysis is the *whole firm* along a continuum, and
+> their central empirical finding was that mechanistic firms mostly **failed** to become
+> organic under change — for political/status reasons — producing three named
+> **pathological forms** (a figure-head decision bottleneck; a "mechanical jungle" of
+> proliferating rules; a committee layered on top). Their lesson is a *warning about
+> botched hybridization*, not a blessing of it.
+>
+> The theory that actually licenses **"different subunits, different regimes, coordinated"**
+> is **Lawrence & Lorsch (1967), differentiation–integration** — and its decisive lesson is
+> that **integration cost rises with differentiation**: separating an organic exploration
+> subsystem from a mechanistic control subsystem *requires proportional investment in
+> explicit integrating machinery* (integrator roles, shared cadences, liaison, a common
+> record). The related theory for explore/exploit in separated-but-integrated units is
+> **structural ambidexterity** (March 1991; Tushman & O'Reilly), which is equally emphatic
+> that **the integration is the hard, costly, leadership-borne part** and that the payoff is
+> *contingent* (small/young systems may do better with focus). So the two-layer split below
+> is *not* free: **whatever you separate, you must pay to reintegrate.** This template's
+> shared record, intent block, and contract seams (Organ 5, docs/08) are that integration
+> investment — and if they are under-built, the separation produces exactly Lawrence &
+> Lorsch's failure mode, not clean two-layer design.
+
+Map this onto an agent organization — remembering the integration cost — and the two
+layers separate:
 
 - **The exploration front — discovery and generation — faces an uncertain,
   dynamic environment.** The best decomposition is unknown in advance. This layer
@@ -73,9 +95,19 @@ Map this onto an agent organization and the two layers separate cleanly:
 
 - **The control layer — verification, admission, safety, and fraud prevention —
   faces a stability-critical environment.** Its job is to be consistent,
-  auditable, and impossible to subvert. This layer must be **mechanistic**:
-  centrally designed, highly formalized, and *not* subject to renegotiation by
-  the agents it governs.
+  auditable, and impossible to subvert. Its *authority graph* must be **mechanistic**:
+  centrally designed and *not* subject to renegotiation by the agents it governs
+  (who admits, who holds custody, who may not check their own work). ⚠ *But note two
+  corrections from docs/11:* (1) the control layer's *method* need not be mechanistic —
+  good verification is itself creative adversarial search (the founding rehearsal's
+  skeptic *explored* to find its bug); fix the authority graph, let checkers explore their
+  methods. (2) **How much control to apply is risk-calibrated, not universal.** Every
+  control theory this repo cites (COSO's compensating controls, agency theory's
+  behavior-vs-outcome trade-off, Williamson's discriminating alignment) says full
+  separation-of-duties is for high-risk, hard-to-verify, asset-touching work; low-risk,
+  cheaply-verifiable, reversible work warrants a *compensating* control (a single reviewer,
+  a forward test), not the full apparatus. Blanket maker-checker is over-governance — see
+  docs/01 §5 (the two-tier threat model) and docs/11 §3.
 
 The self-organization paper measures **problem-solving efficiency**. That lives entirely
 in the organic exploration layer. It says nothing about verification integrity,
@@ -233,12 +265,23 @@ verifying — and clarity about which is which.
 ## Sources
 
 - *Drop the Hierarchy and Roles: How Self-Organizing LLM Agents Outperform
-  Designed Structures.* arXiv 2603.28990.
+  Designed Structures.* arXiv 2603.28990 (verified real; its actual finding is that a
+  **hybrid** protocol wins — mildly strengthening the two-layer stance).
   <https://arxiv.org/pdf/2603.28990>
-- Burns, T. & Stalker, G. M. — *Mechanistic vs. Organic Management Systems.*
+- Burns, T. & Stalker, G. M. (1961), *The Management of Innovation* — the organic/mechanistic
+  **vocabulary** and the contingency insight. ⚠ Do NOT cite them for a two-layer split within
+  one org (they warn against botched hybridization — see the ⚠ note in §2 and docs/11 §4).
   <https://www.valuebasedmanagement.net/methods_burns_mechanistic_organic_systems.html>
-- *Separation of Duties* (authorization / custody / recording; SOX, COSO,
-  Maker-Checker). Wikipedia.
+- **Lawrence, P. & Lorsch, J. (1967), *Organization and Environment*** — the correct citation for
+  "different subunits, different regimes, coordinated": differentiation must be matched by
+  proportional **integration** investment, and integration cost rises with differentiation.
+- **March, J. (1991), "Exploration and Exploitation"; Tushman & O'Reilly, structural ambidexterity**
+  — explore/exploit in separated-but-integrated units; the integration is the hard, costly part and
+  the payoff is contingent.
+- *Separation of Duties* — authorization / custody / recording. ⚠ It is centuries older than
+  SOX/COSO (Roman finance, 1494 double-entry, Montgomery 1912, AICPA 1949); and in COSO itself SoD
+  is one risk-selected control activity, substitutable by compensating controls — **not** a
+  universal (docs/11 §3). Wikipedia.
   <https://en.wikipedia.org/wiki/Separation_of_duties>
 - *Goodhart's Law* (and the principal-agent problem of delegated optimization).
   The familiar one-line phrasing is Marilyn Strathern's (1997) formulation, not

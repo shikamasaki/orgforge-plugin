@@ -27,6 +27,21 @@ See **[THEORY.md](THEORY.md)** for the full decomposition. This is an **organizi
 template, not a silver bullet** — the honest research map (who has done what, and where the real
 white space is) is in [docs/sources.md](docs/sources.md).
 
+> **Read this caveat before believing the thesis.** After a deep literature read (structure,
+> control, and multi-agent-systems theory), the thesis above needed correcting — see
+> **[docs/11-refoundation.md](docs/11-refoundation.md)**. The honest version: the **primary** lens for
+> agent systems is a *permissioned dataflow graph* (nodes, edges, context, capabilities — what
+> builders actually design from); "organization" is a **governing lens over that graph**, and only its
+> *coordination-and-reliability* content transfers (agents have interdependence, but not labor cost,
+> careers, or reorg friction — the constraints that give a human org chart its shape). The empirical
+> backing is real: multi-agent LLM systems fail mostly at coordination and verification (the MASFT
+> study), which is exactly what this content addresses. But the *derivation* — "seven organs derived
+> top-down, complete and ordered" — is a retrofitted checklist, not a proof, and several classical
+> citations were mis-sourced (e.g. Burns & Stalker do **not** license the two-layer split — Lawrence &
+> Lorsch do, *with* an integration cost; separation of duties is risk-calibrated in COSO, not a
+> universal). The durable core is smaller and sharper than the original framing claimed. docs/11 is the
+> corrected map; the rest of the docs are being brought into line with it.
+
 **Harness-neutral by construction.** Because harness and loop are organs the industry *already
 built* (Claude Code, Codex, and their kin are runnable harnesses), this template does not build a
 runtime — it **delegates the heavy organs to whatever existing coding-agent harness runs each
@@ -61,6 +76,7 @@ Decomposing from the organization (not from the parts) changes what you build:
 | Path | What it is |
 |---|---|
 | [docs/01-requirements.md](docs/01-requirements.md) | **The product spec** — actors (client vs operator vs department vs host harness), jobs-to-be-done, success criteria, the two-tier threat model, and the load-bearing requirement (R0): an LLM must run autonomously on an *existing* harness, no bespoke runtime. A design or review is judged against this first. |
+| [docs/11-refoundation.md](docs/11-refoundation.md) | **The literature-grounded correction** — what a deep read of organizational/control/MAS theory says the template got right (coordination is the real risk; the maker/checker insight) and wrong (org-as-primary-lens; SoD-as-universal; Burns & Stalker mis-cited; span numbers; the "derivation"). What to keep, drop, and reframe. Where an older doc conflicts, this wins. |
 
 **Core theory**
 
