@@ -144,6 +144,17 @@ runtime substrates like AIOS, automated agent design like ADAS/DGM) already exis
 here is **the top-down organizational decomposition that places them** — and, per the research in
 [docs/sources.md](docs/sources.md), applying *classical* management theory (Mintzberg, Greiner,
 span of control, separation of duties) to agent design is where the literature is currently thin.
+
+**Provenance caveat (important).** The classical-theory citations were originally written from the
+author model's training memory, not by reading the primary texts — a real weakness for a repo whose
+selling point is source honesty. A 2026-07 verification pass has since checked the *load-bearing*
+citations against external sources (Greiner, Graicunas/span, Barnard, Burns & Stalker, Ashby, Conway,
+Penrose, and arXiv 2603.28990 — all confirmed to exist and, mostly, to say what the repo claims), and
+**corrected the memory errors it found** (e.g. "Conway's law" was named by Brooks, not Conway; the span
+number is Graicunas's ~4–5 / Urwick's 5, not a single "5–6 to 15–20" law; the cited counter-paper
+actually supports a *mixed* stance, mildly strengthening rather than threatening the two-layer law).
+Those corrections and the ✓-verified markers are in [docs/sources.md](docs/sources.md). The long tail
+of secondary citations remains memory-sourced and should be treated as lower-confidence until checked.
 The design is **harness-neutral and delegation-first**: the heavy organs (perception, tools, loop,
 scheduling, sandboxing) are the host harness's job; this repo ships the skeleton, the profile
 projection, and the lint (docs/01, docs/09). The lint cross-validates all five data files and is the
