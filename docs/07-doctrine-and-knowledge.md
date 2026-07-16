@@ -163,8 +163,15 @@ the organization is for* — telos revision is Organ 1 and stays human (docs/06 
 *Status: this document is a design for how the knowledge organ **maps onto host-run
 departments** — the curator, gate, and doctrine store are departments a host harness
 launches on a schedule, and "the pipeline" names their work products and routing, not a
-runtime to build (docs/09 §1, docs/01 R0). The pipeline and its failure modes are this
-repo's synthesis; the organizational anchors are the citations above. The untrusted-input
-treatment of external knowledge is a security stance, not a theorem, and it is realized
-structurally (Tier A) or by the host environment (Tier B), not by a bespoke interceptor —
-treat the whole organ as a design hypothesis to verify against a running system.*
+runtime to build (docs/09 §1, docs/01 R0). The **doctrine store, admission gate, render,
+and stale check are now running code** — [`tools/doctrine.py`](../tools/doctrine.py) — a
+file-backed per-role store that enforces the invariants above: no anonymous doctrine
+(mandatory provenance), untrusted-until-admitted (admit by the gate only, never the maker),
+a review-by TTL surfaced by `stale`, and render-admitted-only within a token budget
+(over-budget re-distills, never silent-truncates). What the tool does **not** ship is the
+scheduler or the curator's watch itself — those are the host-run agents that *call* it on a
+cadence (R0). The pipeline and its failure modes are this repo's synthesis; the
+organizational anchors are the citations above. The untrusted-input treatment of external
+knowledge is a security stance, not a theorem, and it is realized structurally (Tier A) or
+by the host environment (Tier B), not by a bespoke interceptor — treat the whole organ as a
+design hypothesis to verify against a running system.*

@@ -80,6 +80,7 @@ Decomposing from the organization (not from the parts) changes what you build:
 | [docs/08-context-economy.md](docs/08-context-economy.md) | Need-to-know information flow: scoped context packs, contract-interface collaboration, context budgets, and commander's-intent policy propagation. |
 | [docs/09-runtime.md](docs/09-runtime.md) | Execution: **delegate the heavy organs to the host harness, project the profile onto its instruction-file convention.** What the system adds (projection + skeleton + lint) vs. what the host provides (perception, tools, loop, scheduling, sandboxing). |
 | [docs/10-founding-rehearsal.md](docs/10-founding-rehearsal.md) | **S1, demonstrated:** a real RFP run end-to-end on a real host harness — maker, gate, and skeptic as three separate agents, no bespoke runtime — where the adversarial checker caught a genuine bug (a U+212A unicode edge case) the maker and gate both missed. Artifacts in [examples/founding-rehearsal/](examples/founding-rehearsal/). |
+| [docs/11-operating-events.md](docs/11-operating-events.md) | What a 24/7 **unattended** org needs beyond founding, named by essence not by human ritual: why 1-on-1 / team-sync / exec-review *dissolve* into existing organs (only lateral peer reconciliation is net-new), and the governing rule — **reconcile by exception, never stop to meet** (default silent; escalate only the exception). The three load-bearing safety events are running code ([tools/guardrails.py](tools/guardrails.py)). |
 
 **Playbooks & maps**
 
@@ -110,6 +111,10 @@ Decomposing from the organization (not from the parts) changes what you build:
 | Path | What it is |
 |---|---|
 | [tools/org_lint.py](tools/org_lint.py) | The audit gate: meant to run as the gate on every founding/reorg commit (run it as a pre-commit check; it cross-validates all five data files — organization, constitution, moves, ledger-schema, sensors) against the theory (Goodhart, span, SoD, control-never-dormant, need-to-know packs). |
+| [tools/doctrine.py](tools/doctrine.py) | The knowledge organ as running code (docs/07): a file-backed per-role doctrine store + admission gate + render + stale check. Enforces no-anonymous-doctrine (provenance), untrusted-until-admitted (gate-only admit), TTL, and render-admitted-only within a token budget. The curator's watch and the scheduler that calls it are the host's (R0). |
+| [tools/ledger.py](tools/ledger.py) | The record organ as running code (ledger-schema.yaml): append-only, hash-chained (tamper-evident, replayable by `verify` — the watchdog primitive), gapless seq, actor-from-runtime-not-payload, `requires_prior` enforced at write time (the skeptic is load-bearing), and deterministic view/census/**digest** projections (same window + same ledger ⇒ byte-identical). |
+| [tools/sensors.py](tools/sensors.py) | Evaluates the **machine** sensors of sensors.yaml as pure formulas over the ledger (red_tape_ratio, doctrine_stale, blocked_on_missing_context, …). `llm` sensors and those whose inputs aren't fully in the ledger are honestly **deferred**, never silently skipped. |
+| [tools/guardrails.py](tools/guardrails.py) | The three load-bearing safety events for 24/7 unattended operation (docs/11 §2): BLAST-RADIUS-CAP (aggregate exposure the approval queue can't see), STATE-RECONCILED (ledger-belief vs external ground truth), STALE-REFERENCE (roles silent against a reference that moved). Each is fail-quiet on the happy path (exit 0) and escalates the exception (exit 10). |
 
 ## How to use it
 

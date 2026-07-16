@@ -57,6 +57,25 @@ event_classes:
   intent_revised:       { version, diff_ref, human }
   digest_generated:     { window, census: {class: count}, exceptions_ref }
   anomaly_detected:     { detector, description, matched_pattern: pattern_id|none }
+  # operating events (docs/11) — the recurring checks a 24/7 unattended org needs beyond
+  # founding. Each obeys reconcile-by-exception: the silent path emits the event as an audit
+  # breadcrumb; only the exception routes up. §2.1–2.3 have running code (tools/guardrails.py).
+  exposure_budget_checked: { window_id, dimension, committed_so_far, delta_requested, cap,
+                             actor_role, decision: allow|hold, caused_by_event }   # BLAST-RADIUS-CAP
+  state_reconciled:     { domain, expected_value, observed_value, drift: bool, magnitude,
+                          unaccounted_events: [ref] }                              # STATE-RECONCILED
+  reference_staleness_checked: { trigger_event, bound_roles: [role], stale_roles: [role],
+                                 silent_duration_per_role, result: all_current|stale_found } # STALE-REFERENCE
+  # lateral reconciliation family (docs/11 §2.4) — DESIGN, not yet coded. The horizontal seam
+  # no other organ watches; shared shape unifies the three timings of peer divergence.
+  work_claimed:         { role, work_territory, intent_summary }                   # COLLISION-SCAN (claim)
+  lateral_reconciled:   { observer_role, subjects: [role], reference, result: consistent|divergent,
+                          divergence_kind: duplicate|contradiction|stall|breaking_change,
+                          evidence_event_ids: [ref] }
+  dependency_stall_raised: { blocked_role, awaited_seam_id, awaited_producer_role,
+                             stalled_ticks, downstream_impact: [ref] }             # DEPENDENCY-STALL
+  contract_change_proposed: { seam_id, producer_role, current_hash, proposed_shape,
+                              is_breaking: bool, dependents: [role], objection_deadline_tick } # CONTRACT-CHANGE
 
 # ── Cadence triggers: what `loop.cadence: on_<x>` may bind to ────────────────
 triggers:
