@@ -101,7 +101,15 @@ intercepting reads (docs/01 §5, docs/09 §5). The standard pack formula, for ev
 > intent block + own contract & doctrine (docs/07) + **live state of adjacent
 > contracts** (its declared `depends_on` seams) + nearby failures relevant to its scope.
 
-Nothing else rides along by default. Every grant is recorded in the ledger; grants are
+The intent block and the role's own doctrine are the **only** two items a pack carries
+without a per-role view grant — they are declared as `information_flow.universal_pack_items`
+in `organization.yaml`, and the lint reads that declaration rather than hard-coding an
+exemption (so the exemption is articulated, not a hidden allowance a maintainer could widen
+unnoticed). Doctrine qualifies only because it is *per-role by construction* — a role carries
+its own べき論, not another's, so it crosses no need-to-know boundary. **Everything else in a
+pack must be a granted view**: a pack that names a view the role has no grant for is rejected
+by the lint (the deny-by-default hole this closes — an injected-but-ungranted item would
+otherwise unenforce least privilege). Nothing else rides along by default. Every grant is recorded in the ledger; grants are
 **reviewed on a cadence and unused grants are revoked** (access recertification —
 scope creep is how need-to-know quietly becomes share-everything). "On a cadence" here is
 host-realized: a scheduled run of the responsible department (the host's scheduler firing

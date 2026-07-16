@@ -34,14 +34,20 @@ event_classes:
   halt_tripped:         { trigger, scope: global|role }
   # work (Organs 2/6)
   candidate_submitted:  { maker, candidate_id, contract_ref, evidence: [ref] }
-  admission_decided:    { gate, candidate_id, verdict: admit|reject|park, standard_ref, evidence: [ref] }
+  # predicted_outcome: the gate's expected result for this admission — the input the OUTCOME-DELTA /
+  # FRAME-REVIEW organs (learning.py, alignment.py) join against the realized outcome (docs/11 §3,
+  # docs/13 §3). Declared here so the emitting role knows to populate it; the organs are inert
+  # (silently) without it.
+  admission_decided:    { gate, candidate_id, verdict: admit|reject|park, standard_ref,
+                          predicted_outcome, evidence: [ref] }
   refutation_attempted: { skeptic, claim_id, verdict: refuted|survives, checklist_ref }
   # A result may only deploy AFTER the skeptic refuted-and-failed (verdict: survives) for it.
   # requires_prior makes the skeptic load-bearing: without a `survives` for this candidate_id,
   # a result_deployed event is INVALID (the deploy path cannot skip adversarial review).
-  result_deployed:      { candidate_id, net_effect_ref,
+  # observed_outcome: the realized result the organs diff against predicted_outcome (docs/11 §3).
+  result_deployed:      { candidate_id, net_effect_ref, observed_outcome,
                           requires_prior: "refutation_attempted{claim_id==candidate_id, verdict==survives}" }
-  result_retired:       { candidate_id, cause }
+  result_retired:       { candidate_id, cause, observed_outcome }
   # structure (Organ 7 / moves)
   sensor_reading:       { sensor, value, window, inputs_ref }
   move_executed:        { move_id, tier, diff_ref, precondition_evidence: [sensor_reading.id], lint_report_ref }
@@ -149,7 +155,10 @@ context_pack:
        silently truncate, never drop the intent or the contract.
     5. write a pack manifest (what was included, which versions, what was summarized)
        and ledger it via cycle_started.pack_manifest_id.
-  special_pack_items: [intent_block, doctrine]   # the only non-view pack entries
+  # the only non-view pack entries — the single source of truth is
+  # organization.yaml information_flow.universal_pack_items (which the lint reads); do NOT
+  # duplicate the list here (two copies drift). Named there, referenced here.
+  special_pack_items: see_organization.universal_pack_items
   pull_interface: a role may query any view it is GRANTED, mid-cycle, for drill-down;
     queries outside its grants are denied and ledgered (blocked_on_missing_context feeds
     on these denials)

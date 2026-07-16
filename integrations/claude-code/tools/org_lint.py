@@ -59,6 +59,15 @@ import yaml
 
 VALID_REGIMES = {"organic", "mechanistic"}
 VALID_TIERS = {"delegated", "charter", "irreversible"}
+# the fixed six-function vocabulary (docs/03 §3.1.1). A role's functions: must draw only from
+# this set — a typo like `judeg` on the gate, or an invented `seize_admission_authority`, would
+# otherwise silently defeat the string-keyed maker/checker checks (O6 keys on these literals).
+VALID_FUNCTIONS = {"organize", "decide", "implement", "judge", "review", "operate"}
+# moves whose docs promise a load-bearing guard precondition — the lint asserts it is PRESENT
+# (the runtime evaluates it). docs/06 §4.4: refound's doctrine-remap + relint guards.
+REQUIRED_MOVE_CHECKS = {
+    "refound": ["doctrine_remap_covers_every_live_claim", "new_structure_passes_lint"],
+}
 
 
 class Lint:
@@ -120,6 +129,11 @@ def check_schema(org, lint):
         if not isinstance(r.get("active", None), bool):
             lint.fail("SC", f"role '{rid}' needs active: true|false (a bare bool — "
                             f"strings like \"false\" are truthy and lie)")
+        for fn in r.get("functions", []) or []:
+            if fn not in VALID_FUNCTIONS:
+                lint.fail("SC", f"role '{rid}' function '{fn}' is not in the fixed vocabulary "
+                                f"{sorted(VALID_FUNCTIONS)} (docs/03 §3.1.1) — an invented or "
+                                f"mistyped function silently defeats the string-keyed SoD checks")
         roles[rid] = r
     return roles
 
@@ -484,6 +498,39 @@ def lint_moves(mv, con, lint):
         if m.get("tier") == "delegated" and mid not in declared:
             lint.fail("MV", f"move '{mid}' is delegated in moves.yaml but absent from "
                             f"the constitution's delegated list — no tier, no legality")
+    # the CHARTER direction (was unchecked — a charter move could be silently re-tiered to
+    # delegated and pass, downgrading e.g. `refound`, the whole-org teardown, to an unattended
+    # act). Every id in charter.items that is ALSO a move must be tiered charter or irreversible;
+    # and a move whose id sits in charter.items may never be delegated.
+    charter_items = set((con.get("charter") or {}).get("items", []) or [])
+    for mid in charter_items:
+        m = by_id.get(mid)
+        if m is not None and m.get("tier") not in ("charter", "irreversible"):
+            lint.fail("MV", f"move '{mid}' is a charter item in constitution.yaml but moves.yaml "
+                            f"tiers it '{m.get('tier')}' — a charter power silently downgraded to "
+                            f"{m.get('tier')} escapes human sign-off (docs/06)")
+    # a move carrying a `judge: human` precondition is human-held by construction — it may not be
+    # delegated (which would let an agent execute it unattended).
+    for mid, m in by_id.items():
+        human_judged = any(isinstance(pc, dict) and pc.get("judge") == "human"
+                           for pc in m.get("preconditions", []) or [])
+        if human_judged and m.get("tier") == "delegated":
+            lint.fail("MV", f"move '{mid}' has a judge:human precondition but is tiered "
+                            f"'delegated' — a human-judged act cannot run unattended")
+    # named moves whose docs call out a load-bearing guard must actually carry it — otherwise the
+    # guard the docs promise ("the one the move guards explicitly", docs/06 §4.4) is silently
+    # absent. Modeled on O2c's scale-move presence check.
+    for mid, required in REQUIRED_MOVE_CHECKS.items():
+        m = by_id.get(mid)
+        if m is None:
+            continue
+        checks = [pc.get("check") for pc in m.get("preconditions", []) or []
+                  if isinstance(pc, dict)]
+        for req in required:
+            if req not in checks:
+                lint.fail("MV", f"move '{mid}' lacks its required guard precondition '{req}' — "
+                                f"the docs name this the guard that protects the asset "
+                                f"structure-change can lose; without it the move is unguarded")
 
 
 # ── ledger-schema.yaml ───────────────────────────────────────────────────────
@@ -701,10 +748,18 @@ def lint_role_settings(rs, org, lint):
     # when model_family is declared; declaring it is how you opt into decorrelation.
     skeptic_fam = families.get("skeptic")
     if skeptic_fam is not None:
-        for other in ("gate",):
-            if families.get(other) == skeptic_fam:
+        # decorrelate from the gate AND from every maker whose work reaches the skeptic — docs/03
+        # says "maker/gate", not gate alone. A maker that routes to the gate (output_to: gate) is
+        # judged transitively by the skeptic; if it declares the skeptic's family, same blind spots.
+        judged = {"gate"}
+        for r in org.get("roles", []):
+            outs = r.get("output_to", []) or []
+            if "gate" in outs and r.get("regime") == "organic":
+                judged.add(r.get("id"))
+        for other in sorted(judged):
+            if other != "skeptic" and families.get(other) == skeptic_fam:
                 lint.fail("RS", f"skeptic and '{other}' share model_family '{skeptic_fam}' — an "
-                                f"adversarial checker on the same base model shares the maker's "
+                                f"adversarial checker on the same base model shares the maker/gate's "
                                 f"blind spots (a different prompt is not a different error "
                                 f"distribution). Give the skeptic a different model_family.")
 
