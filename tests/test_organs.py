@@ -93,6 +93,24 @@ def test_ledger_seq_gap_detected(tmp_path):
     assert code == 1 and ("seq" in out or "BROKEN" in out)
 
 
+def test_ledger_malformed_line_is_broken_not_crash(tmp_path):
+    # a non-JSON line IS tamper evidence; verify must report BROKEN + exit 1, never traceback
+    seed(tmp_path, "a", "heartbeat", {"component": "x", "invariants_hold": True})
+    (tmp_path / "ledger.jsonl").open("a").write("THIS-IS-NOT-JSON\n")
+    code, out = run("ledger.py", "verify", str(tmp_path))
+    assert code == 1 and "BROKEN" in out and "Traceback" not in out
+
+
+def test_guardrails_cap_tolerates_ts_less_event(tmp_path):
+    # an event with no 'ts' (as emit_event writes) must not KeyError when a window is set
+    (tmp_path / "ledger.jsonl").write_text(json.dumps(
+        {"id": "e1", "seq": 1, "class": "exposure_budget_checked",
+         "payload": {"dimension": "spend", "decision": "allow", "delta_requested": 1}}) + "\n")
+    code, out = run("guardrails.py", "cap", str(tmp_path), "--dimension", "spend",
+                    "--delta", "1", "--cap", "5", "--actor", "x", "--window-since", "1970-01-01")
+    assert code == 0 and "Traceback" not in out
+
+
 def test_ledger_digest_deterministic(tmp_path):
     seed(tmp_path, "a", "candidate_submitted",
          {"maker": "a", "candidate_id": "c1", "contract_ref": "r", "evidence": []})

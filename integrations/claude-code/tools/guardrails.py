@@ -46,7 +46,7 @@ def cmd_cap(a):
     events = read_events(a.root)
     committed = 0.0
     for e in events:
-        if a.window_since and e["ts"] < a.window_since:
+        if a.window_since and e.get("ts", "") < a.window_since:
             continue
         # prior allow decisions in this dimension carry their delta forward as committed exposure
         if e["class"] == "exposure_budget_checked":

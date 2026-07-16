@@ -9,7 +9,7 @@
             "type": "command",
             "command": "python3 ${CODEX_PROJECT_ROOT}/integrations/common/org_hook.py",
             "timeout": 30,
-            "statusMessage": "org guardrail: checking blast-radius / mandate / doctrine"
+            "statusMessage": "org guardrail: checking blast-radius exposure cap"
           }
         ]
       }

@@ -74,6 +74,31 @@ def _allow():
     sys.exit(0)
 
 
+def _append_emitted(output):
+    """Close the emit->append loop (external review BLOCKER, 2026-07). An organ COMPUTES an event
+    and prints `LEDGER-EVENT {json}`; nothing appended it, so the aggregate cap never accumulated
+    (committed_so_far was always 0 -> the blast-radius cap silently degraded to a memoryless
+    per-action check). Here the host (this hook) appends the emitted event via `ledger.py append`,
+    with a --ts so window filters work. This is the R0-correct split: the organ stays a pure
+    function that emits; the host writes. Best-effort — a failed append must not crash the hook."""
+    for line in output.splitlines():
+        if not line.startswith("LEDGER-EVENT "):
+            continue
+        try:
+            ev = json.loads(line[len("LEDGER-EVENT "):])
+            cls, payload = ev["class"], ev["payload"]
+        except (json.JSONDecodeError, KeyError, TypeError):
+            continue
+        ts = os.environ.get("ORG_NOW_TS", "1970-01-01T00:00:00Z")
+        try:
+            subprocess.run([sys.executable, os.path.join(TOOLS_DIR, "ledger.py"), "append",
+                            LEDGER_ROOT, "--actor", "system:org_hook", "--class", cls,
+                            "--payload", json.dumps(payload, ensure_ascii=False), "--ts", ts],
+                           capture_output=True, text=True, timeout=30)
+        except Exception:
+            pass   # a failed write-back must never turn an allow into a crash
+
+
 def _run_organ(argv):
     """Run an organ command; return (exit_code, combined_output). Never raises."""
     try:
@@ -90,19 +115,43 @@ def _run_organ(argv):
 # These are examples wired to the shipped organs; an adopter tunes the caps/dimensions to its org.
 
 def _asset_dimension(tool_name, ti):
-    """Classify a tool call into a real-asset exposure dimension, or None if it touches no asset.
-    This is the BLAST-RADIUS-CAP entry point — the aggregate the approval queue can't see."""
-    cmd = (ti.get("command") or "") if isinstance(ti, dict) else ""
-    # crude, tunable heuristics — an adopter replaces these with its real asset taxonomy
-    if tool_name == "Bash":
-        if any(k in cmd for k in ("curl", "wget", "http")) and any(
-                k in cmd for k in ("POST", "PUT", "DELETE", "-d ", "--data")):
-            return ("external_writes", 1)
-        if any(k in cmd for k in ("aws ", "gcloud ", "terraform apply", "kubectl apply")):
-            return ("infra_changes", 1)
-        if "rm -rf" in cmd or "git push" in cmd:
-            return ("destructive_ops", 1)
-    return None
+    """Classify a tool call into a real-asset exposure dimension. Returns None ONLY for calls that
+    demonstrably touch no external asset (a bare read). This is the BLAST-RADIUS-CAP entry point.
+
+    Fail-SAFE classification (external review, 2026-07): the earlier version returned None for any
+    command outside a keyword list, so `find -delete` / `dd` / `>file` / `… | bash` slipped past
+    the cap entirely. Now an UNRECOGNISED shell command falls into a catch-all `shell_effect`
+    dimension — unknown effect is consulted against the cap, not waved through. An adopter narrows
+    this to its real asset taxonomy; the default errs toward gating, not skipping."""
+    # tool_input may be a dict OR a raw string (some harnesses pass the command as a string).
+    if isinstance(ti, dict):
+        cmd = ti.get("command") or ti.get("cmd") or ""
+    elif isinstance(ti, str):
+        cmd = ti
+    else:
+        cmd = ""
+    if tool_name in ("Write", "Edit", "MultiEdit", "ApplyPatch"):
+        return ("file_writes", 1)            # writing a file is an asset effect
+    if tool_name not in ("Bash", "Shell", "Terminal"):
+        return None                          # non-shell, non-write tools touch no asset here
+    if not cmd.strip():
+        return ("shell_effect", 1)           # an opaque shell call — gate it, don't guess it safe
+    # named high-signal dimensions (kept so their caps can be tuned independently)
+    if any(k in cmd for k in ("curl", "wget", "http")) and any(
+            k in cmd for k in ("POST", "PUT", "DELETE", "-d ", "--data")):
+        return ("external_writes", 1)
+    if any(k in cmd for k in ("aws ", "gcloud ", "terraform apply", "kubectl apply")):
+        return ("infra_changes", 1)
+    if any(k in cmd for k in ("rm -rf", "rm -r", "git push", "-delete", "dd ", "truncate",
+                              "DROP ", "DELETE ", "mkfs", " > /", "| bash", "|bash", "| sh")):
+        return ("destructive_ops", 1)
+    # a read-only shell command touches nothing — the only safe None. Everything else is gated.
+    _READONLY = ("ls", "cat", "grep", "find", "echo", "pwd", "head", "tail", "wc", "git status",
+                 "git log", "git diff", "git show", "which", "file", "stat", "sort", "uniq")
+    first = cmd.strip().split()[0] if cmd.strip() else ""
+    if first in _READONLY and not any(w in cmd for w in ("-delete", "-exec", ">", ">>", "|")):
+        return None
+    return ("shell_effect", 1)               # unknown effect -> consult the cap (fail-safe)
 
 
 def rule_blast_radius(tool_name, ti):
@@ -116,6 +165,11 @@ def rule_blast_radius(tool_name, ti):
             "--window-since", os.environ.get("ORG_WINDOW_SINCE", "1970-01-01")]
 
 
+# Only the blast-radius cap is wired into the tool loop today. reconcile.py `mandate` and the
+# doctrine organ are real, tested code but are NOT PreToolUse rules — mandate fires on a contested
+# decision (not every tool call) and doctrine loads via the SessionStart hook, not here. Wiring
+# them as tool-loop rules is future work; the honest surface is one enforced rule + one injected
+# organ (doctrine at session start), not three enforced here (external review, 2026-07).
 RULES = [rule_blast_radius]
 
 
@@ -146,7 +200,11 @@ def main():
         if code == 10:
             _deny(f"org guardrail HELD this {tool_name} call: {output.strip()[:400]}")
         if code == 0:
-            continue        # this organ allows; keep checking other rules
+            # allow — but record the allowed exposure so the NEXT call's aggregate check sees it
+            # (closes the emit->append loop; without this the cap never accumulates). Only the
+            # allow decision is written; a held call was already denied above and never happens.
+            _append_emitted(output)
+            continue        # keep checking other rules
         # ANY other code (2 = interpreter couldn't run the script, 99 = our sentinel, a crash,
         # a timeout) means the guardrail did NOT return a clean allow. Fail-SAFE: block, never
         # let an unevaluable guardrail become a silent allow (docs/06 §2.4). Dev may opt out.

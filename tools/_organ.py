@@ -25,17 +25,31 @@ def ledger_path(root):
     return os.path.join(root, "ledger.jsonl")
 
 
+class LedgerCorruption(Exception):
+    """A ledger line is not valid JSON — tamper evidence, not a reason to crash. Carries the
+    seq/line so callers (ledger.py verify) can report BROKEN instead of dying with a traceback."""
+    def __init__(self, lineno, raw):
+        self.lineno = lineno
+        self.raw = raw
+        super().__init__(f"malformed ledger line {lineno}: not valid JSON")
+
+
 def read_events(root):
-    """Read the append-only ledger into a list of event dicts (empty if it doesn't exist yet)."""
+    """Read the append-only ledger into a list of event dicts (empty if it doesn't exist yet).
+    A malformed line raises LedgerCorruption — a non-JSON line IS tamper evidence; integrity
+    checkers catch it and report BROKEN rather than crashing (external review, 2026-07)."""
     log = ledger_path(root)
     if not os.path.exists(log):
         return []
     out = []
     with open(log, encoding="utf-8") as f:
-        for line in f:
+        for i, line in enumerate(f, 1):
             line = line.strip()
             if line:
-                out.append(json.loads(line))
+                try:
+                    out.append(json.loads(line))
+                except json.JSONDecodeError:
+                    raise LedgerCorruption(i, line)
     return out
 
 

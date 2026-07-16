@@ -46,7 +46,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _organ import read_events   # noqa: E402
+from _organ import read_events, LedgerCorruption   # noqa: E402
 
 # ── event classes with a required-prior constraint (ledger-schema §event_classes) ──
 # result_deployed{candidate_id==C} is INVALID without a prior refutation_attempted with
@@ -107,9 +107,10 @@ def _read_head(root):
 
 
 def _in_window(ev, since, until):
-    if since and ev["ts"] < since:
+    ts = ev.get("ts", "")
+    if since and ts < since:
         return False
-    if until and ev["ts"] > until:
+    if until and ts > until:
         return False
     return True
 
@@ -156,7 +157,14 @@ def cmd_append(a):
 def cmd_verify(a):
     """Replay the whole chain from GENESIS — the external watchdog's core primitive. Reports
     the FIRST break (edited line, reordered seq, or forged hash). Exit 1 if the chain is broken."""
-    events = _read_events(a.root)
+    try:
+        events = _read_events(a.root)
+    except LedgerCorruption as c:
+        # a non-JSON line IS tamper evidence — report BROKEN, do not crash with a traceback
+        print(f"BROKEN: malformed (non-JSON) content at ledger line {c.lineno} — the append-only "
+              f"log was edited to something that isn't a valid event (tamper evidence)",
+              file=sys.stderr)
+        return 1
     prev = "GENESIS"
     expect_seq = 1
     for ev in events:
@@ -202,7 +210,7 @@ def cmd_view(a):
                          indent=2, ensure_ascii=False))
         return 0
     # generic projection: the events feeding the view, newest last, payloads intact.
-    rows = [{"seq": e["seq"], "ts": e["ts"], "class": e["class"], "payload": e["payload"]}
+    rows = [{"seq": e["seq"], "ts": e.get("ts", ""), "class": e["class"], "payload": e["payload"]}
             for e in events]
     print(json.dumps({"view": a.view_id, "from": classes, "rows": rows},
                      indent=2, ensure_ascii=False))
