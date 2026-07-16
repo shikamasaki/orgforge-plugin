@@ -10,7 +10,7 @@
 #
 # This renders to a permissioned dataflow graph on the host harness (Conway's law: the
 # who-talks-to-whom you write here BECOMES the system's structure) — the graph is the medium,
-# the articulation is the message (docs/11 §1).
+# the articulation is the message.
 #
 # Glossary: "role" = "department" = "member" — one declared unit of the division of labor.
 # A department may be one agent or a self-organizing pool behind one contract; the chart

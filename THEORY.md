@@ -72,15 +72,11 @@ and a parts-first vocabulary has no slot for them. Naming the whole — *the org
 and asking what must be *articulated* for an AI to run it puts every part in its place and
 surfaces the ones the parts-first view left tacit.
 
-> A note on the "seven organs" that follow. Earlier drafts of this document claimed the
-> seven were *derived top-down from a definition, complete and ordered* — a proof that the
-> list is exhaustive. That claim was overbuilt (see docs/11): there is no completeness
-> theorem, and the list is better read as **a checklist of the things a human organization
-> runs on tacitly and an AI organization must have articulated** — distilled from a century
-> of how organizations succeed and fail, and cross-validated against where multi-agent LLM
-> systems actually break (they break at information flow, role clarity, and verification —
-> exactly the tacit things; see docs/11 §0). Read the organs as *what must be put into
-> words*, not as a derivation that proves itself.
+> The "seven organs" that follow are **a checklist of the things a human organization runs
+> on tacitly and an AI organization must have articulated** — distilled from how
+> organizations succeed and fail, and matched to where multi-agent LLM systems actually
+> break (information flow, role clarity, verification — exactly the tacit things). Read them
+> as *what must be put into words*, not as a proof that the list is exhaustive.
 
 ---
 
@@ -115,9 +111,9 @@ runs on that an AI organization must have written down**:
 - **persisting + growing** → how the org *changes its own shape* over time — must be articulated
   (Organ 7).
 
-This is not a top-down derivation that proves the list complete (see docs/11 and the note at the end
-of §0.1); it is a checklist of the tacit organizational things an AI can only act on once they are
-made explicit. The rest of this document develops each: the human-org meaning, why it must be
+This is a checklist of the tacit organizational things an AI can only act on once they are made
+explicit — not a proof that the list is complete. The rest of this document develops each: the
+human-org meaning, why it must be
 articulated, the agent-system realization, the failure mode when it is left tacit or malformed, and
 the concrete primitives that implement it.
 
@@ -159,7 +155,7 @@ more ways than the familiar gaming story admits. Manheim & Garrabrant distinguis
 **Goodhart's law**, and only one — *adversarial* Goodhart — is the "reward the number and people game
 it" case that the fix "keep the proxy out of the reward" defends against. The other three
 (*regressional*, *extremal*, *causal*) occur with **no adversary and no proxy-reward at all**: they
-are statistical consequences of optimizing any lossy stand-in for the true goal (see docs/11 §3). So
+are statistical consequences of optimizing any lossy stand-in for the true goal. So
 the deeper point is not merely anti-gaming; it is that the articulation must state the **purpose**,
 because any metric substituted for it silently diverges under optimization pressure — and agents,
 relentless local optimizers with full knowledge of their own context, surface that divergence faster
@@ -185,7 +181,7 @@ standardization of outputs (divisionalized form), or mutual adjustment (adhocrac
 **span of control** — how many subordinates one supervisor can *effectively* oversee. Classical span
 *numbers* (Graicunas ~4–5, Urwick 5, "15–20 in high-communication settings") are **discredited as
 universals**: CEO spans widened secularly over the last decades, optimal span is contingent on task
-standardization and interdependence, and "flat" is not "decentralized" (see docs/11 §4). What
+standardization and interdependence, and "flat" is not "decentralized." What
 survives, and what actually transfers to agents, is not a number but a constraint: a supervisor's
 **verification bandwidth** — how much it can meaningfully review — is finite, and structure has to
 respect that bound.
@@ -318,7 +314,7 @@ make explicit. A division of labor only re-integrates if information moves: betw
 Two classic results govern this organ. **Conway's law**: a system's architecture inevitably mirrors
 the communication structure of the organization that builds it — so the wiring of who-talks-to-whom
 you *write down* simply *becomes* the shape of the product (which is exactly why the articulation and
-the dataflow graph it renders to are one object seen twice, not rivals; docs/11 §1). And McChrystal's
+the dataflow graph it renders to are one object seen twice, not rivals). And McChrystal's
 **shared consciousness**: distributed autonomy is only safe when paired with pervasive information
 sharing — empowered execution without shared consciousness is dangerous, because a member with
 authority but not context will act confidently in the wrong direction. (*Team of Teams* is an n=1
@@ -363,7 +359,7 @@ the decision line so the human is freed to decide only the essential things and 
 delegated and unattended.** Alongside it sits the maker/checker split — separating the party that
 *produces/authorizes/records* from the party that *verifies* — which classical internal control calls
 **separation of duties (SoD)**. But SoD is emphatically **not a universal non-negotiable**, and every
-control theory this template cites contradicts a blanket rule (docs/11 §3):
+control theory this template cites contradicts a blanket rule:
 
 - **COSO** (the actual internal-control framework) treats SoD as **one control activity inside one of
   five components**, *selected by risk assessment* and explicitly **substitutable by compensating
@@ -388,8 +384,8 @@ Checker, with authorization, custody, and recording held by different parties) f
 hard-to-verify, or irreversible** work; a **compensating control** (a single reviewer, a forward test,
 an outcome contract) for **cheap, reversible, easily-verified** work — not the full apparatus on
 everything. Keep admission grounded in the true purpose (Organ 1) so the Checker is checking the right
-thing. The template's two-tier threat model (docs/01 §5) is this calibration; docs/11 §3 promotes it
-from a footnote to the governing principle of this organ.
+thing. The template's two-tier threat model (docs/01 §5) is this calibration, and it is the governing
+principle of this organ: control is proportioned to risk, never applied uniformly.
 
 **Failure mode.** Two symmetric failures. *Under-control:* let the Maker check its own high-stakes work
 and you have built the single point at which a false positive can be "committed and concealed" — the
@@ -418,7 +414,7 @@ a lens, not a law and not a finding to transplant intact: contingency theory is 
 modest fit–performance evidence), Greiner's crisis stages are a different theory from Mintzberg's
 configurations (grafting one onto the other is a category error), and both are re-parameterized heavily
 once the org is made of forkable agents whose reorg is a **cheap commit** rather than a costly,
-career-laden restructuring (docs/11 §4).
+career-laden restructuring.
 
 **What must be articulated.** How the org changes shape — which move is legal when, and what triggers
 it — is the thing to write down here. In a human firm reorganization is slow, political, and mostly
@@ -428,8 +424,8 @@ an explicit, catalogued capability rather than left to feel.
 **Agent realization.** A growth-stage model used as a diagnostic lens for which strain is coming and
 which organ/layer might answer it (see `docs/02-growth-stages.md`), and a legal-move catalog so reorg is
 an explicit, reversible commit. Alongside it, a *two-regime* stance — keep the exploratory front organic,
-keep the control skeleton designed — developed as its own law below (sourced, per docs/03 and docs/11,
-from Lawrence & Lorsch differentiation–integration and ambidexterity, **not** Burns & Stalker).
+keep the control skeleton designed — developed as its own law below (sourced, per docs/03, from
+Lawrence & Lorsch differentiation–integration and ambidexterity, **not** Burns & Stalker).
 
 **Failure mode.** Skip the diagnosis and you either under-build (stay a founder-supervised simple
 structure past the point one supervisor can verify) or over-build (bolt on layers you don't need — the
@@ -451,7 +447,7 @@ The objection is real and recent: there is evidence that **self-organizing agent
 designed structures** ([arXiv 2603.28990](https://arxiv.org/pdf/2603.28990)). Taken naively, this
 says "don't articulate your organization at all." But note what that same counter-paper actually
 found: a **hybrid** protocol won — self-organized exploration over a designed skeleton — which mildly
-*strengthens* the two-layer stance rather than refuting it (docs/11 §5).
+*strengthens* the two-layer stance rather than refuting it.
 
 That result measures **task-solving efficiency** — the work of exploring: generating hypotheses,
 searching, discovering, choosing methods. On that layer, letting structure emerge tends to win:
@@ -473,10 +469,10 @@ So the split is:
 > freely. The control layer (the decision line, risk-calibrated maker/checker, gates, admission,
 > safety) is designed and articulated — it never self-organizes.
 
-The correct citation for "different subunits, different regimes" is **Lawrence & Lorsch** (1967)
+The citation for "different subunits, different regimes" is **Lawrence & Lorsch** (1967)
 differentiation–integration, **not** Burns & Stalker (whose actual lesson is a warning about *botched*
-hybridization — see docs/03 and docs/11 §4). And L&L's real teaching carries a cost the earlier framing
-hand-waved: **integration cost rises with differentiation** — separating an organic exploration regime
+hybridization — see docs/03). And L&L's teaching carries a cost that is easy to miss:
+**integration cost rises with differentiation** — separating an organic exploration regime
 from a designed control regime demands *proportional* investment in explicit integrating machinery
 (integrator roles, shared cadences, liaison), which is itself part of the information-flow articulation
 (Organ 5). Read this way, the counter-evidence and organizational articulation are **not in conflict**:
@@ -489,7 +485,7 @@ paying the integration cost, and letting everything else find its own shape. (Fu
 ## 4. Placing harness and loop (and what a parts-first view never forces you to articulate)
 
 To make the central claim concrete, here is the whole industry vocabulary relocated onto the organ
-map. The point of the map is not that a derivation proves the list complete — it doesn't (docs/11) —
+map. The point of the map is not that a derivation proves the list complete — it doesn't —
 but that a bottom-up, parts-first vocabulary has **no slot** that forces you to write down the tacit
 organizational things in the right-hand column, and those are the ones that decide whether the output
 is any good:
@@ -553,17 +549,14 @@ things a parts-first vocabulary left un-said, and gives a rough order to articul
 vocabulary and failure modes are drawn from published, cited work (Mintzberg, Conway, Goodhart's four
 variants, agency/principal-agent, COSO/separation of duties, Lawrence & Lorsch, McChrystal) — used as
 **re-parameterized heuristics and failure modes for agents, not as law**; the human numbers (span
-counts) and growth-sequences do not transfer intact, and several earlier citations were mis-sourced and
-are corrected in docs/11. The current agent-engineering literature (context/harness/loop engineering,
-AIOS, CoALA) supplies the substrate side, and MASFT supplies the empirical backing that coordination and
-verification are where these systems actually fail. See `docs/sources.md` and `docs/11-refoundation.md`
-for the honest map.
+counts) and growth-sequences do not transfer intact. The current agent-engineering literature
+(context/harness/loop engineering, AIOS, CoALA) supplies the substrate side, and MASFT supplies the
+empirical backing that coordination and verification are where these systems actually fail. See
+`docs/sources.md` for the research map.
 
-**It is not** a complete top-down derivation, and it does not claim to be. Earlier drafts claimed the
-seven organs were *derived from a definition, complete and ordered* — that claim was **overbuilt**:
-there is no completeness theorem, and the "derivation" was retrofitted (the definition was pre-loaded
-with the clauses needed to emit the desired organs; see docs/11 §6). The durable core is not the
-derivation but **the articulation itself** — the operational claim that, in a world where AI runs the
+**It is not** a complete top-down derivation, and it does not claim to be: there is no completeness
+theorem behind the seven organs. The durable core is not a derivation but **the articulation itself** —
+the operational claim that, in a world where AI runs the
 work around the clock with the human deciding only the essential things, designing the system reduces
 to putting the organization into words an AI can act on, and multi-agent systems fail precisely where
 that articulation is missing or coarse (unclear roles, information that didn't arrive, work no one

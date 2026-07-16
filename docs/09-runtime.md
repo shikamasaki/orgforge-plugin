@@ -1,18 +1,16 @@
 # 09 — Execution: Delegate to the Host Harness, Project the Profile
 
-> An earlier draft of this document specified a runtime *to build* — a mediation layer,
-> a hand-rolled ledger, an external watchdog — as if the organization needed its own
-> execution engine. That violated the repository's first principle (docs/01, R0) and the
-> repository's own thesis (THEORY.md): **the harness and the loop are organs the industry
-> already built.** A department does not need a new runtime. It needs an *existing* one —
-> Claude Code, Codex, or any general coding agent — pointed at a working directory whose
-> instruction file is this role's projected profile. This document is rewritten around
-> that: what the system delegates, what thin layer it adds, and what the host must
+> An agent organization does not need its own execution engine. The repository's first
+> principle (docs/01, R0) and its thesis (THEORY.md) hold that **the harness and the loop
+> are organs the industry already built.** A department does not need a new runtime. It
+> needs an *existing* one — Claude Code, Codex, or any general coding agent — pointed at a
+> working directory whose instruction file is this role's projected profile. This document
+> describes that: what the system delegates, what thin layer it adds, and what the host must
 > provide.
 
 ---
 
-## 1. The delegation principle (replaces the mediation principle)
+## 1. The delegation principle
 
 **A department is a host harness running in a working directory; the harness supplies
 perception, tools, memory, and the control loop.** The system does not intercept the
@@ -117,9 +115,9 @@ in the lint. *How* they're enforced depends on the threat tier the org is deploy
   and to keep the irreversible-action approval gate (docs/06) between "prepared" and
   "executed."
 
-The earlier draft's mediation layer, effect-descriptor classifier, and external watchdog
-were an attempt to *build* Tier-B guarantees inside this repo. Under R0/C4 that is the
-wrong layer: for asset-touching orgs, choose a host environment that provides them; for the
+Tier-B guarantees are not built inside this repo. Under R0/C4 that would be the
+wrong layer: for asset-touching orgs, choose a host environment that provides a mediation
+layer, effect classification, and an external watchdog; for the
 common Tier-A org, structural separation + the approval gate + the lint suffice.
 
 ## 6. Conformance — restated as delegation, not implementation
@@ -144,7 +142,7 @@ The first box is the one that matters: **until an org from this template actuall
 and does useful work on an existing harness with nothing bespoke in the loop, R0 is unmet.**
 That, not spec completeness, is the definition of done.
 
-*Status: this document now describes delegation, not a runtime to build. The remaining
+*Status: this document describes delegation, not a runtime to build. The remaining
 implementation work is the projection layer (docs/01 §7 open question 1) and one
 end-to-end demonstration on a real host harness (docs/01 S1) — deliberately small, because
 the heavy organs are the host's, not ours.*

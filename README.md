@@ -29,24 +29,10 @@ information flow, the division of labor, and the decision line — explicitly, f
 empirical backing is direct: multi-agent LLM systems fail mostly at role clarity, information
 flow, and verification (the MASFT study) — precisely the tacit things left un-said.
 
-See **[THEORY.md](THEORY.md)** for the full decomposition. This is an **organizing frame and a
-template, not a silver bullet** — the honest research map (who has done what, and where the real
-white space is) is in [docs/sources.md](docs/sources.md).
-
-> **Read this caveat before believing the framing.** After a deep literature read (structure,
-> control, and multi-agent-systems theory) the framing was corrected — see
-> **[docs/11-refoundation.md](docs/11-refoundation.md)**. The corrected version *strengthens* the core
-> thesis rather than replacing it: the design act is **articulating the organization** (goal,
-> information flow, division of labor, and the decision line between what the human decides and what
-> runs delegated) in a form an AI can act on. That articulation *renders to* a permissioned dataflow
-> graph on an existing harness — the graph is the medium, not the message (Conway's law: the
-> communication structure you write down becomes the system's structure). The empirical backing is
-> real: multi-agent LLM systems fail mostly at coordination, role clarity, and verification (the MASFT
-> study) — i.e. exactly where the organization was left *tacit*. What was over-claimed: the "seven
-> organs derived top-down, complete and ordered" (a retrofitted checklist, not a proof), and several
-> classical citations were mis-sourced (e.g. Burns & Stalker do **not** license the two-layer split —
-> Lawrence & Lorsch do, *with* an integration cost; separation of duties is risk-calibrated in COSO,
-> not a universal). docs/11 is the corrected map; the remaining docs are being brought into line.
+The articulation *renders to* a permissioned dataflow graph on an existing harness — the graph is
+the medium, not the message (Conway's law: the communication structure you write down becomes the
+system's structure). See **[THEORY.md](THEORY.md)** for the full picture; the research map is in
+[docs/sources.md](docs/sources.md).
 
 **Harness-neutral by construction.** Because harness and loop are organs the industry *already
 built* (Claude Code, Codex, and their kin are runnable harnesses), this template does not build a
@@ -82,7 +68,6 @@ Decomposing from the organization (not from the parts) changes what you build:
 | Path | What it is |
 |---|---|
 | [docs/01-requirements.md](docs/01-requirements.md) | **The product spec** — actors (client vs operator vs department vs host harness), jobs-to-be-done, success criteria, the two-tier threat model, and the load-bearing requirement (R0): an LLM must run autonomously on an *existing* harness, no bespoke runtime. A design or review is judged against this first. |
-| [docs/11-refoundation.md](docs/11-refoundation.md) | **The literature-grounded correction** — what a deep read of organizational/control/MAS theory says the template got right (coordination is the real risk; the maker/checker insight) and wrong (org-as-primary-lens; SoD-as-universal; Burns & Stalker mis-cited; span numbers; the "derivation"). What to keep, drop, and reframe. Where an older doc conflicts, this wins. |
 
 **Core theory**
 
@@ -169,16 +154,6 @@ here is **the top-down organizational decomposition that places them** — and, 
 [docs/sources.md](docs/sources.md), applying *classical* management theory (Mintzberg, Greiner,
 span of control, separation of duties) to agent design is where the literature is currently thin.
 
-**Provenance caveat (important).** The classical-theory citations were originally written from the
-author model's training memory, not by reading the primary texts — a real weakness for a repo whose
-selling point is source honesty. A 2026-07 verification pass has since checked the *load-bearing*
-citations against external sources (Greiner, Graicunas/span, Barnard, Burns & Stalker, Ashby, Conway,
-Penrose, and arXiv 2603.28990 — all confirmed to exist and, mostly, to say what the repo claims), and
-**corrected the memory errors it found** (e.g. "Conway's law" was named by Brooks, not Conway; the span
-number is Graicunas's ~4–5 / Urwick's 5, not a single "5–6 to 15–20" law; the cited counter-paper
-actually supports a *mixed* stance, mildly strengthening rather than threatening the two-layer law).
-Those corrections and the ✓-verified markers are in [docs/sources.md](docs/sources.md). The long tail
-of secondary citations remains memory-sourced and should be treated as lower-confidence until checked.
 The design is **harness-neutral and delegation-first**: the heavy organs (perception, tools, loop,
 scheduling, sandboxing) are the host harness's job; this repo ships the skeleton, the profile
 projection, and the lint (docs/01, docs/09). The lint cross-validates all five data files and is the

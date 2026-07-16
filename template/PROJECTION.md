@@ -84,9 +84,9 @@ tier: A                      # A (drift-only) | B (asset-touching) — selects h
 
 `role-settings.yaml` is itself part of the *articulated organization*: `tools.allow/deny`
 is the **deontic dimension** (who may do what — the access-control articulation that MAS
-theory unifies with structure, docs/11 §2), `stop`/`context_budget_tokens` articulate the
+theory unifies with structure), `stop`/`context_budget_tokens` articulate the
 metabolism and the information budget, and `model_tier`/`effort` articulate how much
-capability this role's work warrants (risk-calibration, docs/11 §3 — a cheap reversible
+capability this role's work warrants (risk-calibration, docs/01 §5 — a cheap reversible
 role does not need the judge tier).
 
 ---

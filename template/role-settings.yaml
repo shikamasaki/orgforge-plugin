@@ -5,12 +5,12 @@
 # deontic "who MAY do what"), its stop condition, and how its deliverable is returned. The
 # projection maps these onto a concrete harness via harness-map.<harness>.yaml — the neutral
 # tiers/effort/tool-names here are NEVER vendor model strings; that mapping is the only
-# vendor-specific file (docs/01 C1, docs/11 §2).
+# vendor-specific file (docs/01 C1).
 #
 # Worked example matching template/organization.yaml. Replace with your own roles.
 # Validate the whole articulated org (this file included) with tools/org_lint.py.
 
-# Neutral tiers are risk-calibrated (docs/11 §3): a cheap reversible role does not warrant the
+# Neutral tiers are risk-calibrated (docs/01 §5): a cheap reversible role does not warrant the
 # judge tier; a checker of high-stakes work does. model_tier is a lever, not a default-to-max.
 defaults:
   effort: medium

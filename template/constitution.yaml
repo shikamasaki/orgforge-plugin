@@ -12,7 +12,7 @@
 # self-organizes from what the human governs, docs/03. But its PURPOSE is delegation, not
 # audit: it exists so the human is freed to the essential decisions, not to catch cheats.
 # Calibrate it to risk — full ceremony for high-stakes/irreversible work, light touch for
-# cheap reversible work; see docs/01 §5 and docs/11 §3. Over-governing every trivial call
+# cheap reversible work; see docs/01 §5. Over-governing every trivial call
 # recreates the bottleneck delegation was meant to remove.)
 #
 # organization.yaml is the org chart (the division of labor) — the org may rewrite it through
@@ -130,10 +130,10 @@ escalation:
   wake_up_push: [global_halt, safety_limit_tripped, ledger_anomaly]   # nothing else
   watchdog:                             # docs/06 §2.4 — the backstop is NOT self-reported
     # A REQUIREMENT ON THE HOST, tier-dependent (docs/01 §5; docs/09 §5). This block declares
-    # that an out-of-org backstop must exist; it does not implement one in this repo (that was
-    # the earlier draft's mistake, forbidden by docs/01 R0/C4). For a Tier-A org, the checker-
-    # independence and no-self-admission this guards are enforced structurally + by the approval
-    # queue. For a Tier-B (asset-touching) org, the HOST ENVIRONMENT provides the external
+    # that an out-of-org backstop must exist; it does not implement one in this repo (docs/01
+    # R0/C4). For a Tier-A org, the checker-independence and no-self-admission this guards are
+    # enforced structurally + by the approval queue. For a Tier-B (asset-touching) org, the
+    # HOST ENVIRONMENT provides the external
     # monitor / tamper-evidence / custody these keys ask for. The constitution states the
     # requirement; the chosen host satisfies it (docs/01 R2, C4).
     outside_org_write_authority: true   # external monitor over the append-only store

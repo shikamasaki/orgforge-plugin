@@ -3,7 +3,7 @@
 
 This is the gate every founding/reorg commit passes. The repo's thesis is that designing an
 agent org = articulating (in machine-actionable form) the tacit organizational knowledge a
-human company runs on (THEORY.md; docs/11): the goal, the division of labor, the information
+human company runs on (THEORY.md): the goal, the division of labor, the information
 flow, and the decision line. This tool checks that articulation is internally consistent —
 that the division of labor, the need-to-know information flow, and the decision line the yaml
 files write down don't contradict each other. It validates the org chart (organization.yaml),
@@ -559,7 +559,7 @@ def lint_role_settings(rs, org, lint):
         mt = s.get("model_tier")
         if mt is not None and mt not in ("judge", "worker", "cheap"):
             lint.fail("RS", f"role '{rid}' model_tier must be judge|worker|cheap (a NEUTRAL "
-                            f"tier, not a vendor model — docs/11 §2)")
+                            f"tier, not a vendor model)")
         # budget must match the org's scope grant (or the info-flow articulation is inconsistent)
         b = s.get("context_budget_tokens")
         if rid in budgets and b is not None and budgets[rid] is not None and b != budgets[rid]:

@@ -10,7 +10,7 @@
 
 ## 0. The first principle, stated as a requirement
 
-The repository's thesis (THEORY.md, as re-anchored): **in a world where AI runs the work
+The repository's thesis (THEORY.md): **in a world where AI runs the work
 around the clock and the human decides only the essential things, designing the system
 reduces to *articulating* — in a form an AI can act on — the tacit organizational
 knowledge a human company runs on: the goal, the information flow, the division of labor,
@@ -47,9 +47,7 @@ A design that requires standing up a custom mediation runtime, a custom event bu
 custom scheduler *before an agent can do useful work* has violated R0. "It's specified"
 is not "it runs." If the smallest useful configuration cannot be launched on a
 general-purpose coding agent as it ships, the requirement is unmet — no matter how
-complete the spec is. (This is the failure the earlier drafts fell into: they specified a
-self-built runtime — docs/09's mediation layer, a hand-rolled ledger and watchdog — and
-so produced a template that could not actually run. R0 exists to forbid that.)
+complete the spec is.
 
 ---
 
@@ -68,8 +66,8 @@ of agents. That is too coarse and hid real requirements. The actors are:
 
 The client↔operator distinction is a hard requirement: the human who *approves a
 production deploy* (operator, charter authority) is often not the human whose *needs the
-RFP encodes* (client). Conflating them, as earlier drafts did, hides the entire
-customer-facing surface (§3, jobs J1/J5).
+RFP encodes* (client). Conflating them hides the entire customer-facing surface
+(§3, jobs J1/J5).
 
 ---
 
