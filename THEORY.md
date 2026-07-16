@@ -1,16 +1,16 @@
 # THEORY — Articulating the Organization So AI Can Run It
 
-> **The claim of this repository, in one sentence:** in a world where AI does the work
-> around the clock with minimal human steering, designing an agent system reduces to
-> **putting the organization into words** — writing down, explicitly enough for an AI to
-> act on, the things a human company runs on *without* writing them down: what we are
-> trying to do, who knows what, who does what, what may be decided where, and which
+> **The claim of this repository, in one sentence:** the goal is to run the engineer's
+> work autonomously around the clock with minimal human steering, and getting there
+> **centers on putting the organization into words** — writing down, explicitly enough for
+> an AI to act on, the things a human company runs on *without* writing them down: what we
+> are trying to do, who knows what, who does what, what may be decided where, and which
 > decisions the human at the top still makes.
 >
 > That is the whole idea. Everything else — harness, loop, context engineering, the yaml
 > files, the lint — is downstream of it.
 
-## 0. Why it reduces to articulation
+## 0. Why it centers on articulation
 
 Consider what an LLM agent system actually needs to produce good work, and notice that
 each need is something a human organization already solves — but solves **tacitly**:
@@ -36,11 +36,13 @@ each need is something a human organization already solves — but solves **taci
 
 Here is the pivot. **A human organization can leave all of this tacit** — carried in
 experience, culture, and the air in the room — because humans read context, absorb norms,
-and fill gaps on their own. **An AI cannot.** An AI reads only what you give it. So the
-moment you hand the work to AI to run autonomously, every one of these tacit things has to
-become *explicit* — written down in a form the AI can act on. The goal has to be stated,
-not felt. "Who needs to know this" has to be a rule, not an instinct. "This is mine to
-decide, that goes up to the human" has to be a declared boundary, not a manager's judgment.
+and fill gaps on their own, *reliably enough*. **An AI can't be trusted to.** An AI does
+fill unwritten gaps — that is exactly the problem: what it infers unbidden is unreliable and
+un-auditable, and over a 24/7 unattended run those silent guesses compound into drift. So the
+load-bearing tacit things have to become *explicit* — written down in a form the AI acts on,
+so the system's behavior is pinned and checkable rather than left to inference. The goal has
+to be stated, not felt. "Who needs to know this" has to be a rule, not an instinct. "This is
+mine to decide, that goes up to the human" has to be a declared boundary, not a judgment.
 
 **So designing an agent organization = articulating, in machine-actionable form, the tacit
 organizational knowledge a human company runs on.** That is what this repository is: a

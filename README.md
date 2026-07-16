@@ -1,14 +1,17 @@
 # org-first-agents
 
-**In a world where AI runs the work around the clock and the human decides only the essential
-things, designing an agent system reduces to one act: putting the organization into words an AI
-can act on.** This repository is a template for that articulation.
+**The goal is to run the engineer's problem-solving process autonomously, around the clock — AI
+that keeps working while you sleep, with you deciding only the essential calls.** This repository
+is a template for getting there. The hard part isn't the model; it's that a system left running
+unattended drifts, duplicates, over-spends, and ships the wrong thing unless the org it runs as is
+written down. So the method is: **put the organization into words the AI can act on.**
 
 > A human company runs on things it never writes down — what we're trying to do, who needs to
 > know what, who owns which deliverable, and which calls the boss makes vs. delegates. People
-> carry that tacitly, in culture and judgment. An AI can't: it acts only on what you give it. So
-> the moment AI runs the org autonomously, all of that tacit knowledge has to become **explicit**.
-> That is the whole design problem — and this template is how you write it down.
+> carry that tacitly, in culture and judgment. An AI can't: what it reads is what it acts on, and
+> what it infers unwritten is unreliable and un-auditable. So the moment AI runs the work
+> autonomously, the load-bearing tacit knowledge has to become **explicit** — that is the design
+> problem this template solves so the system can run 24/7 without a human in every loop.
 
 ---
 
@@ -16,33 +19,35 @@ can act on.** This repository is a template for that articulation.
 
 An LLM agent produces work aligned to the goal only if the **right information reaches it in the
 right amount** (context) and the **division of labor is clear** (roles) — otherwise the output is
-a coarse, essence-missing average. Those are organizational problems, and a human company solves
-them *tacitly*, through culture, hallway conversation, and a manager's sense of who-needs-to-know
-and who-decides-what. The agent-building industry re-invented fragments of this bottom-up —
-*context engineering* (information flow), *harness engineering* (the substrate a member perceives
-and acts through), *loop engineering* (the operating cadence) — but as tactical parts, never
-forcing the questions that decide whether the output is any good: *is the goal actually
-propagated? is the division of labor clear? and — for a 24/7 system — which decisions does the
-human still make, and which run unattended?* Those are the tacit organizational things, and an AI
-can only act on them if they are **articulated**. So the design act is: articulate the goal, the
-information flow, the division of labor, and the decision line — explicitly, for the AI. The
-empirical backing is direct: multi-agent LLM systems fail mostly at role clarity, information
-flow, and verification (the MASFT study) — precisely the tacit things left un-said.
+a coarse, essence-missing average, and over a 24/7 run those small misalignments compound. Those
+are organizational problems. The agent-building industry re-invented fragments of the answer
+bottom-up — *context engineering*, *harness engineering*, *loop engineering* — as tactical parts,
+without forcing the questions that decide whether an unattended system stays on-goal: *is the goal
+actually propagated? is the division of labor clear? which decisions does the human still make, and
+which run unattended?* This template centers on those. It borrows the large frames the field
+already has — classical management theory (Mintzberg, Greiner, span of control, separation of
+duties) applied top-down to agent design, where that grounding is still thin — and turns them into
+**machine-checkable constraints**: an org chart the lint validates, a decision line the projection
+enforces, a separation of duties a hook actually blocks on. The empirical backing is direct:
+multi-agent LLM systems fail mostly at role clarity, information flow, and verification (the MASFT
+study) — precisely the tacit things left un-said.
 
-The articulation *renders to* a permissioned dataflow graph on an existing harness — the graph is
-the medium, not the message (Conway's law: the communication structure you write down becomes the
-system's structure). See **[THEORY.md](THEORY.md)** for the full picture; the research map is in
+The articulation and the permissioned dataflow graph it renders to on an existing harness are **one
+object seen twice, not rivals** (Conway's law: the communication structure you write down becomes
+the system's structure). See **[THEORY.md](THEORY.md)** for the full picture; the research map is in
 [docs/sources.md](docs/sources.md).
 
-**Harness-neutral by construction.** Because harness and loop are organs the industry *already
-built* (Claude Code, Codex, and their kin are runnable harnesses), this template does not build a
-runtime — it **delegates the heavy organs to whatever existing coding-agent harness runs each
-department**, and ships only three thin things: the organization's skeleton as declarative data, a
-**projection** of each role's neutral profile onto that harness's own instruction-file convention,
-and a machine audit of the skeleton. An LLM agent must be able to pick this up and run autonomously
-on a harness that already exists — that requirement, and everything the product must do, is the
-subject of **[docs/01-requirements.md](docs/01-requirements.md)** (read it before judging the repo:
-a design or review is measured against it first).
+**Harness-neutral by construction — the load-bearing bet.** Every "company of agents" framework
+(MetaGPT, ChatDev, CrewAI, and their kin) builds its own bespoke runtime. This one does the
+opposite: because the harness and the loop are organs the industry *already built* (Claude Code,
+Codex, and their kin are runnable harnesses), the template **delegates the heavy organs to whatever
+existing coding-agent harness runs each department** and ships a thin neutral core — the org
+skeleton as declarative data, a **projection** of each role onto that harness's own instruction-file
+convention, and a machine audit of the skeleton. The payoff is concrete: the *same* neutral
+guardrail blocks a real tool call on Claude Code and on Codex, because both share the pre-tool hook
+contract — no rewrite per vendor, no runtime to maintain. That requirement, and everything the
+product must do, is **[docs/01-requirements.md](docs/01-requirements.md)** (read it before judging
+the repo: a design or review is measured against it first).
 
 ## Why this framing is not just aesthetics
 
@@ -54,14 +59,22 @@ Decomposing from the organization (not from the parts) changes what you build:
 - It tells you **when to add hierarchy** (Greiner growth stages) — and, more importantly,
   when **not** to (a middle-management layer is the *last* resort, not the first; invest in
   information flow to widen span and stay flat).
-- It tells you **what must never self-organize.** The strongest counter-argument to designed
-  structure is that *self-organizing agents outperform designed ones*
-  ([arXiv 2603.28990](https://arxiv.org/pdf/2603.28990)). That result is about **task-solving
-  efficiency** — the *exploration* layer. It says nothing about *control*: separation of duties,
+- It tells you **what must never self-organize.** The common counter to designed structure is that
+  *self-organizing agents outperform designed ones*
+  ([arXiv 2603.28990](https://arxiv.org/pdf/2603.28990)) — but read closely that result is about
+  **task-solving efficiency** (the *exploration* layer) and its hybrid finding actually *strengthens*
+  the two-layer stance here (see [docs/sources.md](docs/sources.md)). It says nothing about
+  *control*: separation of duties,
   authorization, anti-gaming, safety. Let exploration self-organize; **design the control skeleton
   only.** (See [docs/03-organic-vs-mechanistic.md](docs/03-organic-vs-mechanistic.md).)
 
 ## What's in here
+
+The inventory below is large, but the split is simple: the **neutral core** the repo actually
+ships is the declarative skeleton + the projection + the machine audit (the lint and the organ
+tools). Everything the docs call "heavy" — the loop, the scheduler, perception, sandboxing — is
+**delegated to the host harness**, not built here (that's R0). The docs are the articulation; the
+tools are its machine-checkable proof; the templates are what you fill in for your own org.
 
 **Start here**
 
