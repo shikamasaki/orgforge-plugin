@@ -329,3 +329,10 @@ runtime:
   durable: true                           # intent: host survives crashes; resumes from the ledger store
   global_halt_flag: true                  # intent: host provides a single stop signal for all members
   budget_guard: true                      # intent: host's token/turn caps + no-progress; schedule: constitution
+  # total_token_budget: the whole org's token allowance — the pool the top holds and carves down at
+  # delegation (docs/14 §granularity). A manager passes a spec_delegated.token_budget to each
+  # subordinate from its own share; the sum of a manager's outgoing budgets may not exceed its own
+  # (checked by lint MB — hierarchical budget, the machine form of "you spawn within your budget").
+  # Since ~1 subagent ≈ ~50k tokens (measured), the budget — not a depth/width knob — sets how deep
+  # and wide the sub-tree grows. Set to null for "delegated to the host's budget_guard, no org cap."
+  total_token_budget: null                # e.g. 5000000 — or null to defer wholly to the host

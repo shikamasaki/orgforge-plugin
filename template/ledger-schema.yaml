@@ -113,6 +113,14 @@ event_classes:
   convention_adopted:   { scope, settled_choice, owner, review_by }              # internal precedent (Nelson&Winter)
   # manager accountability (docs/14) — the VERTICAL control down the supervision edge, distinct
   # from the gate/skeptic's cross-cutting admission (docs/14 §honest-distinction).
+  # spec_delegated (docs/14 §spec-driven): the manager pushes the per-task intent DOWN as an explicit
+  # spec BEFORE work starts (Deming's acceptance-spec), with a token_budget carved from its own —
+  # the producer of conformance_reviewed.delegated_intent_ref. confirmed == the supervisor affirms
+  # the spec conforms to the intent it holds (down-front A3). token_budget is how granularity is
+  # controlled: a subordinate spawns within its budget (~1 agent per ~50k tokens, measured), so the
+  # budget — not a depth/width knob — sets how deep/wide the sub-tree grows (docs/14 §granularity).
+  spec_delegated:       { supervisor, subordinate, spec_ref, contract_ref, intent_basis_ref,
+                          token_budget, confirmed: bool }                        # spec-driven + budget
   conformance_reviewed: { supervisor, subordinate, reviewed_ref, delegated_intent_ref,
                           verdict: conforms|rework|reject, evidence_ref }        # A3 intent-conformance
   # report_up is INVALID without a prior conformance_reviewed{conforms} for each subordinate result

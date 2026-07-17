@@ -69,6 +69,29 @@ REQUIRES_PRIOR = {
         and e["payload"].get("verdict") == "conforms"
         for e in hist
     ),
+    # A3 conformance review is INVALID unless the intent it reviews against was actually delegated
+    # as a spec first (spec-driven, docs/14): the delegated_intent_ref must resolve to a prior
+    # spec_delegated for the same (supervisor, subordinate). Otherwise delegated_intent_ref dangles
+    # — a manager cannot "verify against the intent it delegated" if it never delegated one.
+    "conformance_reviewed": lambda ev, hist: any(
+        e["class"] == "spec_delegated"
+        and e["payload"].get("supervisor") == ev["payload"].get("supervisor")
+        and e["payload"].get("subordinate") == ev["payload"].get("subordinate")
+        for e in hist
+    ),
+}
+
+# an honest per-class reason for a requires_prior rejection (the reject message uses this instead
+# of a single hardcoded 'skeptic is load-bearing' line that only fit result_deployed).
+REQUIRES_PRIOR_WHY = {
+    "result_deployed": "a refutation_attempted{claim_id==candidate_id, verdict==survives} — the "
+                       "skeptic is load-bearing; a result cannot deploy without surviving adversarial review",
+    "report_up": "a conformance_reviewed{verdict==conforms} by this supervisor — a manager cannot "
+                 "report subordinate work up as its own without verifying it against the intent it "
+                 "delegated (docs/14 §A3/§A4)",
+    "conformance_reviewed": "a spec_delegated for this (supervisor, subordinate) — a manager cannot "
+                            "verify against 'the intent it delegated' if it never delegated a spec "
+                            "(docs/14 §spec-driven)",
 }
 
 # ── view -> the event classes it derives from (ledger-schema §views). "*" = all classes. ──
@@ -148,10 +171,9 @@ def cmd_append(a):
     ev = {"id": eid, "seq": seq, "ts": a.ts or "UNSET", "actor": a.actor,
           "class": a.cls, "payload": payload, "prev_hash": head["hash"]}
     if a.cls in REQUIRES_PRIOR and not REQUIRES_PRIOR[a.cls](ev, hist):
-        print(f"append: {a.cls} rejected — requires a prior "
-              f"refutation_attempted{{claim_id=={payload.get('candidate_id')!r}, "
-              f"verdict==survives}}; the skeptic is load-bearing and no such event exists "
-              f"(ledger-schema §event_classes result_deployed.requires_prior)", file=sys.stderr)
+        why = REQUIRES_PRIOR_WHY.get(a.cls, "a required prior event does not exist")
+        print(f"append: {a.cls} rejected — requires a prior event that does not exist: {why} "
+              f"(ledger-schema §event_classes {a.cls}.requires_prior)", file=sys.stderr)
         return 3
     ev["hash"] = _hash(head["hash"], ev)
     os.makedirs(a.root, exist_ok=True)

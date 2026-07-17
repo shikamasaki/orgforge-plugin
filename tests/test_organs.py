@@ -77,15 +77,19 @@ def test_report_up_requires_prior_conformance(tmp_path):
     code, out = run("ledger.py", "append", str(tmp_path), "--actor", "s",
                     "--class", "report_up", "--payload", json.dumps(rp))
     assert code == 3 and "requires a prior" in out
-    # after a conforms review by the same supervisor, report_up is valid
+    # the full chain: spec_delegated -> conformance_reviewed{conforms} -> report_up valid
+    seed(tmp_path, "s", "spec_delegated",
+         {"supervisor": "s", "subordinate": "sub", "spec_ref": "sp", "contract_ref": "c",
+          "intent_basis_ref": "ib", "token_budget": 50000, "confirmed": True},
+         ts="2026-07-16T00:01:00Z")
     seed(tmp_path, "s", "conformance_reviewed",
          {"supervisor": "s", "subordinate": "sub", "reviewed_ref": "r",
-          "delegated_intent_ref": "i", "verdict": "conforms", "evidence_ref": "e"},
-         ts="2026-07-16T00:01:00Z")
+          "delegated_intent_ref": "sp", "verdict": "conforms", "evidence_ref": "e"},
+         ts="2026-07-16T00:02:00Z")
     rp2 = dict(rp)
     code, out = run("ledger.py", "append", str(tmp_path), "--actor", "s",
                     "--class", "report_up", "--payload", json.dumps(rp2), "--ts",
-                    "2026-07-16T00:02:00Z")
+                    "2026-07-16T00:03:00Z")
     assert code == 0, out
 
 
