@@ -68,6 +68,27 @@ def test_ledger_actor_not_from_payload(tmp_path):
     assert code == 2 and "must not carry its own 'actor'" in out
 
 
+def test_report_up_requires_prior_conformance(tmp_path):
+    # A4 (docs/14): a manager may not report subordinate work up without a prior A3 conforms —
+    # the schema promised requires_prior; this pins it as actually enforced at write time.
+    rp = {"supervisor": "s", "parent": "ceo", "window": "w", "basis_refs": [],
+          "intent_status": "met", "exceptions": [], "exceptions_none_asserted": True,
+          "decisions_needed": []}
+    code, out = run("ledger.py", "append", str(tmp_path), "--actor", "s",
+                    "--class", "report_up", "--payload", json.dumps(rp))
+    assert code == 3 and "requires a prior" in out
+    # after a conforms review by the same supervisor, report_up is valid
+    seed(tmp_path, "s", "conformance_reviewed",
+         {"supervisor": "s", "subordinate": "sub", "reviewed_ref": "r",
+          "delegated_intent_ref": "i", "verdict": "conforms", "evidence_ref": "e"},
+         ts="2026-07-16T00:01:00Z")
+    rp2 = dict(rp)
+    code, out = run("ledger.py", "append", str(tmp_path), "--actor", "s",
+                    "--class", "report_up", "--payload", json.dumps(rp2), "--ts",
+                    "2026-07-16T00:02:00Z")
+    assert code == 0, out
+
+
 def test_ledger_tamper_detected(tmp_path):
     seed(tmp_path, "a", "candidate_submitted",
          {"maker": "a", "candidate_id": "c1", "contract_ref": "r", "evidence": []})

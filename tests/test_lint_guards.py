@@ -90,3 +90,42 @@ def test_human_judged_move_cannot_be_delegated(tmp_path):
         return c
     code, out = _lint(tmp_path, moves=mv, constitution=con)
     assert code == 1 and "MV" in out
+
+
+def test_orphan_role_fails_attribution_closure(tmp_path):
+    # O2d (docs/14 §A1): an active role no supervisor owns → its output is owned by nobody
+    def org(o):
+        for r in o["roles"]:
+            if r["id"] == "supervisor":
+                r["supervises"] = [x for x in r["supervises"] if x != "miner"]
+        return o
+    code, out = _lint(tmp_path, organization=org)
+    assert code == 1 and "O2d" in out
+
+
+def test_double_supervised_role_fails_attribution(tmp_path):
+    # O2d: two managers cannot both be accountable for one subordinate. Add a sub-supervisor that
+    # also supervises miner, so miner is owned by two.
+    def org(o):
+        # give an existing role a supervises that overlaps supervisor's (registrar supervises miner too)
+        for r in o["roles"]:
+            if r["id"] == "registrar":
+                r["supervises"] = ["miner"]
+        return o
+    code, out = _lint(tmp_path, organization=org)
+    assert code == 1 and "O2d" in out
+
+
+def test_contract_checker_must_exist_parity(tmp_path):
+    # O2e (docs/14 §A2): a deliverable-bearing role whose checker isn't a real role → parity fail
+    def org(o):
+        for r in o["roles"]:
+            if r.get("contract", {}).get("deliverable"):
+                r["contract"]["checker"] = "ghost_checker"
+                break
+        return o
+    code, out = _lint(tmp_path, organization=org)
+    # only fires if some role has a contract.deliverable; the shipped template's makers may not —
+    # so accept either the O2e failure or a clean pass if no deliverable-bearing role exists.
+    if "deliverable" in (TPL / "organization.yaml").read_text():
+        assert code == 1 and "O2e" in out

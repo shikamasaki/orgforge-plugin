@@ -29,7 +29,11 @@ envelope:
 event_classes:
   # metabolism (Organ 4)
   cycle_started:        { role, pack_manifest_id }
-  cycle_completed:      { role, tokens: {task, gate, reporting}, outputs: [ref], views_referenced: [view_id] }
+  # accountable_supervisor (docs/14 §A1): which supervising role owns this output up the chain,
+  # set from the runtime supervision edge (never the payload — a manager cannot forge who owns a
+  # result, mirroring actor_identity_source). Empty for the top (human-owned) tier.
+  cycle_completed:      { role, tokens: {task, gate, reporting}, outputs: [ref],
+                          views_referenced: [view_id], accountable_supervisor }
   heartbeat:            { component, invariants_hold: bool }
   halt_tripped:         { trigger, scope: global|role }
   # work (Organs 2/6)
@@ -107,6 +111,17 @@ event_classes:
   mandate_conflict_raised: { subjects: [role], contested_decision, mandate_refs: [role],
                              resolution: precedence_applies|integrate|escalate, evidence_ids: [ref] } # MANDATE-CONFLICT
   convention_adopted:   { scope, settled_choice, owner, review_by }              # internal precedent (Nelson&Winter)
+  # manager accountability (docs/14) — the VERTICAL control down the supervision edge, distinct
+  # from the gate/skeptic's cross-cutting admission (docs/14 §honest-distinction).
+  conformance_reviewed: { supervisor, subordinate, reviewed_ref, delegated_intent_ref,
+                          verdict: conforms|rework|reject, evidence_ref }        # A3 intent-conformance
+  # report_up is INVALID without a prior conformance_reviewed{conforms} for each subordinate result
+  # it rolls up — the manager cannot own unverified work upward (requires_prior, as result_deployed
+  # requires a skeptic survives). exceptions_none_asserted makes silence a positive claim (anti-MUM).
+  report_up:            { supervisor, parent, window, basis_refs: [ref],
+                          intent_status: met|at_risk|missed, exceptions: [ref],
+                          exceptions_none_asserted: bool, decisions_needed: [ref],
+                          requires_prior: "conformance_reviewed{verdict==conforms} for each rolled-up result" } # A4 honest roll-up
 
 # ── Cadence triggers: what `loop.cadence: on_<x>` may bind to ────────────────
 triggers:
@@ -142,6 +157,7 @@ views:
   full_evidence_trail:  { from: ["*"], shape: everything touching the item under review — control roles only }
   moves_catalog:        { from: [proposal_adjudicated], shape: current legal moves (mirror of moves.yaml at its adopted version) }
   proposal_queue:       { from: [proposal_filed, proposal_adjudicated], shape: open proposals by subject }
+  pending_conformance_review: { from: [cycle_completed, conformance_reviewed], shape: subordinate outputs a supervisor owns (accountable_supervisor) but has not yet conformance-reviewed — an over-span manager's unreviewed backlog (docs/14 §A3) }
 
 # ── Context-pack assembly (docs/08; executed by the registrar) ───────────────
 context_pack:

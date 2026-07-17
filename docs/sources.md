@@ -315,6 +315,47 @@ problem?" Applied at this repo's granularity as explicit synthesis, flagged, not
 
 ---
 
+### Manager accountability (docs/14)
+
+What a manager/dept-head is answerable for across the delegation chain — the four accountabilities
+of Organ 6's vertical control facet. Applied at agent-manager granularity as explicit synthesis;
+the classical parity/responsibility principles are heuristics to *verify*, not laws (Simon 1946),
+so they are design priors the lint checks, not proofs. (Urwick, Mintzberg, Graicunas, Deming,
+March & Simon are already cited above — referenced, not duplicated.)
+
+- **[P] Koontz & O'Donnell (1955), *Principles of Management*, McGraw-Hill** — **absoluteness of
+  responsibility**: a superior cannot escape responsibility for the activities of subordinates to
+  whom authority was delegated; and the **parity principle**: responsibility exacted cannot exceed
+  (nor fall short of) the authority delegated. Anchors A1 (roll-up attribution) and A2 (parity).
+- **[P] Urwick (1943), *The Elements of Administration*, Harper** (already cited) — the **principle
+  of responsibility** ("the responsibility of superiors for the acts of subordinates is absolute")
+  and the **principle of correspondence** (authority and responsibility coterminous and coequal).
+  A1, A2.
+- **[P] Fayol (1916), *Administration Industrielle et Générale*** — Principle 2, authority and
+  responsibility as corollaries. A2.
+- **[P] Simon (1946), "The Proverbs of Administration," *Public Administration Review* 6(1):
+  53–67** — the classical principles are contradictory proverbs, not laws: **verify, don't assume.**
+  The honesty anchor for treating parity/span as design priors to test. A2.
+- **[S] Simons (2013), "The Entrepreneurial Gap," HBS Working Paper 13-100** — a *bounded* gap
+  between accountability and control is a deliberate lever; an *unbounded* one is a defect. Refines
+  A2 (parity is a floor, a bounded stretch is allowed).
+- **[P] Boehm (1979), "Guidelines for Verifying and Validating Software Requirements and Design
+  Specifications," *Euro IFIP*** — **verification** ("are we building it right?" — conformance to
+  spec) vs. **validation** ("are we building the right thing?"). Anchors A3: the manager's
+  intent-conformance *verification* is categorically distinct from the gate/skeptic's *validation*
+  + adversarial admission — which is why A3 does not violate separation of duties.
+- **[P] March & Simon (1958), *Organizations*, Wiley** (already cited) — **uncertainty
+  absorption**: as information moves up, inferences travel and the evidence is lost, making the
+  summarizer an un-auditable premise source. Anchor A4: carry the *basis* up alongside the
+  inference.
+- **[P] Rosen & Tesser (1970), "On Reluctance to Communicate Undesirable Information: the MUM
+  effect," *Sociometry* 33(3): 253–263** — the reluctance to pass bad news upward. Anchor A4: make
+  silence a positive assertion (`exceptions_none_asserted`), never an omission.
+- **[S] Read (1962) / O'Reilly (1978)** — upward information distortion is *intentional* and tracks
+  the reporter's incentives. Anchor A4's `report_fidelity` audit (grade the roll-up against source).
+
+---
+
 *Preprint note:* arXiv IDs in the 2601–2606 range are 2026 preprints; treat **[S]** arXiv items as
 evidence that a claim/term exists and is discussed, not as peer-reviewed settled results. The
 load-bearing primary anchors are the classical-theory citations, the Anthropic/Thoughtworks

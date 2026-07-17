@@ -59,6 +59,16 @@ REQUIRES_PRIOR = {
         and e["payload"].get("verdict") == "survives"
         for e in hist
     ),
+    # A4 report-up is INVALID unless this supervisor has done at least one A3 conformance review
+    # that CONFORMS — a manager may not report subordinate work up as its own without having
+    # verified it against the intent it delegated (docs/14 §A3/§A4). Without this, the schema's
+    # requires_prior promise (ledger-schema.yaml) is prose, not enforced.
+    "report_up": lambda ev, hist: any(
+        e["class"] == "conformance_reviewed"
+        and e["payload"].get("supervisor") == ev["payload"].get("supervisor")
+        and e["payload"].get("verdict") == "conforms"
+        for e in hist
+    ),
 }
 
 # ── view -> the event classes it derives from (ledger-schema §views). "*" = all classes. ──

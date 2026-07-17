@@ -266,6 +266,55 @@ def check_scale_scope(org, roles, control_ids, mv, lint):
                                  f"control skeleton within its span (regime boundary, docs/03)")
 
 
+def check_manager_accountability(org, roles, lint):
+    """O2d/O2e — manager accountability (docs/14). O2d: attribution closure — every active
+    non-supervisor role is owned by exactly one supervisor (the RACI single-Accountable invariant
+    over the supervises: graph; no orphan whose result nobody owns, no two managers claiming one
+    subordinate). O2e: parity gate — a role held to a contract.deliverable must hold the authority
+    to produce it (its checker is reachable; a supervised integration dependency is in its
+    closure). Accountability without matching authority is a mis-designed job (docs/14 §A2)."""
+    supervisors = {rid: set(r.get("supervises", []) or []) for rid, r in roles.items()
+                   if r.get("supervises")}
+    # O2d — attribution closure
+    for rid, r in roles.items():
+        if rid in supervisors:
+            continue                       # a supervisor is owned by its own parent, checked below
+        if not is_active(r):
+            continue
+        owners = [s for s, subs in supervisors.items() if rid in subs]
+        if len(owners) == 0:
+            lint.fail("O2d", f"active role '{rid}' is in no supervisor's supervises: list — its "
+                             f"output is owned by nobody up the chain (docs/14 §A1: exactly one "
+                             f"accountable supervisor per role)")
+        elif len(owners) > 1:
+            lint.fail("O2d", f"role '{rid}' is supervised by {sorted(owners)} — two managers "
+                             f"cannot both be accountable for one subordinate (docs/14 §A1)")
+    # O2e — parity gate: a contract-bearing role must hold the authority for its deliverable
+    def closure(rid, seen=None):
+        seen = seen if seen is not None else set()
+        for x in roles.get(rid, {}).get("supervises", []) or []:
+            if x not in seen:
+                seen.add(x)
+                closure(x, seen)
+        return seen
+    for rid, r in roles.items():
+        contract = r.get("contract") or {}
+        if not contract.get("deliverable"):
+            continue
+        checker = contract.get("checker")
+        if checker and checker not in roles:
+            lint.fail("O2e", f"role '{rid}' is accountable for a deliverable but its checker "
+                             f"'{checker}' is not a defined role — accountability without a "
+                             f"reachable checker (parity, docs/14 §A2)")
+        # a declared integration dependency this role must roll up must be in its supervises-closure
+        for dep in contract.get("integrates", []) or []:
+            if dep not in closure(rid):
+                lint.fail("O2e", f"role '{rid}' must integrate '{dep}' for its deliverable but "
+                                 f"'{dep}' is not in its supervises-closure — it is accountable "
+                                 f"for output it has no authority to direct or reject (parity, "
+                                 f"docs/14 §A2)")
+
+
 def check_sod(org, roles, control_ids, lint):
     sod = org.get("separation_of_duties")
     if not isinstance(sod, dict):
@@ -868,6 +917,8 @@ def main(argv):
         lint_moves(mv, con, lint)
         if org is not None and "roles" in org:
             check_scale_scope(org, _org_roles, _org_control, mv, lint)
+    if org is not None and "roles" in org and _org_roles is not None:
+        check_manager_accountability(org, _org_roles, lint)
     views, triggers = (set(), set())
     if ls is not None:
         views, triggers = lint_ledger_schema(ls, lint)
