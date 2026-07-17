@@ -133,6 +133,57 @@ against different threats:
 > the new `report_fidelity` audit. The existing SoD skeleton is untouched — A3 adds a vertical
 > verification lane; "enters trusted state" remains the gate's sole authority.
 
+## §spec-driven — confirm the spec before building
+
+A3 is intent-conformance review. Run *early*, before the work exists, it is **spec-driven
+delegation**: the manager writes the per-task intent as an explicit **spec** and pushes it *down*
+at delegation, and the supervising manager **confirms the spec conforms to the intent it holds
+before implementation proceeds** — the acceptance criterion is set at hand-off, not inspected at
+the end of the line (Deming). The spec is the artifact `conformance_reviewed.delegated_intent_ref`
+points at; `spec_delegated` is its producer (`confirmed: bool` is the down-front A3, the same
+positive-claim discipline as `exceptions_none_asserted`).
+
+This does not duplicate the admission standard or the contract: those sit on the *admission* axis
+(the bar a **finished result is judged against**, upward, independent). A spec is the opposite
+direction — intent pushed **down at delegation, before work starts**. It earns its own event only
+when the per-task intent is richer than the standing contract; a spec that merely restates
+`contract.deliverable` should stay in the context pack. The confirm-before-build is the supervising
+manager's own vertical A3, run earlier in time — not the independent gate/skeptic, which still
+admits the finished result exactly as before.
+
+## §granularity — how far to subdivide, and the budget that decides it
+
+When a manager may spawn a subordinate to help (write a spec facet, review from a needed expert
+angle, take a parallel sub-task), the question is **how fine to cut**. The control is not a
+depth/width knob — it is a **token budget carved down at delegation**. A manager passes each
+subordinate a `spec_delegated.token_budget` from its own share; the sum of a manager's outgoing
+budgets may not exceed its own. Since one subagent costs on the order of tens of thousands of
+tokens to stand up (its own context, mostly cached), the budget — not a headcount — sets how deep
+and wide the sub-tree grows: a subordinate spawns within its budget, and when the budget is spent
+it cannot subdivide further. This is the machine form of "you delegate within your budget," and it
+aligns with A1/A2: a manager is accountable for its subordinates' spend (A1) and holds the budget
+authority to bound it (A2).
+
+Three limits compose to set the natural ceiling, so no arbitrary cap is needed:
+- **The host's hard limit** — nesting is bounded by the harness (on the harness this was verified
+  against, a subagent five levels below the top holds no spawn tool and is a leaf). Depth is
+  capped by construction, not by this repo.
+- **The specialization gate** (docs/05 §4) — spawn a specialist only when the work is recurring,
+  or would dilute a generalist's context, or needs independent lineage; the degree of subdivision
+  is bounded by coordination cost (Becker & Murphy), not by how finely one *could* cut.
+- **The budget** — the token allowance runs out.
+
+**And the load-bearing judgment about *when* subdivision pays at all:** subdividing into a
+sub-tree of agents costs multiples of a single agent doing the work — each agent re-reads its own
+context, and a multi-turn loop's cost grows with the *square* of its turns (the whole history is
+re-sent each turn). That extra spend buys real value only for work that is **genuinely parallel,
+breadth-first, exceeds one context window, or spans many independent tools**. For **dependency-heavy
+work that needs one shared context — most implementation and coding — a single agent given the same
+budget usually does as well or better**, and subdivision spends the multiple for little gain. So a
+manager's default is: subdivide for parallel/breadth-first work; keep tightly-coupled work single-
+threaded. This is why `spec_delegated` carries a budget and not a mandate to fan out — the manager
+decides per task whether fanning out is worth its own multiplier, and is accountable (A1) for that call.
+
 *Status: the four accountabilities are articulated here with their ledger events, views, and lint
 teeth; A1/A2 project into the manager's Discipline preamble, A3/A4 into its doctrine, loaded at
 startup (PROJECTION.md §1, the SessionStart hook). The classical parity/responsibility principles
