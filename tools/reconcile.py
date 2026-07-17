@@ -110,44 +110,82 @@ def cmd_collision(a):
     return OK
 
 
+def _latest_depends_on(events, role):
+    """The most recent depends_on edge set a role declared via work_claimed."""
+    edges = []
+    for e in events:
+        if e["class"] == "work_claimed" and e["payload"].get("role") == role:
+            edges = e["payload"].get("depends_on") or []
+    return edges
+
+
+def _lowest_common_owner(events, roles):
+    """Route a stall to the lowest role that supervises all of `roles`. Derived from the
+    supervises edges the ledger records (profile_edited/cycle payloads carry no chart, so we
+    read the org's supervises map if present in a work_claimed 'supervisor' hint; absent that,
+    route to the CEO sentinel). Kept simple: the common owner is the shared supervisor if every
+    role names the same one, else 'ceo' (the top)."""
+    sups = set()
+    for e in events:
+        if e["class"] == "cycle_completed":
+            p = e["payload"]
+            if p.get("role") in roles and p.get("accountable_supervisor"):
+                sups.add(p["accountable_supervisor"])
+    return sups.pop() if len(sups) == 1 else "ceo"
+
+
 def cmd_stall(a):
-    """Convert the ABSENCE of output on a depends_on edge into an explicit stall fact."""
+    """Convert the ABSENCE of output on a depends_on edge into an explicit stall fact. Reads the
+    actual depends_on edges a consumer declared (work_claimed.depends_on) and reports WHO it is
+    waiting on and WHAT the downstream impact is — not just that a cycle didn't complete."""
     events = read_events(a.root)
-    # a dependency edge: a consumer role has bound work awaiting a producer's output. We detect
-    # a stall as: a role emitted cycle_started but no cycle_completed within N subsequent cycles
-    # of the whole org (a freshness window) — its work is in flight but not landing.
-    started = {}   # role -> last cycle_started seq
-    completed = {} # role -> last cycle_completed seq
-    total_cycles = 0
+    started, completed = {}, {}
     for e in events:
         if e["class"] == "cycle_started":
             started[e["payload"].get("role")] = e["seq"]
-            total_cycles += 1
         elif e["class"] == "cycle_completed":
             completed[e["payload"].get("role")] = e["seq"]
     stalled = []
     for role, sseq in started.items():
         cseq = completed.get(role, -1)
         if cseq < sseq:
-            # count org cycles that elapsed since this role started without completing
             elapsed = sum(1 for e in events
                           if e["class"] == "cycle_started" and e["seq"] > sseq)
             if elapsed >= a.freshness_cycles:
-                stalled.append({"role": role, "started_seq": sseq, "stalled_cycles": elapsed})
+                # read this role's declared dependency edges; a stall is a TRUE blocked-on
+                # stall if a producer it awaits has not completed since the consumer started.
+                edges = _latest_depends_on(events, role)
+                awaiting = [ed for ed in edges
+                            if completed.get(ed.get("producer_role"), -1) < sseq]
+                stalled.append({"role": role, "started_seq": sseq, "stalled_cycles": elapsed,
+                                "awaiting": awaiting})
     if not stalled:
         emit_event("dependency_stall_raised", {"blocked_role": None, "result": "no_stall"})
         print(f"no stall: every started cycle completed within {a.freshness_cycles} cycles "
               f"— silent.")
         return OK
     worst = max(stalled, key=lambda s: s["stalled_cycles"])
-    emit_event("dependency_stall_raised", {"blocked_role": worst["role"], "awaited_seam_id": None,
-                                      "awaited_producer_role": None,
+    awaiting = worst["awaiting"]
+    awaited_producer = awaiting[0]["producer_role"] if awaiting else None
+    awaited_seam = awaiting[0].get("seam_id") if awaiting else None
+    # downstream impact: everyone else whose depends_on names the blocked role as a producer
+    downstream = sorted({s["role"] for s in stalled
+                         if any(ed.get("producer_role") == worst["role"]
+                                for ed in _latest_depends_on(events, s["role"]))})
+    owner = _lowest_common_owner(events, [worst["role"]] +
+                                 ([awaited_producer] if awaited_producer else []))
+    emit_event("dependency_stall_raised", {"blocked_role": worst["role"],
+                                      "awaited_seam_id": awaited_seam,
+                                      "awaited_producer_role": awaited_producer,
                                       "stalled_ticks": worst["stalled_cycles"],
-                                      "downstream_impact": []})
-    print(f"STALL: {worst['role']} started but has not completed in {worst['stalled_cycles']} "
-          f"cycles (>= freshness {a.freshness_cycles}) — silence-as-block, now explicit. "
-          f"First stall routes to the common owner's MOVE; escalate only if it persists after "
-          f"a self-heal MOVE. All stalled: {[s['role'] for s in stalled]}", file=sys.stderr)
+                                      "downstream_impact": downstream,
+                                      "route_to": owner})
+    waiting_on = (f" waiting on {awaited_producer}"
+                  f"{' for ' + awaited_seam if awaited_seam else ''}" if awaited_producer
+                  else " (no declared producer — stalled in place)")
+    print(f"STALL: {worst['role']}{waiting_on}, {worst['stalled_cycles']} cycles "
+          f"(>= freshness {a.freshness_cycles}) — routes to {owner}. Downstream: {downstream}. "
+          f"Escalate only if it persists after a self-heal MOVE.", file=sys.stderr)
     return ESCALATE
 
 

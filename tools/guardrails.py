@@ -114,9 +114,47 @@ def cmd_reconcile(a):
     return ESCALATE
 
 
+# event classes that MOVE a reference roles are bound to — the auto-trigger set (docs/11 §2.3,
+# docs/12 §3.1). When one lands, the roles bound to that reference must re-derive.
+REFERENCE_CHANGE_CLASSES = ("priority_ranking_set", "doctrine_diff_admitted",
+                            "scope_grant_changed", "intent_revised")
+
+
+def _auto_trigger_and_bound(events):
+    """Derive (trigger_event_id, bound_roles) from the ledger instead of taking them as args —
+    the wiring docs/11 §2.3/§12 §3.1 imply. The trigger is the latest reference-change event;
+    the bound roles are those the change affects, read from the event payload where the schema
+    carries them (doctrine_diff_admitted.role; scope_grant_changed via grantor's scope; a
+    priority/intent change binds every role that has run a cycle — all of them re-rank)."""
+    latest = None
+    for e in events:
+        if e["class"] in REFERENCE_CHANGE_CLASSES:
+            latest = e
+    if latest is None:
+        return None, []
+    cls, p = latest["class"], latest.get("payload", {})
+    if cls == "doctrine_diff_admitted":
+        bound = [p["role"]] if p.get("role") else []
+    else:
+        # a ranking/intent/scope change binds every role that has been active (produced a cycle)
+        bound = sorted({e["payload"].get("role") for e in events
+                        if e["class"] in ("cycle_started", "cycle_completed")
+                        and e["payload"].get("role")})
+    return latest["id"], bound
+
+
 def cmd_staleref(a):
-    """STALE-REFERENCE: which bound roles have NOT re-derived since the reference moved?"""
+    """STALE-REFERENCE: which bound roles have NOT re-derived since the reference moved?
+    With --auto, the trigger event and bound roles are DERIVED from the ledger (the latest
+    reference-change event + the roles it affects) instead of passed in — closing the
+    manual-input gap the docs' 'event-triggered by any reference change' implied."""
     events = read_events(a.root)
+    if getattr(a, "auto", False):
+        a.trigger_event, auto_bound = _auto_trigger_and_bound(events)
+        if a.trigger_event is None:
+            print("staleref --auto: no reference-change event in the ledger yet — nothing bound.")
+            return OK
+        a.bound = a.bound or ",".join(auto_bound)
     # find the trigger event's seq (when the reference moved)
     trigger_seq = None
     for e in events:
@@ -166,6 +204,40 @@ def cmd_staleref(a):
     return OK
 
 
+# action classes whose effect is IRREVERSIBLE — a backlog item that triggers one of these
+# cannot ride "silence = consent"; it drops to the irreversible-hold tier (docs/06 §2.1). The
+# reversible default (re-ordering, in-workspace work) flows silently. This mirrors the blast-
+# radius classifier's reversibility split (docs/11 §2.1), applied to priority instead of tools.
+IRREVERSIBLE_ACTION_CLASSES = {
+    "deploy", "production_deploy", "release", "publish", "spend", "payment", "transfer",
+    "external_write", "destructive_migration", "drop", "delete_data", "send_external",
+    "credential_use", "force_push",
+}
+
+
+def cmd_consent(a):
+    """SILENCE-CONSENT: may this backlog action proceed on silence, or must it hold for an
+    explicit human ack? Reversible actions (re-prioritization, in-workspace work) ride the
+    delegated tier — silence is consent, they proceed (OK). An irreversible action_class drops
+    to the irreversible-hold tier and REQUIRES an explicit ack — silence is NOT consent for it
+    (ESCALATE). This is docs/06 §2.1 as code: 'no meeting' never means 'no gate on the few
+    actions that can't be undone'."""
+    ac = (a.action_class or "").strip().lower()
+    reversible = ac not in IRREVERSIBLE_ACTION_CLASSES
+    tier = "delegated" if reversible else "irreversible"
+    payload = {"action_class": ac or "(unspecified)", "item_ref": a.item_ref,
+               "reversible": reversible, "tier": tier,
+               "decision": "silence_is_consent" if reversible else "explicit_ack_required"}
+    emit_event("consent_decided", payload)
+    if reversible:
+        print(f"silence=consent: '{ac or 'unspecified'}' is reversible ({a.item_ref}) — "
+              f"proceeds on the delegated tier, no ack needed.")
+        return OK
+    print(f"HOLD: '{ac}' is irreversible ({a.item_ref}) — silence is NOT consent; requires an "
+          f"explicit human ack (irreversible-hold tier, docs/06 §2.1).", file=sys.stderr)
+    return ESCALATE
+
+
 def main(argv):
     p = argparse.ArgumentParser(prog="guardrails", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -189,10 +261,20 @@ def main(argv):
 
     q = sub.add_parser("staleref"); q.set_defaults(fn=cmd_staleref)
     q.add_argument("root")
-    q.add_argument("--trigger-event", dest="trigger_event", required=True)
-    q.add_argument("--bound", required=True)
+    q.add_argument("--trigger-event", dest="trigger_event")   # not required when --auto derives it
+    q.add_argument("--bound")                                 # not required when --auto derives it
+    q.add_argument("--auto", action="store_true",
+                   help="derive the trigger event + bound roles from the ledger's latest "
+                        "reference-change event (docs/11 §2.3) instead of passing them in")
     q.add_argument("--stale-threshold-cycles", dest="stale_threshold_cycles",
                    type=int, default=3)
+
+    q = sub.add_parser("consent"); q.set_defaults(fn=cmd_consent)
+    q.add_argument("root")
+    q.add_argument("--action-class", dest="action_class", required=True,
+                   help="the downstream action a backlog item would trigger (deploy/spend/... "
+                        "are irreversible; everything else rides silence=consent)")
+    q.add_argument("--item-ref", dest="item_ref", default="(unspecified)")
 
     a = p.parse_args(argv[1:])
     return a.fn(a)

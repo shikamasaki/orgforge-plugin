@@ -59,6 +59,10 @@ event_classes:
   proposal_adjudicated: { proposal_id, decision: approve|reject|amend, human }
   irreversible_staged:  { action_class, effect_diff_ref, checker_signature }
   irreversible_executed: { staged_id, human }
+  # SILENCE-CONSENT (docs/06 §2.1): may a backlog action proceed on silence, or hold for an ack?
+  # Reversible => delegated tier (silence is consent); irreversible => irreversible-hold (ack).
+  consent_decided:      { action_class, item_ref, reversible: bool, tier: delegated|irreversible,
+                          decision: silence_is_consent|explicit_ack_required }
   # profiles, doctrine, scopes (Organs 3/5, docs/07-08)
   profile_edited:       { role, diff_ref, editor, section: body|preamble }
   doctrine_diff_admitted: { role, claims: [{claim, provenance: {source, retrieved_at, confidence}, review_by}] }
@@ -81,12 +85,13 @@ event_classes:
                                  silent_duration_per_role, result: all_current|stale_found } # STALE-REFERENCE
   # lateral reconciliation family (docs/11 §2.4) — DESIGN, not yet coded. The horizontal seam
   # no other organ watches; shared shape unifies the three timings of peer divergence.
-  work_claimed:         { role, work_territory, intent_summary }                   # COLLISION-SCAN (claim)
+  work_claimed:         { role, work_territory, intent_summary,
+                          depends_on: [{producer_role, seam_id}] }                 # COLLISION-SCAN (claim); depends_on = the blocked-on edges DEPENDENCY-STALL reads
   lateral_reconciled:   { observer_role, subjects: [role], reference, result: consistent|divergent,
                           divergence_kind: duplicate|contradiction|stall|breaking_change,
                           evidence_event_ids: [ref] }
   dependency_stall_raised: { blocked_role, awaited_seam_id, awaited_producer_role,
-                             stalled_ticks, downstream_impact: [ref] }             # DEPENDENCY-STALL
+                             stalled_ticks, downstream_impact: [ref], route_to }   # DEPENDENCY-STALL; route_to = lowest common owner
   contract_change_proposed: { seam_id, producer_role, current_hash, proposed_shape,
                               is_breaking: bool, dependents: [role], objection_deadline_tick } # CONTRACT-CHANGE
   # resource, learning, and the schedule planner (docs/11 §3, §5)
