@@ -12,7 +12,7 @@ Steps: RECEIVE, GRANULARITY-DECISION, then either the SPLIT path or the BUILD pa
 GRANULARITY-DECISION: decide honestly whether to subdivide. Subdivide only if parts are genuinely independent and each is worth a separate agent; otherwise build it yourself. No target depth, no preference.
 
 IF YOU SUBDIVIDE — for EACH child, before spawning it you MUST build a hand-off packet with the tool (do not hand-write it):
-  python3 /Users/shikama/org-first-agents/tools/handoff.py <DOCTRINE_ROOT> <child-role> \
+  python3 tools/handoff.py <DOCTRINE_ROOT> <child-role> \
      --slice "..." --inputs "..." --outputs "<exact interface others depend on>" \
      [--owns "..."] [--forbid "..."] [--invariant "..."] --out /tmp/seam-e2e/work/handoff-<child-role>.md
 Then spawn a subagent of type "manager" whose task prompt BEGINS with the contents of that handoff file, followed by the child's concrete assignment. The child-role is a trade name (e.g. store-worker, api-worker, cli-worker). DOCTRINE_ROOT is: <DOCTRINE_ROOT>

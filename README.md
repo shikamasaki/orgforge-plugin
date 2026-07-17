@@ -1,4 +1,4 @@
-# org-first-agents
+# orgforge-plugin
 
 **The goal is to run the engineer's problem-solving process autonomously, around the clock — AI
 that keeps working while you sleep, with you deciding only the essential calls.** This repository

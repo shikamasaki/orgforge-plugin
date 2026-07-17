@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""doctrine — the knowledge/guardrail store for org-first-agents (docs/07).
+"""doctrine — the knowledge/guardrail store for orgforge-plugin (docs/07).
 
 This is the running implementation of the doctrine organ: external information is
 watched, admitted through the gate, distilled into per-role **doctrine** (each role's

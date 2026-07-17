@@ -1,12 +1,12 @@
 {
-  "name": "org-first-agents",
+  "name": "orgforge-plugin",
   "owner": {
-    "name": "org-first-agents"
+    "name": "shikamasaki"
   },
   "description": "The articulated AI organization as installable Claude Code features: guardrails that actually block, per-department subagents, and organ commands. Harness-neutral core (tools/), projected here onto Claude Code.",
   "plugins": [
     {
-      "name": "org-first-agents",
+      "name": "orgforge-plugin",
       "source": "./integrations/claude-code",
       "description": "PreToolUse guardrails (blast-radius caps, mandate adjudication) that block real tool calls; SessionStart doctrine injection; gate/skeptic/registrar/maker subagents; /org-tick and /org-mandate commands."
     }

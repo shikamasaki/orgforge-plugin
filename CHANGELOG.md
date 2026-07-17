@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to org-first-agents. This project follows a pragmatic semver:
+All notable changes to orgforge-plugin. This project follows a pragmatic semver:
 minor = new mechanisms/features, patch = fixes, major = breaking articulation changes.
 
 ## 0.2.0

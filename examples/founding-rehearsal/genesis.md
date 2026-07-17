@@ -1,6 +1,6 @@
 # Genesis — founding rehearsal (S1 demonstration)
 
-This is a real founding run of an org-first-agents organization, executed on a real
+This is a real founding run of an orgforge-plugin organization, executed on a real
 host harness (Claude Code + subagents as the departments). Purpose: demonstrate S1
 (docs/01 §4) — an org from the template actually launching and doing useful work
 end-to-end, with the maker/checker separation enforced structurally, and nothing

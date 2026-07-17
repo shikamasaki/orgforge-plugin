@@ -65,7 +65,7 @@ def main():
         sys.exit(0)   # nothing to inject; clean no-op
     context = ("\n\n---\n\n".join(parts) +
                "\n\n(The above is your current doctrine and your org's settled conventions, "
-               "injected by org-first-agents. Act on the current world; follow settled "
+               "injected by orgforge-plugin. Act on the current world; follow settled "
                "precedent instead of re-deriving it.)")
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart",
                                              "additionalContext": context}}))

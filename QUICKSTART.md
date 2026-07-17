@@ -1,6 +1,6 @@
 # Quickstart — install and run in a few minutes
 
-This gets the org-first-agents guardrails **actually blocking inside a real Claude Code session**,
+This gets the orgforge-plugin guardrails **actually blocking inside a real Claude Code session**,
 then points you at how to run a department. It does not require publishing the repo — a private
 GitHub repo or a local path both work (see [Distribution](#distribution) at the end).
 
@@ -10,8 +10,8 @@ The plugin lives in `integrations/claude-code/` and is self-contained (its `buil
 neutral `tools/`, `scripts/`, and `template/` into the plugin root). From a Claude Code session:
 
 ```
-/plugin marketplace add /path/to/org-first-agents      # a local clone works; or the git URL
-/plugin install org-first-agents@org-first-agents
+/plugin marketplace add /path/to/orgforge-plugin      # a local clone works; or the git URL
+/plugin install orgforge-plugin@orgforge-plugin
 ```
 
 Or, for a headless run without installing, load it directly:
@@ -105,8 +105,8 @@ runs (doctrine scoping, seam-driven delegation).
 Publishing to OSS is **not required**. A Claude Code plugin is installed from a git source or a
 local path, so the repo's visibility decides who can install:
 
-- **Public GitHub (OSS):** anyone — `/plugin marketplace add github.com/you/org-first-agents`.
+- **Public GitHub (OSS):** anyone — `/plugin marketplace add github.com/you/orgforge-plugin`.
 - **Private GitHub:** only people with repo access (their git credentials must resolve the clone).
-- **Local / hand-delivered:** `/plugin marketplace add /path/to/org-first-agents`.
+- **Local / hand-delivered:** `/plugin marketplace add /path/to/orgforge-plugin`.
 
 Private and local both work today; make it public only when you want open distribution.

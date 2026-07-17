@@ -1,6 +1,6 @@
 # Doctrine scoping — per-role brains that narrow down the org and survive refounding
 
-Each role in an org-first-agents organization carries its **own** doctrine (its accumulated,
+Each role in an orgforge-plugin organization carries its **own** doctrine (its accumulated,
 gate-admitted brain). This example is the physical evidence, verified on the real Claude Code
 CLI, that three properties hold:
 

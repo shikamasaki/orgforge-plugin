@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ledger — the append-only, hash-chained record for org-first-agents (ledger-schema.yaml).
+"""ledger — the append-only, hash-chained record for orgforge-plugin (ledger-schema.yaml).
 
 This is the running implementation of Organ 5's record and Organ 6's custody holder: the
 single source of truth from which every derived view (and therefore every context pack) is

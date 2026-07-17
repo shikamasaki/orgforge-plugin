@@ -52,8 +52,8 @@ claude plugin validate integrations/claude-code --strict   # verify the manifest
 Install from the marketplace (local path works for testing):
 
 ```bash
-/plugin marketplace add /path/to/org-first-agents      # or the git URL
-/plugin install org-first-agents@org-first-agents
+/plugin marketplace add /path/to/orgforge-plugin      # or the git URL
+/plugin install orgforge-plugin@orgforge-plugin
 ```
 
 Or load it directly for a headless run without installing:
