@@ -1,0 +1,37 @@
+{
+  "role": "api-worker",
+  "claims": [
+    {
+      "id": "ca837d57578",
+      "claim": "Design endpoints contract-first; validate input at the boundary; return structured errors with stable codes, never raw stack traces.",
+      "status": "admitted",
+      "provenance": {
+        "source": "prior api runs",
+        "retrieved_at": "2026-07-17",
+        "confidence": 0.8,
+        "affected_roles": [
+          "api-worker"
+        ]
+      },
+      "review_by": "2026-10-17",
+      "version": 1,
+      "admitted_at": "UNSET"
+    },
+    {
+      "id": "c5ec50ee5c2",
+      "claim": "Idempotency keys on any state-changing POST; a retry must never double-charge.",
+      "status": "admitted",
+      "provenance": {
+        "source": "prior api runs",
+        "retrieved_at": "2026-07-17",
+        "confidence": 0.8,
+        "affected_roles": [
+          "api-worker"
+        ]
+      },
+      "review_by": "2026-10-17",
+      "version": 1,
+      "admitted_at": "UNSET"
+    }
+  ]
+}

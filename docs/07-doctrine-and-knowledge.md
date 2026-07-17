@@ -99,8 +99,88 @@ external sources ──► curator (organic)          ──► gate (mechanisti
    assembling it live. Doctrine that outgrows its budget must be re-distilled, not
    truncated silently.
 
+### 2.1 Loading is keyed by role — and there are two load paths
+
+Doctrine is a **directory of per-role files** (`<root>/<role>.json`), so *which* brain a
+session gets is decided entirely by **which role it is** — the `ORG_ROLE` a launch declares.
+This is what keeps the field narrow-and-deep (docs/08 §1.1): the role name IS the scope of
+the brain. Roles are named by trade, not by rank — `eng-manager`, `design-manager`,
+`ui-worker`, `api-worker`, `db-worker` are five different brains, and a session loading one
+loads only that one. Widen the naming (a single `worker` brain for every trade) and the
+specialist thins into a generalist; that is the failure this keying exists to prevent.
+
+Because the harness's SessionStart hook only fires for a **top-level launch** (a fresh
+`claude -p` / `codex exec` the host or a runner starts), there are two load paths, and a
+department that spawns subordinates must use the right one:
+
+- **Top-level launch → hook injection.** The host/runner sets `ORG_ROLE` + `ORG_DOCTRINE_ROOT`;
+  `org_session_start.py` renders `<role>.DOCTRINE.md` and the harness prepends it. Automatic.
+- **A spawned subordinate (in-process, via the Agent/subagent tool) does NOT inherit the
+  hook.** So the spawning manager, *before* it spawns, builds the child's hand-off packet
+  itself — `tools/handoff.py` — and prepends it to the child's task prompt. The packet has
+  three parts (see §2.1.1): the child's **slice**, the **seam contract**, and the child's
+  **brain scoped to that slice** (`doctrine.py render`, filtered to the child role). The child
+  therefore starts holding **its own** role doctrine — the parent's broader brain does not
+  leak down. This is a **manager duty**, wired into the manager profile the same way
+  spec-driven delegation is.
+
+Either path, the invariant holds: a session runs on the current, gate-admitted doctrine of
+**its own role** — never a parent's, never last quarter's.
+
+### 2.1.1 Fix the seam, not the axis (bound recombination, free decomposition)
+
+A recursive org can decompose freely but must recombine cleanly — and the failure mode of
+recursive splitting is not *how* work is cut but *the un-owned interface at the cut*: two
+siblings each interpret a boundary the parent never pinned, and drift (Conway's law biting
+inside the agent tree; Parnas: hide the volatile decision behind an interface). So the load-
+bearing thing a manager fixes when it delegates is **not a global decomposition axis** — that
+would force one taxonomy top-to-bottom when the right grouping changes by level (Thompson: the
+tightest interdependence sits at a different place each level; a company splits by function but
+an auth team splits by layer). It is the **seam contract** at each cut:
+
+- **Inputs** the child receives and **Outputs** it must produce (the exact interface siblings
+  and the parent integrate against) — a *hard* constraint the child may not renegotiate.
+- **Owns / must-not-touch** files, and any **shared invariant** both sides honor.
+
+The **axis** (how to classify the split — by feature, by layer, by phase) is chosen *locally*
+by each manager for *its own* slice, derived from its doctrine (Parnas: cut to isolate the
+decision most likely to change), and passed down only as advice. Fixing the axis globally is
+redundant with the scoped doctrine and can even contradict it; fixing the **seam** is what
+makes the pieces compose. Decomposition is free, recombination is bound. A manager that splits
+emits a seam contract for **each** child and integrates against those outputs exactly; a child
+that splits further does the same for its own children. (This is the design that survived an
+adversarial review from organizational-theory, software-architecture, and multi-agent-systems
+perspectives — all three rejected a fixed global axis in favor of per-level axis + fixed seam.)
+
+**This is enforced, not merely asked.** A profile that only *requests* "use the hand-off tool"
+gets loose compliance — an agent will hand-write a slice and skip the tool when it judges the
+skip harmless (observed: a parallel enumeration whose outputs never merge). So the PreToolUse
+hook gates the spawn tool itself (`ORG_REQUIRE_SEAM=1`): an `Agent`/`Task` spawn is **blocked**
+unless its prompt carries a seam contract (a `handoff.py` packet) **or** an explicit
+`INDEPENDENT:` declaration — a non-integrating fan-out whose outputs are never merged. That
+distinction is the point: independence is a *legitimate* reason to skip a seam, so the gate asks
+the manager to *declare* which case it is, rather than silently omitting the contract. Integrating
+children get a seam; independent children get labeled; nothing spawns brain-of-drift by default.
+
 The moves catalog gains `update_doctrine` (see template/moves.yaml); the constitution
 gains the knowledge rules (template/constitution.yaml `knowledge:`).
+
+### 2.2 Roles change; the brains are assets that follow (refound)
+
+When the RFP or the work reveals the org is shaped wrong, the CEO/human may **refound** —
+tear down the role structure and re-found with new roles, *assets intact* (docs/06 §4.4).
+Doctrine is one of those assets: a role's accumulated brain is not discarded because the role
+is renamed, split, or merged. `doctrine.py remap --map {old: new | [new,...]}` performs the
+re-routing that `refound`'s `doctrine_remap` declares and `org_lint`'s
+`doctrine_remap_covers_every_live_claim` checks:
+
+- **Rename / merge** (`old -> new`): every live claim moves to the new role.
+- **Split** (`old -> [n1, n2]`): each claim routes to the target(s) named in its
+  `affected_roles` — the scope tag decides where each piece of the brain lands.
+- **Orphan guard:** a live claim that maps to no target **blocks the refound** (exit 2) rather
+  than vanishing; `--allow-orphans` instead surfaces them to `UNROUTED.json` for a human to
+  place. No brain is ever silently lost — the same principle as "nothing external becomes
+  doctrine without admission," run in reverse.
 
 ---
 

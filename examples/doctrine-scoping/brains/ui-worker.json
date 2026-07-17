@@ -1,0 +1,53 @@
+{
+  "role": "ui-worker",
+  "claims": [
+    {
+      "id": "cd642ecb83b",
+      "claim": "A single-file HTML UI keeps markup+CSS+one render function together; do not split a ~250-line coupled UI.",
+      "status": "admitted",
+      "provenance": {
+        "source": "examples/todo-app-run",
+        "retrieved_at": "2026-07-17",
+        "confidence": 0.8,
+        "affected_roles": [
+          "frontend-worker"
+        ]
+      },
+      "review_by": "2026-10-17",
+      "version": 1,
+      "admitted_at": "UNSET"
+    },
+    {
+      "id": "c29f2f5b328",
+      "claim": "For a calculator/keypad grid, use one delegated click listener on the key container plus a keydown map; never per-button handlers.",
+      "status": "admitted",
+      "provenance": {
+        "source": "examples/calc runs",
+        "retrieved_at": "2026-07-17",
+        "confidence": 0.8,
+        "affected_roles": [
+          "frontend-worker"
+        ]
+      },
+      "review_by": "2026-10-17",
+      "version": 1,
+      "admitted_at": "UNSET"
+    },
+    {
+      "id": "c5d032247a7",
+      "claim": "Mobile: touch targets >=44px; avoid hover-only affordances.",
+      "status": "admitted",
+      "provenance": {
+        "source": "mobile",
+        "retrieved_at": "2026-07-17",
+        "confidence": 0.8,
+        "affected_roles": [
+          "mobile-worker"
+        ]
+      },
+      "review_by": "2026-10-17",
+      "version": 1,
+      "admitted_at": "UNSET"
+    }
+  ]
+}

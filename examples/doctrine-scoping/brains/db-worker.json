@@ -1,0 +1,37 @@
+{
+  "role": "db-worker",
+  "claims": [
+    {
+      "id": "c04eb31eecd",
+      "claim": "Avoid N+1: batch or join; every hot query has a covering index; migrations are reversible.",
+      "status": "admitted",
+      "provenance": {
+        "source": "prior db runs",
+        "retrieved_at": "2026-07-17",
+        "confidence": 0.8,
+        "affected_roles": [
+          "db-worker"
+        ]
+      },
+      "review_by": "2026-10-17",
+      "version": 1,
+      "admitted_at": "UNSET"
+    },
+    {
+      "id": "c6cc28f617d",
+      "claim": "Never widen a column type in place under load; add-new + backfill + swap.",
+      "status": "admitted",
+      "provenance": {
+        "source": "prior db runs",
+        "retrieved_at": "2026-07-17",
+        "confidence": 0.8,
+        "affected_roles": [
+          "db-worker"
+        ]
+      },
+      "review_by": "2026-10-17",
+      "version": 1,
+      "admitted_at": "UNSET"
+    }
+  ]
+}

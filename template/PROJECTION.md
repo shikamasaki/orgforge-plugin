@@ -42,6 +42,18 @@ Items 1–5 are the *content* of the instruction file. Item 6 is *files in the w
 directory* the harness can read — "assembling the context pack" is exactly this
 file-writing step (docs/09 §2), not a runtime.
 
+**Manager duty — hand each subordinate a scoped brain AND a seam contract (docs/07 §2.1).**
+Item 3 (this role's doctrine) is auto-injected by the SessionStart hook only for a *top-level*
+launch. A manager that spawns subordinates in-process (the Agent/subagent tool) must build the
+hand-off itself with `tools/handoff.py`, prepended to the child's prompt. The packet fixes
+(a) the child's **slice**, (b) the **seam contract** — inputs/outputs/owns/forbid, the hard
+interface the manager later integrates against; this, not a global decomposition axis, is what
+makes siblings compose (docs/07 §2.1.1), and (c) the child's **brain scoped to its slice**
+(only doctrine whose `affected_roles` name the child role, so the manager's broader brain does
+not leak down). The child role is named by trade (`ui-worker`, not `worker`). A manager profile
+states this as an explicit step, the same way it states spec-driven delegation; omitting the
+seam is how recursive splits drift, omitting the brain is how subordinates run brain-blank.
+
 **Harness mapping (the only thing that changes per harness):**
 
 | Harness | Instruction file | Notes |
