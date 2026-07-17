@@ -116,6 +116,19 @@ outside the boundary** (no secrets, exports, or funds assembled at the edge), an
 **concurrent held actions are capped per class** so the night cannot stage fifty
 irreversibles to swamp the morning review.
 
+The same tiering governs **priority in the operating phase** — the "silence = consent"
+rule the CEO relies on to steer the backlog without sign-off. A re-prioritization is
+**reversible** (a re-ordering is undone by another re-ordering), so it rides the delegated
+tier: the registrar proposes an order and, absent CEO reaction, it proceeds — silence *is*
+consent, because a bad order costs at most a wasted cycle that review-on-completion catches.
+But an **irreversible** operating action a backlog item would trigger (a production deploy,
+a spend, a destructive migration, an external publish) does **not** inherit that silence:
+it drops to the irreversible-hold tier and requires an explicit human ack, exactly like any
+staged irreversible above. "No meeting" must never mean "no gate on the few actions that
+can't be undone" — silence carries the reversible many; the irreversible few are held. This
+is the same reversibility split the blast-radius classifier enforces at the tool boundary
+(docs/11 §2.1): reversible flows, irreversible stops.
+
 ### 2.2 The approval queue is rate-limited by design
 
 The queue is an attack surface: flooding it exhausts the adjudicating human, and a
@@ -184,6 +197,12 @@ shaped as a *clerk, not a ruler*:
   are queued, not decided.
 - Its own profile is mechanistic → charter-tier to change; its outputs (digest, packs)
   are deterministic projections, reproducible by anyone.
+- It **owns the org-wide priority ranking** — it runs `resource.py rank` to recompute the
+  ranked objective order (re-emitting `priority_ranking_set` only when the order changes),
+  the reference every department's next-task choice reads (docs/12 §3.1). This is the
+  "PM" duty at the org altitude: a clerk maintaining the one authoritative order, not a
+  new rank. It authors the ranking; the CEO's charter still decides what may top it
+  (a re-weight that downranks a CEO-protected objective is queued, not self-approved).
 
 This closes the "passive voice" gap: nothing in the metabolism happens without a named,
 bounded, checkable actor.

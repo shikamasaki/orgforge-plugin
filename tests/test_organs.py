@@ -288,6 +288,49 @@ def test_guardrails_cap_allows(tmp_path):
     assert code == 0 and "allow" in out and '"decision": "allow"' in out
 
 
+# ── SILENCE-CONSENT (docs/06 §2.1): reversible flows, irreversible holds ───────
+def test_consent_reversible_proceeds_on_silence(tmp_path):
+    code, out = run("guardrails.py", "consent", str(tmp_path),
+                    "--action-class", "reprioritize", "--item-ref", "i1")
+    assert code == 0 and "silence=consent" in out and "silence_is_consent" in out
+
+
+def test_consent_irreversible_holds_for_ack(tmp_path):
+    code, out = run("guardrails.py", "consent", str(tmp_path),
+                    "--action-class", "production_deploy", "--item-ref", "i2")
+    assert code == 10 and "HOLD" in out and "explicit_ack_required" in out
+
+
+# ── STALE-REFERENCE --auto: derive trigger + bound roles from the ledger ───────
+def test_staleref_auto_finds_role_stale_after_ranking_change(tmp_path):
+    seed(tmp_path, "s", "cycle_completed", {"role": "fe", "tokens": {}, "outputs": []},
+         ts="2026-07-17T10:00:00Z")
+    seed(tmp_path, "s", "cycle_completed", {"role": "be", "tokens": {}, "outputs": []},
+         ts="2026-07-17T10:01:00Z")
+    seed(tmp_path, "r", "priority_ranking_set", {"ranking_id": "r1", "ordered_objectives": []},
+         ts="2026-07-17T11:00:00Z")
+    seed(tmp_path, "s", "cycle_started", {"role": "fe"}, ts="2026-07-17T11:05:00Z")
+    code, out = run("guardrails.py", "staleref", str(tmp_path), "--auto")
+    # fe re-derived after the ranking change; be did not -> be is stale (nudge, under threshold)
+    assert code == 0 and '"stale_roles": ["be"]' in out
+
+
+# ── DEPENDENCY-STALL reads depends_on edges (not just cycle timing) ────────────
+def test_stall_reports_downstream_from_depends_on(tmp_path):
+    seed(tmp_path, "s", "work_claimed",
+         {"role": "fe", "work_territory": "ui", "intent_summary": "x",
+          "depends_on": [{"producer_role": "be", "seam_id": "auth-api"}]},
+         ts="2026-07-17T10:00:00Z")
+    seed(tmp_path, "s", "cycle_started", {"role": "be"}, ts="2026-07-17T10:01:00Z")
+    seed(tmp_path, "s", "cycle_started", {"role": "fe"}, ts="2026-07-17T10:02:00Z")
+    for i in range(3):
+        seed(tmp_path, "s", "cycle_started", {"role": "data"},
+             ts=f"2026-07-17T10:0{3+i}:00Z")
+    code, out = run("reconcile.py", "stall", str(tmp_path), "--freshness-cycles", "2")
+    # the blocked-on edge means fe is downstream of the be stall — read from depends_on, not None
+    assert code == 10 and '"downstream_impact": ["fe"]' in out
+
+
 # ── reconcile.py ──────────────────────────────────────────────────────────────
 def test_reconcile_mandate_precedence(tmp_path):
     code, out = run("reconcile.py", "mandate", str(tmp_path), "--subjects", "safety,growth",
