@@ -83,6 +83,34 @@ tacit gap. It reads the org-wide ranking (Organ 6/7) as its reference and writes
 ledger (Organ 5), so the org-wide ranking finally *reaches* the work, and the work's ordering is
 finally *auditable*.
 
+### §3.1 The two-level backlog (why there is no separate "backlog store")
+
+Stated as a pair, the priority story is **two levels, one ledger**: the **org-wide backlog** is the
+ranked objective list (docs/11 §3, `resource.py rank`, re-emitted only when the order changes); the
+**per-department backlog** is each unit's own queue of pulled work, and *what it runs next from that
+queue* is exactly the §2 decision. These are not two stores — both are **projections of the one
+ledger** (the objective ranking, and the department's `open_experiments`/`candidate_submitted`
+view), so "single custody" (docs/06) is never fragmented into private per-department queues. A
+department **owns the sequencing** of its own backlog (autonomy) but **ranks against the shared
+objective order** (so a local optimum cannot drift from the telos, §2's align+rank score). Priority
+ownership is therefore not a new "PM" rank — it is an existing duty at two altitudes: the
+**registrar** recomputes the org-wide ranking (docs/06 §2.6), and the **department's supervising
+manager** owns intra-unit triage (this doc, answerable per docs/14 A3/A4). Minting a separate
+priority role would violate docs/14's "manager is one category, not a rank ladder."
+
+When the org-wide ranking **changes**, the propagation is already covered, not a new mechanism: the
+revised priority is broadcast as an intent-block revision (docs/08 §2.1), and **STALE-REFERENCE**
+(docs/11 §2.3) re-checks the departments still bound to the *old* order and nudges them to
+re-derive — so a central re-prioritization reaches every department's next-task choice without a
+meeting, and without any department silently working yesterday's #1.
+
+A backlog item in one department that waits on another department's output is a
+cross-department dependency, and it too has an existing home, not a new one:
+**DEPENDENCY-STALL** (docs/11 §2.4) is exactly the blocked-on edge plus aging alarm — a
+freshness window on the `depends_on` edge turns a silently-blocked item into an explicit
+`dependency.stall.raised`, routed to the lowest common owner, so a cross-department block
+surfaces as data instead of a silent deadlock no meeting is there to catch.
+
 *Status: §2 is running, verified code (`tools/attention.py`). The organizational-theory anchors in
 §1 are consensus ideas (Simon, March & Simon, Cyert & March, Ocasio) applied at intra-unit
 granularity as an explicit synthesis — flagged as a down-scaling, not a verbatim citation, per the
