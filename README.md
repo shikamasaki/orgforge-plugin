@@ -6,6 +6,11 @@ is a template for getting there. The hard part isn't the model; it's that a syst
 unattended drifts, duplicates, over-spends, and ships the wrong thing unless the org it runs as is
 written down.
 
+**New here?** [`QUICKSTART.md`](QUICKSTART.md) installs the plugin and proves a guardrail blocks
+in a few minutes — no OSS publish required (a private repo or local path both install).
+[`CHANGELOG.md`](CHANGELOG.md) tracks what's new (0.2.0: hierarchical doctrine, refounding,
+delegation seams, and a blast-radius cap that no longer blocks normal work).
+
 Concretely, a "department" here is nothing exotic: **an existing coding-agent harness — Claude
 Code, Codex — pointed at a working directory whose instruction file is that one role's job.** The
 template doesn't build a runtime; it writes down the organization and projects each role onto a
