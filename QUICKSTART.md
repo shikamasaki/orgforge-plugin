@@ -84,12 +84,21 @@ Drive it on a cadence with cron (R0: the schedule's *content* is yours, the *dri
 `tick.py` reports which checks are due and **detects a missed one** (a due check with no
 proof-of-run), so "the cron stopped firing" becomes a paged fact, not silent drift.
 
-## 6. Define your own org
+## 6. Define your own org — two ways in
 
-The plugin is the *engine*; your organization is `template/organization.yaml` +
-`constitution.yaml` + `moves.yaml`, validated by `python3 tools/org_lint.py …`. Start from the
-shipped template and reshape it to your roles. See `docs/01`–`docs/09` for the design, `docs/10`
-for a worked founding, and `examples/` for real runs (doctrine scoping, seam-driven delegation).
+The plugin is the *engine*; your organization is `organization.yaml` + `constitution.yaml` +
+`moves.yaml`, validated by `python3 tools/org_lint.py …`. Two starting points ship with it:
+
+- **Write it yourself** — copy `template/organization.SKELETON.yaml` to `organization.yaml` and
+  fill the `<ANGLE_BRACKET>` slots. The control skeleton (supervisor / gate / skeptic / registrar)
+  is kept intact — you fill purpose, domain roles, and their contracts. Then lint it and iterate.
+- **Let the org draft it** — run **`/org-found <your RFP or brief>`**. The org does its own
+  feature inventory, architecture with seam contracts, and a linted `organization.yaml`, then
+  **stops and reports up for your review** before anything is built (founding is design; the build
+  is the CEO's next call). This is the founding flow, as a command.
+
+See `docs/01`–`docs/09` for the design, `docs/10` for a worked founding, and `examples/` for real
+runs (doctrine scoping, seam-driven delegation).
 
 ## Distribution
 

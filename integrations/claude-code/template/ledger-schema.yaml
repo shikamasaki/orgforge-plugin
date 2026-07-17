@@ -1,0 +1,207 @@
+# ledger-schema.yaml — the single source of truth, specified.
+#
+# The ledger is Organ 5's shared record and Organ 6's custody+recording holder. This file
+# defines its envelope (tamper evidence), its event classes (the org's complete factual
+# vocabulary — if it isn't an event class, it didn't happen), its derived views (the ONLY
+# things context packs may contain), and how packs are assembled. Views are regenerated
+# from events, never hand-edited. The runtime that serves this schema is specified in
+# docs/09-runtime.md; the lint cross-checks every reference in organization.yaml,
+# moves.yaml, and sensors.yaml against this file.
+
+# ── Envelope: every event, no exceptions ─────────────────────────────────────
+envelope:
+  fields:
+    id: uuid                       # idempotency key (at-least-once delivery, dedup on id)
+    seq: monotonic_integer         # assigned by the ledger service, gapless per ledger
+    ts: rfc3339_utc
+    actor: role_id | human:<name> | system:<component>   # from runtime identity, NEVER from payload
+    class: one_of_event_classes_below
+    payload: class_specific_object
+    prev_hash: sha256              # hash chain: tamper evidence
+    hash: sha256                   # H(prev_hash || canonical_json(id,seq,ts,actor,class,payload))
+  write_control:
+    append_only: true
+    single_writer: ledger_service  # agents call append(); they never hold the file/store
+    actor_identity_source: runtime_session   # an agent cannot claim another's actor id
+    verification: external_watchdog_replays_hash_chain   # docs/06 §2.4, docs/09 §5
+
+# ── Event classes: the org's complete factual vocabulary ────────────────────
+event_classes:
+  # metabolism (Organ 4)
+  cycle_started:        { role, pack_manifest_id }
+  # accountable_supervisor (docs/14 §A1): which supervising role owns this output up the chain,
+  # set from the runtime supervision edge (never the payload — a manager cannot forge who owns a
+  # result, mirroring actor_identity_source). Empty for the top (human-owned) tier.
+  cycle_completed:      { role, tokens: {task, gate, reporting}, outputs: [ref],
+                          views_referenced: [view_id], accountable_supervisor }
+  heartbeat:            { component, invariants_hold: bool }
+  halt_tripped:         { trigger, scope: global|role }
+  # work (Organs 2/6)
+  candidate_submitted:  { maker, candidate_id, contract_ref, evidence: [ref] }
+  # predicted_outcome: the gate's expected result for this admission — the input the OUTCOME-DELTA /
+  # FRAME-REVIEW organs (learning.py, alignment.py) join against the realized outcome (docs/11 §3,
+  # docs/13 §3). Declared here so the emitting role knows to populate it; the organs are inert
+  # (silently) without it.
+  admission_decided:    { gate, candidate_id, verdict: admit|reject|park, standard_ref,
+                          predicted_outcome, evidence: [ref] }
+  refutation_attempted: { skeptic, claim_id, verdict: refuted|survives, checklist_ref }
+  # A result may only deploy AFTER the skeptic refuted-and-failed (verdict: survives) for it.
+  # requires_prior makes the skeptic load-bearing: without a `survives` for this candidate_id,
+  # a result_deployed event is INVALID (the deploy path cannot skip adversarial review).
+  # observed_outcome: the realized result the organs diff against predicted_outcome (docs/11 §3).
+  result_deployed:      { candidate_id, net_effect_ref, observed_outcome,
+                          requires_prior: "refutation_attempted{claim_id==candidate_id, verdict==survives}" }
+  result_retired:       { candidate_id, cause, observed_outcome }
+  # structure (Organ 7 / moves)
+  sensor_reading:       { sensor, value, window, inputs_ref }
+  move_executed:        { move_id, tier, diff_ref, precondition_evidence: [sensor_reading.id], lint_report_ref }
+  proposal_filed:       { subject, diff_ref, diagnosis, expected_effect, dedup_key }
+  proposal_adjudicated: { proposal_id, decision: approve|reject|amend, human }
+  irreversible_staged:  { action_class, effect_diff_ref, checker_signature }
+  irreversible_executed: { staged_id, human }
+  # SILENCE-CONSENT (docs/06 §2.1): may a backlog action proceed on silence, or hold for an ack?
+  # Reversible => delegated tier (silence is consent); irreversible => irreversible-hold (ack).
+  consent_decided:      { action_class, item_ref, reversible: bool, tier: delegated|irreversible,
+                          decision: silence_is_consent|explicit_ack_required }
+  # profiles, doctrine, scopes (Organs 3/5, docs/07-08)
+  profile_edited:       { role, diff_ref, editor, section: body|preamble }
+  doctrine_diff_admitted: { role, claims: [{claim, provenance: {source, retrieved_at, confidence}, review_by}] }
+  intelligence_filed:   { curator, item_ref, provenance, affected_roles }
+  scope_grant_changed:  { seam: {from, to}, change: open|widen|narrow|revoke, grantor }
+  intent_revised:       { version, diff_ref, human }
+  refounding_committed: { old_structure_ref, new_structure_ref, doctrine_remap: {old_role: new_role},
+                          unmapped_claims_surfaced: [claim_id], human }   # docs/06 §4.4 — atomic re-found,
+                          # assets intact: the ledger persists, doctrine is re-mapped, none orphaned
+  digest_generated:     { window, census: {class: count}, exceptions_ref }
+  anomaly_detected:     { detector, description, matched_pattern: pattern_id|none }
+  # operating events (docs/11) — the recurring checks a 24/7 unattended org needs beyond
+  # founding. Each obeys reconcile-by-exception: the silent path emits the event as an audit
+  # breadcrumb; only the exception routes up. §2.1–2.3 have running code (tools/guardrails.py).
+  exposure_budget_checked: { window_id, dimension, committed_so_far, delta_requested, cap,
+                             actor_role, decision: allow|hold, caused_by_event }   # BLAST-RADIUS-CAP
+  state_reconciled:     { domain, expected_value, observed_value, drift: bool, magnitude,
+                          unaccounted_events: [ref] }                              # STATE-RECONCILED
+  reference_staleness_checked: { trigger_event, bound_roles: [role], stale_roles: [role],
+                                 silent_duration_per_role, result: all_current|stale_found } # STALE-REFERENCE
+  # lateral reconciliation family (docs/11 §2.4) — DESIGN, not yet coded. The horizontal seam
+  # no other organ watches; shared shape unifies the three timings of peer divergence.
+  work_claimed:         { role, work_territory, intent_summary,
+                          depends_on: [{producer_role, seam_id}] }                 # COLLISION-SCAN (claim); depends_on = the blocked-on edges DEPENDENCY-STALL reads
+  lateral_reconciled:   { observer_role, subjects: [role], reference, result: consistent|divergent,
+                          divergence_kind: duplicate|contradiction|stall|breaking_change,
+                          evidence_event_ids: [ref] }
+  dependency_stall_raised: { blocked_role, awaited_seam_id, awaited_producer_role,
+                             stalled_ticks, downstream_impact: [ref], route_to }   # DEPENDENCY-STALL; route_to = lowest common owner
+  contract_change_proposed: { seam_id, producer_role, current_hash, proposed_shape,
+                              is_breaking: bool, dependents: [role], objection_deadline_tick } # CONTRACT-CHANGE
+  # resource, learning, and the schedule planner (docs/11 §3, §5)
+  priority_ranking_set: { ranking_id, ordered_objectives: [{objective_id, rank, weight,
+                          rationale_hash}], supersedes, basis_event_ids: [ref] }   # PRIORITY-RANKING
+  allocation_reclaimed: { holder, resource_type, from_level, to_level, yield_metric,
+                          ranking_ref, reason }                                     # ALLOCATION-RECLAIM
+  authority_reviewed:   { grants_reviewed, auto_narrowed: [ref], renewed: [ref] }   # AUTHORITY-EXPIRED
+  outcome_delta:        { decision_event_id, predicted_outcome, observed_outcome,
+                          delta_magnitude, delta_sign, department, recurrence_count } # OUTCOME-DELTA
+  tick_planned:         { now_min, night: bool, due: [check_id], suspended: [check_id],
+                          missed: [check_id] }   # tick.py's own run — a gap proves the host cron died
+  # intra-department attention allocation (docs/12) — how ONE dept picks what to work on next
+  attention_allocated:  { role, wip_limit, in_flight, ranking_id,
+                          selected: [{candidate_id, objective, score, in_ranking}],
+                          deferred: [{candidate_id, score}], reason }   # ATTENTION-ALLOCATION
+  # proxy-stack guards (docs/13) — is the org still solving the RIGHT problem?
+  premise_reconciled:   { premise_id, asserted, observed, status: holds|weakened|broken } # PREMISE/TELOS
+  sunk_course_reviewed: { course_id, attempts, cost, outcome_trend, still_open: bool,
+                          decision: continue|abandon }                          # SUNK-COURSE (Staw)
+  frame_review_raised:  { near_target_decisions, result_trend, question }        # DOUBLE-LOOP (Argyris)
+  mandate_conflict_raised: { subjects: [role], contested_decision, mandate_refs: [role],
+                             resolution: precedence_applies|integrate|escalate, evidence_ids: [ref] } # MANDATE-CONFLICT
+  convention_adopted:   { scope, settled_choice, owner, review_by }              # internal precedent (Nelson&Winter)
+  # manager accountability (docs/14) — the VERTICAL control down the supervision edge, distinct
+  # from the gate/skeptic's cross-cutting admission (docs/14 §honest-distinction).
+  # spec_delegated (docs/14 §spec-driven): the manager pushes the per-task intent DOWN as an explicit
+  # spec BEFORE work starts (Deming's acceptance-spec), with a token_budget carved from its own —
+  # the producer of conformance_reviewed.delegated_intent_ref. confirmed == the supervisor affirms
+  # the spec conforms to the intent it holds (down-front A3). token_budget is how granularity is
+  # controlled: a subordinate spawns within its budget (~1 agent per ~50k tokens, measured), so the
+  # budget — not a depth/width knob — sets how deep/wide the sub-tree grows (docs/14 §granularity).
+  spec_delegated:       { supervisor, subordinate, spec_ref, contract_ref, intent_basis_ref,
+                          token_budget, confirmed: bool }                        # spec-driven + budget
+  conformance_reviewed: { supervisor, subordinate, reviewed_ref, delegated_intent_ref,
+                          verdict: conforms|rework|reject, evidence_ref }        # A3 intent-conformance
+  # report_up is INVALID without a prior conformance_reviewed{conforms} for each subordinate result
+  # it rolls up — the manager cannot own unverified work upward (requires_prior, as result_deployed
+  # requires a skeptic survives). exceptions_none_asserted makes silence a positive claim (anti-MUM).
+  report_up:            { supervisor, parent, window, basis_refs: [ref],
+                          intent_status: met|at_risk|missed, exceptions: [ref],
+                          exceptions_none_asserted: bool, decisions_needed: [ref],
+                          requires_prior: "conformance_reviewed{verdict==conforms} for each rolled-up result" } # A4 honest roll-up
+
+# ── Cadence triggers: what `loop.cadence: on_<x>` may bind to ────────────────
+triggers:
+  candidate_arrival:      candidate_submitted
+  positive_result:        admission_decided   # filtered verdict == admit
+  handover_preparation:   move_executed       # filtered move_id == prepare_handover
+  operator_instruction:   human               # out-of-band; runtime-delivered
+
+# ── Derived views: the ONLY vocabulary of context packs and scope grants ─────
+# Each view: which classes it derives from, and its shape. Regenerated, never edited.
+views:
+  live_findings:        { from: [admission_decided, result_deployed], shape: currently-admitted results and their state }
+  nearby_deaths:        { from: [admission_decided, refutation_attempted, result_retired], shape: recent rejections/refutations adjacent to the reader's contract, with causes }
+  death_causes:         { from: [admission_decided, result_retired], shape: aggregated failure causes }
+  coverage_map:         { from: [candidate_submitted], shape: searched vs unsearched territory }
+  parked_inventory:     { from: [admission_decided], shape: verdict == park, with park reasons }
+  parts_inventory:      { from: [admission_decided, result_retired], shape: admitted orthogonal components }
+  combination_history:  { from: [candidate_submitted, admission_decided], shape: tried combinations and outcomes }
+  open_experiments:     { from: [candidate_submitted, cycle_completed], shape: backlog awaiting execution }
+  reusable_modules:     { from: [cycle_completed], shape: shared implementation assets }
+  gate_input_spec:      { from: [intent_revised, proposal_adjudicated], shape: the current candidate submission format }
+  doctrine_gaps:        { from: [doctrine_diff_admitted, cycle_completed], shape: roles whose doctrine is thin or expiring }
+  doctrine_ttl_board:   { from: [doctrine_diff_admitted], shape: claims by review_by date }
+  watch_sources:        { from: [intelligence_filed, doctrine_diff_admitted], shape: declared external sources and their yield }
+  direction_flags:      { from: [cycle_completed, sensor_reading], shape: per-role direction verdicts for the supervisor }
+  sensor_readings:      { from: [sensor_reading], shape: latest value per sensor with window }
+  ledger_census:        { from: ["*"], shape: counts of every event class, all time }
+  recent_ledger_census: { from: ["*"], shape: counts of every event class, current window }
+  admission_standard:   { from: [intent_revised, proposal_adjudicated], shape: the purpose-grounded standard, current version }
+  candidate_under_review: { from: [candidate_submitted], shape: the one candidate the gate is judging, full submission }
+  claim_under_review:   { from: [admission_decided], shape: the admitted positive under adversarial review }
+  refutation_checklist: { from: [intent_revised, proposal_adjudicated], shape: the skeptic's current battery }
+  full_evidence_trail:  { from: ["*"], shape: everything touching the item under review — control roles only }
+  moves_catalog:        { from: [proposal_adjudicated], shape: current legal moves (mirror of moves.yaml at its adopted version) }
+  proposal_queue:       { from: [proposal_filed, proposal_adjudicated], shape: open proposals by subject }
+  pending_conformance_review: { from: [cycle_completed, conformance_reviewed], shape: subordinate outputs a supervisor owns (accountable_supervisor) but has not yet conformance-reviewed — an over-span manager's unreviewed backlog (docs/14 §A3) }
+
+# ── Context-pack assembly (docs/08; executed by the registrar) ───────────────
+context_pack:
+  algorithm: |
+    1. intent block, by reference to its latest intent_revised version (never copied).
+    2. the role's current doctrine (doctrine_diff_admitted, folded; TTL-expired claims flagged).
+    3. each view granted to the role in organization.yaml information_flow.scopes.grants,
+       rendered fresh from the ledger.
+    4. budget check: if the rendered pack exceeds pack_budget_tokens, summarize the
+       overflowing views and attach ledger refs for pull-based drill-down — never
+       silently truncate, never drop the intent or the contract.
+    5. write a pack manifest (what was included, which versions, what was summarized)
+       and ledger it via cycle_started.pack_manifest_id.
+  # the only non-view pack entries — the single source of truth is
+  # organization.yaml information_flow.universal_pack_items (which the lint reads); do NOT
+  # duplicate the list here (two copies drift). Named there, referenced here.
+  special_pack_items: see_organization.universal_pack_items
+  pull_interface: a role may query any view it is GRANTED, mid-cycle, for drill-down;
+    queries outside its grants are denied and ledgered (blocked_on_missing_context feeds
+    on these denials)
+
+# ── Proposal (approval-queue) item & digest shapes ───────────────────────────
+proposal_item:
+  fields: { subject: one_charter_item, diff_ref, diagnosis, expected_effect, dedup_key }
+  rules_ref: constitution charter.queue_rules
+digest:
+  deterministic: true              # same window + same ledger ⇒ byte-identical digest
+  sections:
+    - census: counts of EVERY event class in the window (mandatory, uncurated)
+    - reorg_commits: all move_executed with diffs
+    - open_proposals: proposal_queue view
+    - held_irreversibles: irreversible_staged not yet executed
+    - anomalies: anomaly_detected + any census count outside its trailing band
+    - budget_report: tokens by role and category vs caps

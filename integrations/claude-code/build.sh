@@ -39,8 +39,10 @@ done
 for f in "$REPO"/tools/*.py; do
   sync_one "$f" "$HERE/tools/$(basename "$f")" || rc=1
 done
-# the data files the /org-tick and /org-mandate commands read (source of truth: template/)
-for f in schedule.yaml sensors.yaml constitution.yaml; do
+# the data files the org commands read (source of truth: template/): schedule/sensors/constitution
+# for /org-tick and /org-mandate; moves + ledger-schema + the SKELETON for /org-found's lint + draft.
+for f in schedule.yaml sensors.yaml constitution.yaml moves.yaml ledger-schema.yaml \
+         organization.SKELETON.yaml; do
   sync_one "$REPO/template/$f" "$HERE/template/$f" || rc=1
 done
 
