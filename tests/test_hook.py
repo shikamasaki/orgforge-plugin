@@ -32,15 +32,101 @@ def fire(root, command, tool_name="Bash", env_extra=None):
 
 # ── the BLOCKER: the emit->append loop must accumulate ────────────────────────
 def test_blast_radius_accumulates_and_blocks(tmp_path):
+    # use a LIGHT destructive op (plain `rm file` = weight 1) so we can watch it accumulate;
+    # heavy recursive deletes are weight 3 and trip a low cap in one shot (see next test).
     env = {"ORG_CAP_DESTRUCTIVE_OPS": "2"}
-    assert fire(tmp_path, "rm -rf /tmp/a", env_extra=env)[0] == 0     # 1st: committed 0
-    assert fire(tmp_path, "rm -rf /tmp/b", env_extra=env)[0] == 0     # 2nd: committed 1
-    code, out = fire(tmp_path, "rm -rf /tmp/c", env_extra=env)        # 3rd: committed 2, +1 > cap 2
-    assert code == 2 and "HELD" in out                               # BLOCK — accumulation works
+    assert fire(tmp_path, "rm /tmp/a", env_extra=env)[0] == 0     # 1st: committed 0
+    assert fire(tmp_path, "rm /tmp/b", env_extra=env)[0] == 0     # 2nd: committed 1
+    code, out = fire(tmp_path, "rm /tmp/c", env_extra=env)        # 3rd: committed 2, +1 > cap 2
+    assert code == 2 and "HELD" in out                           # BLOCK — accumulation works
     # and the ledger really grew (proves the write-back, not a fluke)
     r = subprocess.run([sys.executable, str(TOOLS / "ledger.py"), "census", str(tmp_path)],
                        capture_output=True, text=True)
     assert '"exposure_budget_checked": 2' in r.stdout
+
+
+# ── reversibility pricing (three-perspective review): create is free, destroy is metered ──
+def test_new_file_write_is_not_metered(tmp_path):
+    # a Write to a NON-existent path is a reversible creation — must NOT be blast radius, so a
+    # long build of many new files proceeds. (cap set to 0 => anything metered would block.)
+    env = {"ORG_CAP_FILE_MUTATIONS": "0"}
+    for i in range(10):
+        p = tmp_path / f"new_{i}.js"
+        ev = {"hook_event_name": "PreToolUse", "tool_name": "Write",
+              "tool_input": {"file_path": str(p), "content": "x"}}
+        e = dict(os.environ); e["ORG_LEDGER_ROOT"] = str(tmp_path)
+        e["ORG_TOOLS_DIR"] = str(TOOLS); e.update(env)
+        r = subprocess.run([sys.executable, str(HOOK)], input=json.dumps(ev),
+                           capture_output=True, text=True, env=e)
+        assert r.returncode == 0, r.stdout + r.stderr        # every new-file create passes
+
+
+def test_overwriting_existing_file_is_metered(tmp_path):
+    # a Write to an EXISTING path is a mutation — metered. With cap 0 it blocks.
+    existing = tmp_path / "exists.js"
+    existing.write_text("original")
+    ev = {"hook_event_name": "PreToolUse", "tool_name": "Write",
+          "tool_input": {"file_path": str(existing), "content": "new"}}
+    e = dict(os.environ); e["ORG_LEDGER_ROOT"] = str(tmp_path)
+    e["ORG_TOOLS_DIR"] = str(TOOLS); e["ORG_CAP_FILE_MUTATIONS"] = "0"
+    r = subprocess.run([sys.executable, str(HOOK)], input=json.dumps(ev),
+                       capture_output=True, text=True, env=e)
+    assert r.returncode == 2 and "HELD" in (r.stdout + r.stderr)
+
+
+def test_heavy_recursive_delete_costs_more_than_a_light_one(tmp_path):
+    # rm -rf is weight 3 (scope-weighted): one trips a cap of 2 in a single shot, where a light
+    # `rm file` (weight 1) would have passed — the reviewers' "one catastrophic command alone
+    # can exceed the cap" property that the old flat delta-1 model couldn't express.
+    env = {"ORG_CAP_DESTRUCTIVE_OPS": "2"}
+    code, out = fire(tmp_path, "rm -rf /tmp/whole-dir", env_extra=env)   # 0 + 3 > 2 -> block
+    assert code == 2 and "HELD" in out
+    # a light delete under the same cap passes (weight 1: 0 + 1 <= 2)
+    env2 = {"ORG_CAP_DESTRUCTIVE_OPS": "2"}
+    assert fire(tmp_path / "b", "rm /tmp/one.tmp", env_extra=env2)[0] == 0
+
+
+def test_build_tooling_not_metered(tmp_path):
+    # npm install / node / pytest are benign build tooling — not blast radius.
+    for c in ("npm install", "node build.js", "pytest -q", "git commit -m x"):
+        assert fire(tmp_path, c)[0] == 0, c
+
+
+# ── Agent-spawn discipline: seam contract OR independence, else block ─────────
+def fire_spawn(prompt, require_seam=True, root=None):
+    env = dict(os.environ)
+    env["ORG_TOOLS_DIR"] = str(TOOLS)
+    if root:
+        env["ORG_LEDGER_ROOT"] = str(root)
+    if require_seam:
+        env["ORG_REQUIRE_SEAM"] = "1"
+    ev = {"hook_event_name": "PreToolUse", "tool_name": "Agent",
+          "tool_input": {"prompt": prompt}}
+    r = subprocess.run([sys.executable, str(HOOK)], input=json.dumps(ev),
+                       capture_output=True, text=True, env=env)
+    return r.returncode, r.stdout + r.stderr
+
+
+def test_spawn_without_seam_or_independence_is_blocked():
+    code, out = fire_spawn("You are a worker. Build the login page.")
+    assert code == 2 and "HELD" in out and "seam contract" in out
+
+
+def test_spawn_with_seam_contract_allowed():
+    code, _ = fire_spawn("## Your slice: login\n## Boundary contract\n"
+                         "- Outputs you MUST produce: a LoginForm component")
+    assert code == 0
+
+
+def test_spawn_declared_independent_allowed():
+    code, _ = fire_spawn("INDEPENDENT: enumerate features; output not merged with siblings.")
+    assert code == 0
+
+
+def test_spawn_gate_is_opt_in():
+    # without ORG_REQUIRE_SEAM the bare spawn passes (the gate is opt-in)
+    code, _ = fire_spawn("You are a worker. Build the login page.", require_seam=False)
+    assert code == 0
 
 
 # ── the classifier fail-open: unknown destructive commands must be gated ──────
