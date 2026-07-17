@@ -1,0 +1,37 @@
+{
+  "role": "eng-manager",
+  "claims": [
+    {
+      "id": "cbb8798c52a",
+      "claim": "Independent modules with a stable contract may be built in parallel; a tightly-coupled artifact must be built by one agent to avoid integration seams.",
+      "status": "admitted",
+      "provenance": {
+        "source": "prior runs",
+        "retrieved_at": "2026-07-17",
+        "confidence": 0.8,
+        "affected_roles": [
+          "eng-manager"
+        ]
+      },
+      "review_by": "2026-10-17",
+      "version": 1,
+      "admitted_at": "UNSET"
+    },
+    {
+      "id": "c77ed69c4ad",
+      "claim": "Every deliverable ships with an executable acceptance check the manager re-runs itself before reporting up.",
+      "status": "admitted",
+      "provenance": {
+        "source": "prior runs",
+        "retrieved_at": "2026-07-17",
+        "confidence": 0.8,
+        "affected_roles": [
+          "eng-manager"
+        ]
+      },
+      "review_by": "2026-10-17",
+      "version": 1,
+      "admitted_at": "UNSET"
+    }
+  ]
+}

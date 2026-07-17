@@ -16,7 +16,12 @@ the hook keeps it inside the decision line. This runner ships NO scheduler (R0):
 it on the role's cadence, or the tick planner (tools/tick.py) says when.
 
   run_department.py --harness claude|codex --role R --task "..." [--ledger DIR] [--workdir DIR]
-                    [--profile FILE] [--dry-run]
+                    [--profile FILE] [--doctrine DIR] [--conventions DIR] [--dry-run]
+
+The role's brain persists across turns as its doctrine: pass --doctrine DIR and the launched
+department inherits ORG_DOCTRINE_ROOT, so its SessionStart hook (org_session_start.py) renders
+<role>.DOCTRINE.md into context before it acts — the same role, next turn, starts already holding
+what it learned. Without --doctrine the department simply starts with no doctrine (a clean no-op).
 
 --dry-run prints the exact command it WOULD run (so you can inspect/verify the projection without
 a harness installed — used by the tests). Without --dry-run it execs the harness and streams JSON.
@@ -39,8 +44,12 @@ CLAUDE_TOOLS = {"read": "Read", "write": "Write", "edit": "Edit", "run_tests": "
 CODEX_SANDBOX_BY_TIER = {"A": "workspace-write", "B": "danger-full-access"}
 
 
-def build_claude(role, task, profile, tools, mode, workdir):
+def build_claude(role, task, profile, tools, mode, workdir, plugin_dir):
     cmd = ["claude", "-p", task, "--output-format", "json"]
+    if plugin_dir:
+        # loads the org plugin so the launched turn fires the PreToolUse + SessionStart hooks —
+        # without it, raw `claude -p` runs no hooks and doctrine is never injected.
+        cmd += ["--plugin-dir", plugin_dir]
     if profile:
         cmd += ["--append-system-prompt", profile]
     if tools:
@@ -70,12 +79,18 @@ def main(argv):
     p.add_argument("--role", required=True)
     p.add_argument("--task", required=True)
     p.add_argument("--ledger")
+    p.add_argument("--doctrine")          # doctrine store dir -> ORG_DOCTRINE_ROOT (the role's brain)
+    p.add_argument("--conventions")       # conventions store dir -> ORG_CONVENTIONS_ROOT
     p.add_argument("--workdir")
     p.add_argument("--profile")           # a file with the role's projected system prompt
     p.add_argument("--tools")             # comma-separated neutral tool names
     p.add_argument("--tier", default="A")
     p.add_argument("--model")
     p.add_argument("--permission-mode", dest="mode")
+    p.add_argument("--plugin-dir", dest="plugin_dir",
+                   help="Claude Code plugin dir to load so the launched turn fires the org hooks "
+                        "(PreToolUse guardrail + SessionStart doctrine injection). Defaults to the "
+                        "bundled integrations/claude-code when that layout is present.")
     p.add_argument("--dry-run", action="store_true")
     a = p.parse_args(argv[1:])
 
@@ -86,7 +101,13 @@ def main(argv):
     tools = [t.strip() for t in (a.tools or "").split(",") if t.strip()]
 
     if a.harness == "claude":
-        cmd = build_claude(a.role, a.task, profile_text, tools, a.mode, a.workdir)
+        # default to the bundled plugin dir if it exists next to this runner's repo
+        plugin_dir = a.plugin_dir
+        if plugin_dir is None:
+            cand = os.path.join(REPO, "integrations", "claude-code")
+            if os.path.isdir(os.path.join(cand, ".claude-plugin")):
+                plugin_dir = cand
+        cmd = build_claude(a.role, a.task, profile_text, tools, a.mode, a.workdir, plugin_dir)
     else:
         cmd = build_codex(a.role, a.task, profile_text, a.tier, a.model, a.workdir)
 
@@ -94,12 +115,17 @@ def main(argv):
     env = dict(os.environ)
     if a.ledger:
         env["ORG_LEDGER_ROOT"] = a.ledger
+    if a.doctrine:
+        env["ORG_DOCTRINE_ROOT"] = a.doctrine
+    if a.conventions:
+        env["ORG_CONVENTIONS_ROOT"] = a.conventions
     env["ORG_ROLE"] = a.role
 
     if a.dry_run:
         print("# projected headless invocation for role=%s on harness=%s" % (a.role, a.harness))
         print(" ".join(shlex.quote(c) for c in cmd))
-        print("# env: ORG_LEDGER_ROOT=%s ORG_ROLE=%s" % (a.ledger or "(unset)", a.role))
+        print("# env: ORG_LEDGER_ROOT=%s ORG_DOCTRINE_ROOT=%s ORG_ROLE=%s"
+              % (a.ledger or "(unset)", a.doctrine or "(unset)", a.role))
         return 0
 
     try:

@@ -115,54 +115,131 @@ def _run_organ(argv):
 # These are examples wired to the shipped organs; an adopter tunes the caps/dimensions to its org.
 
 def _asset_dimension(tool_name, ti):
-    """Classify a tool call into a real-asset exposure dimension. Returns None ONLY for calls that
-    demonstrably touch no external asset (a bare read). This is the BLAST-RADIUS-CAP entry point.
+    """Classify a tool call into a blast-radius exposure dimension, PRICED BY REVERSIBILITY.
 
-    Fail-SAFE classification (external review, 2026-07): the earlier version returned None for any
-    command outside a keyword list, so `find -delete` / `dd` / `>file` / `… | bash` slipped past
-    the cap entirely. Now an UNRECOGNISED shell command falls into a catch-all `shell_effect`
-    dimension — unknown effect is consulted against the cap, not waved through. An adopter narrows
-    this to its real asset taxonomy; the default errs toward gating, not skipping."""
-    # tool_input may be a dict OR a raw string (some harnesses pass the command as a string).
+    A blast-radius cap must bound *irreversible effect*, not *activity*. The earlier version
+    charged every file write 1 against a single low cap, so a normal build (hundreds of
+    reversible file creations) exhausted a budget meant for destruction — the guardrail stopped
+    construction, not runaways. A three-perspective review (security / rate-limiting / control
+    theory) converged on the fix: meter irreversibility, not tool-call count.
+
+    Dimensions returned (each has its own cap; the dangerous ones are low, the safe ones high):
+      - None            : reversible/benign — NOT blast radius, not metered (new-file create,
+                          read-only shell). A 300-file build lives here and proceeds.
+      - "file_mutations": overwriting an EXISTING file (reversible under VCS, but real) — high cap.
+      - "external_writes"/"infra_changes"/"destructive_ops": irreversible / external side effects
+                          — LOW cap. This is the actual blast radius.
+      - "shell_effect"  : genuinely unclassifiable shell — fail-safe metered (unknown=dangerous).
+
+    CREATE-vs-MUTATE is decided by a filesystem stat (does the path already exist?), exactly as
+    the reviewers recommended — the single check that unblocks a legit build while keeping
+    overwrite metered. Fail-safe: unknown shell is charged, ambiguous destroys are max-cost."""
     if isinstance(ti, dict):
         cmd = ti.get("command") or ti.get("cmd") or ""
+        path = ti.get("file_path") or ti.get("path") or ""
     elif isinstance(ti, str):
-        cmd = ti
+        cmd, path = ti, ""
     else:
-        cmd = ""
+        cmd, path = "", ""
+
+    # ── file-editing tools: CREATE (new path) is reversible & free; MUTATE (existing) is metered.
     if tool_name in ("Write", "Edit", "MultiEdit", "ApplyPatch"):
-        return ("file_writes", 1)            # writing a file is an asset effect
+        # Edit/MultiEdit/ApplyPatch always target an existing file (a mutation). A Write to a
+        # path that does not yet exist is a reversible creation — not blast radius.
+        if tool_name == "Write" and path and not os.path.exists(path):
+            return None                      # new file — reversible, cheap; do not meter
+        if tool_name == "Write" and not path:
+            return ("file_mutations", 1)     # can't tell → fail-safe meter
+        return ("file_mutations", 1)         # overwrote/edited an existing file
     if tool_name not in ("Bash", "Shell", "Terminal"):
         return None                          # non-shell, non-write tools touch no asset here
     if not cmd.strip():
         return ("shell_effect", 1)           # an opaque shell call — gate it, don't guess it safe
-    # named high-signal dimensions (kept so their caps can be tuned independently)
+
+    # ── irreversible / external side effects — the real blast radius (LOW cap) ────────────
     if any(k in cmd for k in ("curl", "wget", "http")) and any(
             k in cmd for k in ("POST", "PUT", "DELETE", "-d ", "--data")):
         return ("external_writes", 1)
     if any(k in cmd for k in ("aws ", "gcloud ", "terraform apply", "kubectl apply")):
         return ("infra_changes", 1)
-    if any(k in cmd for k in ("rm -rf", "rm -r", "git push", "-delete", "dd ", "truncate",
-                              "DROP ", "DELETE ", "mkfs", " > /", "| bash", "|bash", "| sh")):
-        return ("destructive_ops", 1)
-    # a read-only shell command touches nothing — the only safe None. Everything else is gated.
-    _READONLY = ("ls", "cat", "grep", "find", "echo", "pwd", "head", "tail", "wc", "git status",
-                 "git log", "git diff", "git show", "which", "file", "stat", "sort", "uniq")
-    first = cmd.strip().split()[0] if cmd.strip() else ""
-    if first in _READONLY and not any(w in cmd for w in ("-delete", "-exec", ">", ">>", "|")):
-        return None
-    return ("shell_effect", 1)               # unknown effect -> consult the cap (fail-safe)
+    if any(k in cmd for k in ("rm -rf", "rm -r", "rm ", "git push", "-delete", "dd ", "truncate",
+                              "DROP ", "DELETE ", "TRUNCATE", "mkfs", " > /", "| bash", "|bash",
+                              "| sh", "shutil.rmtree", "git reset --hard", "--force", "-f ")):
+        # scope-weight the catastrophic recursive/glob deletes so ONE can trip the cap alone
+        heavy = any(k in cmd for k in ("rm -rf", "-delete", "DROP ", "TRUNCATE", "mkfs",
+                                       "shutil.rmtree", "/*", "reset --hard"))
+        return ("destructive_ops", 3 if heavy else 1)
 
+    # ── reversible / benign shell — NOT blast radius, not metered ────────────────────────
+    # build/test/package tooling and read-only inspection create or read within the workspace;
+    # they are reversible and must not burn the destruction budget (reviewers: unknown≠dangerous,
+    # but common-safe IS safe). Interpreters (bash -c/python -c/make) stay opaque -> metered below.
+    _BENIGN = ("ls", "cat", "grep", "rg", "echo", "pwd", "head", "tail", "wc", "which", "file",
+               "stat", "sort", "uniq", "mkdir", "touch", "cp", "node", "npm", "npx", "pnpm",
+               "yarn", "pip", "python", "python3", "pytest", "go", "cargo", "tsc", "vite",
+               "git status", "git log", "git diff", "git show", "git add", "git commit",
+               "git branch", "git checkout", "git init")
+    stripped = cmd.strip()
+    first = stripped.split()[0] if stripped else ""
+    starts_benign = first in _BENIGN or any(stripped.startswith(b + " ") for b in _BENIGN)
+    # a benign head still gets metered if it hides a redirect-overwrite or a pipe-to-shell
+    if starts_benign and not any(w in cmd for w in ("-delete", "-exec", " > /", ">>/", "| bash",
+                                                    "|bash", "| sh", "-c ")):
+        return None
+    return ("shell_effect", 1)               # genuinely unknown effect -> fail-safe meter
+
+
+# Per-dimension default caps, priced by reversibility (a three-perspective review's conclusion:
+# meter irreversibility, not activity). The irreversible/external dimensions are LOW — that is
+# the real blast radius. Reversible-but-real mutations get a HIGH cap so a normal build proceeds.
+# Reversible creations and reads return None from the classifier and are never metered at all.
+# Every value is overridable per-adopter via ORG_CAP_<DIMENSION>.
+_DEFAULT_CAPS = {
+    "destructive_ops": "3",    # rm/DROP/force — irreversible; low, scope-weighted
+    "external_writes": "3",    # outbound POST/PUT/DELETE — irreversible side effect
+    "infra_changes":   "3",    # apply to real infra — irreversible
+    "shell_effect":    "8",    # unclassifiable shell — metered fail-safe, but not build-killing
+    "file_mutations":  "200",  # overwriting existing files — reversible under VCS; high ceiling
+}
 
 def rule_blast_radius(tool_name, ti):
     dim = _asset_dimension(tool_name, ti)
     if not dim:
         return None
     dimension, delta = dim
-    cap = os.environ.get(f"ORG_CAP_{dimension.upper()}", "3")
+    cap = os.environ.get(f"ORG_CAP_{dimension.upper()}", _DEFAULT_CAPS.get(dimension, "3"))
     return ["guardrails.py", "cap", LEDGER_ROOT, "--dimension", dimension,
             "--delta", str(delta), "--cap", cap, "--actor", "harness-agent",
             "--window-since", os.environ.get("ORG_WINDOW_SINCE", "1970-01-01")]
+
+
+# ── Agent spawn discipline (docs/07 §2.1.1) ──────────────────────────────────
+# A manager that spawns a subordinate must either hand it a SEAM CONTRACT (so integrating
+# siblings don't drift) or declare the child INDEPENDENT (a non-integrating fan-out — e.g. a
+# parallel enumeration whose outputs are never merged). This turns the profile's "please use
+# handoff.py" from advice into structure: without one of the two, the spawn is blocked. Not an
+# organ/ledger rule — it's a pure shape check on the spawn prompt, so it returns a verdict
+# directly (see main()'s SPAWN_GATE branch) rather than an organ argv.
+_SEAM_MARKERS = ("outputs you must produce", "boundary contract", "inputs you receive",
+                 "seam contract", "## your slice")
+_INDEP_MARKERS = ("independent:", "non-integrating", "no seam", "outputs are not merged",
+                  "independent fan-out")
+
+def spawn_needs_seam_or_independence(tool_name, ti):
+    """Return None to allow, or a deny-reason string to block. Gate the Agent/Task spawn tool."""
+    if tool_name not in ("Agent", "Task"):
+        return None
+    if os.environ.get("ORG_REQUIRE_SEAM", "") not in ("1", "true", "yes"):
+        return None                      # opt-in: only enforced when the org turns it on
+    prompt = (ti.get("prompt") or "").lower()
+    if any(m in prompt for m in _SEAM_MARKERS):
+        return None                      # carries a seam contract — integrating child, fine
+    if any(m in prompt for m in _INDEP_MARKERS):
+        return None                      # explicitly an independent, non-integrating child
+    return ("this Agent spawn carries neither a seam contract (build it with tools/handoff.py: "
+            "slice + inputs/outputs the child integrates to) nor an explicit independence "
+            "declaration (start the child prompt with 'INDEPENDENT: ...' if its output is never "
+            "merged with a sibling's). Recursive splits drift without an owned seam — docs/07 §2.1.1.")
 
 
 # Only the blast-radius cap is wired into the tool loop today. reconcile.py `mandate` and the
@@ -184,6 +261,13 @@ def main():
         _allow()
     tool_name = event.get("tool_name", "")
     tool_input = event.get("tool_input", {})
+
+    # Agent-spawn discipline is a pure shape check on the spawn prompt — it needs no ledger, so
+    # it runs before the ledger gate. Blocks a manager that spawns a child with neither a seam
+    # contract nor an independence declaration (docs/07 §2.1.1); opt-in via ORG_REQUIRE_SEAM.
+    seam_reason = spawn_needs_seam_or_independence(tool_name, tool_input)
+    if seam_reason:
+        _deny(f"org guardrail HELD this {tool_name} spawn: {seam_reason}")
 
     if not LEDGER_ROOT:
         # no ledger configured => the org has no state to judge against. Fail-safe: allow, but

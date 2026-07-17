@@ -1,0 +1,5 @@
+Build a tiny task-tracker as three files that MUST integrate:
+  - store.js   : a data layer. exports createStore() -> { add(text), toggle(id), remove(id), all() }; persists to a JSON file tasks.json.
+  - api.js     : a thin HTTP-less command layer. exports handle(store, cmd) where cmd is {op, ...} and op in {add,toggle,remove,list}; returns a plain result object.
+  - cli.js     : parses process.argv into a cmd and prints handle()'s result. Uses api.js + store.js.
+Acceptance: `node cli.js add "buy milk"` then `node cli.js list` shows the task; toggle/remove work; state survives across invocations. The three files must agree on the task shape {id, text, done}.

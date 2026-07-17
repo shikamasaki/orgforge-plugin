@@ -193,6 +193,78 @@ def cmd_show(a):
     return 0
 
 
+def _live(c):
+    """A claim whose brain-value must survive a refound: admitted, or still pending
+    (rejected claims are settled history and are not re-routed)."""
+    return c.get("status") in ("admitted", "pending")
+
+
+def cmd_remap(a):
+    """refound executor: re-route each role's LIVE doctrine onto the new role structure,
+    ASSETS INTACT (docs/06 §4.4). This is what performs `doctrine_remapped`; org_lint's
+    `doctrine_remap_covers_every_live_claim` checks the plan, this applies it.
+
+    The map is a JSON object {old_role: new_role | [new_role, ...]}:
+      - old -> new        : rename / merge (many olds may point at one new; claims union).
+      - old -> [n1, n2]   : SPLIT — each live claim goes to the new role(s) named in its
+                            provenance.affected_roles ∩ {n1,n2}; a claim naming none of the
+                            targets is an ORPHAN (surfaced, never silently dropped).
+    Refuses to run (exit 2) if any live claim would be orphaned, unless --allow-orphans,
+    which instead writes them to <new_root>/UNROUTED.<old>.json for a human to place —
+    so the refound is atomic-or-surfaced, never a silent brain loss.
+    """
+    try:
+        mapping = json.loads(a.map)
+    except Exception as e:
+        print(f"remap: --map must be JSON {{old_role: new_role|[roles]}} — {e}", file=sys.stderr)
+        return 2
+    src_root, dst_root = a.root, (a.into or a.root)
+    routed, orphans = {}, []          # new_role -> [claims];  orphans -> [(old, claim)]
+    for old, target in mapping.items():
+        data = _load(src_root, old)
+        targets = [target] if isinstance(target, str) else list(target)
+        for c in data["claims"]:
+            if not _live(c):
+                continue
+            if len(targets) == 1:
+                dests = targets                      # rename/merge: everything moves
+            else:
+                aff = set(c.get("provenance", {}).get("affected_roles", []))
+                dests = [t for t in targets if t in aff]   # split by affected_roles
+            if not dests:
+                orphans.append((old, c))
+                continue
+            for d in dests:
+                routed.setdefault(d, []).append(c)
+
+    if orphans and not a.allow_orphans:
+        print(f"remap: {len(orphans)} live claim(s) would be orphaned (no target role) — "
+              f"refound BLOCKED so no brain is silently lost (docs/06 §4.4). Fix the map or "
+              f"pass --allow-orphans to surface them to UNROUTED.* for a human:", file=sys.stderr)
+        for old, c in orphans:
+            print(f"    [{old}] {c['claim'][:80]}", file=sys.stderr)
+        return 2
+
+    # apply: union claims into each new role's file (dedup by id, keep existing)
+    for new_role, claims in routed.items():
+        dst = _load(dst_root, new_role)
+        have = {c["id"] for c in dst["claims"]}
+        for c in claims:
+            if c["id"] not in have:
+                dst["claims"].append(c)
+                have.add(c["id"])
+        _save(dst_root, new_role, dst)
+        print(f"remapped -> {new_role}: {len(claims)} claim(s) routed in")
+
+    if orphans:   # --allow-orphans path: surface, do not drop
+        orphan_doc = {"role": "UNROUTED", "claims": [c for _, c in orphans]}
+        _save(dst_root, "UNROUTED", orphan_doc)
+        print(f"surfaced {len(orphans)} orphan claim(s) -> {dst_root}/UNROUTED.json "
+              f"(a human must re-place these; NOT lost)")
+    print("doctrine remap complete — assets preserved, roles re-routed")
+    return 0
+
+
 def main(argv):
     p = argparse.ArgumentParser(prog="doctrine", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -224,6 +296,12 @@ def main(argv):
 
     q = sub.add_parser("show"); q.set_defaults(fn=cmd_show)
     q.add_argument("root"); q.add_argument("role")
+
+    q = sub.add_parser("remap"); q.set_defaults(fn=cmd_remap)
+    q.add_argument("root")                                  # source doctrine store (old roles)
+    q.add_argument("--map", required=True)                  # JSON {old_role: new_role|[roles]}
+    q.add_argument("--into")                                # dest store (default: same as root)
+    q.add_argument("--allow-orphans", dest="allow_orphans", action="store_true")
 
     a = p.parse_args(argv[1:])
     return a.fn(a)

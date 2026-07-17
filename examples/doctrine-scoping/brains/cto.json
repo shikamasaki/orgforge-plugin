@@ -1,0 +1,37 @@
+{
+  "role": "cto",
+  "claims": [
+    {
+      "id": "c3189e9f462",
+      "claim": "Prefer boring, well-understood technology over novel stacks unless the bet is core to strategy; the org optimizes for net-positive shipped results, not resume-driven choices.",
+      "status": "admitted",
+      "provenance": {
+        "source": "charter",
+        "retrieved_at": "2026-07-17",
+        "confidence": 0.8,
+        "affected_roles": [
+          "cto"
+        ]
+      },
+      "review_by": "2026-10-17",
+      "version": 1,
+      "admitted_at": "UNSET"
+    },
+    {
+      "id": "c1b905fa600",
+      "claim": "A capability owned by one team end-to-end beats one split across teams; org design follows the seams of the product, not the seams of the tech.",
+      "status": "admitted",
+      "provenance": {
+        "source": "charter",
+        "retrieved_at": "2026-07-17",
+        "confidence": 0.8,
+        "affected_roles": [
+          "cto"
+        ]
+      },
+      "review_by": "2026-10-17",
+      "version": 1,
+      "admitted_at": "UNSET"
+    }
+  ]
+}

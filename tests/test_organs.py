@@ -185,6 +185,96 @@ def test_doctrine_gate_admits(tmp_path):
     assert code == 0 and "admitted" in out
 
 
+def _admitted_claim(tmp_path, role, claim, affects):
+    """propose+admit one claim tagged for `affects`, return its id."""
+    run("doctrine.py", "propose", str(tmp_path), role, "--claim", claim,
+        "--source", "s", "--confidence", "0.9", "--retrieved-at", "2026-07-16",
+        "--review-by", "2027-01-16", "--affects", affects)
+    _, show = run("doctrine.py", "show", str(tmp_path), role)
+    cid = [c for c in json.loads(show)["claims"] if c["claim"] == claim][0]["id"]
+    run("doctrine.py", "admit", str(tmp_path), role, cid, "--by", "gate", "--at", "2026-07-16")
+    return cid
+
+
+def test_doctrine_remap_rename_preserves_brain(tmp_path):
+    # refound rename: eng-manager -> platform-manager; the brain follows (asset intact).
+    _admitted_claim(tmp_path, "eng-manager", "coupled unit: one agent", "eng-manager")
+    dst = tmp_path / "new"
+    code, out = run("doctrine.py", "remap", str(tmp_path),
+                    "--map", json.dumps({"eng-manager": "platform-manager"}), "--into", str(dst))
+    assert code == 0, out
+    _, show = run("doctrine.py", "show", str(dst), "platform-manager")
+    assert len(json.loads(show)["claims"]) == 1
+
+
+def test_doctrine_remap_split_routes_by_affected_roles(tmp_path):
+    # refound split: ui-worker -> {frontend-worker, mobile-worker}; each claim goes to the
+    # target named in its affected_roles.
+    _admitted_claim(tmp_path, "ui-worker", "single-file UI: do not split", "frontend-worker")
+    _admitted_claim(tmp_path, "ui-worker", "touch targets >= 44px", "mobile-worker")
+    dst = tmp_path / "new"
+    code, out = run("doctrine.py", "remap", str(tmp_path),
+                    "--map", json.dumps({"ui-worker": ["frontend-worker", "mobile-worker"]}),
+                    "--into", str(dst))
+    assert code == 0, out
+    _, fe = run("doctrine.py", "show", str(dst), "frontend-worker")
+    _, mo = run("doctrine.py", "show", str(dst), "mobile-worker")
+    assert len(json.loads(fe)["claims"]) == 1 and len(json.loads(mo)["claims"]) == 1
+
+
+def test_doctrine_remap_orphan_blocks_refound(tmp_path):
+    # a live claim that maps to no target must BLOCK the refound — no silent brain loss.
+    _admitted_claim(tmp_path, "api-worker", "idempotency keys on POST", "api-worker")
+    dst = tmp_path / "new"
+    code, out = run("doctrine.py", "remap", str(tmp_path),
+                    "--map", json.dumps({"api-worker": ["x-worker", "y-worker"]}), "--into", str(dst))
+    assert code == 2 and "orphan" in out.lower()
+
+
+def test_doctrine_remap_allow_orphans_surfaces_not_drops(tmp_path):
+    # --allow-orphans routes orphans to UNROUTED (surfaced for a human), never dropped.
+    _admitted_claim(tmp_path, "api-worker", "idempotency keys on POST", "api-worker")
+    dst = tmp_path / "new"
+    code, out = run("doctrine.py", "remap", str(tmp_path),
+                    "--map", json.dumps({"api-worker": ["x-worker", "y-worker"]}),
+                    "--into", str(dst), "--allow-orphans")
+    assert code == 0, out
+    _, un = run("doctrine.py", "show", str(dst), "UNROUTED")
+    assert len(json.loads(un)["claims"]) == 1   # preserved, not lost
+
+
+# ── handoff.py (seam contract + scoped brain at delegation) ───────────────────
+def test_handoff_requires_a_seam_contract(tmp_path):
+    # a manager cannot delegate without fixing the boundary — inputs/outputs are required,
+    # so no child is ever spawned with an un-owned seam (the integration-drift guard).
+    code, out = run("handoff.py", str(tmp_path), "api-worker", "--slice", "s")
+    assert code == 2 and "inputs" in out and "outputs" in out
+
+
+def test_handoff_scopes_brain_and_fixes_seam(tmp_path):
+    # the child's brain is scoped to ITS role; a sibling's doctrine does not leak in;
+    # the seam contract (inputs/outputs) is present as a hard constraint.
+    _admitted_claim(tmp_path, "api-worker", "idempotency keys on POST", "api-worker")
+    _admitted_claim(tmp_path, "db-worker", "avoid N+1 queries", "db-worker")
+    code, out = run("handoff.py", str(tmp_path), "api-worker",
+                    "--slice", "build the auth API",
+                    "--inputs", "user records", "--outputs", "POST /login -> {token}")
+    assert code == 0, out
+    assert "idempotency keys on POST" in out        # its own brain
+    assert "N+1" not in out                          # sibling brain does NOT leak in
+    assert "Boundary contract" in out and "POST /login -> {token}" in out   # seam fixed
+
+
+def test_handoff_axis_is_local_advice_not_global(tmp_path):
+    # the axis line is explicitly local ("your call"), never a global constraint —
+    # the per-level-axis conclusion from the design review.
+    code, out = run("handoff.py", str(tmp_path), "w",
+                    "--slice", "s", "--inputs", "i", "--outputs", "o",
+                    "--axis", "cut by endpoint")
+    assert code == 0, out
+    assert "do not inherit a global one" in out
+
+
 # ── guardrails.py ─────────────────────────────────────────────────────────────
 def test_guardrails_cap_holds(tmp_path):
     code, out = run("guardrails.py", "cap", str(tmp_path), "--dimension", "spend",

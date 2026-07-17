@@ -68,6 +68,21 @@ action rather than recording it; a held action enqueues to the approval queue.
 `guardrails.py cap` verified: two acts under an aggregate cap of 1000 pass silently (300, then
 +400 = 700); the third (+500 → 1200) is HELD (exit 10).
 
+**A blast-radius cap must meter irreversibility, not activity.** The classifier that feeds this
+cap (`org_hook.py::_asset_dimension`) prices each action by how hard it is to undo — a design a
+three-perspective review (security / rate-limiting / organizational-control) converged on after
+an early flat "every file write costs 1 against a cap of 3" model blocked a *normal build* at its
+4th file. Reversible actions are **not blast radius and are not metered**: creating a new file
+(a stat decides new-vs-overwrite), reading, and build/test tooling (`npm`, `pytest`, `git commit`)
+return no dimension and never touch a cap — so a 300-file build proceeds untouched. The scarce,
+low caps are reserved for the irreversible: `destructive_ops` (rm/DROP/force — **scope-weighted**,
+a recursive `rm -rf` costs 3 so one catastrophic command trips the cap alone), `external_writes`,
+`infra_changes`. Overwriting an existing file is `file_mutations` (reversible under VCS — a high
+cap, not build-killing). Unknown shell is metered fail-safe (`shell_effect`) — unknown ≠ safe.
+The honest tradeoff: correctness now lives in the *classifier*, so it fails safe (ambiguous
+destroys are max-cost, interpreters stay opaque) and the real enforcement belongs at the FS/DB
+boundary with this regex layer as an advisory pre-filter.
+
 **Ledger event:** `exposure_budget_checked {window_id, dimension, committed_so_far,
 delta_requested, cap, actor_role, decision(allow|hold), caused_by_event}`.
 **Fire:** at every act touching a real asset (not a cadence). **Escalate:** only on `hold`.
