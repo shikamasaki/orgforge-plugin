@@ -74,7 +74,7 @@ def _render(tool, root, subcmd_args, out_path):
         return ""
     try:
         subprocess.run([sys.executable, os.path.join(TOOLS, tool)] + subcmd_args,
-                       capture_output=True, text=True, timeout=20)
+                       capture_output=True, encoding="utf-8", errors="replace", timeout=20)
         if os.path.exists(out_path):
             with open(out_path, encoding="utf-8") as f:
                 return f.read()

@@ -16,6 +16,14 @@ org_hook subprocess by absolute path, bundled-in-plugin copy):
 """
 import json
 import os
+import sys as _sys
+# cp932 fix: organ messages contain em-dashes; force UTF-8 on captured pipes so
+# a print() never crashes the PreToolUse guardrail on a non-UTF-8 console locale.
+for _stream in (_sys.stdout, _sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
 
 ESCALATE = 10   # exit: the exception surfaced — host enqueues / pages / halts
 OK = 0          # exit: fail-quiet — nothing surfaces
