@@ -354,6 +354,32 @@ March & Simon are already cited above — referenced, not duplicated.)
 - **[S] Read (1962) / O'Reilly (1978)** — upward information distortion is *intentional* and tracks
   the reporter's incentives. Anchor A4's `report_fidelity` audit (grade the roll-up against source).
 
+### Decomposition principles — how a manager splits a task (docs/15)
+
+How a manager turns one backlog item into sub-tasks (or keeps it single-threaded). There is **no
+single named theory** of intra-unit task decomposition; docs/15 renders four consensus results at the
+agent-manager granularity the originals did not reach. The own-domain-vs-cross-domain boundary and its
+lint tooth are this repo's synthesis, to be verified against a running system.
+
+- **[P] Parnas (1972), "On the Criteria To Be Used in Decomposing Systems into Modules," *CACM*
+  15(12)** (already cited above) — **information hiding**: split so each module hides a decision likely
+  to change. The anchor for "cut at the design secret, not the surface" (§2.1).
+- **[P] Simon (1962), "The Architecture of Complexity," *Proc. Am. Phil. Soc.* 106(6)** (already cited)
+  — **near-decomposability**: dense interaction within a part, sparse between parts. The anchor for
+  "cut where coupling is already sparse" (§2.2).
+- **[P] Thompson (1967), *Organizations in Action*, McGraw-Hill** — the **interdependence taxonomy**
+  (pooled / sequential / reciprocal) and its rising coordination cost. The anchor for "never split
+  reciprocal work; pin sequential seams; pooled splits freely" (§2.3), and the theoretical form of
+  docs/14's keep-coupled-work-single-threaded.
+- **[P] Becker & Murphy (1992), "The Division of Labor, Coordination Costs, and Knowledge," *QJE*
+  107(4)** (already cited) — the division of labor is bounded by **coordination cost**, not by how
+  finely one could cut. The anchor for "split only while the gain beats the coordination cost" (§2.4).
+- **[P] Conway (1968), *Datamation* 14(5)** (already cited, docs/04 §3) — the artifact mirrors the
+  decomposition; the split is itself an architectural decision.
+- Knowledge-boundary anchors reused from docs/07 §2.1 (role-keyed doctrine) and docs/08 §1.1 (no
+  **doctrine capture** — the control layer holds no per-role domain doctrine), which ground §3's
+  own-domain-vs-cross-domain rule and §5's lint tooth.
+
 ---
 
 *Preprint note:* arXiv IDs in the 2601–2606 range are 2026 preprints; treat **[S]** arXiv items as
