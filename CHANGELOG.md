@@ -3,6 +3,24 @@
 All notable changes to orgforge-plugin. This project follows a pragmatic semver:
 minor = new mechanisms/features, patch = fixes, major = breaking articulation changes.
 
+## 0.5.0
+
+The scheduler is real now, not just documented. Previously SCHEDULER.md described how one *could*
+wire the cadence but nothing actually registered it — so nothing ran unattended.
+
+### Added
+- **`scheduler-install.sh` / `scheduler-uninstall.sh`** — one command installs the org's metabolism
+  on the **OS cron**, so it runs 24/7 with no Claude Code session open. It writes crontab entries that
+  invoke `claude -p "/org-tick" | "/org-work <role>" | "/org-discover <role>"` headless, with the
+  plugin attached (hooks + doctrine injection fire) and ORG_* env inlined; output streams to
+  `$ORG_LEDGER_ROOT/cron.log`; each entry is tagged `# orgforge:<role>` for clean removal. `--dry-run`
+  previews the lines; intervals of 60+ minutes become valid hourly cron expressions (no invalid `*/60`).
+
+### Changed
+- **SCHEDULER.md corrected.** The in-session schedulers (`/schedule`, `/loop`) are **session-only** —
+  they stop when Claude Code exits and are not "unattended." The doc now states this plainly and points
+  to the OS-cron install for a genuinely 24/7 org (docs/09 §4 names "a cron" first for this reason).
+
 ## 0.4.3
 
 ### Fixed

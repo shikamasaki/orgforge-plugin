@@ -21,23 +21,46 @@ Three commands make up the metabolism; the scheduler fires them on cadence:
 The base interval must be **≤ the smallest cadence** in `schedule.yaml` (its own header rule), so
 `tick.py`'s missed-check detection stays meaningful.
 
-## Realizing it with Claude Code's scheduler
+## Two ways to fire the cadence — pick by how unattended you need it
 
-Claude Code exposes scheduling two ways; either realizes `schedule.yaml`:
+Claude Code's in-session scheduler and the OS cron differ in ONE decisive way — session-only vs.
+survives-the-REPL-closing — so choose by whether the org must run with no session open.
 
-- **`/schedule`** (cron cloud agents / routines) — register a recurring run of a command on a cron
-  expression. Use this for the unattended, always-on cadence (the "24/7 org" of docs/09 §4). One
-  routine per driven command, at the cadence its `schedule.yaml` check declares.
-- **`/loop`** — run a command on a fixed interval (or self-paced) within a session. Use this for an
-  attended run you want to watch, or to pace a single role's cycles.
+| | Runs when | Survives closing Claude Code? | Use for |
+|---|---|---|---|
+| **OS cron** (`scheduler-install.sh`) | always, headless (`claude -p`) | **yes** — true 24/7 unattended | the real always-on org |
+| **`/schedule`** (in-session cron) | only while THIS session is open | no — session-only, in-memory, 7-day cap | pacing a session you keep open |
+| **`/loop`** | only while THIS session is open | no | an attended run you watch |
 
-Concretely, per active role, register:
+**For a genuinely 24/7 org, use the OS cron** — the in-session schedulers stop the moment Claude Code
+exits, which is not "unattended." `docs/09 §4` names "a cron" first for exactly this reason.
 
-1. `/org-tick` at the base interval — the watchdog. If it reports a **MISS**, the scheduler itself may
-   be down: `tick.py` turns "it was supposed to run" into an escalated fact, never a silent skip
-   (docs/11 §5.2). This is why the missed-check detector stays even though the host now owns firing.
-2. `/org-work <role>` at that role's `loop.cadence` — the work cycle.
-3. `/org-discover <role>` at a slower cadence — self-improvement.
+### The one-command install (OS cron — recommended)
+
+With `ORG_LEDGER_ROOT` (and usually `ORG_ROLE`/`ORG_DOCTRINE_ROOT`) set in your environment:
+
+```
+integrations/claude-code/scheduler-install.sh --role <role> --tick-min 30 --work-min 60 --discover-hours 24
+# preview without installing:  add --dry-run
+# remove:                      integrations/claude-code/scheduler-uninstall.sh --role <role>
+```
+
+This writes crontab entries that run, headless with the plugin attached (so hooks + doctrine injection
+fire), one per driven command:
+
+1. `/org-tick` at `--tick-min` — the watchdog. A reported **MISS** means the cron itself may be down:
+   `tick.py` turns "it was supposed to run" into an escalated fact, never a silent skip (docs/11 §5.2).
+2. `/org-work <role>` at `--work-min` — the work cycle.
+3. `/org-discover <role>` every `--discover-hours` — self-improvement.
+
+Output streams to `$ORG_LEDGER_ROOT/cron.log`. Each entry is tagged `# orgforge:<role>` so the
+uninstaller can find and remove exactly this role's lines.
+
+### In-session alternative (when you keep a session open)
+
+`/schedule` registers the same commands on a cron expression *within the current session* (gone when
+it closes, auto-expires after 7 days); `/loop` runs one command on a fixed interval you watch. Use
+these to pace or observe a session — not as the unattended driver.
 
 ## The stop/night discipline still holds
 
