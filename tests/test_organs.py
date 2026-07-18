@@ -44,6 +44,30 @@ def test_ledger_chain_intact(tmp_path):
     assert code == 0 and "chain intact" in out
 
 
+def test_work_in_progress_view_resolves_started_not_completed(tmp_path):
+    # the recovery source after a context wipe: a candidate STARTED with a progress checkpoint but not
+    # completed must appear with its latest next_step; a COMPLETED one must drop out.
+    seed(tmp_path, "eng", "cycle_started", {"role": "eng", "candidate_id": "X", "pack_manifest_id": "p"},
+         ts="2026-07-16T01:00:00Z")
+    seed(tmp_path, "eng", "progress_recorded",
+         {"role": "eng", "candidate_id": "X", "fraction": 0.6, "phase": "impl",
+          "done_so_far": "parser done", "next_step": "wire into CLI", "blocked_by": None, "artifacts": []},
+         ts="2026-07-16T02:00:00Z")
+    # a second candidate that WAS completed — must not appear in WIP
+    seed(tmp_path, "eng", "cycle_started", {"role": "eng", "candidate_id": "Y", "pack_manifest_id": "p"},
+         ts="2026-07-16T03:00:00Z")
+    seed(tmp_path, "eng", "cycle_completed", {"role": "eng", "candidate_id": "Y", "outputs": []},
+         ts="2026-07-16T04:00:00Z")
+    code, out = run("ledger.py", "view", str(tmp_path), "work_in_progress")
+    assert code == 0, out
+    data = json.loads(out)
+    ids = [w["candidate_id"] for w in data["in_progress"]]
+    assert ids == ["X"], f"expected only the unfinished X, got {ids}"
+    wx = data["in_progress"][0]
+    assert wx["progress"]["next_step"] == "wire into CLI"
+    assert abs(wx["progress"]["fraction"] - 0.6) < 1e-9
+
+
 def test_ledger_requires_prior_orphan_deploy(tmp_path):
     code, out = run("ledger.py", "append", str(tmp_path), "--actor", "r",
                     "--class", "result_deployed",

@@ -28,11 +28,22 @@ envelope:
 # ── Event classes: the org's complete factual vocabulary ────────────────────
 event_classes:
   # metabolism (Organ 4)
-  cycle_started:        { role, pack_manifest_id }
+  # candidate_id: WHICH backlog item this cycle is working (docs/12). Ties the cycle to the
+  # candidate_submitted it drains, so "in flight" is per-item, not just a per-role count — and so a
+  # cycle interrupted (e.g. by /clear) is recoverable: the work_in_progress view pairs the started
+  # candidate with its latest progress_recorded. Absent ⇒ an untracked cycle (legacy / not backlog-driven).
+  cycle_started:        { role, candidate_id, pack_manifest_id }
+  # progress_recorded: the CHECKPOINT that survives a context wipe (docs/01 R−1: the org acts only on
+  # what is written; a half-done implementation that lives only in the agent's context is lost on
+  # /clear). Stamped at each milestone of a cycle: how far (0..1 or a phase label), what was just done,
+  # the concrete next step, and any blocker. work_in_progress reads the LATEST per candidate; /org-resume
+  # replays it to continue exactly where the cycle stopped. This is the backlog's memory of "how far".
+  progress_recorded:    { role, candidate_id, fraction, phase, done_so_far, next_step,
+                          blocked_by, artifacts: [ref] }
   # accountable_supervisor (docs/14 §A1): which supervising role owns this output up the chain,
   # set from the runtime supervision edge (never the payload — a manager cannot forge who owns a
   # result, mirroring actor_identity_source). Empty for the top (human-owned) tier.
-  cycle_completed:      { role, tokens: {task, gate, reporting}, outputs: [ref],
+  cycle_completed:      { role, candidate_id, tokens: {task, gate, reporting}, outputs: [ref],
                           views_referenced: [view_id], accountable_supervisor }
   heartbeat:            { component, invariants_hold: bool }
   halt_tripped:         { trigger, scope: global|role }
@@ -159,6 +170,7 @@ views:
   parts_inventory:      { from: [admission_decided, result_retired], shape: admitted orthogonal components }
   combination_history:  { from: [candidate_submitted, admission_decided], shape: tried combinations and outcomes }
   open_experiments:     { from: [candidate_submitted, cycle_completed], shape: backlog awaiting execution }
+  work_in_progress:     { from: [cycle_started, progress_recorded, cycle_completed], shape: candidates STARTED but not yet completed, each with its latest progress checkpoint (how far / next step / blocker) — the recovery source after a context wipe (/org-resume) }
   reusable_modules:     { from: [cycle_completed], shape: shared implementation assets }
   gate_input_spec:      { from: [intent_revised, proposal_adjudicated], shape: the current candidate submission format }
   doctrine_gaps:        { from: [doctrine_diff_admitted, cycle_completed], shape: roles whose doctrine is thin or expiring }

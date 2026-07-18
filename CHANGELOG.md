@@ -3,6 +3,28 @@
 All notable changes to orgforge-plugin. This project follows a pragmatic semver:
 minor = new mechanisms/features, patch = fixes, major = breaking articulation changes.
 
+## 0.4.1
+
+Work-in-progress survives a context wipe. Half-done work now lives in the ledger, not in the
+conversation, so `/clear` or a fresh session no longer loses "how far did we get."
+
+### Added
+- **Progress checkpoints** (`ledger-schema.yaml`). `cycle_started`/`cycle_completed` gain a
+  `candidate_id` (in-flight is now per-item, not just a per-role count), and a new
+  `progress_recorded {role, candidate_id, fraction, phase, done_so_far, next_step, blocked_by,
+  artifacts}` event records "how far / what's done / the next step / any blocker" at each milestone.
+- **`work_in_progress` view** (`ledger.py`). Resolves the candidates started-but-not-completed, each
+  with its latest checkpoint — the recovery source after a context wipe.
+- **Automatic resume injection** (`org_session_start.py`). The SessionStart hook now injects the role's
+  work in progress alongside its doctrine — so a fresh session (after `/clear`, a crash, or a scheduled
+  wake) picks up from `next_step` automatically, with no `/org-resume` needed. "Just continue" works.
+- **`/org-resume`** — the manual counterpart: show a role's in-progress board and pick up an item.
+
+### Changed
+- **`/org-work` records as it goes.** The PM loop now checkpoints keyed by `candidate_id`
+  (started → progress at each milestone → completed), and states the discipline explicitly: work only
+  items that are on the backlog; submit first if it isn't, so nothing is invisible/unrecoverable.
+
 ## 0.4.0
 
 The running metabolism: a department now has a driven backlog, a PM loop that delegates in

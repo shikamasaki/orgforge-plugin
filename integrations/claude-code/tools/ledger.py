@@ -106,6 +106,7 @@ VIEW_FROM = {
     "sensor_readings": ["sensor_reading"],
     "proposal_queue": ["proposal_filed", "proposal_adjudicated"],
     "open_experiments": ["candidate_submitted", "cycle_completed"],
+    "work_in_progress": ["cycle_started", "progress_recorded", "cycle_completed"],
     "ledger_census": ["*"],
     "recent_ledger_census": ["*"],
 }
@@ -240,6 +241,28 @@ def cmd_view(a):
             counts[e["class"]] = counts.get(e["class"], 0) + 1
         print(json.dumps({"view": a.view_id, "counts": dict(sorted(counts.items()))},
                          indent=2, ensure_ascii=False))
+        return 0
+    if a.view_id == "work_in_progress":
+        # RESOLVE (not raw rows): candidates started but not completed, each with its LATEST progress
+        # checkpoint. This is the recovery source after a context wipe — the SessionStart hook and
+        # /org-resume read it to answer "what was this role mid-way through, and what's the next step?"
+        started, completed, latest = {}, set(), {}
+        for e in events:
+            cid = e["payload"].get("candidate_id")
+            if not cid:
+                continue
+            if e["class"] == "cycle_started":
+                started[cid] = {"candidate_id": cid, "role": e["payload"].get("role"),
+                                "started_seq": e["seq"]}
+            elif e["class"] == "cycle_completed":
+                completed.add(cid)
+            elif e["class"] == "progress_recorded":
+                latest[cid] = {k: e["payload"].get(k) for k in
+                               ("fraction", "phase", "done_so_far", "next_step", "blocked_by", "artifacts")}
+        wip = [{**started[cid], "progress": latest.get(cid)}
+               for cid in started if cid not in completed]
+        wip.sort(key=lambda w: w["started_seq"])
+        print(json.dumps({"view": "work_in_progress", "in_progress": wip}, indent=2, ensure_ascii=False))
         return 0
     # generic projection: the events feeding the view, newest last, payloads intact.
     rows = [{"seq": e["seq"], "ts": e.get("ts", ""), "class": e["class"], "payload": e["payload"]}

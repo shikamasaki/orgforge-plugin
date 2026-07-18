@@ -8,9 +8,15 @@ Claude Code and Codex fire a SessionStart hook whose stdout `additionalContext` 
 the model's context. This renders the role's DOCTRINE.md + CONVENTIONS.md (via the organ tools)
 and returns them as that context.
 
-Env: ORG_LEDGER_ROOT (state), ORG_DOCTRINE_ROOT (doctrine store dir), ORG_CONVENTIONS_ROOT
-     (conventions store dir), ORG_ROLE (which department this session is). All optional; a
-     missing store simply contributes nothing (no crash) — a role with no doctrine yet is fine.
+It ALSO injects the role's WORK IN PROGRESS — candidates it started but did not finish, each with
+its latest progress checkpoint (how far / next step / blocker). This is what makes "just continue"
+work after a context wipe (/clear) or a fresh session: the half-done work lives in the LEDGER, not in
+the lost conversation, so the role resumes exactly where it stopped without the human re-explaining
+(docs/01 R−1: the org acts only on what is written). The recovery is automatic — no /org-resume needed.
+
+Env: ORG_LEDGER_ROOT (state — also the source of work-in-progress), ORG_DOCTRINE_ROOT (doctrine store
+     dir), ORG_CONVENTIONS_ROOT (conventions store dir), ORG_ROLE (which department this session is).
+     All optional; a missing store simply contributes nothing (no crash).
 """
 import json
 import os
@@ -26,6 +32,41 @@ TOOLS = os.environ.get("ORG_TOOLS_DIR", _BUNDLED if os.path.isdir(_BUNDLED) else
 ROLE = os.environ.get("ORG_ROLE", "")
 DOCTRINE_ROOT = os.environ.get("ORG_DOCTRINE_ROOT", "")
 CONV_ROOT = os.environ.get("ORG_CONVENTIONS_ROOT", "")
+LEDGER_ROOT = os.environ.get("ORG_LEDGER_ROOT", "")
+
+
+def _work_in_progress():
+    """Read the role's started-but-unfinished candidates + latest progress from the ledger. Returns a
+    human-readable resume block, or "" if there is nothing in flight (a clean role = clean no-op)."""
+    if not (LEDGER_ROOT and ROLE):
+        return ""
+    try:
+        p = subprocess.run([sys.executable, os.path.join(TOOLS, "ledger.py"),
+                            "view", LEDGER_ROOT, "work_in_progress"],
+                           capture_output=True, text=True, timeout=20)
+        data = json.loads(p.stdout or "{}")
+    except Exception:
+        return ""
+    mine = [w for w in data.get("in_progress", []) if w.get("role") == ROLE]
+    if not mine:
+        return ""
+    lines = ["## Work in progress (resume from here — recovered from the ledger, not the lost session)"]
+    for w in mine:
+        pr = w.get("progress") or {}
+        frac = pr.get("fraction")
+        head = f"- **{w['candidate_id']}**" + (f" — {round(float(frac) * 100)}%" if frac is not None else "")
+        if pr.get("phase"):
+            head += f" ({pr['phase']})"
+        lines.append(head)
+        if pr.get("done_so_far"):
+            lines.append(f"    - done so far: {pr['done_so_far']}")
+        if pr.get("next_step"):
+            lines.append(f"    - **next step: {pr['next_step']}**")
+        if pr.get("blocked_by"):
+            lines.append(f"    - ⚠ blocked by: {pr['blocked_by']}")
+        if not pr:
+            lines.append("    - started, no progress checkpoint yet — verify state before continuing")
+    return "\n".join(lines)
 
 
 def _render(tool, root, subcmd_args, out_path):
@@ -61,12 +102,17 @@ def main():
                        ["render", CONV_ROOT, "--role", ROLE, "--out", out], out)
         if conv.strip():
             parts.append(conv)
+    # work in progress — injected LAST so "just continue" lands on the freshest, most actionable block.
+    wip = _work_in_progress()
+    if wip.strip():
+        parts.append(wip)
     if not parts:
         sys.exit(0)   # nothing to inject; clean no-op
     context = ("\n\n---\n\n".join(parts) +
-               "\n\n(The above is your current doctrine and your org's settled conventions, "
-               "injected by orgforge-plugin. Act on the current world; follow settled "
-               "precedent instead of re-deriving it.)")
+               "\n\n(The above is your current doctrine, your org's settled conventions, and any work "
+               "you had in progress — injected by orgforge-plugin. Act on the current world; follow "
+               "settled precedent instead of re-deriving it; and if there is work in progress, resume "
+               "it from its next step rather than restarting.)")
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart",
                                              "additionalContext": context}}))
     sys.exit(0)

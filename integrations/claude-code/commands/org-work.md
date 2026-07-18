@@ -34,13 +34,28 @@ Read the `selected[]` above. Then apply the **decomposition doctrine (docs/15)**
   role goes to that role, so its knowledge accrues to that role's doctrine — never absorbed here.
 - If an item is your OWN-domain tightly-coupled work, implementing it yourself is fine (docs/14).
 
-## 3. Record completion
+## 3. Record work as you go — so nothing is lost to a context wipe
 
-For each item that completed, append a `cycle_completed` event so the backlog drains and the next
-cycle sees accurate in-flight/WIP. Emit it via the ledger (the organ tools' `LEDGER-EVENT` line is
-appended by the hook; a direct append uses `ledger.py`):
+The backlog is the org's memory. Work that lives only in this session's context is **gone** on `/clear`
+or a crash (docs/01 R−1: the org acts only on what is written). So a cycle records itself at three
+points, keyed by `candidate_id`:
 
-!`echo 'After the delegated Tasks return, record one cycle_completed per finished item: python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/ledger.py" append "'"${ORG_LEDGER_ROOT}"'" --class cycle_completed --payload {role,outputs,...}. Do not fabricate completion for work that did not finish.'`
+1. **On starting an item** — append `cycle_started {role, candidate_id, pack_manifest_id}`. This marks
+   the item in-flight and ties every later record to it.
+2. **At each milestone** (and before you might stop — end of a phase, hitting a blocker, low on budget)
+   — append `progress_recorded {role, candidate_id, fraction, phase, done_so_far, next_step, blocked_by,
+   artifacts}`. `next_step` is the load-bearing field: it is what a fresh session resumes from.
+3. **On finishing** — append `cycle_completed {role, candidate_id, outputs, ...}` so the item drains
+   from the backlog.
+
+!`echo 'Record the cycle, keyed by candidate_id (never fabricate completion): python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/ledger.py" append "'"${ORG_LEDGER_ROOT}"'" --actor "'"$1"'" --class cycle_started|progress_recorded|cycle_completed --payload {role,candidate_id,...}. Checkpoint BEFORE you risk stopping, so the next session resumes from next_step, not from zero.'`
+
+## Discipline — work only from the backlog
+
+**Always work an item that is on the backlog.** If you are about to implement something that is not a
+`candidate_submitted` item, submit it first (as `/org-discover` does) — otherwise the work is invisible
+to the org and unrecoverable after a wipe. Pull from the backlog, record as you go; do not do untracked
+work on the side.
 
 ## Discipline
 
