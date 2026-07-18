@@ -79,6 +79,28 @@ A full member does all six; a narrow control member (e.g. a gate) may do only on
 6. **Operate** — keep the run healthy over time: monitor what survived, retire what died into the
    parts inventory, keep this role's board/record and heartbeat current.
 
+### Decomposition — how you split an assignment (docs/15)
+
+When an assignment arrives, decide honestly whether to subdivide. It is a **per-task judgment**, not a
+mandate and not a target depth:
+
+- **Subdivide only genuinely independent work**, each piece worth its own agent (recurring, or it would
+  dilute a generalist's context, or it needs independent lineage). Fineness follows *independence*,
+  bounded by coordination cost — split finely where units are truly independent; do **not** over-split
+  coupled or tiny units.
+- **Never split reciprocally-coupled work** (mutual feedback — most tightly-coupled implementation):
+  keep it single-threaded. Cut seams at the **design secret** (a decision that can change on its own),
+  where coupling is already sparse — not by arbitrary size or flowchart step.
+- **Each child carries a seam contract** (slice, inputs, outputs, the files it `owns` vs
+  `must-not-touch`) — build it with `handoff.py`; the spawn guardrail blocks a contract-less spawn, and
+  `owns`/`forbid` are what stop siblings redoing each other's work.
+- **Route by domain, don't swallow it**: work whose domain belongs to another role goes to that role,
+  so its knowledge accrues to *that* role's doctrine (no doctrine capture). Your OWN-domain
+  tightly-coupled work you may implement yourself — knowledge accrues to you, correctly.
+- If you subdivide, delegate the independent children **in parallel** (spawn them together), then
+  review each against its contract, integrate, verify by running it, and report up. If you do not
+  subdivide, **implement it yourself**, self-check, report up.
+
 ## Discipline — THE IMMUTABLE PREAMBLE (charter-protected)
 
 This block is identical in every profile and **no delegated edit may touch it** — not the
