@@ -63,6 +63,7 @@ def _backlog(events, role):
             cid = e["payload"].get("candidate_id")
             submitted[cid] = {"candidate_id": cid,
                               "objective": e["payload"].get("contract_ref"),
+                              "source": e["payload"].get("source", "self"),
                               "seq": e["seq"]}
     # remove items whose outcome already landed (deployed/retired) — they're done, not backlog
     done = set()
@@ -126,10 +127,16 @@ def cmd_select(a):
         # lower rank number = higher priority; convert to a positive score component
         rank_score = (1.0 / r["rank"]) if r and r.get("rank") else 0.0
         boost = _aspiration_gap(events, it, a.aspiration)   # PROBLEMISTIC SEARCH
-        score = round(align + rank_score + boost, 4)
+        base = align + rank_score + boost
+        # ZONE OF ACCEPTANCE: a mandate whose objective IS in the ranking (inside the zone) is floored
+        # to ride above self-generated work; a mandate off the ranking gets NO floor — it stays a
+        # visible drift signal, never silently promoted (docs/12, Simon zone of acceptance).
+        in_ranking = obj in ranking
+        floored = (it.get("source") == "mandate" and in_ranking and base < a.mandate_floor)
+        score = round(max(base, a.mandate_floor) if floored else base, 4)
         scored.append({**it, "align": align, "rank_score": round(rank_score, 4),
                        "problemistic_boost": boost, "score": score,
-                       "in_ranking": obj in ranking})
+                       "mandate_floored": floored, "in_ranking": in_ranking})
     # SEQUENTIAL ATTENTION: rank order, pick a PREFIX up to the WIP limit (pull, don't push).
     scored.sort(key=lambda s: (-s["score"], s["seq"]))
     in_flight = _in_flight(events, role)
@@ -140,11 +147,12 @@ def cmd_select(a):
     payload = {"role": role, "wip_limit": a.wip_limit, "in_flight": in_flight,
                "ranking_id": ranking_id,
                "selected": [{"candidate_id": s["candidate_id"], "objective": s["objective"],
-                             "score": s["score"], "in_ranking": s["in_ranking"]} for s in selected],
+                             "score": s["score"], "in_ranking": s["in_ranking"],
+                             "source": s.get("source", "self")} for s in selected],
                "deferred": [{"candidate_id": s["candidate_id"], "score": s["score"]}
                             for s in deferred],
-               "reason": "situated-attention(align to org ranking) + problemistic-search boost, "
-                         "sequential prefix within WIP limit"}
+               "reason": "situated-attention(align to org ranking) + problemistic-search boost + "
+                         "mandate zone-of-acceptance floor, sequential prefix within WIP limit"}
     print("LEDGER-EVENT " + json.dumps({"class": "attention_allocated", "payload": payload},
                                        ensure_ascii=False))
 
@@ -185,6 +193,11 @@ def main(argv):
     q.add_argument("root"); q.add_argument("--role", required=True)
     q.add_argument("--wip-limit", dest="wip_limit", type=int, default=2)
     q.add_argument("--aspiration", type=float, default=0.5)
+    # zone of acceptance (Simon 1947 / Barnard inducement-contribution, docs/12): a top-down MANDATE
+    # rides above self-generated work at a floor score — but only INSIDE the acceptance zone. A
+    # mandate whose objective is off the org ranking is OUTSIDE the zone and is NOT auto-floored; it
+    # surfaces as a drift signal (and, if it is the sole coverage of the top objective, ESCALATEs).
+    q.add_argument("--mandate-floor", dest="mandate_floor", type=float, default=1.0)
     a = p.parse_args(argv[1:])
     return a.fn(a)
 

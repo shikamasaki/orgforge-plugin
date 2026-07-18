@@ -440,6 +440,49 @@ def test_attention_escalates_on_coverage_gap(tmp_path):
     assert code == 10 and ("ESCALATE" in out or "cannot serve" in out)
 
 
+def test_attention_mandate_rides_a_floor_over_self_work(tmp_path):
+    # zone of acceptance (docs/12): a top-down mandate on an in-ranking objective is floored so a live
+    # instruction is not starved by low-priority self work. Both serve in-ranking objectives ranked
+    # low (rank 3 → rank_score 0.33, weight 0.2 → base 0.53 each). The self item's base 0.53 loses to
+    # the mandate floored to 1.0. With --wip-limit 1 the floor must select the mandate.
+    seed(tmp_path, "registrar", "priority_ranking_set",
+         {"ranking_id": "r1", "ordered_objectives": [
+             {"objective_id": "minor_a", "rank": 3, "weight": 0.2},
+             {"objective_id": "minor_b", "rank": 3, "weight": 0.2}]})
+    seed(tmp_path, "eng", "candidate_submitted",
+         {"maker": "eng", "candidate_id": "self1", "contract_ref": "minor_a", "source": "self",
+          "evidence": []}, ts="2026-07-16T00:01:00Z")
+    seed(tmp_path, "eng", "candidate_submitted",
+         {"maker": "eng", "candidate_id": "mand1", "contract_ref": "minor_b", "source": "mandate",
+          "evidence": []}, ts="2026-07-16T00:02:00Z")
+    code, out = run("attention.py", "select", str(tmp_path), "--role", "eng",
+                    "--wip-limit", "1", "--mandate-floor", "1.0")
+    # the mandate is selected (floored to 1.0, above the self item's base ~0.53); the emitted event
+    # carries source + the floor marker.
+    assert code == 0, out
+    sel = out.split('"selected"')[1].split('"deferred"')[0]
+    assert '"candidate_id": "mand1"' in sel and '"source": "mandate"' in sel
+    assert '"candidate_id": "self1"' not in sel
+
+
+def test_attention_off_ranking_mandate_is_not_floored(tmp_path):
+    # a mandate whose objective is OFF the ranking is OUTSIDE the acceptance zone — no floor, it stays
+    # a visible drift signal (docs/12). Only the in-ranking self item is picked.
+    seed(tmp_path, "registrar", "priority_ranking_set",
+         {"ranking_id": "r1", "ordered_objectives": [{"objective_id": "growth", "rank": 1, "weight": 0.9}]})
+    seed(tmp_path, "eng", "candidate_submitted",
+         {"maker": "eng", "candidate_id": "self1", "contract_ref": "growth", "source": "self",
+          "evidence": []}, ts="2026-07-16T00:01:00Z")
+    seed(tmp_path, "eng", "candidate_submitted",
+         {"maker": "eng", "candidate_id": "offmand", "contract_ref": "unlisted", "source": "mandate",
+          "evidence": []}, ts="2026-07-16T00:02:00Z")
+    code, out = run("attention.py", "select", str(tmp_path), "--role", "eng",
+                    "--wip-limit", "1", "--mandate-floor", "1.0")
+    assert code == 0, out
+    assert '"candidate_id": "self1"' in out          # in-ranking self wins
+    assert '"candidate_id": "offmand", "objective"' not in out.split('"selected"')[1].split('"deferred"')[0]
+
+
 def test_learning_silent_when_matched(tmp_path):
     code, out = run("learning.py", "delta", str(tmp_path))
     assert code == 0 and "matched" in out

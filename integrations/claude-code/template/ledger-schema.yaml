@@ -37,7 +37,12 @@ event_classes:
   heartbeat:            { component, invariants_hold: bool }
   halt_tripped:         { trigger, scope: global|role }
   # work (Organs 2/6)
-  candidate_submitted:  { maker, candidate_id, contract_ref, evidence: [ref] }
+  # source: how this backlog item entered the department's backlog (docs/12, docs/15). `mandate` =
+  # a top-down instruction handed down; `self` = a self-generated task the department raised from its
+  # own aspiration gap (problemistic search). Both land in the SAME backlog (open_experiments) and are
+  # prioritized on one footing by attention.py; source only lets a mandate carry a floor (zone of
+  # acceptance, Simon 1947) and lets an audit see where work came from. Absent ⇒ treated as `self`.
+  candidate_submitted:  { maker, candidate_id, contract_ref, evidence: [ref], source: mandate|self }
   # predicted_outcome: the gate's expected result for this admission — the input the OUTCOME-DELTA /
   # FRAME-REVIEW organs (learning.py, alignment.py) join against the realized outcome (docs/11 §3,
   # docs/13 §3). Declared here so the emitting role knows to populate it; the organs are inert
@@ -106,7 +111,7 @@ event_classes:
                           missed: [check_id] }   # tick.py's own run — a gap proves the host cron died
   # intra-department attention allocation (docs/12) — how ONE dept picks what to work on next
   attention_allocated:  { role, wip_limit, in_flight, ranking_id,
-                          selected: [{candidate_id, objective, score, in_ranking}],
+                          selected: [{candidate_id, objective, score, in_ranking, source}],
                           deferred: [{candidate_id, score}], reason }   # ATTENTION-ALLOCATION
   # proxy-stack guards (docs/13) — is the org still solving the RIGHT problem?
   premise_reconciled:   { premise_id, asserted, observed, status: holds|weakened|broken } # PREMISE/TELOS
