@@ -28,6 +28,11 @@ against the invariants that must hold for the articulation to be coherent:
                           checkers) never dormant while any organic role is active
   O7   contracts        — every organic maker has a contract naming a mechanistic checker
                           that is not itself
+  O8   no doctrine cap  — no control role carries 'implement' together with 'judge'/'review'
+                          (an adjudicating authority that also implements collapses maker and
+                          checker: domain knowledge pools in the boss, not the field role that
+                          owns it — docs/08 §1.1, docs/15 §3). A non-judging clerk that
+                          implements (e.g. the registrar authoring diffs the gate admits) is fine.
   CH   charter sanity   — invariants present/true, sunset held, founding_commit charter,
                           no placeholders (SET_ME), queue rules on
   MV   move catalog     — parses, tiers valid, delegated lists cross-match constitution;
@@ -104,6 +109,7 @@ def lint_org(org, lint):
     check_layers_and_span(org, roles, lint)
     control_ids = collect_control_ids(org, roles, lint)
     check_sod(org, roles, control_ids, lint)
+    check_no_doctrine_capture(org, roles, control_ids, lint)
     check_contracts(org, roles, lint)
     check_control_awake(roles, control_ids, lint)
     return roles, control_ids
@@ -394,6 +400,32 @@ def check_sod(org, roles, control_ids, lint):
                             f"any adversarial checker {skeptics} — the deploy path skips "
                             f"refutation the ledger schema requires (result_deployed needs a "
                             f"prior 'survives'). Add the skeptic to '{auth}'.output_to.")
+
+
+def check_no_doctrine_capture(org, roles, control_ids, lint):
+    """O8 — no doctrine capture (docs/08 §1.1, docs/15 §3/§5). A control role that BOTH judges/reviews
+    AND implements has collapsed maker and checker into one seat: it produces a domain deliverable and
+    also sits in judgment of domain output, so domain knowledge pools in the boss instead of accruing
+    to the field role's own role-keyed brain (docs/07 §2.1). "The boss needs to know whether the
+    specialist's output is on-purpose, not what the specialist knows" — docs/08 §1.1.
+
+    The tooth fires ONLY on a control role that carries `implement` TOGETHER WITH `judge` or `review`.
+    That conjunction is the real capture: an authority (judge/review) that also implements. It is the
+    generalization of O6's existing "authorization holder must not implement" from one seat to every
+    judging/reviewing control seat. A control CLERK that implements without judging (e.g. the registrar
+    authors reorg diffs as a Maker whose output the gate admits — docs/06 §2.6 "approves nothing,
+    ever") is NOT capture: it produces no domain doctrine and holds no admission authority, so it is
+    left alone. Domain-work routing itself stays a runtime concern (seam contract owns/forbid +
+    role-keyed doctrine); this tooth only forbids the maker/checker collapse in the chart."""
+    for rid in sorted(control_ids):
+        fns = set(roles.get(rid, {}).get("functions") or [])
+        if "implement" in fns and ({"judge", "review"} & fns):
+            adjudicating = sorted({"judge", "review"} & fns)
+            lint.fail("O8", f"control role '{rid}' carries 'implement' together with {adjudicating} — "
+                            f"a judging/reviewing authority that also implements collapses maker and "
+                            f"checker into one seat (doctrine capture): domain knowledge pools in the "
+                            f"boss instead of the field role that owns it (docs/08 §1.1, docs/15 §3). "
+                            f"A control role that adjudicates must not also implement a domain.")
 
 
 def check_contracts(org, roles, lint):

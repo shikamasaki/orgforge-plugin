@@ -129,3 +129,26 @@ def test_contract_checker_must_exist_parity(tmp_path):
     # so accept either the O2e failure or a clean pass if no deliverable-bearing role exists.
     if "deliverable" in (TPL / "organization.yaml").read_text():
         assert code == 1 and "O2e" in out
+
+
+def test_o8_control_role_that_adjudicates_and_implements_is_capture(tmp_path):
+    # O8 (docs/08 §1.1, docs/15 §3): a control role that JUDGES/REVIEWS and also IMPLEMENTs collapses
+    # maker and checker — domain knowledge would pool in the boss (doctrine capture). Give the gate
+    # (functions: [judge]) an extra `implement` → must fail O8.
+    def org(o):
+        for r in o["roles"]:
+            if r["id"] == "gate":
+                r["functions"] = r["functions"] + ["implement"]
+        return o
+    code, out = _lint(tmp_path, organization=org)
+    assert code == 1 and "O8" in out
+
+
+def test_o8_does_not_fire_on_a_non_judging_clerk_that_implements(tmp_path):
+    # The registrar is mechanistic and carries `implement` (it authors reorg diffs as a Maker the
+    # gate admits — docs/06 §2.6, "approves nothing, ever"). It does NOT judge/review, so it is a
+    # clerk, not capture. The shipped template must stay clean of O8 — a guard against the tooth
+    # regressing into the coarse "any control implement" false positive that flagged the registrar.
+    code, out = _lint(tmp_path)
+    assert code == 0, out
+    assert "O8" not in out
