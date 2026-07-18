@@ -92,6 +92,45 @@ def test_build_tooling_not_metered(tmp_path):
         assert fire(tmp_path, c)[0] == 0, c
 
 
+# ── word-boundary destructive classification (regression: substring false positives) ──────────
+# The old classifier tested `"rm " in cmd` / `"-f " in cmd` as SUBSTRINGS, so a command that merely
+# CONTAINED those bytes — e.g. any path under `.../fx-ml-platform/...`, or `grep -f`, or `--info`
+# collapsing to `-f` — was miscounted as a destructive op, accumulated against the low cap, and
+# eventually blocked every command. These pin that benign commands containing those bytes are NOT
+# metered, under a cap of 0 (any destructive charge would block immediately).
+def test_benign_commands_are_not_misread_as_destructive(tmp_path):
+    env = {"ORG_CAP_DESTRUCTIVE_OPS": "0"}   # cap 0 => any destructive charge blocks on the spot
+    benign = [
+        "ls /Volumes/192.168.1.6/fx-ml-platform",   # path contains 'form' — must not read as 'rm'
+        "cat /Volumes/nas/fx-ml-platform/README.md",
+        "grep -f patterns.txt data.log",            # '-f' as a real flag, not 'rm -f'
+        "python train.py --info",                   # no destructive token at all
+        "cd /srv/platform && pytest -q",            # 'platform' contains 'form'
+        "git diff --stat",
+    ]
+    for c in benign:
+        code, out = fire(tmp_path, c, env_extra=env)
+        assert code == 0, f"benign command wrongly gated as destructive: {c!r} -> {out!r}"
+
+
+def test_real_destructive_still_caught_by_word_boundary(tmp_path):
+    # The fix must NOT weaken the guardrail: real destructive ops still charge and block at cap 0.
+    env = {"ORG_CAP_DESTRUCTIVE_OPS": "0"}
+    destructive = [
+        "rm /tmp/a",
+        "rm -rf /tmp/dir",
+        "dd if=/dev/zero of=/tmp/x",
+        "find . -name '*.tmp' -delete",
+        "git push origin main",
+        "git reset --hard HEAD~1",
+        "echo bad | bash",
+        "cat evil.sh | sh",
+    ]
+    for c in destructive:
+        code, out = fire(tmp_path / c.replace("/", "_")[:20], c, env_extra=env)
+        assert code == 2, f"real destructive command NOT gated: {c!r} -> {out!r}"
+
+
 # ── Agent-spawn discipline: seam contract OR independence, else block ─────────
 def fire_spawn(prompt, require_seam=True, root=None):
     env = dict(os.environ)

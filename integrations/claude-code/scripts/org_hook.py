@@ -44,6 +44,8 @@ Environment:
 """
 import json
 import os
+import re
+import shlex
 import subprocess
 import sys
 
@@ -114,6 +116,39 @@ def _run_organ(argv):
 # The organ is consulted with the CURRENT ledger; exit 10 (or its block message) => BLOCK.
 # These are examples wired to the shipped organs; an adopter tunes the caps/dimensions to its org.
 
+
+def _tokenize(cmd):
+    """Split a shell command into tokens for WORD-BOUNDARY matching.
+
+    The destructive classifier must not fire on substrings: a path like
+    `/Volumes/.../fx-ml-platform/...` contains neither the token `rm` nor `-f`, yet the old
+    `"rm " in cmd` / `"-f " in cmd` substring tests would misfire on commands that merely
+    *contain* those bytes (e.g. `grep -f pattern`, a path with `form`, `--info` → `-f`). We tokenize
+    once and test token membership instead. shlex is used for correctness; if the command is not
+    valid shell (unbalanced quotes, etc.) we fall back to a whitespace split so we still gate it
+    rather than silently passing an unparseable — and thus opaque — command."""
+    try:
+        return shlex.split(cmd, posix=True)
+    except ValueError:
+        return cmd.split()
+
+
+def _has_token(tokens, *words):
+    """True if any of `words` appears as a WHOLE token (not a substring of one)."""
+    tset = set(tokens)
+    return any(w in tset for w in words)
+
+
+def _has_seq(tokens, *pairs):
+    """True if any (a, b) pair appears as ADJACENT tokens, e.g. ('git','push') or ('reset','--hard').
+    Catches multi-word operators that a single-token test would miss."""
+    for a, b in pairs:
+        for i in range(len(tokens) - 1):
+            if tokens[i] == a and tokens[i + 1] == b:
+                return True
+    return False
+
+
 def _asset_dimension(tool_name, ti):
     """Classify a tool call into a blast-radius exposure dimension, PRICED BY REVERSIBILITY.
 
@@ -162,12 +197,29 @@ def _asset_dimension(tool_name, ti):
         return ("external_writes", 1)
     if any(k in cmd for k in ("aws ", "gcloud ", "terraform apply", "kubectl apply")):
         return ("infra_changes", 1)
-    if any(k in cmd for k in ("rm -rf", "rm -r", "rm ", "git push", "-delete", "dd ", "truncate",
-                              "DROP ", "DELETE ", "TRUNCATE", "mkfs", " > /", "| bash", "|bash",
-                              "| sh", "shutil.rmtree", "git reset --hard", "--force", "-f ")):
+    # WORD-BOUNDARY matching (not substring): tokenize first so a path like `.../fx-ml-platform/...`
+    # or a flag like `grep -f` never masquerades as `rm`/`-f`. Operators (`|`, `>`) and dotted calls
+    # (`shutil.rmtree`) don't tokenize as clean words, so those few are matched on the raw string
+    # with tight anchors. See _tokenize/_has_token/_has_seq above and the tests that pin this.
+    toks = _tokenize(cmd)
+    destructive = (
+        _has_token(toks, "rm", "dd", "truncate", "mkfs", "shred")                 # dangerous binaries
+        or _has_token(toks, "DROP", "DELETE", "TRUNCATE")                         # SQL (as whole tokens)
+        or _has_token(toks, "--force", "--delete", "-delete")                     # force / find -delete
+        or _has_seq(toks, ("git", "push"), ("git", "reset"), ("reset", "--hard"),
+                    ("terraform", "destroy"), ("kubectl", "delete"))
+        or "shutil.rmtree" in cmd                                                 # python dotted call
+        or bool(re.search(r"(\||>>?)\s*/", cmd))                                  # redirect/pipe onto an absolute path
+        or bool(re.search(r"\|\s*(bash|sh)\b", cmd))                              # pipe-to-shell
+    )
+    if destructive:
         # scope-weight the catastrophic recursive/glob deletes so ONE can trip the cap alone
-        heavy = any(k in cmd for k in ("rm -rf", "-delete", "DROP ", "TRUNCATE", "mkfs",
-                                       "shutil.rmtree", "/*", "reset --hard"))
+        rm_recursive = _has_token(toks, "rm") and _has_token(toks, "-r", "-rf", "-fr", "-R")
+        heavy = (rm_recursive
+                 or _has_token(toks, "-delete", "--delete", "DROP", "TRUNCATE", "mkfs", "shred")
+                 or _has_seq(toks, ("reset", "--hard"))
+                 or "shutil.rmtree" in cmd
+                 or "/*" in cmd)
         return ("destructive_ops", 3 if heavy else 1)
 
     # ── reversible / benign shell — NOT blast radius, not metered ────────────────────────
