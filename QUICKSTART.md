@@ -1,8 +1,13 @@
 # Quickstart — install and run in a few minutes
 
 This gets the orgforge-plugin guardrails **actually blocking inside a real Claude Code session**,
-then points you at how to run a department. It does not require publishing the repo — a private
-GitHub repo or a local path both work (see [Distribution](#distribution) at the end).
+then walks the lifecycle: define an org, launch a department, drive the running metabolism. It does
+not require publishing the repo — a private GitHub repo or a local path both work (see
+[Distribution](#distribution) at the end).
+
+> For the whole-system picture — the ecosystem (neutral core → projection → harness), the organs, and
+> the full founding → operation → evolution lifecycle — read [ARCHITECTURE.md](ARCHITECTURE.md).
+> This quickstart is the hands-on path through it.
 
 ## 1. Install the plugin
 
@@ -75,16 +80,45 @@ python3 integrations/runner/run_department.py --harness claude --role <role> \
   --tools read,write,run_tests --dry-run     # drop --dry-run to actually run
 ```
 
-Drive it on a cadence with cron (R0: the schedule's *content* is yours, the *drive* is the host's):
+## 6. Drive the metabolism (the running loop)
+
+Once an org is defined (§7) and departments can launch (§5), the running loop is three commands. They
+operate on the **one backlog per department** — the `open_experiments` ledger view — which holds both
+top-down **mandate** items and self-raised **self** items on one footing.
 
 ```
-*/30 * * * *  python3 tools/tick.py plan $ORG_LEDGER_ROOT template/schedule.yaml --now-min $(date +%s)
+/org-work <role>       # the PM loop: select from the backlog by attention, delegate the selected
+                       #   items to subordinates in PARALLEL (one Task each, where the split is
+                       #   genuine), then record cycle_completed. This ACTS.
+/org-discover <role>   # problemistic search: surface aspiration gaps and raise them as source:self
+                       #   backlog items. Adds to the backlog; never executes. Fail-quiet if no gap.
+/org-tick              # read-only health: which checks are due / MISSED, sensors, chain integrity.
 ```
 
-`tick.py` reports which checks are due and **detects a missed one** (a due check with no
-proof-of-run), so "the cron stopped firing" becomes a paged fact, not silent drift.
+`/org-work` uses `attention.py` to prioritize the whole backlog (situated attention to the org
+ranking + problemistic-search boost), **floors an in-zone mandate** so a live instruction is not
+starved by low-priority self work, and picks a prefix within the WIP limit. Delegation follows the
+decomposition doctrine (docs/15): split only genuinely independent work, never split coupled work,
+each child carries a seam contract.
 
-## 6. Define your own org — two ways in
+### Run it unattended, on the harness's own scheduler
+
+`template/schedule.yaml` declares the cadences as **data**; the host realizes them. On Claude Code,
+use its built-in scheduler (which docs/09 names as "the harness's own loop" — R0-conformant, no
+external cron needed):
+
+```
+/schedule   # register a recurring run of /org-tick (base interval) and /org-work <role> (per its
+            #   loop.cadence), and /org-discover <role> (slower) — the unattended 24/7 metabolism
+/loop       # or run a command on a fixed interval within an attended session you want to watch
+```
+
+See [integrations/claude-code/SCHEDULER.md](integrations/claude-code/SCHEDULER.md) for the full
+wiring. `tick.py` still detects a **missed check** (a due check with no proof-of-run in the ledger),
+so "the scheduler stopped firing" becomes a paged fact, not silent drift — the org checks its own
+heartbeat regardless of who fires the cadence.
+
+## 7. Define your own org — two ways in
 
 The plugin is the *engine*; your organization is `organization.yaml` + `constitution.yaml` +
 `moves.yaml`, validated by `python3 tools/org_lint.py …`. Two starting points ship with it:
@@ -97,8 +131,10 @@ The plugin is the *engine*; your organization is `organization.yaml` + `constitu
   **stops and reports up for your review** before anything is built (founding is design; the build
   is the CEO's next call). This is the founding flow, as a command.
 
-See `docs/01`–`docs/09` for the design, `docs/10` for a worked founding, and `examples/` for real
-runs (doctrine scoping, seam-driven delegation).
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the whole system, `docs/01`–`docs/09` for the core design,
+`docs/10` for a worked founding, `docs/11`–`docs/15` for the operating organs (events, attention,
+proxy-stack, manager accountability, decomposition), and `examples/` for real runs (doctrine scoping,
+seam-driven delegation).
 
 ## Distribution
 

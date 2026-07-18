@@ -8,6 +8,8 @@ written down.
 
 **New here?** [`QUICKSTART.md`](QUICKSTART.md) installs the plugin and proves a guardrail blocks
 in a few minutes — no OSS publish required (a private repo or local path both install).
+[`ARCHITECTURE.md`](ARCHITECTURE.md) is the whole-system map: the ecosystem (neutral core → projection
+→ harness), the organs, and the full founding → operation → evolution lifecycle.
 [`CHANGELOG.md`](CHANGELOG.md) tracks what's new (0.2.0: hierarchical doctrine, refounding,
 delegation seams, and a blast-radius cap that no longer blocks normal work).
 
@@ -187,10 +189,14 @@ concrete for Claude Code and Codex. The organs become **direct harness features*
 hook (the *same* neutral `org_hook.py` on both harnesses — they share the exit-2 block contract)
 makes a blast-radius cap or a mandate check **actually block a real tool call**; a `SessionStart`
 hook injects the role's doctrine + conventions every cycle; departments run headless via
-`claude -p` / `codex exec` (the runner projects one neutral role onto either); a cron drives
-`tools/tick.py`, which detects a missed check so "the schedule stopped firing" is a paged fact.
-Ships as a Claude Code **plugin** (hooks + subagents + `/org-tick`, `/org-mandate` commands) and a
-Codex `.codex/` config — neutral core, one folder per harness. See
+`claude -p` / `codex exec` (the runner projects one neutral role onto either); the schedule's
+cadences are realized by the harness's own scheduler (Claude Code's `/schedule` / `/loop`, or a
+cron), and `tools/tick.py` detects a missed check so "the schedule stopped firing" is a paged fact
+([integrations/claude-code/SCHEDULER.md](integrations/claude-code/SCHEDULER.md)). Ships as a Claude
+Code **plugin** — hooks + subagents + commands: `/org-found` (draft an org from a brief), `/org-work`
+(the PM loop: select from the backlog and delegate in parallel), `/org-discover` (raise self-tasks
+from aspiration gaps), `/org-tick` (read-only health), `/org-mandate` (adjudicate a mandate clash) —
+plus a Codex `.codex/` config; neutral core, one folder per harness. See
 [integrations/README.md](integrations/README.md).
 
 ## Status & honesty
