@@ -3,6 +3,52 @@
 All notable changes to orgforge-plugin. This project follows a pragmatic semver:
 minor = new mechanisms/features, patch = fixes, major = breaking articulation changes.
 
+## 0.4.0
+
+The running metabolism: a department now has a driven backlog, a PM loop that delegates in
+parallel, a self-improvement loop, and a scheduler wired to the harness's own loop — plus the
+knowledge-aggregation guarantee made load-bearing, and two guardrail deadlocks fixed. Aligns the
+plugin version with the autonomous-founding narrative the docs already describe (v0.3/v0.4).
+
+### Added
+- **Driven backlog with two intake paths** (`ledger-schema.yaml`, `attention.py`). `candidate_submitted`
+  gains `source: mandate|self`; top-down instructions and self-raised tasks share one backlog
+  (`open_experiments`) and are prioritized on one footing. An in-ranking **mandate rides a floor**
+  (zone of acceptance, Simon 1947) so a live instruction is never starved by low-priority self work;
+  an off-ranking mandate gets no floor (a visible drift signal). (docs/12)
+- **The PM loop** (`/org-work <role>`). Select from the backlog by situated attention, delegate the
+  selected items to subordinates **in parallel** (one `Task` each, where the split is genuine), record
+  `cycle_completed`. Parallelism is a judgment, not a mandate.
+- **The discovery loop** (`/org-discover <role>`). Problemistic search raises `source: self` backlog
+  items from aspiration gaps, scoped to the role's own domain; append-only, fail-quiet when there is
+  no gap. (docs/12)
+- **Decomposition doctrine** (`docs/15`, projected into `ROLE.md`). How a manager splits an assignment,
+  grounded in Parnas (information hiding), Simon (near-decomposability), Thompson (interdependence),
+  Becker & Murphy (coordination cost), Conway. Never split reciprocal work; cut at the design secret;
+  each child carries a seam contract; route another role's domain to that role.
+- **Scheduler wiring** (`integrations/claude-code/SCHEDULER.md`). Realize `schedule.yaml`'s cadences on
+  Claude Code's own scheduler (`/schedule`, `/loop`) — R0-conformant ("the harness's own loop"), no R0
+  change, wiring confined to the integration layer.
+- **`ARCHITECTURE.md`** — the whole-system map: ecosystem (neutral core → projection → harness, organs,
+  enforcement vs advisory) and lifecycle (founding → projection → operation → guardrails → evolution).
+
+### Changed
+- **O8 no-doctrine-capture lint tooth** (`org_lint.py`). No control role may carry `implement` together
+  with `judge`/`review` — a coordinator that produces a domain deliverable collapses maker and checker
+  and pools domain knowledge in the boss instead of the field role that owns it (docs/08 §1.1, docs/15
+  §3). Generalizes O6's "authorization holder must not implement" to every adjudicating seat.
+
+### Fixed
+- **Word-boundary destructive classification** (`org_hook.py`). The blast-radius classifier tested
+  destructive tokens as substrings (`"rm " in cmd`, `"-f " in cmd`), so a path like `.../fx-ml-platform/…`
+  or a flag like `grep -f` was miscounted as destructive and eventually blocked every command. Now
+  tokenizes and matches on word boundaries; operators/dotted calls stay on tight-anchored regex.
+- **Rolling-window deadlock** (`org_hook.py`). The blast-radius window was hardcoded to `1970-01-01`
+  (all-time) while appended events were stamped `1970` too — read-window and write-ts diverged, so
+  committed exposure accumulated forever and the cap eventually **blocked every edit**. Now a rolling
+  **daily** window (both the append ts and the read window share one `_now_ts` clock); the budget
+  resets each day with no operator action. `ORG_WINDOW=all` opts back into an all-time cap deliberately.
+
 ## 0.2.0
 
 Hierarchical doctrine, refounding, delegation seams, and an operating-phase spine —

@@ -91,7 +91,7 @@ def _append_emitted(output):
             cls, payload = ev["class"], ev["payload"]
         except (json.JSONDecodeError, KeyError, TypeError):
             continue
-        ts = os.environ.get("ORG_NOW_TS", "1970-01-01T00:00:00Z")
+        ts = _now_ts()
         try:
             subprocess.run([sys.executable, os.path.join(TOOLS_DIR, "ledger.py"), "append",
                             LEDGER_ROOT, "--actor", "system:org_hook", "--class", cls,
@@ -254,6 +254,38 @@ _DEFAULT_CAPS = {
     "file_mutations":  "200",  # overwriting existing files — reversible under VCS; high ceiling
 }
 
+def _now_ts():
+    """The host's 'now', as an ISO ts. Used BOTH for the ts stamped on appended events and for the
+    rolling window boundary — they MUST share one clock, or events are written under one epoch and
+    read under another (the deadlock's root cause: events stamped 1970 while the window rolled to
+    today, so nothing ever fell inside the window and committed exposure was mis-summed). Override
+    with ORG_NOW_TS (tests pin a fixed clock); else the real UTC now."""
+    override = os.environ.get("ORG_NOW_TS")
+    if override:
+        return override
+    try:
+        import datetime
+        return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    except Exception:
+        return "1970-01-01T00:00:00Z"
+
+
+def _window_since():
+    """The start of the CURRENT blast-radius window. The cap bounds exposure PER WINDOW (a rolling
+    budget that resets — the "death by a thousand cuts" guard of docs/11 §2.1), so the window must
+    ROLL FORWARD, or committed exposure accumulates for all time and the cap eventually blocks every
+    action (the frozen-epoch deadlock). Default: a rolling DAILY window (the day of _now_ts, at
+    00:00), so the budget resets each day with no operator action. Override with ORG_WINDOW_SINCE for
+    a custom boundary, or ORG_WINDOW=all to opt into an all-time cap deliberately."""
+    override = os.environ.get("ORG_WINDOW_SINCE")
+    if override:
+        return override
+    if os.environ.get("ORG_WINDOW") == "all":
+        return "1970-01-01"                       # explicit, deliberate all-time budget
+    # the day-boundary of the same clock the appends use — keep read-window and write-ts consistent
+    return _now_ts()[:10] + "T00:00:00Z"
+
+
 def rule_blast_radius(tool_name, ti):
     dim = _asset_dimension(tool_name, ti)
     if not dim:
@@ -262,7 +294,7 @@ def rule_blast_radius(tool_name, ti):
     cap = os.environ.get(f"ORG_CAP_{dimension.upper()}", _DEFAULT_CAPS.get(dimension, "3"))
     return ["guardrails.py", "cap", LEDGER_ROOT, "--dimension", dimension,
             "--delta", str(delta), "--cap", cap, "--actor", "harness-agent",
-            "--window-since", os.environ.get("ORG_WINDOW_SINCE", "1970-01-01")]
+            "--window-since", _window_since()]
 
 
 # ── Agent spawn discipline (docs/07 §2.1.1) ──────────────────────────────────

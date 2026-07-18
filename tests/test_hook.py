@@ -30,6 +30,30 @@ def fire(root, command, tool_name="Bash", env_extra=None):
     return r.returncode, r.stdout + r.stderr
 
 
+# ── the rolling window must reset, or the cap deadlocks (frozen-epoch bug) ────
+def test_blast_radius_window_rolls_forward_daily(tmp_path):
+    # REGRESSION: the window was hardcoded to 1970-01-01 (all-time), so committed exposure
+    # accumulated forever and the cap eventually blocked EVERY action — a deadlock where nothing
+    # could be edited. With a rolling DAILY window, yesterday's exhausted budget does NOT count today.
+    (tmp_path / "HEAD").write_text("x")
+    # seed the ledger with a full day of file_mutations committed YESTERDAY (cap exhausted then)
+    lines = [json.dumps({"id": f"e{i}", "seq": i, "ts": "2026-07-17T10:00:00Z", "actor": "x",
+                         "class": "exposure_budget_checked",
+                         "payload": {"dimension": "file_mutations", "decision": "allow",
+                                     "delta_requested": 1.0}}) for i in range(200)]
+    (tmp_path / "ledger.jsonl").write_text("\n".join(lines) + "\n")
+    # a mutation TODAY (an existing file) must be allowed — yesterday's 200 fall outside today's window.
+    existing = tmp_path / "ledger.jsonl"          # a path that exists → Write = file_mutation
+    ev = {"hook_event_name": "PreToolUse", "tool_name": "Write",
+          "tool_input": {"command": "", "file_path": str(existing)}}
+    env = dict(os.environ, ORG_LEDGER_ROOT=str(tmp_path), ORG_TOOLS_DIR=str(TOOLS))
+    for k in ("ORG_WINDOW_SINCE", "ORG_WINDOW", "ORG_NOW_TS"):
+        env.pop(k, None)
+    r = subprocess.run([sys.executable, str(HOOK)], input=json.dumps(ev),
+                       capture_output=True, text=True, env=env)
+    assert r.returncode == 0, f"rolling window did not reset — deadlock persists: {r.stdout + r.stderr}"
+
+
 # ── the BLOCKER: the emit->append loop must accumulate ────────────────────────
 def test_blast_radius_accumulates_and_blocks(tmp_path):
     # use a LIGHT destructive op (plain `rm file` = weight 1) so we can watch it accumulate;

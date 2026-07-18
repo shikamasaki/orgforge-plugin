@@ -10,8 +10,9 @@ written down.
 in a few minutes — no OSS publish required (a private repo or local path both install).
 [`ARCHITECTURE.md`](ARCHITECTURE.md) is the whole-system map: the ecosystem (neutral core → projection
 → harness), the organs, and the full founding → operation → evolution lifecycle.
-[`CHANGELOG.md`](CHANGELOG.md) tracks what's new (0.2.0: hierarchical doctrine, refounding,
-delegation seams, and a blast-radius cap that no longer blocks normal work).
+[`CHANGELOG.md`](CHANGELOG.md) tracks what's new (0.4.0: the running metabolism — driven backlog, the
+PM and discovery loops, scheduler wiring, the O8 knowledge-capture lint tooth, and two guardrail
+deadlock fixes).
 
 Concretely, a "department" here is nothing exotic: **an existing coding-agent harness — Claude
 Code, Codex — pointed at a working directory whose instruction file is that one role's job.** The
