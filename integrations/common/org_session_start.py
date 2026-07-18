@@ -102,17 +102,31 @@ def main():
                        ["render", CONV_ROOT, "--role", ROLE, "--out", out], out)
         if conv.strip():
             parts.append(conv)
-    # work in progress — injected LAST so "just continue" lands on the freshest, most actionable block.
+    # work in progress — so "just continue" lands on the freshest, most actionable block.
     wip = _work_in_progress()
     if wip.strip():
         parts.append(wip)
+    # start-the-metabolism nudge — only when the org is configured (ledger + role). A hook CANNOT call
+    # CronCreate itself (SessionStart hooks cannot invoke tools), so this is an INSTRUCTION the model
+    # acts on: it asks you to run /org-start, which registers the cycles. Injected LAST so it is the most
+    # salient line at session start. If the model does not act, the user runs /org-start manually — the
+    # explicit, guaranteed path.
+    if LEDGER_ROOT and ROLE:
+        parts.append(
+            "## Start the org (do this first)\n"
+            f"This is an orgforge session (role: {ROLE}). To bring the org to its running state, "
+            "**run the `/org-start` command now** — it registers this session's recurring cycles "
+            "(`/org-tick`, `/org-work`, `/org-discover`) via CronCreate so the org drives itself while "
+            "this session is open. `/org-start` is idempotent: if the cycles are already scheduled it "
+            "does nothing, so it is safe to run. (A hook cannot register them for you; this is why the "
+            "step is a command.)")
     if not parts:
         sys.exit(0)   # nothing to inject; clean no-op
     context = ("\n\n---\n\n".join(parts) +
-               "\n\n(The above is your current doctrine, your org's settled conventions, and any work "
-               "you had in progress — injected by orgforge-plugin. Act on the current world; follow "
-               "settled precedent instead of re-deriving it; and if there is work in progress, resume "
-               "it from its next step rather than restarting.)")
+               "\n\n(Injected by orgforge-plugin: your current doctrine, settled conventions, any work "
+               "in progress, and — if this is an org session — the start step. Act on the current world; "
+               "follow settled precedent; resume in-progress work from its next step; and if asked to "
+               "start the org, run /org-start so the metabolism begins.)")
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart",
                                              "additionalContext": context}}))
     sys.exit(0)

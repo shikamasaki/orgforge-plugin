@@ -1,7 +1,7 @@
 {
   "name": "orgforge-plugin",
   "displayName": "OrgForge — the org as guardrails",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Runs an articulated AI organization on Claude Code: the org's organs (blast-radius caps, mandate-conflict adjudication, doctrine, ledger, schedule) enforce as PreToolUse hooks that actually block, plus per-department subagents and organ slash-commands. Harness-neutral core; this is the Claude Code projection.",
   "author": {
     "name": "shikamasaki"

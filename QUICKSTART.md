@@ -80,11 +80,31 @@ python3 integrations/runner/run_department.py --harness claude --role <role> \
   --tools read,write,run_tests --dry-run     # drop --dry-run to actually run
 ```
 
-## 6. Drive the metabolism (the running loop)
+## 6. Start the metabolism — one command brings the org to its running state
 
-Once an org is defined (§7) and departments can launch (§5), the running loop is three commands. They
-operate on the **one backlog per department** — the `open_experiments` ledger view — which holds both
-top-down **mandate** items and self-raised **self** items on one footing.
+Once an org is defined (§7) and `ORG_LEDGER_ROOT` + `ORG_ROLE` are set, **run `/org-start`**:
+
+```
+/org-start [role] [tick-min] [work-min] [discover-hours]     # defaults: supervisor 15 60 6
+```
+
+It registers this session's recurring cycles (`/org-tick`, `/org-work`, `/org-discover`) as scheduled
+jobs (via Claude Code's `CronCreate`), so the org drives itself **while this session is open**. It is
+**idempotent** — run it again and it only adds cycles that are missing. You usually won't type it
+yourself: on an org session (ledger + role set), the SessionStart hook injects a prompt asking the
+model to run `/org-start` at the top of the session, so the org starts on its own. `/org-start` is the
+guaranteed manual path if you ever need it.
+
+**Session-scoped:** these cycles run while this Claude Code session is open and stop when it closes
+(and auto-expire after 7 days). For a genuinely 24/7 org with no session open, use an OS-level cron —
+`integrations/claude-code/scheduler-install.sh` (see [SCHEDULER.md](integrations/claude-code/SCHEDULER.md)) —
+a separate, explicit setup.
+
+### The three cycles it runs
+
+The running loop is three commands operating on the **one backlog per department** — the
+`open_experiments` ledger view — which holds both top-down **mandate** items and self-raised **self**
+items on one footing.
 
 ```
 /org-work <role>       # the PM loop: select from the backlog by attention, delegate the selected
@@ -101,21 +121,16 @@ starved by low-priority self work, and picks a prefix within the WIP limit. Dele
 decomposition doctrine (docs/15): split only genuinely independent work, never split coupled work,
 each child carries a seam contract.
 
-### Run it unattended, on the harness's own scheduler
+### Session-scoped vs. genuinely 24/7
 
-`template/schedule.yaml` declares the cadences as **data**; the host realizes them. On Claude Code,
-use its built-in scheduler (which docs/09 names as "the harness's own loop" — R0-conformant, no
-external cron needed):
+`/org-start` schedules the cycles **within this session** (Claude Code's `CronCreate` / `/schedule` are
+session-only — they stop when the session closes). That is the right default for an attended or
+kept-open session. For an org that must run with **no session open**, install the cadence on the OS
+cron with `integrations/claude-code/scheduler-install.sh --role <role>` — see
+[SCHEDULER.md](integrations/claude-code/SCHEDULER.md) for the difference and the full wiring.
 
-```
-/schedule   # register a recurring run of /org-tick (base interval) and /org-work <role> (per its
-            #   loop.cadence), and /org-discover <role> (slower) — the unattended 24/7 metabolism
-/loop       # or run a command on a fixed interval within an attended session you want to watch
-```
-
-See [integrations/claude-code/SCHEDULER.md](integrations/claude-code/SCHEDULER.md) for the full
-wiring. `tick.py` still detects a **missed check** (a due check with no proof-of-run in the ledger),
-so "the scheduler stopped firing" becomes a paged fact, not silent drift — the org checks its own
+Either way, `tick.py` detects a **missed check** (a due check with no proof-of-run in the ledger), so
+"the scheduler stopped firing" becomes a paged fact, not silent drift — the org checks its own
 heartbeat regardless of who fires the cadence.
 
 ## 7. Define your own org — two ways in

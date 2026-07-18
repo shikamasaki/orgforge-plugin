@@ -3,6 +3,25 @@
 All notable changes to orgforge-plugin. This project follows a pragmatic semver:
 minor = new mechanisms/features, patch = fixes, major = breaking articulation changes.
 
+## 0.5.1
+
+Follow the quickstart, get a running org — the metabolism starts in-session without hunting for how.
+
+### Added
+- **`/org-start`** — one idempotent command brings the org to its running state in the current session:
+  it registers the recurring cycles (`/org-tick`, `/org-work`, `/org-discover`) via Claude Code's
+  `CronCreate`, checking `CronList` first so it never double-registers. Session-scoped (stops when the
+  session closes; OS cron via `scheduler-install.sh` is the 24/7 path).
+- **SessionStart nudge to start the org.** On an org session (ledger + role set), the SessionStart hook
+  now injects a prompt asking the model to run `/org-start` — so the org starts on its own at the top of
+  the session. A hook cannot call `CronCreate` itself (SessionStart hooks cannot invoke tools), so this
+  is an instruction the model acts on, with `/org-start` as the guaranteed manual fallback. Non-org
+  sessions get no nudge.
+
+### Changed
+- **QUICKSTART §6 rewritten** around `/org-start` as the start step, and corrected the "unattended 24/7"
+  claim: in-session scheduling is session-only; the OS cron is the genuinely-unattended path.
+
 ## 0.5.0
 
 The scheduler is real now, not just documented. Previously SCHEDULER.md described how one *could*
