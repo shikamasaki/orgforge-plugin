@@ -189,7 +189,7 @@ def _asset_dimension(tool_name, ti):
     if tool_name not in ("Bash", "Shell", "Terminal"):
         return None                          # non-shell, non-write tools touch no asset here
     if not cmd.strip():
-        return ("shell_effect", 1)           # an opaque shell call — gate it, don't guess it safe
+        return None                          # an empty command touches no asset — not blast radius
 
     # ── irreversible / external side effects — the real blast radius (LOW cap) ────────────
     if any(k in cmd for k in ("curl", "wget", "http")) and any(
@@ -222,23 +222,18 @@ def _asset_dimension(tool_name, ti):
                  or "/*" in cmd)
         return ("destructive_ops", 3 if heavy else 1)
 
-    # ── reversible / benign shell — NOT blast radius, not metered ────────────────────────
-    # build/test/package tooling and read-only inspection create or read within the workspace;
-    # they are reversible and must not burn the destruction budget (reviewers: unknown≠dangerous,
-    # but common-safe IS safe). Interpreters (bash -c/python -c/make) stay opaque -> metered below.
-    _BENIGN = ("ls", "cat", "grep", "rg", "echo", "pwd", "head", "tail", "wc", "which", "file",
-               "stat", "sort", "uniq", "mkdir", "touch", "cp", "node", "npm", "npx", "pnpm",
-               "yarn", "pip", "python", "python3", "pytest", "go", "cargo", "tsc", "vite",
-               "git status", "git log", "git diff", "git show", "git add", "git commit",
-               "git branch", "git checkout", "git init")
-    stripped = cmd.strip()
-    first = stripped.split()[0] if stripped else ""
-    starts_benign = first in _BENIGN or any(stripped.startswith(b + " ") for b in _BENIGN)
-    # a benign head still gets metered if it hides a redirect-overwrite or a pipe-to-shell
-    if starts_benign and not any(w in cmd for w in ("-delete", "-exec", " > /", ">>/", "| bash",
-                                                    "|bash", "| sh", "-c ")):
-        return None
-    return ("shell_effect", 1)               # genuinely unknown effect -> fail-safe meter
+    # ── everything else — NOT blast radius, not metered ──────────────────────────────────
+    # The cap bounds IRREVERSIBLE EFFECT, not activity. A command that matched none of the explicit
+    # destructive / external-write / infra patterns above is not charged — including read-only
+    # inspection (ls, cat, grep, find, du, stat), build/test tooling (npm, pytest, go, cargo), and
+    # any unclassified shell. Earlier this returned a metered `shell_effect` for "unknown" commands,
+    # which quietly drained the daily budget on benign work (git status, find, an unfamiliar CLI) until
+    # the cap blocked everything — a false-positive deadlock. "Unknown" is not "dangerous": the danger
+    # is caught by the explicit patterns above (kept broad and word-boundary-accurate), and the danger
+    # that slips those is caught by the SEPARATE guards (a Write/Edit to an existing file is metered as
+    # file_mutations; a genuinely novel destructive verb is a coverage gap to add to the patterns, not
+    # a reason to tax every command). So: no match ⇒ not blast radius ⇒ not metered.
+    return None
 
 
 # Per-dimension default caps, priced by reversibility (a three-perspective review's conclusion:
@@ -246,12 +241,19 @@ def _asset_dimension(tool_name, ti):
 # the real blast radius. Reversible-but-real mutations get a HIGH cap so a normal build proceeds.
 # Reversible creations and reads return None from the classifier and are never metered at all.
 # Every value is overridable per-adopter via ORG_CAP_<DIMENSION>.
+# Per-dimension default caps — a PER-DAY budget (the window rolls daily, see _window_since). Sized so
+# a normal day of real work proceeds untouched while a runaway (hundreds of irreversible acts in a day)
+# still trips. The irreversible dimensions are the real blast radius, but "irreversible" is not "rare":
+# a research/ML day legitimately deletes and replaces artifacts, models, and caches many times, so the
+# floor must clear that, not a hand-count of 3. Tune per adopter via ORG_CAP_<DIMENSION>; a tighter
+# threat tier (asset-touching prod) sets these lower, a sandboxed dev tier may raise them further.
 _DEFAULT_CAPS = {
-    "destructive_ops": "3",    # rm/DROP/force — irreversible; low, scope-weighted
-    "external_writes": "3",    # outbound POST/PUT/DELETE — irreversible side effect
-    "infra_changes":   "3",    # apply to real infra — irreversible
-    "shell_effect":    "8",    # unclassifiable shell — metered fail-safe, but not build-killing
-    "file_mutations":  "200",  # overwriting existing files — reversible under VCS; high ceiling
+    "destructive_ops": "50",   # rm/DROP/force per day — irreversible but routine in real work; scope-weighted
+    "external_writes": "30",   # outbound POST/PUT/DELETE per day — irreversible side effect
+    "infra_changes":   "20",   # apply to real infra per day — irreversible, rarer than local deletes
+    "shell_effect":    "100",  # DEPRECATED: the classifier no longer emits shell_effect (unknown≠metered);
+                               #   kept only so an existing ORG_CAP_SHELL_EFFECT override is not an error.
+    "file_mutations":  "500",  # overwriting existing files per day — reversible under VCS; high ceiling
 }
 
 def _now_ts():

@@ -116,6 +116,19 @@ def test_build_tooling_not_metered(tmp_path):
         assert fire(tmp_path, c)[0] == 0, c
 
 
+def test_unknown_and_readonly_shell_never_meters_the_cap(tmp_path):
+    # REGRESSION: unclassified/read-only shell used to be charged as a metered `shell_effect`, which
+    # quietly drained the daily budget on benign work (git status, find, du, an unfamiliar CLI) until
+    # the cap blocked everything — the false-positive deadlock the user hit. Now "unknown" is NOT
+    # metered: only explicit destructive/external/infra patterns are. Under cap 0 for BOTH destructive
+    # and (deprecated) shell_effect, these must all still pass — proof they draw down no budget at all.
+    env = {"ORG_CAP_DESTRUCTIVE_OPS": "0", "ORG_CAP_SHELL_EFFECT": "0"}
+    for c in ("git status", "git log --oneline", "find . -name '*.py'", "du -sh .", "stat file",
+              "mv a b", "some-unfamiliar-cli --do-thing", "ls -R /data", ""):
+        code, out = fire(tmp_path, c, env_extra=env)
+        assert code == 0, f"benign/unknown shell wrongly metered: {c!r} -> {out!r}"
+
+
 # ── word-boundary destructive classification (regression: substring false positives) ──────────
 # The old classifier tested `"rm " in cmd` / `"-f " in cmd` as SUBSTRINGS, so a command that merely
 # CONTAINED those bytes — e.g. any path under `.../fx-ml-platform/...`, or `grep -f`, or `--info`

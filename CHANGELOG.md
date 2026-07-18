@@ -3,6 +3,33 @@
 All notable changes to orgforge-plugin. This project follows a pragmatic semver:
 minor = new mechanisms/features, patch = fixes, major = breaking articulation changes.
 
+## 0.4.2
+
+Stop the guardrail from taxing benign work, right-size the caps for real days, and ship a proper
+reference so operators aren't reading source to configure the thing.
+
+### Fixed
+- **Unknown/read-only shell is no longer metered.** The classifier used to charge a `shell_effect`
+  budget for any command it couldn't classify — so benign work (`git status`, `find`, `du`, an
+  unfamiliar CLI) quietly drained the daily budget until the cap blocked everything, a false-positive
+  deadlock. Now "unknown" is not "dangerous": only explicit destructive / external / infra patterns
+  draw down a budget; reads, build tooling, and unclassified shell draw down nothing. (Also fixes a
+  2-word benign-match bug where `git status` exactly could slip the allowlist.)
+
+### Changed
+- **Right-sized per-day caps.** With the daily rolling window (0.4.0), the caps are per-day budgets;
+  the old floor of 3 was a hand-count that a research/ML day blew through immediately. New defaults:
+  `destructive_ops` 3→**50**, `external_writes` 3→**30**, `infra_changes` 3→**20**, `file_mutations`
+  200→**500**. Still trips a genuine runaway (hundreds of irreversible acts/day); no longer blocks a
+  normal day. `ORG_CAP_SHELL_EFFECT` is deprecated (unused; kept so an old override is not an error).
+
+### Added
+- **`REFERENCE.md`** — the flat lookup operators were missing: every environment variable (with
+  defaults), every command, the org's files, the ledger events you touch most, and a troubleshooting
+  section for the problems people actually hit (cap deadlock, benign-flagged commands, missing
+  injection, updating the plugin). Linked from README and QUICKSTART; QUICKSTART's env table updated
+  to the new defaults.
+
 ## 0.4.1
 
 Work-in-progress survives a context wipe. Half-done work now lives in the ledger, not in the

@@ -48,15 +48,15 @@ That one variable turns the blast-radius cap on. Everything else below is option
 | `ORG_ROLE` | which role this session is — the key the doctrine injection and ledger events use | (none) |
 | `ORG_CONVENTIONS_ROOT` | dir of settled conventions, injected alongside doctrine | (none) |
 | `ORG_REQUIRE_SEAM` | `1` blocks an `Agent`/`Task` spawn that carries neither a seam contract (a `handoff.py` packet) nor an explicit `INDEPENDENT:` declaration — stops recursive splits from drifting | off |
-| `ORG_CAP_DESTRUCTIVE_OPS` | cap on irreversible ops (rm/DROP/force; scope-weighted, `rm -rf`=3) | `3` |
-| `ORG_CAP_EXTERNAL_WRITES` / `ORG_CAP_INFRA_CHANGES` | caps on outbound writes / infra applies | `3` |
-| `ORG_CAP_FILE_MUTATIONS` | cap on overwriting existing files (reversible under VCS — high) | `200` |
-| `ORG_CAP_SHELL_EFFECT` | cap on unclassifiable shell (fail-safe metered) | `8` |
+| `ORG_CAP_DESTRUCTIVE_OPS` | per-day cap on irreversible ops (rm/DROP/force; scope-weighted, `rm -rf`=3) | `50` |
+| `ORG_CAP_EXTERNAL_WRITES` / `ORG_CAP_INFRA_CHANGES` | per-day caps on outbound writes / infra applies | `30` / `20` |
+| `ORG_CAP_FILE_MUTATIONS` | per-day cap on overwriting existing files (reversible under VCS — high) | `500` |
 | `ORG_HOOK_FAIL_OPEN` | `1` allows on organ error instead of blocking — **dev only** | off (fail-safe) |
 
-The caps meter **irreversibility, not activity**: creating new files, reads, and build tooling
-(`npm`, `pytest`, `git commit`) are not metered, so a normal build proceeds; only destructive /
-external / overwrite actions draw down a budget (docs/11 §2.1).
+The caps are **per-day budgets** (the window rolls daily) and meter **irreversibility, not activity**:
+reads, build tooling (`npm`, `pytest`, `git status`), unknown/unfamiliar commands, and new-file
+creation are **not** metered — only explicit destructive / external / infra actions draw down a budget.
+See [REFERENCE.md](REFERENCE.md) for the full variable, command, event, and troubleshooting reference.
 
 ## 4. Prove a guardrail actually fires
 

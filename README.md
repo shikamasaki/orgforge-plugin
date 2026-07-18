@@ -10,6 +10,8 @@ written down.
 in a few minutes — no OSS publish required (a private repo or local path both install).
 [`ARCHITECTURE.md`](ARCHITECTURE.md) is the whole-system map: the ecosystem (neutral core → projection
 → harness), the organs, and the full founding → operation → evolution lifecycle.
+[`REFERENCE.md`](REFERENCE.md) is the flat lookup: every env var, command, ledger event, cap, and the
+fixes for problems people actually hit.
 [`CHANGELOG.md`](CHANGELOG.md) tracks what's new (0.4.0: the running metabolism — driven backlog, the
 PM and discovery loops, scheduler wiring, the O8 knowledge-capture lint tooth, and two guardrail
 deadlock fixes).
