@@ -116,6 +116,27 @@ def test_build_tooling_not_metered(tmp_path):
         assert fire(tmp_path, c)[0] == 0, c
 
 
+def test_dev_null_and_stderr_redirects_are_not_destructive(tmp_path):
+    # REGRESSION: the redirect check `(\||>>?)\s*/` fired on `2>/dev/null` and `> /dev/null 2>&1`, so a
+    # read-only search with stderr suppressed was charged as a destructive op and drained the budget
+    # (the user raised the cap 3→25→100 chasing this). These harmless redirects must NOT be metered.
+    env = {"ORG_CAP_DESTRUCTIVE_OPS": "0"}   # cap 0 → any destructive charge blocks immediately
+    for c in ("grep -r foo . 2>/dev/null", "find . -name x 2>/dev/null", "ls /data 2>/dev/null",
+              "python train.py > /dev/null 2>&1", "echo hi >/dev/null", "python x.py > out.log",
+              "echo a >> ./local.txt", "make 2> build.err"):
+        code, out = fire(tmp_path, c, env_extra=env)
+        assert code == 0, f"harmless redirect wrongly gated as destructive: {c!r} -> {out!r}"
+
+
+def test_redirect_to_system_path_still_destructive(tmp_path):
+    # the fix must not weaken the guard: a real overwrite of a system path still meters at cap 0.
+    env = {"ORG_CAP_DESTRUCTIVE_OPS": "0"}
+    for c in ("cmd > /etc/passwd", "echo x > /usr/local/bin/tool", "tee >> /etc/hosts",
+              "echo x > /boot/config"):
+        code, out = fire(tmp_path / c.replace("/", "_")[:20], c, env_extra=env)
+        assert code == 2, f"real system-path overwrite NOT gated: {c!r} -> {out!r}"
+
+
 def test_unknown_and_readonly_shell_never_meters_the_cap(tmp_path):
     # REGRESSION: unclassified/read-only shell used to be charged as a metered `shell_effect`, which
     # quietly drained the daily budget on benign work (git status, find, du, an unfamiliar CLI) until

@@ -3,6 +3,17 @@
 All notable changes to orgforge-plugin. This project follows a pragmatic semver:
 minor = new mechanisms/features, patch = fixes, major = breaking articulation changes.
 
+## 0.4.3
+
+### Fixed
+- **`2>/dev/null` and `> /dev/null` are no longer charged as destructive.** The redirect-to-absolute-path
+  check (`(\||>>?)\s*/`) fired on stderr suppression and `/dev/null` sinks, so a read-only search like
+  `grep -r foo . 2>/dev/null` was metered as a destructive op and drained the daily budget — the reason
+  the cap had to be raised repeatedly. The check now excludes `/dev/*` sinks and stderr redirects and
+  matches only a genuine overwrite of a system path (`> /etc/…`, `>> /usr/…`). Real system-path
+  overwrites and pipe-to-shell stay destructive; `2>/dev/null`, `> /dev/null 2>&1`, and relative-path
+  redirects (`> out.log`, `>> ./local.txt`) draw down nothing.
+
 ## 0.4.2
 
 Stop the guardrail from taxing benign work, right-size the caps for real days, and ship a proper

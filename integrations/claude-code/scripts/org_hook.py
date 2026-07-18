@@ -149,6 +149,23 @@ def _has_seq(tokens, *pairs):
     return False
 
 
+# stdout/stderr redirect onto an ABSOLUTE path — but NOT the harmless cases that dominate real work.
+# The earlier check `(\||>>?)\s*/` fired on `2>/dev/null`, `> /dev/null 2>&1`, and any pipe-to-absolute,
+# so read-only searches with stderr suppressed were mis-charged as destructive and drained the budget.
+# We match only a REAL overwrite of a system path: an optional fd, `>`/`>>`, then an absolute path that
+# is NOT a /dev/* sink (writing to /dev/null|stdout|stderr|tty is a no-op sink, not blast radius).
+_REDIR_TO_ABS = re.compile(r"(?:^|\s)\d?>>?\s*(/[^\s|&;>]*)")
+
+
+def _redirects_to_system_path(cmd):
+    for m in _REDIR_TO_ABS.finditer(cmd):
+        target = m.group(1)
+        if target.startswith("/dev/"):
+            continue                          # /dev/null, /dev/stdout, … — a sink, not a write
+        return True                           # a genuine `> /etc/…` / `>> /usr/…` overwrite
+    return False
+
+
 def _asset_dimension(tool_name, ti):
     """Classify a tool call into a blast-radius exposure dimension, PRICED BY REVERSIBILITY.
 
@@ -209,7 +226,7 @@ def _asset_dimension(tool_name, ti):
         or _has_seq(toks, ("git", "push"), ("git", "reset"), ("reset", "--hard"),
                     ("terraform", "destroy"), ("kubectl", "delete"))
         or "shutil.rmtree" in cmd                                                 # python dotted call
-        or bool(re.search(r"(\||>>?)\s*/", cmd))                                  # redirect/pipe onto an absolute path
+        or _redirects_to_system_path(cmd)                                        # `> /etc/…` overwrite of a system path
         or bool(re.search(r"\|\s*(bash|sh)\b", cmd))                              # pipe-to-shell
     )
     if destructive:

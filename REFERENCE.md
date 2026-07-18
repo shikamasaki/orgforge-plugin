@@ -119,6 +119,12 @@ It shouldn't anymore — only explicit destructive/external/infra patterns are m
 read-only shell are not. If you see this, you are on an old plugin version — update it (§ below) and
 restart.
 
+**A read-only search with `2>/dev/null` (or `> /dev/null`) is flagged as destructive.**
+Fixed — the redirect check now excludes `/dev/*` sinks and stderr redirects, so `grep … 2>/dev/null`
+and `cmd > /dev/null 2>&1` are not metered; only a real overwrite of a system path (`> /etc/…`) is.
+Update the plugin and restart. (Before the fix, this was the most common cause of a slowly-draining
+`destructive_ops` budget.)
+
 **A path like `.../fx-ml-platform/...` was flagged as a destructive `rm`.**
 Fixed by word-boundary matching — update the plugin and restart. The classifier tokenizes now, so a
 path containing `rm`/`form`/`-f` bytes is not mistaken for the `rm` command.
