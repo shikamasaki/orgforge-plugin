@@ -3,6 +3,34 @@
 All notable changes to orgforge-plugin. This project follows a pragmatic semver:
 minor = new mechanisms/features, patch = fixes, major = breaking articulation changes.
 
+## 0.6.0
+
+Loop reliability — the failure modes a practitioner hits building an autonomous loop, checked against
+the code and closed where the code fell short.
+
+### Added
+- **docs/16 — Loop reliability.** Why an unattended loop survives: a loop pass is a series system, so
+  `n` decisions at accuracy `p` succeed `p^n` (10×0.95 ≈ 60%) — cut the decision *count* before
+  sharpening steps (Barlow & Proschan 1965). Load-bearing constraints belong in the **enforcement layer**
+  (hooks/lint, deterministic), not the request layer (prompts, probabilistic); a **subagent doesn't
+  inherit the parent's prompt**, so cross-fan-out control must be a hook (with the honest caveat that the
+  child's call reaching the hook is a harness property). State is **explicit in the ledger**, not context;
+  trust is **staged read-only-first**. Grounded in the loop-engineering literature (docs/sources.md §16,
+  r_kaga and y-hirakaw).
+- **Catastrophic denylist** (`org_hook.py`). A verification pass found that the blast-radius cap — a
+  *daily budget* — could not stop a single unrecoverable command: at the default cap, `rm -rf /` passed
+  (weight 3, ~16 before the budget tripped). The denylist now **hard-blocks** the catastrophic class
+  (`rm -rf /`/`~`/root-glob, `mkfs`, `dd` to a raw block device, fork bombs) regardless of budget and
+  even with no ledger configured. Deliberately narrow — ordinary `rm -rf ./build` / `node_modules` stay
+  cap-metered, not blocked. Sandbox opt-out: `ORG_ALLOW_CATASTROPHIC=1`.
+
+### Fixed
+- **docs/16 subagent-gating claim made honest.** The doc had asserted the hook "gates every subagent at
+  every depth" as a plugin property; whether a subagent's tool call reaches `PreToolUse` is a *harness*
+  property. The doc now states the plugin is correct-by-construction (verdict from the raw call + ledger,
+  no inherited context) and requires a harness that fires the event for subagents — the docs/09 host
+  contract, not a reimplementation.
+
 ## 0.5.1
 
 Follow the quickstart, get a running org — the metabolism starts in-session without hunting for how.

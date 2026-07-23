@@ -305,6 +305,36 @@ def _window_since():
     return _now_ts()[:10] + "T00:00:00Z"
 
 
+# CATASTROPHIC denylist — commands whose ONE execution is unrecoverable at a scope no daily budget
+# should ever permit. The blast-radius cap bounds "death by a thousand cuts" (many small irreversible
+# acts summed over a window); it CANNOT bound "death by one cut" — a single `rm -rf /` is weight 3 and
+# passes under any non-zero cap. This layer hard-blocks those regardless of budget, so a fresh org with
+# the default cap is not one command away from catastrophe. It is deliberately narrow (only the
+# unambiguously catastrophic, root-scoped / whole-disk forms) to avoid false positives; the cap handles
+# the ordinary irreversible ops. Override for a sandbox with ORG_ALLOW_CATASTROPHIC=1 (never in prod).
+def _catastrophic_reason(tool_name, ti):
+    if tool_name not in ("Bash", "Shell", "Terminal"):
+        return None
+    cmd = ti.get("command") or ti.get("cmd") or "" if isinstance(ti, dict) else (ti if isinstance(ti, str) else "")
+    if not cmd.strip():
+        return None
+    toks = _tokenize(cmd)
+    recursive_rm = _has_token(toks, "rm") and _has_token(toks, "-rf", "-fr", "-r", "-R", "--recursive")
+    # rm -rf targeting root, home, or a root glob — the unambiguously catastrophic forms
+    if recursive_rm and re.search(r"(?:^|\s)(/\s|/\*|/$|~/?\s|~/?$|\$HOME)", cmd + " "):
+        return "recursive delete of a root/home/glob path (`rm -rf /` class) — unrecoverable"
+    # whole-disk / filesystem destroyers
+    if _has_token(toks, "mkfs") or re.search(r"\bmkfs\.\w+", cmd):
+        return "filesystem format (`mkfs`) — destroys a whole device"
+    if _has_token(toks, "dd") and re.search(r"of=\s*/dev/(sd|nvme|disk|hd|mmcblk|vd)", cmd):
+        return "`dd` writing to a raw block device — destroys a disk"
+    if re.search(r"of=\s*/dev/(sd|nvme|disk|hd|mmcblk|vd)", cmd):
+        return "raw write to a block device — destroys a disk"
+    if re.search(r":\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:", cmd):
+        return "fork bomb"
+    return None
+
+
 def rule_blast_radius(tool_name, ti):
     dim = _asset_dimension(tool_name, ti)
     if not dim:
@@ -364,6 +394,18 @@ def main():
         _allow()
     tool_name = event.get("tool_name", "")
     tool_input = event.get("tool_input", {})
+
+    # CATASTROPHIC denylist — a hard block that does NOT depend on the ledger or the cap. The cap is a
+    # daily budget (bounds many cuts); it cannot stop ONE unrecoverable cut (`rm -rf /`, `mkfs`, `dd`
+    # to a raw disk, a fork bomb), which is weight-3 and passes under any non-zero cap. This fires
+    # first, before any budget logic, and even when no org/ledger is configured — a catastrophic
+    # command is never a budget question. Sandbox opt-out: ORG_ALLOW_CATASTROPHIC=1.
+    if os.environ.get("ORG_ALLOW_CATASTROPHIC") != "1":
+        cat = _catastrophic_reason(tool_name, tool_input)
+        if cat:
+            _deny(f"org guardrail HARD-BLOCKED this {tool_name}: {cat}. This is blocked regardless of "
+                  f"budget — a single such command is unrecoverable. Set ORG_ALLOW_CATASTROPHIC=1 only "
+                  f"in a disposable sandbox.")
 
     # Agent-spawn discipline is a pure shape check on the spawn prompt — it needs no ledger, so
     # it runs before the ledger gate. Blocks a manager that spawns a child with neither a seam

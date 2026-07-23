@@ -116,6 +116,37 @@ def test_build_tooling_not_metered(tmp_path):
         assert fire(tmp_path, c)[0] == 0, c
 
 
+def test_catastrophic_commands_hard_blocked_regardless_of_cap(tmp_path):
+    # The blast-radius cap is a DAILY BUDGET — it bounds many cuts, not one unrecoverable cut. A single
+    # `rm -rf /` is weight 3 and passes under any non-zero cap, so the default cap would let it through.
+    # The catastrophic denylist hard-blocks it BEFORE the budget logic, even at the default cap.
+    env = {"ORG_CAP_DESTRUCTIVE_OPS": "1000"}   # a huge budget — the denylist must still block
+    for c in ("rm -rf /", "rm -rf /*", "rm -rf ~", "rm -rf $HOME",
+              "mkfs.ext4 /dev/sda", "dd if=/dev/zero of=/dev/sda bs=1M", ":(){ :|:& };:"):
+        code, out = fire(tmp_path, c, env_extra=env)
+        assert code == 2 and "HARD-BLOCKED" in out, f"catastrophic command NOT hard-blocked: {c!r} -> {out!r}"
+
+
+def test_catastrophic_denylist_does_not_false_positive_on_ordinary_deletes(tmp_path):
+    # Ordinary recursive deletes of a workspace path are common, reversible-enough dev work — they stay
+    # cap-metered, NOT hard-blocked (else the denylist re-creates the false-positive deadlock we fixed).
+    for c in ("rm -rf /tmp/mydir", "rm -rf ./build", "rm -rf node_modules", "rm file.txt",
+              "rm -rf dist/"):
+        code, out = fire(tmp_path, c)   # default cap → allowed
+        assert code == 0, f"ordinary delete wrongly hard-blocked: {c!r} -> {out!r}"
+
+
+def test_catastrophic_block_fires_without_a_ledger(tmp_path):
+    # A catastrophic command is never a budget question — it must block even when no org/ledger exists.
+    ev = {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "rm -rf /"}}
+    env = dict(os.environ, ORG_TOOLS_DIR=str(TOOLS))   # note: NO ORG_LEDGER_ROOT
+    for k in ("ORG_LEDGER_ROOT", "ORG_ALLOW_CATASTROPHIC"):
+        env.pop(k, None)
+    r = subprocess.run([sys.executable, str(HOOK)], input=json.dumps(ev),
+                       capture_output=True, text=True, env=env)
+    assert r.returncode == 2 and "HARD-BLOCKED" in (r.stdout + r.stderr)
+
+
 def test_dev_null_and_stderr_redirects_are_not_destructive(tmp_path):
     # REGRESSION: the redirect check `(\||>>?)\s*/` fired on `2>/dev/null` and `> /dev/null 2>&1`, so a
     # read-only search with stderr suppressed was charged as a destructive op and drained the budget

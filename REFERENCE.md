@@ -49,6 +49,7 @@ irreversible patterns draw down a budget.
 | `ORG_WINDOW` | Set to `all` to opt into a deliberate **all-time** cap (no reset). Use only if you truly want a lifetime budget — otherwise leave unset for the daily reset. | *(rolling daily)* |
 | `ORG_REQUIRE_SEAM` | `1`/`true`/`yes` turns on the spawn gate: an `Agent`/`Task` spawn is blocked unless its prompt carries a seam contract or an `INDEPENDENT:` declaration. Off by default. | *(off)* |
 | `ORG_HOOK_FAIL_OPEN` | `1` allows a tool call when the guardrail organ errors, instead of blocking. **Dev only** — the safe default is fail-closed. | *(off / fail-safe)* |
+| `ORG_ALLOW_CATASTROPHIC` | `1` disables the catastrophic denylist (the hard block on `rm -rf /`-class, `mkfs`, `dd`-to-disk, fork bombs). **Disposable sandbox only** — never in an environment with real data. | *(off / catastrophic blocked)* |
 | `ORG_NOW_TS` | Pins the hook's "now" (append ts + window boundary). Mainly for tests; leave unset in production so the real clock is used. | *(real UTC now)* |
 | `ORG_TOOLS_DIR` | Override the directory the hooks resolve the organ tools from. Set automatically by the plugin bundle; rarely touched by hand. | *(bundled/repo auto-resolve)* |
 
@@ -142,3 +143,10 @@ Then **restart Claude Code** — "Restart to apply changes" means the new hook c
 **A due check reports MISS.**
 `tick.py` found no proof-of-run for a check that was due — the scheduler may be down. It is a paged
 fact by design (silence must not read as success), not a bug in the org.
+
+**A catastrophic command was hard-blocked (`HARD-BLOCKED`), not just budget-metered.**
+`rm -rf /`-class deletes, `mkfs`, `dd` to a raw disk, and fork bombs are blocked unconditionally — the
+blast-radius cap is a daily budget and cannot stop a single unrecoverable command, so these are refused
+regardless of budget and even with no ledger. Ordinary deletes (`rm -rf ./build`, `node_modules`) are
+NOT hard-blocked (only cap-metered). To run such a command in a disposable sandbox, set
+`ORG_ALLOW_CATASTROPHIC=1` — never in an environment with real data.

@@ -382,6 +382,29 @@ lint tooth are this repo's synthesis, to be verified against a running system.
 
 ---
 
+### Loop reliability — fewer decisions, explicit state, staged trust (docs/16)
+
+The reliability discipline for the operating loop. The compound-failure law is a classical result; the
+loop-engineering framing is current practitioner literature, cited as [S] (evidence the practice exists
+and is being worked out, not settled theory).
+
+- **[P] Barlow & Proschan (1965), *Mathematical Theory of Reliability*, Wiley** — **series-system
+  reliability**: a non-redundant system succeeds only if every component does, so its reliability is the
+  PRODUCT of component reliabilities. The anchor for §1's `p^n` compound-failure law (a loop pass is a
+  series of decision points).
+- **[S] r_kaga (2026), "ループエンジニアリングの本質"** (zenn.dev/r_kaga/articles/a27a3879dd3ce4) — the
+  three-loop decomposition (execution / completion / operation) and the thesis that the operating loop —
+  start conditions, verification gates, failure recovery — is the real object of design, not raw
+  autonomy. Anchors §5's verification ladder and the framing of docs/11 as the operation loop.
+- **[S] y-hirakaw (2026), "自動工場設計の道:ループエンジニアリングは実際に作るとどこで詰まるのか"**
+  (zenn.dev/z_maruhira/articles/ba4eba465034d1) — the implementer's report: the request-layer /
+  enforcement-layer split (§2), the subagent-does-not-inherit-skill-context trap (§2 corollary), the
+  `0.95^10 ≈ 0.60` compound-failure figure (§1), label-based explicit state with the human's input
+  compressed to one label (§3), and read-only-first staging (§4). Anchors those sections as observed
+  practice this repo's mechanisms already realize.
+
+---
+
 *Preprint note:* arXiv IDs in the 2601–2606 range are 2026 preprints; treat **[S]** arXiv items as
 evidence that a claim/term exists and is discussed, not as peer-reviewed settled results. The
 load-bearing primary anchors are the classical-theory citations, the Anthropic/Thoughtworks
