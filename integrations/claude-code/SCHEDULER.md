@@ -17,9 +17,25 @@ Three commands make up the metabolism; the scheduler fires them on cadence:
 | `/org-tick` | Read-only health tick: which checks are due / MISSED, sensors, chain integrity. Surfaces, never acts. | the base interval (e.g. every 30 min) |
 | `/org-work <role>` | The PM loop: select from the backlog (attention), delegate selected items in parallel, record completion. Acts. | per role's `loop.cadence` |
 | `/org-discover <role>` | Problemistic search: raise `source: self` backlog items from aspiration gaps. Adds to backlog. | slower than `/org-work` (e.g. daily) |
+| `/org-triage <signal>` | The **front door**: turn an external signal (issue/bug/feedback) into a backlog item. | on the intake source's cadence (see below) |
 
 The base interval must be **≤ the smallest cadence** in `schedule.yaml` (its own header rule), so
 `tick.py`'s missed-check detection stays meaningful.
+
+### Wiring the external front door (the factory intake)
+
+To make the org a factory that work flows *into* (not a workshop a human types tasks into), feed
+`/org-triage` from an issue tracker. The org ships no ingestion service (R0) — the host feeds it. E.g. a
+cron that lists newly-labeled issues and pipes each to a headless triage:
+
+```
+*/10 * * * *  gh issue list --label 'orgforge:ready' --state open --json number,title,body \
+  | jq -c '.[]' | while read -r issue; do \
+      claude -p "/org-triage $issue" --plugin-dir <plugin> ; done
+```
+
+The human's whole input is then **applying one label** to an issue. orgforge supplies the triage; the
+host supplies the feed.
 
 ## Two ways to fire the cadence — pick by how unattended you need it
 
