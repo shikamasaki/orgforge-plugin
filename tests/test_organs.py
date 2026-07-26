@@ -573,3 +573,22 @@ def test_conventions_conflict_escalates(tmp_path):
     code, out = run("conventions.py", "conflict", str(tmp_path), "--scope", "tone",
                     "--choice", "aggressive")
     assert code == 10 and "CONVENTION-CONFLICT" in out
+
+
+def test_repeated_death_escalates(tmp_path):
+    # the direct measure of "learning lifts quality": the same death cause on a later candidate escalates.
+    seed(tmp_path, "gate", "result_retired",
+         {"candidate_id": "A", "cause": "null hypothesis not rejected"}, ts="2026-07-16T01:00:00Z")
+    seed(tmp_path, "gate", "result_retired",
+         {"candidate_id": "B", "cause": "null hypothesis not rejected"}, ts="2026-07-16T02:00:00Z")
+    code, out = run("learning.py", "repeats", str(tmp_path))
+    assert code == 10 and "REPEATED DEATH" in out
+
+
+def test_distinct_deaths_are_silent(tmp_path):
+    seed(tmp_path, "gate", "result_retired", {"candidate_id": "A", "cause": "cause one"},
+         ts="2026-07-16T01:00:00Z")
+    seed(tmp_path, "gate", "result_retired", {"candidate_id": "B", "cause": "cause two"},
+         ts="2026-07-16T02:00:00Z")
+    code, out = run("learning.py", "repeats", str(tmp_path))
+    assert code == 0 and "clean" in out

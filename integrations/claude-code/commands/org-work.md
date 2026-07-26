@@ -17,6 +17,22 @@ picks a prefix within the WIP limit.
 
 !`python3 "${CLAUDE_PLUGIN_ROOT}/tools/attention.py" select "${ORG_LEDGER_ROOT}" --role "$1" --wip-limit ${2:-2} --mandate-floor ${3:-1.0}`
 
+## 1.5 Learn from prior deaths BEFORE delegating — do not repeat a known failure
+
+The org's accumulated failures are its most valuable context (docs/07). Before spawning, read what
+already died near this work and what caused it, so a selected item that would repeat a known death is
+reshaped or dropped — not re-attempted blindly. This is how accumulated learning lifts output quality
+(the org's core purpose); skipping it is how the same mistake gets mass-produced.
+
+!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/ledger.py" view "${ORG_LEDGER_ROOT}" nearby_deaths`
+!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/ledger.py" view "${ORG_LEDGER_ROOT}" death_causes`
+
+For each selected item, check it against the deaths above:
+- If it matches a **prior death** (same approach that already failed/was refuted/retired), do NOT
+  re-attempt it as-is — reshape it to avoid the known cause, or drop it and say why. Carry the relevant
+  death cause into the child's seam contract so the worker starts knowing what to avoid.
+- If it's genuinely new territory, proceed. Silence here (no relevant deaths) is fine.
+
 ## 2. Delegate the selected items — in parallel, but only where the split is genuine
 
 Read the `selected[]` above. Then apply the **decomposition doctrine (docs/15)** before spawning:

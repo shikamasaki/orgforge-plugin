@@ -13,6 +13,10 @@ own track record. Pure projection over tools/ledger.py; ships no scheduler (R0).
   delta <root> [--threshold F] [--recurrence N]   join decisions to outcomes; emit deltas past
       threshold; escalate only a delta CLASS that recurs >= N times (systemic).
 
+  repeats <root> [--recurrence N]   REPEATED-DEATH detector: escalate a death cause that reappears
+      on a later candidate (>= N times) — the org re-made a mistake it had already recorded, i.e.
+      accumulated learning was NOT fed forward. The direct measure of "learning lifts quality."
+
 A "decision" is an admission_decided (verdict admit) carrying a predicted_outcome in its
 payload; its "realized outcome" is a later result_deployed / result_retired for the same
 candidate_id carrying an observed_outcome. The delta is |predicted - observed|. Silent when
@@ -87,6 +91,44 @@ def cmd_delta(a):
     return OK
 
 
+def cmd_repeats(a):
+    """REPEATED-DEATH detector — the direct measure of whether accumulated learning is actually USED.
+    A death (a result_retired / a refutation that failed) carries a `cause`. If the SAME cause reappears
+    on a LATER candidate, the org failed to feed its own lesson forward — it re-made a mistake it had
+    already recorded (the org's core purpose, missed). This escalates a cause that recurs >= --recurrence
+    times, naming the deaths, so "learning lifts quality" is a checked fact, not a hope. Silent when every
+    death cause is distinct (no lesson was ignored)."""
+    events = read_events(a.root)
+    by_cause = {}
+    for e in events:
+        p = e.get("payload", {})
+        cause = None
+        if e["class"] == "result_retired":
+            cause = p.get("cause") or p.get("hypothesized_cause")
+        elif e["class"] == "refutation_attempted" and p.get("verdict") == "refuted":
+            cause = p.get("cause") or p.get("checklist_ref")
+        if cause:
+            key = str(cause).strip().lower()
+            by_cause.setdefault(key, []).append({"seq": e["seq"], "cause": cause,
+                                                 "candidate_id": p.get("candidate_id")})
+    repeated = {c: hits for c, hits in by_cause.items() if len(hits) >= a.recurrence}
+    if not repeated:
+        print(f"clean: no death cause recurred >= {a.recurrence} times — accumulated learning is being "
+              f"used, no known mistake re-made. Silent.")
+        return OK
+    for cause, hits in sorted(repeated.items(), key=lambda kv: -len(kv[1])):
+        emit_event("repeated_death_detected", {
+            "cause": hits[0]["cause"], "occurrences": len(hits),
+            "candidate_ids": [h["candidate_id"] for h in hits]})
+    worst = max(repeated.items(), key=lambda kv: len(kv[1]))
+    print(f"REPEATED DEATH: cause {worst[1][0]['cause']!r} recurred {len(worst[1])} times "
+          f"(candidates {[h['candidate_id'] for h in worst[1]]}) — the org re-made a mistake it had "
+          f"already recorded. Accumulated learning was NOT fed forward; strengthen the death into "
+          f"doctrine and inject it before the next attempt (docs/07). This is the org's core purpose "
+          f"failing — escalate.", file=sys.stderr)
+    return ESCALATE
+
+
 def main(argv):
     p = argparse.ArgumentParser(prog="learning", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -95,6 +137,9 @@ def main(argv):
     q.add_argument("root")
     q.add_argument("--threshold", type=float, default=0.2)
     q.add_argument("--recurrence", type=int, default=3)
+    q = sub.add_parser("repeats"); q.set_defaults(fn=cmd_repeats)
+    q.add_argument("root")
+    q.add_argument("--recurrence", type=int, default=2)
     a = p.parse_args(argv[1:])
     return a.fn(a)
 

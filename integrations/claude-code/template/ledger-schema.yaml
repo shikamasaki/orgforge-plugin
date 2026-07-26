@@ -103,6 +103,10 @@ event_classes:
   # (identical next_step repeated, or fraction flat) — flag for a human, free the WIP slot.
   stall_breaker_checked: { candidate_id, role, checkpoints, repeat_run, no_advance_run,
                            decision: trip|ok, reason }
+  # REPEATED-DEATH (docs/07, docs/17 §5.5): a death cause reappeared on a later candidate — the org
+  # re-made a mistake it had recorded, i.e. accumulated learning was NOT fed forward. The direct
+  # measure that "the team's output quality rises over time" is holding (or not).
+  repeated_death_detected: { cause, occurrences, candidate_ids: [ref] }
   state_reconciled:     { domain, expected_value, observed_value, drift: bool, magnitude,
                           unaccounted_events: [ref] }                              # STATE-RECONCILED
   reference_staleness_checked: { trigger_event, bound_roles: [role], stale_roles: [role],

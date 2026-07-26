@@ -31,6 +31,16 @@ For each `candidate_id` above, run `guardrails.py stall "${ORG_LEDGER_ROOT}" --c
 **TRIP** means the candidate is not progressing (identical next_step, or flat fraction) — flag it for a
 human and free its WIP slot; do not respawn the wedged cycle.
 
+## Check whether accumulated learning is being used (repeated-death detector)
+
+The org exists to accumulate learning and lift output quality. A death cause that reappears means a
+recorded lesson was NOT fed forward — the core purpose failing. Surface it:
+
+!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/learning.py" repeats "${ORG_LEDGER_ROOT}"`
+
+A **REPEATED DEATH** means the org re-made a mistake it had recorded — strengthen that death into
+doctrine and inject it before the next attempt, so the lesson actually lands next time.
+
 Based on the above:
 - If any check is **MISSED** past threshold, this is "it was supposed to run" — surface it as an escalation (the host cron may be down). Do not treat silence as success.
 - If any machine sensor **FIRED**, name the move it feeds and whether that move is night-safe.
