@@ -59,14 +59,25 @@ irreversible patterns draw down a budget.
 
 ## 2. Commands (Claude Code slash-commands)
 
+**The commands you use** (the everyday surface):
+
 | Command | What it does |
 |---|---|
 | `/org-found <RFP or brief>` | Draft an org from a brief: a feature inventory, an architecture with seam contracts, a linted `organization.yaml` — then stop and report up for scope approval. Design only; the build is a separate call. |
-| `/org-work <role> [wip] [floor]` | The **PM loop**: select from the role's backlog by situated attention, delegate the selected items to subordinates in parallel (one `Task` each, where the split is genuine), record progress and completion. Acts. |
-| `/org-discover <role> [aspiration]` | **Problemistic search**: surface the role's aspiration gaps and raise them as `source: self` backlog items. Adds to the backlog; never executes; fail-quiet when there is no gap. |
-| `/org-resume [role]` | Show a role's **work in progress** — candidates started but not finished, each with its latest checkpoint (how far / next step / blocker). The manual counterpart to the automatic resume injection. |
-| `/org-tick` | Read-only **health tick**: which checks are due / MISSED, machine sensors, ledger-chain integrity. Surfaces, never acts. Fail-quiet is the normal state. |
-| `/org-mandate <subjectA,subjectB> <decision>` | Adjudicate a genuine **mandate conflict** against the constitution's human-authored precedence: precedence applies, both integrate, or escalate. |
+| `/org-start [role] [tick] [work] [discover]` | Bring the org to its **running state**: register this session's recurring cycles via the scheduler. Idempotent. The SessionStart hook prompts it for you. |
+| `/org` `[role]` | The **status board** — "how's my org?" in one GREEN/AMBER/RED answer (done / in progress with next steps / what needs you), in your language. Read-only. |
+| `/org-triage <signal>` | The **front door**: turn an external bug/issue/feedback into a triaged backlog item (or reject it). Feeds `/org-work`. |
+| `/org-mandate <subjectA,subjectB> <decision>` | Adjudicate a **mandate conflict** against the constitution's human-authored precedence: precedence applies, both integrate, or escalate. |
+| `/org-verify-guards` | Certify the guardrails block — including for a spawned subagent — before trusting the org to fan out unattended. Run once at founding. |
+
+**The internal metabolism** (runs on cadence; you rarely type these):
+
+| Command | What it does |
+|---|---|
+| `/org-work <role> [wip] [floor]` | The **PM loop**: check deaths + reuse, select by situated attention, delegate genuinely-independent slices in parallel, record progress/completion + reuse + settled conventions. Acts. |
+| `/org-discover <role> [aspiration]` | **Problemistic search**: raise `source: self` backlog items from aspiration gaps. Adds only; fail-quiet when there is no gap. |
+| `/org-tick` | Read-only **health tick**: due/MISSED checks, machine sensors, chain integrity, stall breakers, repeated-death + domain-model-growth checks. Surfaces, never acts. |
+| `/org-resume [role]` | Show a role's **work in progress** with checkpoints — the manual counterpart to the automatic resume injection. |
 
 Scheduling these on a cadence: see [integrations/claude-code/SCHEDULER.md](integrations/claude-code/SCHEDULER.md)
 (`/schedule` cron routines for unattended runs, `/loop` for attended ones).

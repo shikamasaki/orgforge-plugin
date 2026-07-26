@@ -100,6 +100,10 @@ guaranteed manual path if you ever need it.
 `integrations/claude-code/scheduler-install.sh` (see [SCHEDULER.md](integrations/claude-code/SCHEDULER.md)) —
 a separate, explicit setup.
 
+**Check on it any time with `/org`** — one GREEN/AMBER/RED board: what it did, what's in progress, and
+whether it needs you. You don't read the ledger; `/org` tells you in plain language. Feed new work in
+with `/org-triage <a bug/issue/idea>` (or drop it on the backlog); the org works it on its own.
+
 ### The three cycles it runs
 
 The running loop is three commands operating on the **one backlog per department** — the
