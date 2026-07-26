@@ -41,6 +41,16 @@ recorded lesson was NOT fed forward — the core purpose failing. Surface it:
 A **REPEATED DEATH** means the org re-made a mistake it had recorded — strengthen that death into
 doctrine and inject it before the next attempt, so the lesson actually lands next time.
 
+## Check the domain model is growing (SSoT inferability rising)
+
+The SSoT/domain model must grow as the org runs (not stay a static founding artifact); a flat model
+over many cycles means the org is amplifying a fixed ambiguity, not compounding clarity.
+
+!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/conventions.py" growth "${ORG_CONVENTIONS_ROOT:-$ORG_LEDGER_ROOT}"`
+
+If the domain model is **EMPTY or flat** across many cycles, that is a signal — settle domain rules in
+the work cycle (co-commit), so inferability rises over time.
+
 Based on the above:
 - If any check is **MISSED** past threshold, this is "it was supposed to run" — surface it as an escalation (the host cron may be down). Do not treat silence as success.
 - If any machine sensor **FIRED**, name the move it feeds and whether that move is night-safe.

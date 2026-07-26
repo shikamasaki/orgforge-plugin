@@ -81,8 +81,14 @@ points, keyed by `candidate_id`:
 3. **On finishing** — append `cycle_completed {role, candidate_id, outputs, reused, ...}` so the item
    drains from the backlog, and record in `reused` which existing modules/parts this cycle pulled from
    (empty if it authored everything) — so reuse is a visible, auditable fact, not an invisible discipline.
+4. **Grow the SSoT/domain model IN THE SAME cycle** — if this work established or changed a domain rule,
+   a boundary, or a naming/convention (ubiquitous language), record it NOW as a convention, not as a
+   deferred separate task (a separate task gets postponed and the context base rots — the co-commit
+   discipline). This is how the org's inferability rises over time and how the same clarity is amplified
+   next cycle instead of the same ambiguity. A convention is proposed here and adopted by a checker
+   (never self-adopted):
 
-!`echo 'Record the cycle, keyed by candidate_id (never fabricate completion): python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/ledger.py" append "'"${ORG_LEDGER_ROOT}"'" --actor "'"$1"'" --class cycle_started|progress_recorded|cycle_completed --payload {role,candidate_id,...}. Checkpoint BEFORE you risk stopping, so the next session resumes from next_step, not from zero.'`
+!`echo 'Record the cycle (never fabricate completion): python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/ledger.py" append "'"${ORG_LEDGER_ROOT}"'" --actor "'"$1"'" --class cycle_started|progress_recorded|cycle_completed --payload {role,candidate_id,...}. AND, in the same cycle, if a domain rule/boundary/naming was settled: python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/conventions.py" adopt "'"${ORG_CONVENTIONS_ROOT:-$ORG_LEDGER_ROOT}"'" --scope <area> --choice "<the settled rule>" --owner "'"$1"'" --by checker. Checkpoint BEFORE you risk stopping.'`
 
 ## Discipline — work only from the backlog
 

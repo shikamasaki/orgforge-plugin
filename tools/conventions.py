@@ -126,10 +126,36 @@ def cmd_stale(a):
     return OK
 
 
+def cmd_growth(a):
+    """DOMAIN-MODEL GROWTH — the domain model (settled conventions: ubiquitous language, boundaries,
+    naming) must GROW as the org runs, not stay a static founding artifact; a rising, well-scoped
+    convention base is the org's inferability rising over time (docs/17 §5.5, the user's amplifier
+    constraint made dynamic). This reports the active convention count and the scopes covered so
+    "the SSoT/domain model is growing" is a checked fact. It does not escalate — it is a health
+    breadcrumb the tick surfaces; a FLAT domain model over many cycles is the signal that the org is
+    running without compounding its context base (amplifying a fixed ambiguity)."""
+    data = _load(a.root)
+    active = [c for c in data["conventions"] if c.get("status") == "active"]
+    scopes = sorted({c["scope"] for c in active})
+    stale = [c for c in active if c.get("review_by", "UNSET") != "UNSET" and c["review_by"] < a.now]
+    print(f"domain model: {len(active)} active convention(s) across {len(scopes)} scope(s)"
+          + (f" — scopes: {', '.join(scopes)}" if scopes else " — none yet"))
+    if stale:
+        print(f"  {len(stale)} stale (past review_by) — re-confirm or retire so the model stays true.")
+    if not active:
+        print("  the domain model is EMPTY — no ubiquitous language / boundaries settled yet. As the "
+              "org runs, settle domain rules IN the work cycle (co-commit) so inferability rises; an "
+              "org that never grows its model amplifies a fixed ambiguity (docs/17 §5.5).")
+    return OK
+
+
 def main(argv):
     p = argparse.ArgumentParser(prog="conventions", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
+
+    q = sub.add_parser("growth"); q.set_defaults(fn=cmd_growth)
+    q.add_argument("root"); q.add_argument("--now", default="2026-01-01")
 
     q = sub.add_parser("adopt"); q.set_defaults(fn=cmd_adopt)
     q.add_argument("root"); q.add_argument("--scope", required=True)

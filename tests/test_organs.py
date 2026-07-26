@@ -592,3 +592,14 @@ def test_distinct_deaths_are_silent(tmp_path):
          ts="2026-07-16T02:00:00Z")
     code, out = run("learning.py", "repeats", str(tmp_path))
     assert code == 0 and "clean" in out
+
+
+def test_domain_model_growth_reports_scopes(tmp_path):
+    # the SSoT/domain model must grow during operation; growth reports the settled-convention base.
+    code, out = run("conventions.py", "growth", str(tmp_path))
+    assert code == 0 and "EMPTY" in out          # nothing settled yet
+    for scope, choice in (("auth", "use JWT"), ("naming", "snake_case")):
+        run("conventions.py", "adopt", str(tmp_path), "--scope", scope, "--choice", choice,
+            "--owner", "eng", "--by", "checker")
+    code, out = run("conventions.py", "growth", str(tmp_path))
+    assert code == 0 and "2 active convention" in out and "auth" in out
