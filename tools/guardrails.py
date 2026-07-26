@@ -28,6 +28,11 @@ rule the design fixes: **default silent (fail-quiet); escalate only the exceptio
       repeats N times (identical-output) or `fraction` fails to advance for N checkpoints — flag for
       a human and free the slot, don't respawn the wedged cycle. Silent while progressing.
 
+  rollback <root> --action-ref R [--undo TXT]
+      PROVEN-ROLLBACK. The silence-consent tier trusts "reversible" — but a reversibility claim with
+      no declared undo is untested. Escalates a reversible action that declares no undo/compensation;
+      silent when the undo is present (the host runs the undo dry-run to fully prove recovery).
+
   reconcile <root> --domain D --observed V --expected V [--halt-magnitude N]
       STATE-RECONCILED. The ledger is the org's BELIEF; real assets live in external systems.
       A half-applied write / an unauthored external mutation / a missed webhook makes every
@@ -186,6 +191,27 @@ def cmd_stall(a):
         return ESCALATE
     print(f"progressing: candidate '{a.candidate_id}' advancing "
           f"({len(checkpoints)} checkpoints, repeat {repeat}, flat {no_advance}) — silent.")
+    return OK
+
+
+def cmd_rollback(a):
+    """PROVEN-ROLLBACK (docs/11 §4, docs/17 §5). The silence-is-consent tier lets a REVERSIBLE action
+    proceed unattended — but "reversible" claimed and never tested is not reversibility, it is a latent
+    lie. This asserts a reversible-classified action carries a declared, non-empty undo (its rollback
+    command / compensation ref). It does NOT execute the undo (R0 — the host runs commands); it makes an
+    UNTESTED reversibility claim a hard error at the point it would be trusted, so an org can't lean on
+    silence-consent for an action whose rollback it never named. Escalates a reversible action with no
+    undo declared; silent when the undo is present."""
+    if not (a.undo or "").strip():
+        emit_event("rollback_unproven", {"action_ref": a.action_ref, "reason": "no undo declared"})
+        print(f"UNPROVEN: reversible action '{a.action_ref}' declares no undo/compensation — a "
+              f"reversibility claim with no rollback is untested and must not ride silence-as-consent. "
+              f"Declare its undo (--undo) or treat it as IRREVERSIBLE (full approval). (docs/11 §4)",
+              file=sys.stderr)
+        return ESCALATE
+    emit_event("rollback_declared", {"action_ref": a.action_ref, "undo": a.undo})
+    print(f"proven: reversible action '{a.action_ref}' carries a declared undo — the silence-consent "
+          f"tier may trust it. (Run the undo dry-run in the host to fully prove recovery.)")
     return OK
 
 
@@ -377,6 +403,11 @@ def main(argv):
     q.add_argument("--role", default="")
     q.add_argument("--repeat-threshold", dest="repeat_threshold", type=int, default=2)
     q.add_argument("--stall-threshold", dest="stall_threshold", type=int, default=3)
+
+    q = sub.add_parser("rollback"); q.set_defaults(fn=cmd_rollback)
+    q.add_argument("root")
+    q.add_argument("--action-ref", dest="action_ref", required=True)
+    q.add_argument("--undo", default="")
 
     q = sub.add_parser("reconcile"); q.set_defaults(fn=cmd_reconcile)
     q.add_argument("root")

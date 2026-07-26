@@ -110,6 +110,10 @@ event_classes:
   # re-made a mistake it had recorded, i.e. accumulated learning was NOT fed forward. The direct
   # measure that "the team's output quality rises over time" is holding (or not).
   repeated_death_detected: { cause, occurrences, candidate_ids: [ref] }
+  # PROVEN-ROLLBACK (docs/11 §4, docs/17 §5): a reversible action must carry a declared undo, or its
+  # reversibility is an untested claim the silence-consent tier must not trust.
+  rollback_declared:    { action_ref, undo }
+  rollback_unproven:    { action_ref, reason }
   state_reconciled:     { domain, expected_value, observed_value, drift: bool, magnitude,
                           unaccounted_events: [ref] }                              # STATE-RECONCILED
   reference_staleness_checked: { trigger_event, bound_roles: [role], stale_roles: [role],

@@ -603,3 +603,15 @@ def test_domain_model_growth_reports_scopes(tmp_path):
             "--owner", "eng", "--by", "checker")
     code, out = run("conventions.py", "growth", str(tmp_path))
     assert code == 0 and "2 active convention" in out and "auth" in out
+
+
+def test_rollback_unproven_without_undo(tmp_path):
+    # a reversible action with no declared undo escalates (untested reversibility is a latent lie).
+    code, out = run("guardrails.py", "rollback", str(tmp_path), "--action-ref", "deploy-x")
+    assert code == 10 and "UNPROVEN" in out
+
+
+def test_rollback_proven_with_undo(tmp_path):
+    code, out = run("guardrails.py", "rollback", str(tmp_path), "--action-ref", "deploy-x",
+                    "--undo", "git revert abc123")
+    assert code == 0 and "proven" in out

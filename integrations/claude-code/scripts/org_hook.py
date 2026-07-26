@@ -102,13 +102,32 @@ def _append_emitted(output):
 
 
 def _run_organ(argv):
-    """Run an organ command; return (exit_code, combined_output). Never raises."""
-    try:
-        p = subprocess.run([sys.executable, os.path.join(TOOLS_DIR, argv[0])] + argv[1:],
-                           capture_output=True, text=True, timeout=30)
-        return p.returncode, (p.stdout + p.stderr)
-    except Exception as e:  # organ missing / crashed / timed out
-        return 99, f"organ {argv[0]} failed to run: {e}"
+    """Run an organ command; return (exit_code, combined_output). Never raises.
+
+    BOUNDED RETRY on a TRANSIENT failure (docs/17 §5): a timeout / crash (an exception, or a run that
+    produced no clean verdict) is retried a bounded number of times with a short backoff, so a single
+    flake in a long unattended run does not convert to a hard fail-safe block. A CLEAN verdict (exit 0
+    allow, 10 escalate) never retries — only genuinely transient failures do. After the bounded retries
+    the fail-safe block still applies (the caller blocks on the non-clean code). Retries: ORG_ORGAN_RETRIES
+    (default 2); backoff: ORG_ORGAN_BACKOFF seconds (default 0.5), skipped entirely when ORG_NOW_TS is set
+    (tests pin a clock and must not sleep)."""
+    import time
+    retries = int(os.environ.get("ORG_ORGAN_RETRIES", "2"))
+    backoff = float(os.environ.get("ORG_ORGAN_BACKOFF", "0.5"))
+    last = (99, f"organ {argv[0]} did not run")
+    for attempt in range(retries + 1):
+        try:
+            p = subprocess.run([sys.executable, os.path.join(TOOLS_DIR, argv[0])] + argv[1:],
+                               capture_output=True, text=True, timeout=30)
+            # a clean verdict (allow / escalate) is authoritative — return immediately, never retry it.
+            if p.returncode in (0, 10):
+                return p.returncode, (p.stdout + p.stderr)
+            last = (p.returncode, (p.stdout + p.stderr))
+        except Exception as e:  # organ missing / crashed / timed out — transient, retry
+            last = (99, f"organ {argv[0]} failed to run (attempt {attempt + 1}): {e}")
+        if attempt < retries and not os.environ.get("ORG_NOW_TS"):
+            time.sleep(backoff * (2 ** attempt))   # exponential backoff
+    return last
 
 
 # ── RULES: (predicate on the tool call) -> organ command to consult ──────────────────────────
