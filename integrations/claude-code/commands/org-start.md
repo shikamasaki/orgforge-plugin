@@ -1,46 +1,47 @@
 ---
-description: Start the org's metabolism in THIS session — register the recurring cycles (health tick, PM loop, issue discovery) as scheduled jobs so the org runs itself while this session is open. Idempotent — if the jobs are already registered, it does nothing. Run once per session (or let the SessionStart hook prompt you to).
+description: Start the org's metabolism in THIS session by driving its cycles with /loop. Prints the exact /loop invocations to run (health tick, PM loop, discovery) so the org runs itself while the session is open. The drive is delegated to Claude Code's /loop; the org keeps only the monitoring (missed-tick detection) that /loop can't provide.
 argument-hint: "[role] [tick-min] [work-min] [discover-hours]"
-allowed-tools: CronCreate, CronList, CronDelete, Bash(python3 *)
+allowed-tools: Bash(echo *)
 ---
 
-Bring the organization to its **running state** for this session: the metabolism cadences of
-`schedule.yaml` (docs/09 §4), realized on this session's scheduler (`CronCreate`). While this session
-stays open, the org drives itself; when it closes, the jobs end (session-scoped — see the note below).
+Bring the organization to its **running state** for this session. The drive — firing each cycle on a
+cadence — is delegated to Claude Code's built-in **`/loop`** (R0: borrow the harness's loop, don't build
+one). The org keeps only what `/loop` can't give it: the **missed-tick detection** in `/org-tick` that
+notices when a cycle that was due did *not* run (docs/11 §5.2) — so "the loop stopped" is a detected fact,
+not silence.
 
 Role: **${1:-supervisor}** · tick every **${2:-15}** min · work every **${3:-60}** min · discover every
 **${4:-6}** hours.
 
-## 1. Check what is already scheduled (idempotent — do not double-register)
+## Run these three `/loop` invocations to drive the org
 
-First list the current jobs:
+`/loop <interval> <command>` runs a command on that interval within this session. Start the three cycles:
 
-Use **CronList**. If jobs whose prompts are `/org-tick`, `/org-work ${1:-supervisor}`, and
-`/org-discover ${1:-supervisor}` are ALREADY present, the org is already running — report that and
-STOP. Do not register duplicates. Only register the ones that are missing.
+```
+/loop ${2:-15}m /org-tick
+/loop ${3:-60}m /org-work ${1:-supervisor}
+/loop ${4:-6}h /org-discover ${1:-supervisor}
+```
 
-## 2. Register the missing cycles
+- **`/org-tick`** — read-only health: due/MISSED checks, stall breakers, repeated-death + domain-model
+  growth. This is the **monitoring the org keeps** — it catches a cycle that was due but didn't fire.
+- **`/org-work`** — the PM loop: select from the backlog, delegate in parallel, record.
+- **`/org-discover`** — raise self-tasks from aspiration gaps.
 
-For each cycle not already present, call **CronCreate** (recurring). Pick off-:00/:30 minutes so fleets
-don't all fire at once:
+Each `/loop` is session-scoped: it runs while this Claude Code session is open and stops when it closes.
+Check on the org any time with **`/org`** (the status board). Stop a cycle by ending its `/loop`.
 
-- **Health tick** — `/org-tick` — cron `*/${2:-15} * * * *` (read-only; surfaces due/missed checks).
-- **PM loop** — `/org-work ${1:-supervisor}` — cron for every ${3:-60} min (an interval of 60 → `3 * * * *`;
-  sub-60 → `*/${3:-60} * * * *`). Selects from the backlog and delegates in parallel.
-- **Discovery** — `/org-discover ${1:-supervisor}` — cron `17 */${4:-6} * * *` (raises self-tasks from
-  aspiration gaps).
+## For a genuinely 24/7 org (no session open)
 
-## 3. Confirm and report
+`/loop` and the session end when Claude Code closes. To run unattended with no session, install the
+cadence on the OS cron instead — `integrations/claude-code/scheduler-install.sh --role ${1:-supervisor}`
+(see [SCHEDULER.md](../SCHEDULER.md)). That is the one case that needs the heavier setup; for an attended
+or kept-open session, the three `/loop`s above are all you need.
 
-Call **CronList** again and report the running state: which cycles are now scheduled, at what cadence,
-for role `${1:-supervisor}`. Tell the user plainly that these are **session-scoped** — they run while
-this Claude Code session is open and stop when it closes (and auto-expire after 7 days); to run the org
-genuinely 24/7 with no session open, an OS-level cron is needed (see SCHEDULER.md), which is a separate,
-explicit setup.
+## Why the monitoring stays with the org
 
-## Notes
-
-- **Idempotent**: safe to run more than once; it only adds cycles that are missing.
-- **Stop the org**: `CronDelete` each job (or `/org-stop` if present), or just close the session.
-- The `tick.py` missed-check detector still runs inside `/org-tick`, so a cycle that was due but did not
-  fire is surfaced as a fact, not silently skipped (docs/11 §5.2).
+`/loop` fires a command on a cadence, but it does **not** know whether a *due org check* actually ran —
+that's an org-specific fact only `tick.py` can judge (a due check with no `verify_event` in the ledger is
+a MISS). So the drive is delegated, the monitoring is not: `/org-tick` (driven by `/loop`) still detects a
+missed cycle and surfaces it, exactly as before. Delegating the drive removed the CronCreate/OS-cron
+bookkeeping; keeping the monitor preserved the "silence must not read as success" guarantee (docs/16).

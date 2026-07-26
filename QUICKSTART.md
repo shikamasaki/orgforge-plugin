@@ -88,15 +88,22 @@ Once an org is defined (§7) and `ORG_LEDGER_ROOT` + `ORG_ROLE` are set, **run `
 /org-start [role] [tick-min] [work-min] [discover-hours]     # defaults: supervisor 15 60 6
 ```
 
-It registers this session's recurring cycles (`/org-tick`, `/org-work`, `/org-discover`) as scheduled
-jobs (via Claude Code's `CronCreate`), so the org drives itself **while this session is open**. It is
-**idempotent** — run it again and it only adds cycles that are missing. You usually won't type it
-yourself: on an org session (ledger + role set), the SessionStart hook injects a prompt asking the
-model to run `/org-start` at the top of the session, so the org starts on its own. `/org-start` is the
-guaranteed manual path if you ever need it.
+It prints three **`/loop`** invocations that drive this session's cycles, so the org runs itself **while
+this session is open**:
 
-**Session-scoped:** these cycles run while this Claude Code session is open and stop when it closes
-(and auto-expire after 7 days). For a genuinely 24/7 org with no session open, use an OS-level cron —
+```
+/loop 15m /org-tick               # monitoring: due/MISSED checks, stalls, repeated deaths
+/loop 60m /org-work supervisor    # the PM loop: select, delegate, record
+/loop 6h  /org-discover supervisor # raise self-tasks from aspiration gaps
+```
+
+The drive is delegated to Claude Code's built-in `/loop` (R0 — borrow the harness's loop, don't build
+one); the org keeps only the monitoring `/loop` can't give it (the missed-tick detector in `/org-tick`).
+You usually won't type `/org-start` yourself — on an org session the SessionStart hook prompts the model
+to run it. Check on the org any time with **`/org`**.
+
+**Session-scoped:** these `/loop` cycles run while this Claude Code session is open and stop when it
+closes. For a genuinely 24/7 org with no session open, use an OS-level cron —
 `integrations/claude-code/scheduler-install.sh` (see [SCHEDULER.md](integrations/claude-code/SCHEDULER.md)) —
 a separate, explicit setup.
 

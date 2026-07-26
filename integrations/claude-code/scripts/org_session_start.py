@@ -106,20 +106,19 @@ def main():
     wip = _work_in_progress()
     if wip.strip():
         parts.append(wip)
-    # start-the-metabolism nudge — only when the org is configured (ledger + role). A hook CANNOT call
-    # CronCreate itself (SessionStart hooks cannot invoke tools), so this is an INSTRUCTION the model
-    # acts on: it asks you to run /org-start, which registers the cycles. Injected LAST so it is the most
-    # salient line at session start. If the model does not act, the user runs /org-start manually — the
-    # explicit, guaranteed path.
+    # start-the-metabolism nudge — only when the org is configured (ledger + role). A hook CANNOT run a
+    # command or /loop itself (SessionStart hooks cannot invoke tools), so this is an INSTRUCTION the
+    # model acts on: it asks you to run /org-start, which prints the /loop invocations that drive the org.
+    # Injected LAST so it is the most salient line at session start. If the model does not act, the user
+    # runs /org-start manually — the explicit, guaranteed path.
     if LEDGER_ROOT and ROLE:
         parts.append(
             "## Start the org (do this first)\n"
             f"This is an orgforge session (role: {ROLE}). To bring the org to its running state, "
-            "**run the `/org-start` command now** — it registers this session's recurring cycles "
-            "(`/org-tick`, `/org-work`, `/org-discover`) via CronCreate so the org drives itself while "
-            "this session is open. `/org-start` is idempotent: if the cycles are already scheduled it "
-            "does nothing, so it is safe to run. (A hook cannot register them for you; this is why the "
-            "step is a command.)")
+            "**run the `/org-start` command now** — it prints the `/loop` invocations that drive this "
+            "session's cycles (`/org-tick`, `/org-work`, `/org-discover`) so the org runs itself while "
+            "the session is open. Then check on it any time with `/org` (the status board). (A hook "
+            "cannot start the loops for you; this is why the step is a command.)")
     if not parts:
         sys.exit(0)   # nothing to inject; clean no-op
     context = ("\n\n---\n\n".join(parts) +

@@ -31,6 +31,23 @@ the code and closed where the code fell short.
   no inherited context) and requires a harness that fires the event for subagents — the docs/09 host
   contract, not a reimplementation.
 
+## 0.7.1
+
+Simplify the drive: delegate it to Claude Code's `/loop`, keep only the monitoring.
+
+### Changed
+- **`/org-start` drives with `/loop`, not CronCreate.** The drive — firing each cycle on a cadence — is
+  now delegated to Claude Code's built-in `/loop` (R0: borrow the harness's loop, don't build one).
+  `/org-start` prints three invocations (`/loop 15m /org-tick`, `/loop 60m /org-work`, `/loop 6h
+  /org-discover`) — no cron expressions, no CronList idempotency dance. The SessionStart nudge and
+  QUICKSTART/SCHEDULER updated to match.
+- **The monitoring stays with the org.** `/loop` fires a command but can't judge whether a *due org
+  check* ran; `tick.py`'s missed-check detection (a due check with no `verify_event` = MISS) is the
+  org-specific part `/loop` can't provide, so it stays — "the loop stopped" is still a detected fact,
+  not silence (docs/16). Delegate the drive, keep the monitor.
+- OS cron (`scheduler-install.sh`) demoted to the one case `/loop` can't cover: running 24/7 with no
+  session open. For everyday attended/kept-open runs, the three `/loop`s are the whole drive.
+
 ## 0.7.0
 
 The ideal-state build-out (docs/17): a six-opinion synthesis defined what orgforge is *for* — a
