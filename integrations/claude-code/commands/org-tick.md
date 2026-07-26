@@ -20,9 +20,21 @@ Ledger root: `${ORG_LEDGER_ROOT}` (must be set).
 
 !`python3 "${CLAUDE_PLUGIN_ROOT}/tools/ledger.py" verify "${ORG_LEDGER_ROOT}"`
 
+## Check each in-progress candidate for a stall (circuit breaker)
+
+Read the work-in-progress board, then run the stall breaker on each in-flight candidate — a wedged
+cycle that stopped advancing must be tripped, not left to burn its slot:
+
+!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/ledger.py" view "${ORG_LEDGER_ROOT}" work_in_progress`
+
+For each `candidate_id` above, run `guardrails.py stall "${ORG_LEDGER_ROOT}" --candidate-id <id>`. A
+**TRIP** means the candidate is not progressing (identical next_step, or flat fraction) — flag it for a
+human and free its WIP slot; do not respawn the wedged cycle.
+
 Based on the above:
 - If any check is **MISSED** past threshold, this is "it was supposed to run" — surface it as an escalation (the host cron may be down). Do not treat silence as success.
 - If any machine sensor **FIRED**, name the move it feeds and whether that move is night-safe.
+- If any candidate's stall breaker **TRIPPED**, surface it — a wedged cycle is a wasted WIP slot, not silence.
 - If the chain is **BROKEN**, this is a global-halt condition — stop and report immediately.
 - Otherwise report "org healthy, N checks due, nothing escalating" — fail-quiet is the normal state.
 

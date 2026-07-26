@@ -99,6 +99,10 @@ event_classes:
   # HOLDs a runaway loop the blast-radius cap can't see (reversible read-think-edit spinning forever).
   iteration_budget_checked: { window_id, role, cycles_so_far, tokens_so_far, max_cycles, max_tokens,
                               decision: allow|hold, limiting }
+  # CIRCUIT-BREAKER (docs/17 §5 #3): trips when a candidate's progress_recorded stream stops advancing
+  # (identical next_step repeated, or fraction flat) — flag for a human, free the WIP slot.
+  stall_breaker_checked: { candidate_id, role, checkpoints, repeat_run, no_advance_run,
+                           decision: trip|ok, reason }
   state_reconciled:     { domain, expected_value, observed_value, drift: bool, magnitude,
                           unaccounted_events: [ref] }                              # STATE-RECONCILED
   reference_staleness_checked: { trigger_event, bound_roles: [role], stale_roles: [role],

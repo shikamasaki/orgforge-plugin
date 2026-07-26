@@ -507,6 +507,27 @@ def test_attention_off_ranking_mandate_is_not_floored(tmp_path):
     assert '"candidate_id": "offmand", "objective"' not in out.split('"selected"')[1].split('"deferred"')[0]
 
 
+def test_stall_breaker_trips_on_identical_output(tmp_path):
+    # circuit breaker: the same next_step twice in a row → trip (AgentMesh identical-output heuristic).
+    seed(tmp_path, "eng", "progress_recorded",
+         {"candidate_id": "X", "role": "eng", "fraction": 0.3, "next_step": "wire CLI"},
+         ts="2026-07-16T01:00:00Z")
+    seed(tmp_path, "eng", "progress_recorded",
+         {"candidate_id": "X", "role": "eng", "fraction": 0.3, "next_step": "wire CLI"},
+         ts="2026-07-16T02:00:00Z")
+    code, out = run("guardrails.py", "stall", str(tmp_path), "--candidate-id", "X")
+    assert code == 10 and "TRIP" in out
+
+
+def test_stall_breaker_silent_while_progressing(tmp_path):
+    for i, f in enumerate((0.2, 0.5, 0.8)):
+        seed(tmp_path, "eng", "progress_recorded",
+             {"candidate_id": "X", "role": "eng", "fraction": f, "next_step": f"step{i}"},
+             ts=f"2026-07-16T0{i+1}:00:00Z")
+    code, out = run("guardrails.py", "stall", str(tmp_path), "--candidate-id", "X")
+    assert code == 0 and "progressing" in out
+
+
 def test_learning_silent_when_matched(tmp_path):
     code, out = run("learning.py", "delta", str(tmp_path))
     assert code == 0 and "matched" in out

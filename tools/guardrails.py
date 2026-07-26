@@ -22,6 +22,12 @@ rule the design fixes: **default silent (fail-quiet); escalate only the exceptio
       reported tokens in the window and HOLDs when either would exceed its cap — killing a runaway
       early ("$3-5, not $180") in the enforcement layer, not via a role-settings 'please stop at N'.
 
+  stall <root> --candidate-id C [--role R] [--repeat-threshold N] [--stall-threshold N]
+      CIRCUIT-BREAKER on non-progress. A wedged cycle burns its WIP slot and budget until a human
+      notices. This reads a candidate's progress_recorded stream and TRIPS when the same next_step
+      repeats N times (identical-output) or `fraction` fails to advance for N checkpoints — flag for
+      a human and free the slot, don't respawn the wedged cycle. Silent while progressing.
+
   reconcile <root> --domain D --observed V --expected V [--halt-magnitude N]
       STATE-RECONCILED. The ledger is the org's BELIEF; real assets live in external systems.
       A half-applied write / an unauthored external mutation / a missed webhook makes every
@@ -121,6 +127,65 @@ def cmd_cycles(a):
               file=sys.stderr)
         return ESCALATE
     print(f"allow: role '{a.role}' {cycles} cycles / {tokens:.0f} tokens — under budget.")
+    return OK
+
+
+def cmd_stall(a):
+    """CIRCUIT-BREAKER on non-progress (docs/17 §5 #3). A wedged cycle consumes its WIP slot and budget
+    until a human notices — the most common real failure (wrong-solution loops). This reads a candidate's
+    progress_recorded stream and TRIPS (escalate) when it is not advancing: either the same next_step/
+    done_so_far repeated `--repeat-threshold` times in a row (AgentMesh's identical-output heuristic), or
+    `--stall-threshold` consecutive checkpoints with no increase in `fraction`. Trips OPEN → the cycle is
+    flagged for a human and its slot should be freed, rather than left to spin. Silent while progressing."""
+    events = read_events(a.root)
+    checkpoints = [e["payload"] for e in events
+                   if e["class"] == "progress_recorded"
+                   and e["payload"].get("candidate_id") == a.candidate_id]
+    if len(checkpoints) < 2:
+        print(f"progressing: candidate '{a.candidate_id}' has <2 checkpoints — nothing to judge, silent.")
+        return OK
+    # identical-output run: how many trailing checkpoints share the same (next_step, done_so_far)?
+    def sig(p):
+        return (str(p.get("next_step", "")).strip(), str(p.get("done_so_far", "")).strip())
+    last_sig = sig(checkpoints[-1])
+    repeat = 0
+    for p in reversed(checkpoints):
+        if sig(p) == last_sig:
+            repeat += 1
+        else:
+            break
+    # fraction non-advance: trailing checkpoints whose fraction did not increase
+    def frac(p):
+        try:
+            return float(p.get("fraction"))
+        except (TypeError, ValueError):
+            return None
+    no_advance = 0
+    peak = -1.0
+    for p in checkpoints:
+        f = frac(p)
+        if f is None:
+            continue
+        if f > peak:
+            peak = f
+            no_advance = 0
+        else:
+            no_advance += 1
+    tripped = repeat >= a.repeat_threshold or no_advance >= a.stall_threshold
+    why = ("identical output ×%d" % repeat if repeat >= a.repeat_threshold
+           else "fraction flat ×%d" % no_advance) if tripped else ""
+    emit_event("stall_breaker_checked", {
+        "candidate_id": a.candidate_id, "role": a.role, "checkpoints": len(checkpoints),
+        "repeat_run": repeat, "no_advance_run": no_advance,
+        "decision": "trip" if tripped else "ok", "reason": why})
+    if tripped:
+        print(f"TRIP: candidate '{a.candidate_id}' is not progressing ({why}). The circuit breaker "
+              f"opened — flag for a human and FREE its WIP slot; do not respawn the same wedged cycle. "
+              f"Its last next_step: {checkpoints[-1].get('next_step','(none)')!r} (docs/17 §5).",
+              file=sys.stderr)
+        return ESCALATE
+    print(f"progressing: candidate '{a.candidate_id}' advancing "
+          f"({len(checkpoints)} checkpoints, repeat {repeat}, flat {no_advance}) — silent.")
     return OK
 
 
@@ -305,6 +370,13 @@ def main(argv):
     q.add_argument("--max-cycles", dest="max_cycles", type=int)
     q.add_argument("--max-tokens", dest="max_tokens", type=float)
     q.add_argument("--window-since", dest="window_since")
+
+    q = sub.add_parser("stall"); q.set_defaults(fn=cmd_stall)
+    q.add_argument("root")
+    q.add_argument("--candidate-id", dest="candidate_id", required=True)
+    q.add_argument("--role", default="")
+    q.add_argument("--repeat-threshold", dest="repeat_threshold", type=int, default=2)
+    q.add_argument("--stall-threshold", dest="stall_threshold", type=int, default=3)
 
     q = sub.add_parser("reconcile"); q.set_defaults(fn=cmd_reconcile)
     q.add_argument("root")
