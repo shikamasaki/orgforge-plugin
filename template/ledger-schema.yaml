@@ -95,6 +95,10 @@ event_classes:
   # breadcrumb; only the exception routes up. §2.1–2.3 have running code (tools/guardrails.py).
   exposure_budget_checked: { window_id, dimension, committed_so_far, delta_requested, cap,
                              actor_role, decision: allow|hold, caused_by_event }   # BLAST-RADIUS-CAP
+  # ITERATION/SPEND-CAP (docs/16 §1, docs/17 §5 #2): a role's loop cycles + cumulative tokens per window;
+  # HOLDs a runaway loop the blast-radius cap can't see (reversible read-think-edit spinning forever).
+  iteration_budget_checked: { window_id, role, cycles_so_far, tokens_so_far, max_cycles, max_tokens,
+                              decision: allow|hold, limiting }
   state_reconciled:     { domain, expected_value, observed_value, drift: bool, magnitude,
                           unaccounted_events: [ref] }                              # STATE-RECONCILED
   reference_staleness_checked: { trigger_event, bound_roles: [role], stale_roles: [role],

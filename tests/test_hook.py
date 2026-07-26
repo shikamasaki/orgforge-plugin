@@ -309,6 +309,42 @@ def test_spawn_owns_collision_cleared_after_release(tmp_path):
     assert code == 0
 
 
+# ── iteration/spend cap: the runaway kill in the enforcement layer ────────────
+def _seed(root, cls, payload, ts):
+    subprocess.run([sys.executable, str(TOOLS / "ledger.py"), "append", str(root),
+                    "--actor", "x", "--class", cls, "--payload", json.dumps(payload), "--ts", ts],
+                   capture_output=True)
+
+
+def test_iteration_cap_holds_a_spawn_over_the_cycle_budget(tmp_path):
+    # 2 cycles already run this window for role 'eng'; cap is 2, so the next spawn (would be #3) holds.
+    for i in range(2):
+        _seed(tmp_path, "cycle_started", {"role": "eng", "candidate_id": f"c{i}"},
+              f"2026-07-27T0{i}:00:00Z")
+    env = {"ORG_ROLE": "eng", "ORG_MAX_CYCLES": "2", "ORG_REQUIRE_SEAM": "0",
+           "ORG_NOW_TS": "2026-07-27T05:00:00Z"}
+    ev = {"hook_event_name": "PreToolUse", "tool_name": "Task",
+          "tool_input": {"prompt": "INDEPENDENT: do a thing"}}
+    e = dict(os.environ, ORG_LEDGER_ROOT=str(tmp_path), ORG_TOOLS_DIR=str(TOOLS), **env)
+    r = subprocess.run([sys.executable, str(HOOK)], input=json.dumps(ev),
+                       capture_output=True, text=True, env=e)
+    assert r.returncode == 2 and "cap" in (r.stdout + r.stderr)
+
+
+def test_iteration_cap_inactive_without_env(tmp_path):
+    # no ORG_MAX_* set → the iteration cap never fires (an org that didn't opt into a budget is unaffected).
+    for i in range(9):
+        _seed(tmp_path, "cycle_started", {"role": "eng", "candidate_id": f"c{i}"},
+              f"2026-07-27T0{i}:00:00Z")
+    env = {"ORG_ROLE": "eng", "ORG_REQUIRE_SEAM": "0"}
+    ev = {"hook_event_name": "PreToolUse", "tool_name": "Task",
+          "tool_input": {"prompt": "INDEPENDENT: do a thing"}}
+    e = dict(os.environ, ORG_LEDGER_ROOT=str(tmp_path), ORG_TOOLS_DIR=str(TOOLS), **env)
+    r = subprocess.run([sys.executable, str(HOOK)], input=json.dumps(ev),
+                       capture_output=True, text=True, env=e)
+    assert r.returncode == 0
+
+
 # ── the classifier fail-open: unknown destructive commands must be gated ──────
 def test_classifier_gates_unknown_destructive(tmp_path):
     env = {"ORG_CAP_DESTRUCTIVE_OPS": "0"}   # cap 0 => any gated destructive op blocks

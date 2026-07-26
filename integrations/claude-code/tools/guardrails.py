@@ -16,6 +16,12 @@ rule the design fixes: **default silent (fail-quiet); escalate only the exceptio
       deltas in the window from the ledger and BLOCKS (not just annotates) when committed+delta
       would cross the cap. Silent `allow` under budget; `hold` → enqueue to the approval queue.
 
+  cycles <root> --role R [--max-cycles N] [--max-tokens N] [--window-since TS]
+      ITERATION/SPEND-CAP. The blast-radius cap meters irreversible ASSET effect; it cannot see a
+      role's loop spinning on reversible reads/edits. This sums the role's cycle_started count and
+      reported tokens in the window and HOLDs when either would exceed its cap — killing a runaway
+      early ("$3-5, not $180") in the enforcement layer, not via a role-settings 'please stop at N'.
+
   reconcile <root> --domain D --observed V --expected V [--halt-magnitude N]
       STATE-RECONCILED. The ledger is the org's BELIEF; real assets live in external systems.
       A half-applied write / an unauthored external mutation / a missed webhook makes every
@@ -74,6 +80,47 @@ def cmd_cap(a):
         return ESCALATE
     print(f"allow: {a.dimension} {committed} + {a.delta} = {would_be} <= cap {a.cap} "
           f"— under budget, proceeds silently; tally advances.")
+    return OK
+
+
+def cmd_cycles(a):
+    """ITERATION/SPEND-CAP: a role's loop cycles and cumulative tokens are a RUNAWAY dimension the
+    blast-radius cap does not cover — a reversible read-think-edit loop touches no metered asset yet
+    can spin forever ("endless file-reading loop"). This sums the role's cycle_started count and
+    reported tokens in the window and HOLDS when either would exceed its cap, so a runaway is killed
+    early ("$3-5, not $180"). docs/16 §1 / docs/17 §5 #2: a hard iteration/spend cap belongs in the
+    enforcement layer, not a role-settings 'please stop at N' the host must honor."""
+    events = read_events(a.root)
+    cycles = 0
+    tokens = 0.0
+    for e in events:
+        if a.window_since and e.get("ts", "") < a.window_since:
+            continue
+        p = e.get("payload", {})
+        if e["class"] == "cycle_started" and p.get("role") == a.role:
+            cycles += 1
+        elif e["class"] == "cycle_completed" and p.get("role") == a.role:
+            tk = p.get("tokens") or {}
+            if isinstance(tk, dict):
+                tokens += sum(float(v) for v in tk.values() if isinstance(v, (int, float)))
+    over_cycles = a.max_cycles is not None and (cycles + 1) > a.max_cycles
+    over_tokens = a.max_tokens is not None and tokens > a.max_tokens
+    decision = "hold" if (over_cycles or over_tokens) else "allow"
+    reason = ("cycle count" if over_cycles else "token spend") if decision == "hold" else ""
+    payload = {"window_id": a.window_since or "all", "role": a.role,
+               "cycles_so_far": cycles, "tokens_so_far": tokens,
+               "max_cycles": a.max_cycles, "max_tokens": a.max_tokens,
+               "decision": decision, "limiting": reason}
+    emit_event("iteration_budget_checked", payload)
+    if decision == "hold":
+        detail = (f"{cycles} cycles >= max {a.max_cycles}" if over_cycles
+                  else f"{tokens:.0f} tokens > max {a.max_tokens}")
+        print(f"HOLD: role '{a.role}' hit its {reason} cap ({detail}) — the loop is killed at the "
+              f"budget, not left to spin. Raise --max-cycles/--max-tokens or let a human intervene. "
+              f"This is the runaway kill the blast-radius cap can't make (docs/17 §5).",
+              file=sys.stderr)
+        return ESCALATE
+    print(f"allow: role '{a.role}' {cycles} cycles / {tokens:.0f} tokens — under budget.")
     return OK
 
 
@@ -251,6 +298,13 @@ def main(argv):
     q.add_argument("--actor", required=True)
     q.add_argument("--window-since", dest="window_since")
     q.add_argument("--caused-by", dest="caused_by")
+
+    q = sub.add_parser("cycles"); q.set_defaults(fn=cmd_cycles)
+    q.add_argument("root")
+    q.add_argument("--role", required=True)
+    q.add_argument("--max-cycles", dest="max_cycles", type=int)
+    q.add_argument("--max-tokens", dest="max_tokens", type=float)
+    q.add_argument("--window-since", dest="window_since")
 
     q = sub.add_parser("reconcile"); q.set_defaults(fn=cmd_reconcile)
     q.add_argument("root")

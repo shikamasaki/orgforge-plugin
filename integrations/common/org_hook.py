@@ -444,7 +444,28 @@ def spawn_needs_seam_or_independence(tool_name, ti):
 # decision (not every tool call) and doctrine loads via the SessionStart hook, not here. Wiring
 # them as tool-loop rules is future work; the honest surface is one enforced rule + one injected
 # organ (doctrine at session start), not three enforced here (external review, 2026-07).
-RULES = [rule_blast_radius]
+def rule_iteration_cap(tool_name, ti):
+    """ITERATION/SPEND-CAP (docs/17 §5 #2): on a spawn (each Agent/Task = a delegated cycle), hold the
+    role if its cycle count or token spend in the window would exceed a cap. Enforcement-layer home for
+    the runaway kill — active only when a cap env is set, so an org that hasn't opted into a budget is
+    unaffected. Role from ORG_ROLE; caps from ORG_MAX_CYCLES / ORG_MAX_TOKENS."""
+    if tool_name not in ("Agent", "Task"):
+        return None
+    role = os.environ.get("ORG_ROLE", "")
+    max_cycles = os.environ.get("ORG_MAX_CYCLES")
+    max_tokens = os.environ.get("ORG_MAX_TOKENS")
+    if not role or (not max_cycles and not max_tokens):
+        return None
+    argv = ["guardrails.py", "cycles", LEDGER_ROOT, "--role", role,
+            "--window-since", _window_since()]
+    if max_cycles:
+        argv += ["--max-cycles", max_cycles]
+    if max_tokens:
+        argv += ["--max-tokens", max_tokens]
+    return argv
+
+
+RULES = [rule_blast_radius, rule_iteration_cap]
 
 
 def main():
