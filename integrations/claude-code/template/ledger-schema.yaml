@@ -43,8 +43,11 @@ event_classes:
   # accountable_supervisor (docs/14 §A1): which supervising role owns this output up the chain,
   # set from the runtime supervision edge (never the payload — a manager cannot forge who owns a
   # result, mirroring actor_identity_source). Empty for the top (human-owned) tier.
+  # reused: the reusable_modules/parts this cycle PULLED FROM instead of re-authoring (docs/17 §5 #7).
+  # Recorded so reuse is a visible, auditable fact ("I can see reuse happened, and how much it saved"),
+  # not an invisible discipline — the factory compounds only if reuse actually fires.
   cycle_completed:      { role, candidate_id, tokens: {task, gate, reporting}, outputs: [ref],
-                          views_referenced: [view_id], accountable_supervisor }
+                          reused: [ref], views_referenced: [view_id], accountable_supervisor }
   heartbeat:            { component, invariants_hold: bool }
   halt_tripped:         { trigger, scope: global|role }
   # work (Organs 2/6)

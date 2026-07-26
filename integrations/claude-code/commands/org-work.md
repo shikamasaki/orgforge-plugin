@@ -33,6 +33,23 @@ For each selected item, check it against the deaths above:
   death cause into the child's seam contract so the worker starts knowing what to avoid.
 - If it's genuinely new territory, proceed. Silence here (no relevant deaths) is fine.
 
+## 1.6 Reuse before you rebuild — check the parts inventory
+
+The factory compounds assets; a worker that re-authors from scratch what the org already built wastes
+the multiplier and diverges from a working part (the divergence sensor only catches that *after* the
+fact). Before delegating an item that needs a component, check what already exists:
+
+!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/ledger.py" view "${ORG_LEDGER_ROOT}" reusable_modules`
+!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/ledger.py" view "${ORG_LEDGER_ROOT}" parts_inventory`
+
+For each selected item:
+- If a reusable module/part already covers part of it, the child's seam contract must say **"reuse
+  `<module>`; do not rebuild it"** — the worker imports the existing asset and only writes the novel
+  delta. Record in the child's `inputs` which parts it reuses.
+- If nothing fits, author it — but if the new part is itself reusable, that is what enters
+  `reusable_modules` on completion, seeding the next cycle. Building the base is not enough; the base
+  must be *pulled from* (SPLE proactive reuse), or it's a library nobody imports.
+
 ## 2. Delegate the selected items — in parallel, but only where the split is genuine
 
 Read the `selected[]` above. Then apply the **decomposition doctrine (docs/15)** before spawning:
@@ -61,8 +78,9 @@ points, keyed by `candidate_id`:
 2. **At each milestone** (and before you might stop — end of a phase, hitting a blocker, low on budget)
    — append `progress_recorded {role, candidate_id, fraction, phase, done_so_far, next_step, blocked_by,
    artifacts}`. `next_step` is the load-bearing field: it is what a fresh session resumes from.
-3. **On finishing** — append `cycle_completed {role, candidate_id, outputs, ...}` so the item drains
-   from the backlog.
+3. **On finishing** — append `cycle_completed {role, candidate_id, outputs, reused, ...}` so the item
+   drains from the backlog, and record in `reused` which existing modules/parts this cycle pulled from
+   (empty if it authored everything) — so reuse is a visible, auditable fact, not an invisible discipline.
 
 !`echo 'Record the cycle, keyed by candidate_id (never fabricate completion): python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/ledger.py" append "'"${ORG_LEDGER_ROOT}"'" --actor "'"$1"'" --class cycle_started|progress_recorded|cycle_completed --payload {role,candidate_id,...}. Checkpoint BEFORE you risk stopping, so the next session resumes from next_step, not from zero.'`
 
