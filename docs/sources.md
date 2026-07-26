@@ -403,6 +403,36 @@ and is being worked out, not settled theory).
   compressed to one label (§3), and read-only-first staging (§4). Anchors those sections as observed
   practice this repo's mechanisms already realize.
 
+### Ideal state — the four-concept convergence and the amplifier constraint (docs/17)
+
+The north-star synthesis. Grounds the claim that Software Factory + Harness + Loop + SDD collapse into one
+principle (externalize the tacit as source; make the verifying loop the product; borrow the substrate;
+industrialize under upstream guardrails), all bounded by "autonomy is bounded by verifiability."
+
+- **[P] Greenfield & Short (2003), "Software Factories," OOPSLA** (already cited, docs/sources §Lens-4) —
+  the factory schema as a viewpoint graph, framework completion, model-as-source. The classical lineage
+  docs/17 §1 traces.
+- **[S] Anthropic, "Building Effective Agents"** (already cited) — harness-vs-model, poka-yoke tools,
+  the scaffold is the product. Anchors docs/17 §1's harness-engineering strand.
+- **[S] r_kaga (2026) / y-hirakaw (2026)** (already cited, §16) — loop engineering: the operation loop and
+  its verification are the product; the human moves from task-giver to loop-designer. docs/17 §1 loop
+  strand.
+- **[S] GitHub Spec Kit** (github.blog / github.github.com/spec-kit) and **[S] Amazon Kiro**
+  (kiro.dev; "the spec is source-of-truth and code is a build artifact"; steering docs product/tech/
+  structure.md; "spec-driven codebases benefit as models improve") — the SDD lineage docs/17 §1 maps
+  onto orgforge's spec=organization / projection=generated-view.
+- **[S] Osmani, "Software Factories, Light and Dark"** — the comprehension-debt failure mode (months of
+  green tests while understanding erodes); move human judgment upstream. Anchors docs/17 §6's "don't
+  measure by items-drained."
+- **[S] AI-DLC practitioner field report (2026; the user's own article)** — the **amplifier constraint**
+  (DORA 2025: AI amplifies good and bad process equally; the bottleneck moves, TOC); root cause = context
+  absence not prompt quality; **SSoT in the inferable artifact (code / the org spec), NOT the task-scoped
+  Spec** (fragment-Specs never form system-wide coherent context; maintenance cost unsustainable);
+  context accumulates as a by-product of work via co-commit, enforced by mechanism not attention;
+  human-in-the-loop as design (judgment upstream). Cited as [S] first-hand practitioner evidence; it
+  supplies docs/17 §3's top-level bound and is weighed as a co-equal opinion in the ideal-state synthesis.
+  Its DORA/GitClear/Faros/CodeRabbit data points are secondary industry reports.
+
 ---
 
 *Preprint note:* arXiv IDs in the 2601–2606 range are 2026 preprints; treat **[S]** arXiv items as
