@@ -33,6 +33,9 @@ against the invariants that must hold for the articulation to be coherent:
                           checker: domain knowledge pools in the boss, not the field role that
                           owns it — docs/08 §1.1, docs/15 §3). A non-judging clerk that
                           implements (e.g. the registrar authoring diffs the gate admits) is fine.
+  O9   no domain owed   — no mechanistic/control role holds a contract.deliverable (a coordinator
+                          that owes a domain deliverable swallows a field role's work — the
+                          docs/15 §5 tooth; catches the implement-without-judge case O8 misses)
   CH   charter sanity   — invariants present/true, sunset held, founding_commit charter,
                           no placeholders (SET_ME), queue rules on
   MV   move catalog     — parses, tiers valid, delegated lists cross-match constitution;
@@ -110,6 +113,7 @@ def lint_org(org, lint):
     control_ids = collect_control_ids(org, roles, lint)
     check_sod(org, roles, control_ids, lint)
     check_no_doctrine_capture(org, roles, control_ids, lint)
+    check_no_domain_deliverable(org, roles, control_ids, lint)
     check_contracts(org, roles, lint)
     check_control_awake(roles, control_ids, lint)
     return roles, control_ids
@@ -426,6 +430,28 @@ def check_no_doctrine_capture(org, roles, control_ids, lint):
                             f"checker into one seat (doctrine capture): domain knowledge pools in the "
                             f"boss instead of the field role that owns it (docs/08 §1.1, docs/15 §3). "
                             f"A control role that adjudicates must not also implement a domain.")
+
+
+def check_no_domain_deliverable(org, roles, control_ids, lint):
+    """O9 — a mechanistic/control role produces NO domain deliverable (docs/15 §5, the tooth docs/15
+    named and left unimplemented). O8 catches the implement+judge COLLAPSE; O9 catches the quieter case
+    O8 misses: a coordinator that merely *implements a domain deliverable* without judging — a supervisor
+    with functions [organize, implement] and a contract.deliverable passes O8 but is exactly the
+    'coordinator swallowing domain work' docs/15 §3 warns against. A control role coordinates, routes, and
+    reviews; the domain deliverable belongs to the field role, so its knowledge accrues there (docs/08
+    §1.1 no doctrine capture). A control role authoring org-mechanism work products (the registrar's reorg
+    diffs) is NOT a domain deliverable — those are routed to the gate as candidates, not owed as a
+    contract.deliverable — so it does not carry one and passes."""
+    for rid in sorted(control_ids):
+        r = roles.get(rid, {})
+        deliverable = (r.get("contract") or {}).get("deliverable")
+        if deliverable:
+            lint.fail("O9", f"control role '{rid}' (mechanistic/control set) holds a "
+                            f"contract.deliverable ({str(deliverable)[:50]!r}) — a coordinator that owes a "
+                            f"domain deliverable swallows work that belongs to a field role, so domain "
+                            f"knowledge pools in the boss instead of accruing to the role that owns it "
+                            f"(doctrine capture, docs/08 §1.1, docs/15 §5). A control role coordinates and "
+                            f"reviews; it does not owe a domain deliverable — route it to a domain role.")
 
 
 def check_contracts(org, roles, lint):

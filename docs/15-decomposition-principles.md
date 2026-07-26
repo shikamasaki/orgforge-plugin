@@ -133,6 +133,6 @@ Decomposition quality cannot be machine-judged without re-imposing a fixed axis 
 anchors — Parnas 1972, Simon 1962, Thompson 1967, Becker & Murphy 1992, Conway 1968 — are consensus
 results applied at the intra-unit granularity the originals did not reach, per the docs/sources.md
 discipline; the "own-domain vs cross-domain" boundary and its lint tooth (§3, §5) are this repo's
-synthesis, to be verified against a running system. The one piece of new enforcement (§5's
-mechanistic-no-domain-deliverable lint tooth) is specified here and is not yet implemented in
-tools/org_lint.py.*
+synthesis, to be verified against a running system. §5's mechanistic-no-domain-deliverable lint tooth is
+now implemented as **O9** in tools/org_lint.py (a mechanistic/control role may hold no
+contract.deliverable), complementing O8 (which catches the implement+judge collapse).*

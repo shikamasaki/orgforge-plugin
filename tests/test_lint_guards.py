@@ -152,3 +152,22 @@ def test_o8_does_not_fire_on_a_non_judging_clerk_that_implements(tmp_path):
     code, out = _lint(tmp_path)
     assert code == 0, out
     assert "O8" not in out
+
+
+def test_o9_mechanistic_role_may_not_own_a_domain_deliverable(tmp_path):
+    # O9 (docs/15 §5): a control role that owes a contract.deliverable swallows a field role's domain
+    # work. Give the supervisor a deliverable → must fail. Catches the implement-without-judge case O8 misses.
+    def org(o):
+        for r in o["roles"]:
+            if r["id"] == "supervisor":
+                r["functions"] = ["organize", "implement"]
+                r["contract"] = {"deliverable": "the login API", "checker": "gate"}
+        return o
+    code, out = _lint(tmp_path, organization=org)
+    assert code == 1 and "O9" in out
+
+
+def test_o9_does_not_fire_on_the_clean_template(tmp_path):
+    # no mechanistic role in the shipped template owes a domain deliverable — O9 must stay clean.
+    code, out = _lint(tmp_path)
+    assert code == 0 and "O9" not in out
