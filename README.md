@@ -12,9 +12,9 @@ in a few minutes — no OSS publish required (a private repo or local path both 
 → harness), the organs, and the full founding → operation → evolution lifecycle.
 [`REFERENCE.md`](REFERENCE.md) is the flat lookup: every env var, command, ledger event, cap, and the
 fixes for problems people actually hit.
-[`CHANGELOG.md`](CHANGELOG.md) tracks what's new (0.4.0: the running metabolism — driven backlog, the
-PM and discovery loops, scheduler wiring, the O8 knowledge-capture lint tooth, and two guardrail
-deadlock fixes).
+[`CHANGELOG.md`](CHANGELOG.md) tracks what's new (0.7.0: the ideal-state build-out — enforcement-layer
+runaway caps, non-progress circuit breaker, concurrent-write prevention, learning that feeds forward,
+a growing domain model, an external-signal front door, and a single `/org` status board).
 
 Concretely, a "department" here is nothing exotic: **an existing coding-agent harness — Claude
 Code, Codex — pointed at a working directory whose instruction file is that one role's job.** The
@@ -198,15 +198,16 @@ hook injects the role's doctrine + conventions every cycle; departments run head
 cadences are realized by the harness's own scheduler (Claude Code's `/schedule` / `/loop`, or a
 cron), and `tools/tick.py` detects a missed check so "the schedule stopped firing" is a paged fact
 ([integrations/claude-code/SCHEDULER.md](integrations/claude-code/SCHEDULER.md)). Ships as a Claude
-Code **plugin** — hooks + subagents + commands: `/org-found` (draft an org from a brief), `/org-work`
-(the PM loop: select from the backlog and delegate in parallel), `/org-discover` (raise self-tasks
-from aspiration gaps), `/org-tick` (read-only health), `/org-mandate` (adjudicate a mandate clash) —
-plus a Codex `.codex/` config; neutral core, one folder per harness. See
-[integrations/README.md](integrations/README.md).
+Code **plugin** — hooks + subagents + commands. The **commands you use** are few: **`/org-found`**
+(draft an org from a brief), **`/org-start`** (bring it to its running state), **`/org`** (the status
+board — GREEN/AMBER/RED), and **`/org-triage`** (feed a signal into the backlog); `/org-mandate` and
+`/org-verify-guards` handle the occasional exception. The org's **own metabolism** — `/org-work`,
+`/org-discover`, `/org-tick` — runs on cadence and you rarely type it. Plus a Codex `.codex/` config;
+neutral core, one folder per harness. See [integrations/README.md](integrations/README.md).
 
 ## Status & honesty
 
-v0.4. This is a **framing + template**, distilled from published organizational theory and the
+v0.7. This is a **framing + template**, distilled from published organizational theory and the
 current agent-engineering literature. The parts (principal-agent theory, harness/loop engineering,
 runtime substrates like AIOS, automated agent design like ADAS/DGM) already exist; the contribution
 here is **the top-down organizational decomposition that places them** — and, per the research in

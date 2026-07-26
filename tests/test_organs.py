@@ -615,3 +615,19 @@ def test_rollback_proven_with_undo(tmp_path):
     code, out = run("guardrails.py", "rollback", str(tmp_path), "--action-ref", "deploy-x",
                     "--undo", "git revert abc123")
     assert code == 0 and "proven" in out
+
+
+def test_status_board_green_when_work_drains(tmp_path):
+    seed(tmp_path, "m", "candidate_submitted",
+         {"candidate_id": "A", "maker": "m", "contract_ref": "c"}, ts="2026-07-16T01:00:00Z")
+    seed(tmp_path, "eng", "cycle_completed", {"candidate_id": "A", "role": "eng"},
+         ts="2026-07-16T02:00:00Z")
+    code, out = run("status.py", "status", str(tmp_path))
+    assert code == 0 and out.startswith("GREEN")
+
+
+def test_status_board_red_on_repeated_death(tmp_path):
+    seed(tmp_path, "x", "repeated_death_detected",
+         {"cause": "y", "occurrences": 2, "candidate_ids": ["A", "B"]}, ts="2026-07-16T01:00:00Z")
+    code, out = run("status.py", "status", str(tmp_path))
+    assert code == 0 and out.startswith("RED") and "needs you" in out

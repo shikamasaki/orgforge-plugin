@@ -31,6 +31,53 @@ the code and closed where the code fell short.
   no inherited context) and requires a harness that fires the event for subagents — the docs/09 host
   contract, not a reimplementation.
 
+## 0.7.0
+
+The ideal-state build-out (docs/17): a six-opinion synthesis defined what orgforge is *for* — a
+spec-driven factory whose product is a verifying unattended loop and whose yield is a compounding
+context base. This release closes the enumerated gap in three layers.
+
+### Layer 1 — the loop can't run away (all enforcement-layer)
+- **Concurrent-write prevention.** The seam/independence spawn gate is now **default-on** (opt out with
+  `ORG_REQUIRE_SEAM=0`), and a spawn declaring `owns:` territory that collides with a live sibling's
+  claim is refused — turning reconcile's post-hoc scan into a spawn-time precondition (single-writer
+  ownership, prevented not detected).
+- **Iteration/token/spend cap in the hook** (`guardrails.py cycles`, `ORG_MAX_CYCLES`/`ORG_MAX_TOKENS`)
+  — the runaway kill ("$3-5, not $180") the blast-radius cap couldn't make.
+- **Circuit breaker on non-progress** (`guardrails.py stall`) — trips a wedged cycle (identical output
+  twice, or flat fraction) and frees its slot, over the `progress_recorded` stream it already writes.
+- **O9 no-domain-deliverable lint tooth** — a mechanistic/control role may hold no contract.deliverable
+  (the docs/15 §5 tooth, now implemented; catches the implement-without-judge case O8 misses).
+- **Harness-capability probe** (`tools/harness_probe.py`, `/org-verify-guards`) — certify PreToolUse
+  fires for a spawned subagent before trusting the org to fan out.
+
+### The heart — learning accumulates and is used; the domain model grows
+- **Learning feeds forward and is measured.** `/org-work` checks each item against `nearby_deaths` /
+  `death_causes` before delegating; `learning.py repeats` escalates a death cause that reappears (the
+  org re-made a recorded mistake) so "learning lifts quality" is a checked fact.
+- **Reuse fires.** `/org-work` consults `reusable_modules` / `parts_inventory` before authoring, and
+  `cycle_completed.reused` records what was pulled — reuse is now visible, not a library nobody imports.
+- **The SSoT / domain model grows during operation.** `/org-work` settles domain rules IN the work
+  cycle (co-commit, not a deferred task); `conventions.py growth` reports the domain model's size so
+  rising inferability is a checked fact.
+
+### Layer 2 — a factory, not a workshop
+- **External-signal front door** (`/org-triage`) — a bug/issue/feedback becomes a triaged backlog item;
+  the host feeds it from an issue tracker (SCHEDULER.md), compressing the human's input to one label.
+
+### Layer 3 — anyone can use it
+- **One status board** (`/org`, `tools/status.py`) — "how's my org?" in one glanceable GREEN/AMBER/RED
+  answer, in the user's language, without reading the ledger. Command surface reframed: the few you use
+  (`/org-found`, `/org-start`, `/org`, `/org-triage`) vs the internal metabolism (`/org-work` etc.) that
+  runs on cadence.
+- **Version drift fixed** (plugin.json / README now agree).
+
+### Lower-priority reliability
+- **Bounded retry/backoff** on a transient organ failure (`_run_organ`) so one flake doesn't hard-block
+  an overnight run; a clean verdict is never retried.
+- **Proven-rollback** (`guardrails.py rollback`) — a reversible action with no declared undo escalates,
+  so silence-consent never trusts an untested reversibility claim.
+
 ## 0.5.1
 
 Follow the quickstart, get a running org — the metabolism starts in-session without hunting for how.
