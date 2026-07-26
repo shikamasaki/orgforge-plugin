@@ -380,3 +380,11 @@ def test_hook_fail_open_opt_out(tmp_path):
            "ORG_CAP_DESTRUCTIVE_OPS": "5"}
     code, _ = fire(tmp_path, "rm -rf /tmp/x", env_extra=env)
     assert code == 0   # dev opt-out allows
+
+
+def test_harness_probe_level1_passes_on_real_hook(tmp_path):
+    # the Level-1 probe must certify the shipped hook blocks a catastrophic + over-cap call and allows a read.
+    r = subprocess.run([sys.executable, str(REPO / "tools" / "harness_probe.py"),
+                        "--hook", str(HOOK), "--tools", str(TOOLS)],
+                       capture_output=True, text=True)
+    assert r.returncode == 0 and "Level 1 PASSED" in (r.stdout + r.stderr)
