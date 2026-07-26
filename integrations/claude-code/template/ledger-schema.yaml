@@ -103,6 +103,9 @@ event_classes:
   # no other organ watches; shared shape unifies the three timings of peer divergence.
   work_claimed:         { role, work_territory, intent_summary,
                           depends_on: [{producer_role, seam_id}] }                 # COLLISION-SCAN (claim); depends_on = the blocked-on edges DEPENDENCY-STALL reads
+  # claim_released: closes a work_claimed so the spawn-time non-collision gate (org_hook) stops treating
+  # the territory as live. A cycle_completed/result_* on the same territory also closes it implicitly.
+  claim_released:       { role, work_territory }
   lateral_reconciled:   { observer_role, subjects: [role], reference, result: consistent|divergent,
                           divergence_kind: duplicate|contradiction|stall|breaking_change,
                           evidence_event_ids: [ref] }

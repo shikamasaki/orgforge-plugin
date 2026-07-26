@@ -221,13 +221,14 @@ def test_real_destructive_still_caught_by_word_boundary(tmp_path):
 
 
 # ── Agent-spawn discipline: seam contract OR independence, else block ─────────
-def fire_spawn(prompt, require_seam=True, root=None):
+def fire_spawn(prompt, require_seam=True, root=None, opt_out=False):
     env = dict(os.environ)
     env["ORG_TOOLS_DIR"] = str(TOOLS)
     if root:
         env["ORG_LEDGER_ROOT"] = str(root)
-    if require_seam:
-        env["ORG_REQUIRE_SEAM"] = "1"
+    # the gate is now DEFAULT-ON; opt_out sets ORG_REQUIRE_SEAM=0 to disable it for an ungated dev run.
+    if opt_out:
+        env["ORG_REQUIRE_SEAM"] = "0"
     ev = {"hook_event_name": "PreToolUse", "tool_name": "Agent",
           "tool_input": {"prompt": prompt}}
     r = subprocess.run([sys.executable, str(HOOK)], input=json.dumps(ev),
@@ -251,9 +252,60 @@ def test_spawn_declared_independent_allowed():
     assert code == 0
 
 
-def test_spawn_gate_is_opt_in():
-    # without ORG_REQUIRE_SEAM the bare spawn passes (the gate is opt-in)
-    code, _ = fire_spawn("You are a worker. Build the login page.", require_seam=False)
+def test_spawn_gate_is_default_on():
+    # the gate is now DEFAULT-ON (docs/17 §5 Layer-1 #1): a bare spawn with no seam/independence blocks
+    # even without any env flag set.
+    code, out = fire_spawn("You are a worker. Build the login page.")
+    assert code == 2 and "seam contract" in out
+
+
+def test_spawn_gate_opt_out_disables_it():
+    # ORG_REQUIRE_SEAM=0 disables the gate for a deliberately ungated dev run.
+    code, _ = fire_spawn("You are a worker. Build the login page.", opt_out=True)
+    assert code == 0
+
+
+def test_spawn_owns_collision_with_live_sibling_is_blocked(tmp_path):
+    # concurrent-write drift is PREVENTED at spawn time: a child declaring owns-territory that a live
+    # sibling already claimed is refused, turning reconcile's post-hoc scan into a precondition.
+    (tmp_path / "HEAD").write_text("x")
+    (tmp_path / "ledger.jsonl").write_text(json.dumps({
+        "id": "c1", "seq": 1, "ts": "2026-07-26T00:00:00Z", "actor": "sib", "class": "work_claimed",
+        "payload": {"role": "sibling-a", "work_territory": "src/auth/login.py",
+                    "intent_summary": "build login"}}) + "\n")
+    prompt = ("## Your slice: auth\n## Boundary contract\nInputs you receive: none\n"
+              "Owns: src/auth/login.py\n")
+    code, out = fire_spawn(prompt, root=tmp_path)
+    assert code == 2 and "collides with a live sibling claim" in out
+
+
+def test_spawn_owns_disjoint_from_live_sibling_allowed(tmp_path):
+    # a disjoint owns-set is fine — only an actual overlap is blocked.
+    (tmp_path / "HEAD").write_text("x")
+    (tmp_path / "ledger.jsonl").write_text(json.dumps({
+        "id": "c1", "seq": 1, "ts": "2026-07-26T00:00:00Z", "actor": "sib", "class": "work_claimed",
+        "payload": {"role": "sibling-a", "work_territory": "src/auth/login.py",
+                    "intent_summary": "build login"}}) + "\n")
+    prompt = ("## Your slice: search\n## Boundary contract\nInputs you receive: none\n"
+              "Owns: src/search/index.py\n")
+    code, _ = fire_spawn(prompt, root=tmp_path)
+    assert code == 0
+
+
+def test_spawn_owns_collision_cleared_after_release(tmp_path):
+    # once the sibling releases (claim_released or a cycle_completed on the territory), the child may claim it.
+    (tmp_path / "HEAD").write_text("x")
+    (tmp_path / "ledger.jsonl").write_text(
+        json.dumps({"id": "c1", "seq": 1, "ts": "2026-07-26T00:00:00Z", "actor": "sib",
+                    "class": "work_claimed",
+                    "payload": {"role": "sibling-a", "work_territory": "src/auth/login.py",
+                                "intent_summary": "x"}}) + "\n" +
+        json.dumps({"id": "c2", "seq": 2, "ts": "2026-07-26T01:00:00Z", "actor": "sib",
+                    "class": "claim_released",
+                    "payload": {"role": "sibling-a", "work_territory": "src/auth/login.py"}}) + "\n")
+    prompt = ("## Your slice: auth\n## Boundary contract\nInputs you receive: none\n"
+              "Owns: src/auth/login.py\n")
+    code, _ = fire_spawn(prompt, root=tmp_path)
     assert code == 0
 
 

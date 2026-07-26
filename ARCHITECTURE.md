@@ -240,10 +240,11 @@ harnesses, reading each tool call **and the ledger**:
    are never metered (a 300-file build proceeds); overwriting existing files has a high cap; destructive
    / external-write / infra-change ops have low caps, scope-weighted so one `rm -rf` / `DROP` /
    `reset --hard` can trip alone. The hook appends the emitted event so the cap accumulates.
-2. **Seam-contract-on-spawn** (opt-in via `ORG_REQUIRE_SEAM`) — when enabled, an `Agent`/`Task` spawn is
-   blocked unless the prompt carries a seam contract or an explicit `INDEPENDENT:` declaration (turns
-   "please split cleanly" into structure). Off by default; the blast-radius cap is the only mechanism
-   wired into the tool loop unconditionally today.
+2. **Seam-contract-on-spawn** (**on by default**; opt out with `ORG_REQUIRE_SEAM=0`) — an `Agent`/`Task`
+   spawn is blocked unless the prompt carries a seam contract or an explicit `INDEPENDENT:` declaration
+   (turns "please split cleanly" into structure), and a declared `owns:` territory that collides with a
+   live sibling's claim in the ledger is refused — concurrent-write drift is prevented at spawn time, not
+   detected after the fact (docs/17 §5).
 3. **Word-boundary destructive detection** — classifies destructive commands on *whole tokens*, so a
    path like `.../fx-ml-platform/…` or a flag like `grep -f` never misfires as `rm` / `-f`. **Fail-safe**:
    an unevaluable guardrail blocks.

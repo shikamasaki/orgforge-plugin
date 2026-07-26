@@ -358,21 +358,85 @@ _SEAM_MARKERS = ("outputs you must produce", "boundary contract", "inputs you re
 _INDEP_MARKERS = ("independent:", "non-integrating", "no seam", "outputs are not merged",
                   "independent fan-out")
 
+def _declared_owns(prompt):
+    """Parse the `owns:` / `owns —` territory list a seam contract declares in a spawn prompt.
+    handoff.py writes an `Owns:` line (docs/07 §2.1.1); we read the paths/globs after it so the gate
+    can check them against live sibling claims. Best-effort line/inline parse; returns a set of tokens."""
+    owns = set()
+    for m in re.finditer(r"(?im)^\s*owns\s*[:\-—]\s*(.+)$", prompt):
+        for tok in re.split(r"[,\s]+", m.group(1).strip()):
+            tok = tok.strip("`'\"").rstrip(".;")
+            if tok:
+                owns.add(tok)
+    return owns
+
+
+def _live_claimed_territories(ledger_root):
+    """The set of work_territory strings currently claimed and not yet released, from the ledger.
+    A `work_claimed` opens a claim; a `cycle_completed`/`result_deployed`/`result_retired` on the same
+    territory (or an explicit release) closes it. Pure read; empty on any error (fail toward allow for
+    the collision check specifically — the seam-contract requirement below still holds)."""
+    try:
+        import json as _json
+        path = os.path.join(ledger_root, "ledger.jsonl")
+        if not os.path.exists(path):
+            return {}
+        open_terr = {}
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                try:
+                    e = _json.loads(line)
+                except ValueError:
+                    continue
+                p = e.get("payload", {})
+                if e.get("class") == "work_claimed" and p.get("work_territory"):
+                    open_terr[p["work_territory"]] = p.get("role")
+                elif e.get("class") in ("cycle_completed", "result_deployed", "result_retired",
+                                        "claim_released") and p.get("work_territory"):
+                    open_terr.pop(p["work_territory"], None)
+        return open_terr
+    except Exception:
+        return {}
+
+
 def spawn_needs_seam_or_independence(tool_name, ti):
-    """Return None to allow, or a deny-reason string to block. Gate the Agent/Task spawn tool."""
+    """Return None to allow, or a deny-reason string to block. Gate the Agent/Task spawn tool.
+
+    DEFAULT-ON (docs/17 §5 Layer-1 #1): a must-not-violate control across a fan-out belongs in the
+    enforcement layer, not a prompt (docs/16 §2). Opt OUT with ORG_REQUIRE_SEAM=0 for a deliberately
+    ungated dev run. Two gates: (a) SHAPE — the child must carry a seam contract or an independence
+    declaration; (b) NON-COLLISION — if it declares `owns:` territory, that territory must not intersect
+    a sibling's live claim in the ledger, turning reconcile.py's post-hoc collision SCAN into a
+    spawn-time PRECONDITION (the research's single-writer-ownership, prevented not detected)."""
     if tool_name not in ("Agent", "Task"):
         return None
-    if os.environ.get("ORG_REQUIRE_SEAM", "") not in ("1", "true", "yes"):
-        return None                      # opt-in: only enforced when the org turns it on
-    prompt = (ti.get("prompt") or "").lower()
-    if any(m in prompt for m in _SEAM_MARKERS):
-        return None                      # carries a seam contract — integrating child, fine
-    if any(m in prompt for m in _INDEP_MARKERS):
-        return None                      # explicitly an independent, non-integrating child
-    return ("this Agent spawn carries neither a seam contract (build it with tools/handoff.py: "
-            "slice + inputs/outputs the child integrates to) nor an explicit independence "
-            "declaration (start the child prompt with 'INDEPENDENT: ...' if its output is never "
-            "merged with a sibling's). Recursive splits drift without an owned seam — docs/07 §2.1.1.")
+    if os.environ.get("ORG_REQUIRE_SEAM", "1") in ("0", "false", "no", "off"):
+        return None                      # explicit opt-out for an ungated dev run
+    prompt_raw = ti.get("prompt") or ""
+    prompt = prompt_raw.lower()
+    has_seam = any(m in prompt for m in _SEAM_MARKERS)
+    has_indep = any(m in prompt for m in _INDEP_MARKERS)
+    if not (has_seam or has_indep):
+        return ("this Agent spawn carries neither a seam contract (build it with tools/handoff.py: "
+                "slice + inputs/outputs the child integrates to) nor an explicit independence "
+                "declaration (start the child prompt with 'INDEPENDENT: ...' if its output is never "
+                "merged with a sibling's). Recursive splits drift without an owned seam — docs/07 §2.1.1.")
+    # NON-COLLISION: a declared owns territory must not overlap a live sibling claim (concurrent-write
+    # drift is PREVENTED here, not detected later by reconcile.py collision).
+    if LEDGER_ROOT:
+        declared = _declared_owns(prompt_raw)
+        if declared:
+            live = _live_claimed_territories(LEDGER_ROOT)
+            clash = sorted(t for t in declared if t in live)
+            if clash:
+                holders = ", ".join(f"{t} (held by {live[t]})" for t in clash)
+                return (f"this spawn's declared owns-territory collides with a live sibling claim: "
+                        f"{holders}. Two agents writing the same territory concurrently is the "
+                        f"concurrent-write drift the org prevents at spawn time — give the child a "
+                        f"disjoint `owns:` set, or wait for the holder to release (docs/17 §5).")
+    return None
 
 
 # Only the blast-radius cap is wired into the tool loop today. reconcile.py `mandate` and the

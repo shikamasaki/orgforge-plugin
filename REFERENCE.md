@@ -47,7 +47,7 @@ irreversible patterns draw down a budget.
 |---|---|---|
 | `ORG_WINDOW_SINCE` | Explicit ISO timestamp for the start of the cap window (overrides the rolling daily default). | *(rolling daily)* |
 | `ORG_WINDOW` | Set to `all` to opt into a deliberate **all-time** cap (no reset). Use only if you truly want a lifetime budget — otherwise leave unset for the daily reset. | *(rolling daily)* |
-| `ORG_REQUIRE_SEAM` | `1`/`true`/`yes` turns on the spawn gate: an `Agent`/`Task` spawn is blocked unless its prompt carries a seam contract or an `INDEPENDENT:` declaration. Off by default. | *(off)* |
+| `ORG_REQUIRE_SEAM` | The spawn gate is **on by default**: an `Agent`/`Task` spawn is blocked unless its prompt carries a seam contract or an `INDEPENDENT:` declaration, and a declared `owns:` territory must not collide with a live sibling's claim (concurrent-write prevention). Set to `0`/`false`/`off` to disable it for an ungated dev run. | *(on)* |
 | `ORG_HOOK_FAIL_OPEN` | `1` allows a tool call when the guardrail organ errors, instead of blocking. **Dev only** — the safe default is fail-closed. | *(off / fail-safe)* |
 | `ORG_ALLOW_CATASTROPHIC` | `1` disables the catastrophic denylist (the hard block on `rm -rf /`-class, `mkfs`, `dd`-to-disk, fork bombs). **Disposable sandbox only** — never in an environment with real data. | *(off / catastrophic blocked)* |
 | `ORG_NOW_TS` | Pins the hook's "now" (append ts + window boundary). Mainly for tests; leave unset in production so the real clock is used. | *(real UTC now)* |
