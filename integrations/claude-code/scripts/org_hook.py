@@ -104,7 +104,7 @@ def _append_emitted(output):
             subprocess.run([sys.executable, os.path.join(TOOLS_DIR, "ledger.py"), "append",
                             LEDGER_ROOT, "--actor", "system:org_hook", "--class", cls,
                             "--payload", json.dumps(payload, ensure_ascii=False), "--ts", ts],
-                           capture_output=True, text=True, timeout=30)
+                           capture_output=True, encoding="utf-8", errors="replace", timeout=30)
         except Exception:
             pass   # a failed write-back must never turn an allow into a crash
 
@@ -118,7 +118,11 @@ def _run_organ(argv):
     allow, 10 escalate) never retries — only genuinely transient failures do. After the bounded retries
     the fail-safe block still applies (the caller blocks on the non-clean code). Retries: ORG_ORGAN_RETRIES
     (default 2); backoff: ORG_ORGAN_BACKOFF seconds (default 0.5), skipped entirely when ORG_NOW_TS is set
-    (tests pin a clock and must not sleep)."""
+    (tests pin a clock and must not sleep).
+
+    UTF-8 pin (cp932 fix): the child pipe is read as UTF-8 with errors=replace, so an organ status
+    message containing a non-ASCII char (an em-dash) never crashes the guardrail on a non-UTF-8 console
+    locale (e.g. Japanese cp932) — a UnicodeDecodeError here would fail-safe-block every tool call."""
     import time
     retries = int(os.environ.get("ORG_ORGAN_RETRIES", "2"))
     backoff = float(os.environ.get("ORG_ORGAN_BACKOFF", "0.5"))
@@ -126,7 +130,7 @@ def _run_organ(argv):
     for attempt in range(retries + 1):
         try:
             p = subprocess.run([sys.executable, os.path.join(TOOLS_DIR, argv[0])] + argv[1:],
-                               capture_output=True, text=True, timeout=30)
+                               capture_output=True, encoding="utf-8", errors="replace", timeout=30)
             # a clean verdict (allow / escalate) is authoritative — return immediately, never retry it.
             if p.returncode in (0, 10):
                 return p.returncode, (p.stdout + p.stderr)
