@@ -160,11 +160,28 @@ def check_env_example(repo):
     return True, "no env config surface detected (n/a)"
 
 
+def _vcs_root(start):
+    """Walk up from `start` to the repository root (the dir containing .git), or return `start` if
+    none is found. CI config lives at the VCS root by convention, even when the checked app is a
+    sub-package (a monorepo's app/ dir) — so a root-only CI must still count for a sub-package check."""
+    d = os.path.abspath(start)
+    while True:
+        if os.path.exists(os.path.join(d, ".git")):
+            return d
+        parent = os.path.dirname(d)
+        if parent == d:
+            return os.path.abspath(start)   # no .git found — fall back to the checked dir
+        d = parent
+
+
 def check_ci(repo):
-    # a committed CI workflow that (by convention) runs setup+test from clean — the machine deploy gate
-    if _exists(repo, ".github/workflows/*.yml", ".github/workflows/*.yaml",
-               ".gitlab-ci.yml", ".circleci/config.yml", "azure-pipelines.yml"):
-        return True, "a committed CI workflow is present"
+    # a committed CI workflow that (by convention) runs setup+test from clean — the machine deploy gate.
+    # Look BOTH in the checked dir and at the VCS root (CI usually lives at the repo root even when the
+    # app is a sub-package), so a monorepo layout (app/ under a root-level .github/) isn't a false HOLD.
+    for base in (repo, _vcs_root(repo)):
+        if _exists(base, ".github/workflows/*.yml", ".github/workflows/*.yaml",
+                   ".gitlab-ci.yml", ".circleci/config.yml", "azure-pipelines.yml"):
+            return True, "a committed CI workflow is present"
     return False, ("no committed CI workflow (.github/workflows/…). The deploy gate has no machine form: "
                    "reproducibility is not proven continuously from a clean clone.")
 
