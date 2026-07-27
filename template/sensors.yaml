@@ -86,7 +86,7 @@ sensors:
     window: continuous
     threshold: ">= 1 claim"
     judge: machine
-    preregistered_for_night: [update_doctrine]         # still gate-admitted per docs/07
+    preregistered_for_night: [update_doctrine]         # still gate-admitted per docs/06
 
   - id: blocked_on_missing_context
     feeds_moves: [adjust_context_scope]

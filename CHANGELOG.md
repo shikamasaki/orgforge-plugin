@@ -3,13 +3,70 @@
 All notable changes to orgforge-plugin. This project follows a pragmatic semver:
 minor = new mechanisms/features, patch = fixes, major = breaking articulation changes.
 
+## 0.8.0
+
+**orgforge is a plugin for standing up and running an AI-native IT business company** — not merely
+"an organization." The company decides what to build as a business, builds through a forced
+non-skippable SDLC, ships via CI/CD, operates under a reliability budget, navigates by DORA to the
+moving bottleneck, and grows the system and the org together. This release re-scopes the whole
+project to that definition, restructures the docs, and — most importantly — makes the process
+**reproducible**: same org spec + RFP ⇒ same process, gates, contracts, and verification, and the
+repositories the company builds clone-and-run the same for anyone.
+
+### Docs — restructured into 4 Parts × 12 chapters (was 18 flat files)
+- Consolidated the docs from 18 → 12 chapters, grouped into four Parts (Foundations / Design /
+  Operate / North star) with a new `docs/README.md` map. The chapter skeleton is now stable: new
+  material is added as a section inside a chapter, not as a new file. Merges: former operating-events
+  + proxy-stack folded into **05 Operating a Running Company**; decomposition folded into **03**;
+  manager-accountability folded into **09**; elastic-org folded into **02**. The S1 founding rehearsal
+  moved to `demos/`.
+- **THEORY §1b** — a new layer over the neutral organization definition: the org this template stands
+  up is an IT business company, filling Organ 1 with a business telos and specializing Organs 2/4/6/7
+  with the SDLC, CI/CD, reliability budget, and DORA. The AI-as-amplifier thesis is stated here.
+- **docs/11 — The forced SDLC mold** (new chapter): the non-skippable phase chain
+  (requirements→design→implement→test→deploy→operate), enforced by generalizing the `requires_prior`
+  predicate from admission-gating to phase-gating. §0 states reproducibility as the deep purpose;
+  §4a is the Level-2 reproducibility admission standard for the repos the org builds.
+
+### Reproducibility & idempotency (the release's core)
+- **SDLC phase gate (F1).** New ledger events `phase_started` / `phase_admitted`; `ledger.py`
+  `REQUIRES_PRIOR` now enforces the phase order (a phase cannot start until its predecessor is
+  admitted), so the same spec runs the same phases in the same order for every founder and run.
+- **Idempotent ledger append (F3).** `ledger.py append --natural-key` no-ops a replay/retry of the
+  same logical event, so exposure/cycle/WIP counts no longer drift with how many times a hook fired.
+- **Spec-declared enforcement (F5).** Caps, budget window, iteration limits, and the seam gate now
+  live in `constitution.yaml`'s `enforcement:` block (hash-chained, agent-unwritable), so every
+  install of the same org enforces the SAME gates. `ORG_CAP_*` / `ORG_WINDOW` / `ORG_MAX_*` /
+  `ORG_REQUIRE_SEAM` are demoted to DEV OVERRIDES. The iteration cap is now default-on.
+- **Deterministic backlog (F4).** `candidate_id` is now a hash of (role, contract_ref, normalized
+  gap), so the same RFP yields the same backlog; attention tie-breaks on it, not append order.
+- **Idempotent projections (F2, F9).** `github_sync create` no-ops when an open Issue already matches;
+  `conventions adopt` no-ops on an identical (scope, choice).
+- **Real clock in the tick (F6).** `/org-tick` now uses the host UTC clock, not a frozen literal date
+  and a zero counter, so missed-check detection depends on ledger state, not operator-passed args.
+- **Founding coverage gate (F8).** New lint tooth **O10**: every declared deliverable must carry a
+  non-empty acceptance standard, be owned by exactly one role, and have a checker distinct from its
+  maker — so two foundings from the same RFP converge on the same contracts. `/org-found` now emits a
+  coverage manifest.
+- **Level-2 repo reproducibility (`tools/repro_lint.py`).** A deterministic gate checking a generated
+  repo is clone-and-run reproducible: committed lockfile, pinned toolchain, one-command setup+test in
+  a README, idempotent migrations, `.env.example`, and a CI workflow green from a clean clone. The
+  **gate** and **maker** agent doctrines now require it.
+- **DORA + reliability budget.** New ledger events `reliability_budget_checked` / `dora_snapshot`
+  fold into docs/05 as operating instruments (error budget bounds deploy velocity; DORA four keys
+  navigate to the moving bottleneck).
+
+### Tests
+- 130 passing (was 114): phase-gate, ledger idempotency, spec-declared caps, `repro_lint`, and the
+  O10 founding-coverage tooth all have regression coverage.
+
 ## 0.6.0
 
 Loop reliability — the failure modes a practitioner hits building an autonomous loop, checked against
 the code and closed where the code fell short.
 
 ### Added
-- **docs/16 — Loop reliability.** Why an unattended loop survives: a loop pass is a series system, so
+- **docs/10 — Loop reliability.** Why an unattended loop survives: a loop pass is a series system, so
   `n` decisions at accuracy `p` succeed `p^n` (10×0.95 ≈ 60%) — cut the decision *count* before
   sharpening steps (Barlow & Proschan 1965). Load-bearing constraints belong in the **enforcement layer**
   (hooks/lint, deterministic), not the request layer (prompts, probabilistic); a **subagent doesn't
@@ -25,10 +82,10 @@ the code and closed where the code fell short.
   cap-metered, not blocked. Sandbox opt-out: `ORG_ALLOW_CATASTROPHIC=1`.
 
 ### Fixed
-- **docs/16 subagent-gating claim made honest.** The doc had asserted the hook "gates every subagent at
+- **docs/10 subagent-gating claim made honest.** The doc had asserted the hook "gates every subagent at
   every depth" as a plugin property; whether a subagent's tool call reaches `PreToolUse` is a *harness*
   property. The doc now states the plugin is correct-by-construction (verdict from the raw call + ledger,
-  no inherited context) and requires a harness that fires the event for subagents — the docs/09 host
+  no inherited context) and requires a harness that fires the event for subagents — the docs/08 host
   contract, not a reimplementation.
 
 ## 0.7.2
@@ -62,13 +119,13 @@ Simplify the drive: delegate it to Claude Code's `/loop`, keep only the monitori
 - **The monitoring stays with the org.** `/loop` fires a command but can't judge whether a *due org
   check* ran; `tick.py`'s missed-check detection (a due check with no `verify_event` = MISS) is the
   org-specific part `/loop` can't provide, so it stays — "the loop stopped" is still a detected fact,
-  not silence (docs/16). Delegate the drive, keep the monitor.
+  not silence (docs/10). Delegate the drive, keep the monitor.
 - OS cron (`scheduler-install.sh`) demoted to the one case `/loop` can't cover: running 24/7 with no
   session open. For everyday attended/kept-open runs, the three `/loop`s are the whole drive.
 
 ## 0.7.0
 
-The ideal-state build-out (docs/17): a six-opinion synthesis defined what orgforge is *for* — a
+The ideal-state build-out (docs/12): a six-opinion synthesis defined what orgforge is *for* — a
 spec-driven factory whose product is a verifying unattended loop and whose yield is a compounding
 context base. This release closes the enumerated gap in three layers.
 
@@ -82,7 +139,7 @@ context base. This release closes the enumerated gap in three layers.
 - **Circuit breaker on non-progress** (`guardrails.py stall`) — trips a wedged cycle (identical output
   twice, or flat fraction) and frees its slot, over the `progress_recorded` stream it already writes.
 - **O9 no-domain-deliverable lint tooth** — a mechanistic/control role may hold no contract.deliverable
-  (the docs/15 §5 tooth, now implemented; catches the implement-without-judge case O8 misses).
+  (the docs/03 §6.5 tooth, now implemented; catches the implement-without-judge case O8 misses).
 - **Harness-capability probe** (`tools/harness_probe.py`, `/org-verify-guards`) — certify PreToolUse
   fires for a spawned subagent before trusting the org to fan out.
 
@@ -148,7 +205,7 @@ wire the cadence but nothing actually registered it — so nothing ran unattende
 ### Changed
 - **SCHEDULER.md corrected.** The in-session schedulers (`/schedule`, `/loop`) are **session-only** —
   they stop when Claude Code exits and are not "unattended." The doc now states this plainly and points
-  to the OS-cron install for a genuinely 24/7 org (docs/09 §4 names "a cron" first for this reason).
+  to the OS-cron install for a genuinely 24/7 org (docs/08 §4 names "a cron" first for this reason).
 
 ## 0.4.3
 
@@ -222,14 +279,14 @@ plugin version with the autonomous-founding narrative the docs already describe 
   gains `source: mandate|self`; top-down instructions and self-raised tasks share one backlog
   (`open_experiments`) and are prioritized on one footing. An in-ranking **mandate rides a floor**
   (zone of acceptance, Simon 1947) so a live instruction is never starved by low-priority self work;
-  an off-ranking mandate gets no floor (a visible drift signal). (docs/12)
+  an off-ranking mandate gets no floor (a visible drift signal). (docs/09)
 - **The PM loop** (`/org-work <role>`). Select from the backlog by situated attention, delegate the
   selected items to subordinates **in parallel** (one `Task` each, where the split is genuine), record
   `cycle_completed`. Parallelism is a judgment, not a mandate.
 - **The discovery loop** (`/org-discover <role>`). Problemistic search raises `source: self` backlog
   items from aspiration gaps, scoped to the role's own domain; append-only, fail-quiet when there is
-  no gap. (docs/12)
-- **Decomposition doctrine** (`docs/15`, projected into `ROLE.md`). How a manager splits an assignment,
+  no gap. (docs/09)
+- **Decomposition doctrine** (`docs/03`, projected into `ROLE.md`). How a manager splits an assignment,
   grounded in Parnas (information hiding), Simon (near-decomposability), Thompson (interdependence),
   Becker & Murphy (coordination cost), Conway. Never split reciprocal work; cut at the design secret;
   each child carries a seam contract; route another role's domain to that role.
@@ -242,7 +299,7 @@ plugin version with the autonomous-founding narrative the docs already describe 
 ### Changed
 - **O8 no-doctrine-capture lint tooth** (`org_lint.py`). No control role may carry `implement` together
   with `judge`/`review` — a coordinator that produces a domain deliverable collapses maker and checker
-  and pools domain knowledge in the boss instead of the field role that owns it (docs/08 §1.1, docs/15
+  and pools domain knowledge in the boss instead of the field role that owns it (docs/07 §1.1, docs/03
   §3). Generalizes O6's "authorization holder must not implement" to every adjudicating seat.
 
 ### Fixed
@@ -267,22 +324,22 @@ plus a redesigned blast-radius cap that no longer blocks normal work.
   **doctrine scoped to that slice** — so knowledge narrows going down and splits by trade
   (`ui-worker` ≠ `api-worker` ≠ `db-worker`), and a parent's broader brain never leaks down. The
   runner (`run_department.py`) wires `ORG_DOCTRINE_ROOT` + `--plugin-dir` so a top-level launch
-  fires the doctrine-injection hook automatically. (docs/07 §2.1)
+  fires the doctrine-injection hook automatically. (docs/06 §2.1)
 - **Doctrine remap for refounding** (`doctrine.py remap`). When roles are renamed / split /
   merged, every live claim follows as an asset; a claim that maps to nothing **blocks** the
-  refound rather than being silently lost. (docs/06 §4.4, docs/07 §2.2)
+  refound rather than being silently lost. (docs/05 §4.4, docs/06 §2.2)
 - **Spawn seam-contract gate** (`ORG_REQUIRE_SEAM=1`). An `Agent`/`Task` spawn is blocked unless
   its prompt carries a seam contract or an explicit `INDEPENDENT:` declaration — recursive splits
-  can't drift on an un-owned interface. (docs/07 §2.1.1)
+  can't drift on an un-owned interface. (docs/06 §2.1.1)
 - **Silence-consent gate** (`guardrails.py consent`). A reversible backlog action rides the
   delegated tier (silence = consent, proceeds); an irreversible one (deploy/spend/destroy/…) holds
-  for an explicit human ack. (docs/06 §2.1)
+  for an explicit human ack. (docs/05 §2.1)
 - **STALE-REFERENCE auto-trigger** (`guardrails.py staleref --auto`). Derives the trigger event +
   bound roles from the ledger's latest reference change, so a central re-prioritization propagates
-  to departments without hand-fed arguments. (docs/11 §2.3, docs/12 §3.1)
+  to departments without hand-fed arguments. (docs/05 §5.1.3, docs/09 §3.1)
 - **DEPENDENCY-STALL dependency edges** (`reconcile.py stall`). Reads `work_claimed.depends_on`
   edges to report who a blocked role awaits, which downstream roles are impacted, and the
-  lowest-common-owner to route to — instead of cycle timing alone. (docs/11 §2.4)
+  lowest-common-owner to route to — instead of cycle timing alone. (docs/05 §5.2)
 - **QUICKSTART.md** — install, the one required setting, guardrail tuning, and a verified
   "prove it blocks" snippet.
 
@@ -293,12 +350,12 @@ plus a redesigned blast-radius cap that no longer blocks normal work.
   **not metered**; the scarce low caps are reserved for `destructive_ops` (scope-weighted —
   `rm -rf` = 3), `external_writes`, `infra_changes`; overwriting an existing file is
   `file_mutations` (high cap 200). A 300-file build proceeds; `rm -rf` still hard-stops. New caps
-  are tunable via `ORG_CAP_*`. (docs/11 §2.1)
+  are tunable via `ORG_CAP_*`. (docs/05 §2.1)
 
 ### Docs
 - Operating-phase flow integrated into existing homes (no new file): the two-level backlog
-  (org-wide ranking + per-dept next-task) in docs/12 §3.1; the registrar as org-wide priority
-  owner in docs/06 §2.6; reversible-vs-irreversible consent in docs/06 §2.1.
+  (org-wide ranking + per-dept next-task) in docs/09 §3.1; the registrar as org-wide priority
+  owner in docs/05 §2.6; reversible-vs-irreversible consent in docs/05 §2.1.
 - New `examples/`: `doctrine-scoping` (per-role brains that narrow + refound remap), and
   `seam-descent-run` (an org self-driving scoped hand-offs end to end).
 

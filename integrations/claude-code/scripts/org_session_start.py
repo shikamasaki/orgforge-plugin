@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """org_session_start — inject a role's doctrine + conventions at session start (both harnesses).
 
-The "load" step of the doctrine organ (docs/07 §load) and the conventions organ (docs/13 §5),
+The "load" step of the doctrine organ (docs/06 §load) and the conventions organ (docs/05 §5),
 wired as a SessionStart hook so a department's current normative playbook and its org's settled
 precedent are in context BEFORE it acts — every cycle, not last quarter's world. Neutral: both
 Claude Code and Codex fire a SessionStart hook whose stdout `additionalContext` is prepended to

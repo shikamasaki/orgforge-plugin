@@ -15,13 +15,31 @@ concurrent-write prevention.
 Commands (all shell out to `gh`, which the host authenticates — the organ does no network of its own):
   claim   --repo R --issue N --agent A     claim an Issue if unclaimed; exit 0 claimed / 10 contended
   release --repo R --issue N --agent A     drop this agent's claim
-  create  --repo R --title T [--body B] [--objective O] [--source mandate|self] [--depends 3,7] [--priority N]
-                                           mint a backlog Issue with the label set (priority/dep/objective)
+  create  --repo R --title T [--kind objective|task] [--parent N] [--dept D] [--objective O]
+          [--body B] [--source mandate|self] [--depends 3,7] [--priority N]
+                                           mint a backlog Issue. --kind objective = the big-picture
+                                           RFP/objective Issue (the parent); --kind task (default) = a
+                                           department's unit of work, linked as a NATIVE GitHub
+                                           sub-issue of --parent so the hierarchy + roll-up shows in
+                                           the UI. --dept tags the owning department.
   stage   --repo R --issue N --stage S     set the lifecycle label (ready|in-progress|blocked|needs-human|done)
-  ready   --repo R                         list Issues that are ready to work (no open dependency, unclaimed)
+  log     --repo R --issue N --event E [--detail T] [--phase P] [--event-id ID]
+                                           append a WORK-LOG comment to a task Issue on a milestone
+                                           event (cycle_started/progress_recorded/phase_admitted/
+                                           cycle_completed …), so progress accrues on the Issue as it
+                                           happens. Idempotent per --event-id (a replay logs once).
+  ready   --repo R [--kind task|objective|any]
+                                           list Issues ready to work (no open dependency, unclaimed);
+                                           default lists TASKS only (objectives are parents, not work)
+
+Two-level hierarchy (the org's structure projected onto GitHub):
+  objective Issue  — orgforge:kind:objective — the RFP/objective (a projection of an org objective)
+    └─ task Issue  — orgforge:kind:task + orgforge:dept:<name> — a department's work, a native
+                     sub-issue of its objective (GitHub's own parent/child, borrowed under R0)
 
 Labels: orgforge:claimed:<agent> · orgforge:{ready,in-progress,blocked,needs-human,done} ·
-        orgforge:objective:<id> · orgforge:{mandate,self} · orgforge:off-ranking
+        orgforge:kind:{objective,task} · orgforge:dept:<name> · orgforge:objective:<id> ·
+        orgforge:{mandate,self} · orgforge:off-ranking
 
 Exit: 0 ok / 10 contended-or-blocked (escalate) / 2 usage or gh error.
 """
@@ -95,17 +113,108 @@ def _ensure_labels(repo, names):
         gh(["label", "create", name, "--repo", repo, "--color", color, "--force"], check=False)
 
 
+def _find_open_issue(repo, title, objective):
+    """Return an existing OPEN Issue number matching this backlog item's natural key (title, and the
+    objective label if given), else None. The backlog projection must be idempotent (docs/11 §0): a
+    replayed discovery/founding cycle, or a web + local session projecting the same ledger, must not
+    mint duplicate Issues."""
+    code, out = gh(["issue", "list", "--repo", repo, "--state", "open",
+                    "--search", title, "--json", "number,title,labels"])
+    if code != 0:
+        return None   # can't check — fall through to create (best effort; a dup is recoverable)
+    try:
+        for it in json.loads(out):
+            if it.get("title") != title:
+                continue
+            if objective:
+                names = [l["name"] for l in it.get("labels", [])]
+                if f"orgforge:objective:{objective}" not in names:
+                    continue
+            return it["number"]
+    except Exception:
+        return None
+    return None
+
+
+def _issue_number(url_or_out):
+    """Extract the trailing issue number from a `gh issue create` URL (…/issues/123)."""
+    tok = url_or_out.strip().rstrip("/").rsplit("/", 1)[-1]
+    return int(tok) if tok.isdigit() else None
+
+
+def _issue_id(repo, number):
+    """The GitHub REST database id of an issue (needed by the sub-issues API, which keys on id, not
+    the human number). Returns None on failure."""
+    owner_repo = repo.split("/")
+    if len(owner_repo) != 2:
+        return None
+    code, out = gh(["api", f"repos/{repo}/issues/{number}", "--jq", ".id"])
+    if code != 0:
+        return None
+    try:
+        return int(out.strip())
+    except ValueError:
+        return None
+
+
+def _link_sub_issue(repo, parent_number, child_number):
+    """Attach child as a NATIVE GitHub sub-issue of parent (GitHub's own hierarchy, so the parent shows
+    a sub-issue list + progress roll-up in the UI). The sub-issues API keys on the child's database id.
+    R0: we borrow GitHub's native parent/child primitive rather than inventing our own link. Returns
+    (ok, detail)."""
+    child_id = _issue_id(repo, child_number)
+    if child_id is None:
+        return False, f"could not resolve issue #{child_number} database id for the sub-issue link"
+    # -F (not -f): the sub_issues API requires sub_issue_id as a JSON *integer*; -f sends a string,
+    # which the API rejects ("not of type integer"). -F preserves the numeric type.
+    code, out = gh(["api", "--method", "POST",
+                    f"repos/{repo}/issues/{parent_number}/sub_issues",
+                    "-F", f"sub_issue_id={child_id}"])
+    if code != 0:
+        # already-linked is not an error for us (idempotent). GitHub phrases this as "already"
+        # or "duplicate sub-issues" / "may only have one parent" — all mean the link already exists.
+        low = out.lower()
+        if "already" in low or "duplicate sub-issue" in low or "one parent" in low:
+            return True, f"#{child_number} already a sub-issue of #{parent_number} (idempotent)"
+        return False, f"sub-issue link failed: {out.strip()[:160]}"
+    return True, f"#{child_number} linked as a sub-issue of #{parent_number}"
+
+
 def cmd_create(a):
-    labels = ["orgforge:ready"]
-    ensure = [("orgforge:ready", "1d76db")]
+    # KIND: objective (the big-picture RFP/objective Issue — the parent) vs task (a department's unit of
+    # work — a sub-issue of its objective). The kind label makes the two legible at a glance; the native
+    # sub-issue link (below) makes the hierarchy real in GitHub's UI. Both are ledger projections (SSoT
+    # unchanged): an objective Issue projects an org objective; a task Issue projects a candidate.
+    kind = getattr(a, "kind", None) or "task"
+    # idempotency (docs/11 §0): if an open Issue with this title (+objective) already exists, this is a
+    # replay — return it instead of minting a duplicate.
+    existing = _find_open_issue(a.repo, a.title, a.objective)
+    if existing is not None:
+        print(f"issue #{existing} already open for {a.title!r} — idempotent no-op (docs/11 §0).")
+        # still (re)assert the parent link so a replayed task lands under its objective
+        parent = getattr(a, "parent", None)
+        if parent:
+            ok, detail = _link_sub_issue(a.repo, int(str(parent).lstrip("#")), existing)
+            print(detail if ok else f"WARN: {detail}", file=sys.stderr if not ok else sys.stdout)
+        return 0
+    labels = ["orgforge:ready", f"orgforge:kind:{kind}"]
+    ensure = [("orgforge:ready", "1d76db"),
+              (f"orgforge:kind:{kind}", "0e8a16" if kind == "objective" else "bfd4f2")]
     if a.objective:
         lbl = f"orgforge:objective:{a.objective}"
         labels.append(lbl); ensure.append((lbl, "5319e7"))
+    dept = getattr(a, "dept", None)
+    if dept:
+        lbl = f"orgforge:dept:{dept}"
+        labels.append(lbl); ensure.append((lbl, "d4c5f9"))
     if a.source:
         lbl = f"orgforge:{a.source}"
         labels.append(lbl); ensure.append((lbl, "fbca04"))
     _ensure_labels(a.repo, ensure)
     body = a.body or ""
+    parent = getattr(a, "parent", None)
+    if parent:
+        body += f"\n\nParent: #{str(parent).lstrip('#')}"   # human-readable; the native link is added below
     if a.depends:
         deps = ", ".join(f"#{d.strip().lstrip('#')}" for d in a.depends.split(",") if d.strip())
         body += f"\n\nDepends on: {deps}"
@@ -119,6 +228,15 @@ def cmd_create(a):
         print(f"gh error creating issue: {out}", file=sys.stderr)
         return 2
     print(out.strip())   # gh prints the new issue URL
+    # attach as a native sub-issue of its parent objective, so GitHub shows the hierarchy + roll-up
+    if parent:
+        child_number = _issue_number(out)
+        if child_number is None:
+            print("WARN: created the Issue but could not parse its number to link it as a sub-issue.",
+                  file=sys.stderr)
+            return 0
+        ok, detail = _link_sub_issue(a.repo, int(str(parent).lstrip("#")), child_number)
+        print(detail if ok else f"WARN: {detail}", file=(sys.stdout if ok else sys.stderr))
     return 0
 
 
@@ -150,6 +268,43 @@ def cmd_stage(a):
     return 0
 
 
+def cmd_log(a):
+    """Append a WORK-LOG comment to a task Issue on a milestone event (cycle_started, progress_recorded,
+    phase_admitted, cycle_completed, …). The ledger stays the SSoT — this comment is its projection onto
+    the Issue so the human (on a phone) sees progress accrue without opening the ledger.
+
+    IDEMPOTENT (docs/11 §0): each comment carries a hidden marker `<!-- orgforge:event:<id> -->`. If a
+    comment with this event id already exists on the Issue, we no-op — a replayed/retried cycle logs the
+    same milestone once, never twice. Pass --event-id (the ledger event's id) to key the dedup; without
+    it we fall back to a hash of (event, detail)."""
+    marker_key = a.event_id or ("h" + str(abs(hash((a.event, a.detail or "")))))
+    marker = f"<!-- orgforge:event:{marker_key} -->"
+    # dedup: has this milestone already been logged on the Issue?
+    code, out = gh(["issue", "view", str(a.issue), "--repo", a.repo, "--json", "comments"])
+    if code == 0:
+        try:
+            for c in json.loads(out).get("comments", []):
+                if marker in (c.get("body") or ""):
+                    print(f"log: event {marker_key} already on issue #{a.issue} — idempotent no-op "
+                          f"(docs/11 §0).")
+                    return 0
+        except Exception:
+            pass   # can't read comments — fall through and post (a rare dup is recoverable)
+    # the visible line: a compact, human-readable milestone. detail is optional free text.
+    line = f"**{a.event}**"
+    if a.phase:
+        line += f" · phase: `{a.phase}`"
+    if a.detail:
+        line += f" — {a.detail}"
+    body = f"{line}\n\n{marker}"
+    code, out = gh(["issue", "comment", str(a.issue), "--repo", a.repo, "--body", body])
+    if code != 0:
+        print(f"gh error posting work-log comment: {out}", file=sys.stderr)
+        return 2
+    print(f"logged {a.event} to issue #{a.issue}.")
+    return 0
+
+
 def cmd_ready(a):
     # list open Issues labeled orgforge:ready, unclaimed, with no open dependency
     code, out = gh(["issue", "list", "--repo", a.repo, "--label", "orgforge:ready",
@@ -162,11 +317,19 @@ def cmd_ready(a):
     except Exception as e:
         print(f"parse: {e}", file=sys.stderr)
         return 2
+    kind = getattr(a, "kind", None) or "task"   # default: only TASKS are workable ready items
     ready = []
     for it in issues:
         names = [l["name"] for l in it.get("labels", [])]
         if any(n.startswith(CLAIM_PREFIX) for n in names):
             continue   # already claimed
+        # kind filter: an objective Issue is a parent/roll-up, not a claimable unit of work. Default to
+        # tasks; pass --kind objective to list objectives, or --kind any for both.
+        if kind != "any":
+            it_kind = next((n[len("orgforge:kind:"):] for n in names
+                            if n.startswith("orgforge:kind:")), "task")
+            if it_kind != kind:
+                continue
         # dependency: parse "Depends on: #n, #m"; ready only if all referenced issues are closed
         body = it.get("body") or ""
         deps = []
@@ -197,13 +360,31 @@ def main(argv):
     q.add_argument("--repo", required=True); q.add_argument("--title", required=True)
     q.add_argument("--body"); q.add_argument("--objective"); q.add_argument("--source")
     q.add_argument("--depends"); q.add_argument("--priority", type=int)
+    q.add_argument("--kind", choices=("objective", "task"), default="task",
+                   help="objective = the big-picture RFP/objective Issue (parent); "
+                        "task = a department's unit of work (a sub-issue of its objective)")
+    q.add_argument("--dept", help="the department this task belongs to (labels orgforge:dept:<name>)")
+    q.add_argument("--parent", help="parent Issue number: link this task as a NATIVE GitHub sub-issue "
+                                    "of that objective (GitHub shows the hierarchy + progress roll-up)")
     q = sub.add_parser("stage")
     q.add_argument("--repo", required=True); q.add_argument("--issue", required=True, type=int)
     q.add_argument("--stage", required=True)
     q = sub.add_parser("ready"); q.add_argument("--repo", required=True)
+    q.add_argument("--kind", choices=("task", "objective", "any"), default="task",
+                   help="which kind of Issue to list as ready (default: task — objectives are "
+                        "parent/roll-up Issues, not claimable units of work)")
+    q = sub.add_parser("log")
+    q.add_argument("--repo", required=True); q.add_argument("--issue", required=True, type=int)
+    q.add_argument("--event", required=True,
+                   help="the milestone ledger event class (cycle_started, progress_recorded, "
+                        "phase_admitted, cycle_completed, …)")
+    q.add_argument("--detail", help="optional free-text detail for the log line")
+    q.add_argument("--phase", help="the SDLC phase, if this milestone is a phase transition")
+    q.add_argument("--event-id", dest="event_id",
+                   help="the ledger event's id — keys the idempotent dedup so a replay logs once")
     a = p.parse_args(argv[1:])
     return {"claim": cmd_claim, "release": cmd_release, "create": cmd_create,
-            "stage": cmd_stage, "ready": cmd_ready}[a.cmd](a)
+            "stage": cmd_stage, "ready": cmd_ready, "log": cmd_log}[a.cmd](a)
 
 
 if __name__ == "__main__":

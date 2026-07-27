@@ -52,7 +52,7 @@ For each theory the primary text is cited as **[P]**; convenience web summaries 
   (creativity, direction, delegation, coordination, collaboration); crises leadership → autonomy →
   control → red tape; the 5th crisis Greiner left open. Greiner's sequence is *one-way and crisis-driven*
   (rapid growth shortens the time to the next crisis, slow growth delays it — but it does not reverse).
-  docs/05's "bidirectional activation levels" reframing keeps Greiner's phase *names* while dropping the
+  docs/02's "bidirectional activation levels" reframing keeps Greiner's phase *names* while dropping the
   one-way-crisis *mechanism* — so under the elastic model, Greiner is a lens/taxonomy, not a transferred
   finding. This is a known limit, stated in docs/02.
   [S] Convenience summaries: https://www.mindtools.com/aks7u4n/the-greiner-curve/ ·
@@ -84,11 +84,11 @@ For each theory the primary text is cited as **[P]**; convenience web summaries 
 - **[P] Simon (1947), *Administrative Behavior*, Macmillan** — bounded rationality
   (the direct descendant of Barnard's zone of acceptance); **and (1962),
   "The Architecture of Complexity", *Proceedings of the American Philosophical Society* 106(6)** —
-  near-decomposability, which supports the latent-modular design in docs/05.
+  near-decomposability, which supports the latent-modular design in docs/02.
 - **[P] Penrose (1959), *The Theory of the Growth of the Firm*, Blackwell** —
   growth is limited by *managerial capacity* (the time incumbent managers need to absorb new
   managers), not by market interfaces; limits the *rate* of growth, not firm size per se; foundation of
-  the resource-based view. docs/05's "ledger + context-pack nullifies the Penrose effect" is the repo's
+  the resource-based view. docs/02's "ledger + context-pack nullifies the Penrose effect" is the repo's
   own *argued extension*, flagged there as a claim to test.
 - **[P] Lawrence & Lorsch (1967), *Organization and Environment*, Harvard Business School Press** —
   differentiation/integration: the real source for running different regimes in different subunits.
@@ -115,7 +115,7 @@ For each theory the primary text is cited as **[P]**; convenience web summaries 
 - **[P] Mintzberg & Waters (1985), "Of Strategies, Deliberate and Emergent", *Strategic Management
   Journal* 6(3).**
 
-### Knowledge & doctrine (docs/07)
+### Knowledge & doctrine (docs/06)
 
 - **[P] Tushman (1977), "Special Boundary Roles in the Innovation Process", *Administrative Science
   Quarterly* 22(4)** — boundary spanning; the curator role's theoretical basis.
@@ -128,7 +128,7 @@ For each theory the primary text is cited as **[P]**; convenience web summaries 
 - Mintzberg's **standardization of skills** (professional bureaucracy; see Mintzberg 1979 above) is
   the coordination mechanism that doctrine implements.
 
-### Context economy (docs/08)
+### Context economy (docs/07)
 
 - **[P] Parnas (1972), "On the Criteria To Be Used in Decomposing Systems into Modules",
   *Communications of the ACM* 15(12)** — information hiding.
@@ -196,7 +196,7 @@ harness and loop** — is thin-to-empty in the literature. That is an *opportuni
 parts*, not a claim of blank-slate invention. The classical theories are cited from their primary
 texts, with web summaries marked **[S]**.
 
-## The elastic organization (docs/05 — which constraints transfer, which vanish)
+## The elastic organization (docs/02 — which constraints transfer, which vanish)
 
 - **[P] Coase (1937), "The Nature of the Firm", *Economica* 4(16)** (firm boundaries set by
   coordination/transaction costs, not capital).
@@ -219,12 +219,12 @@ texts, with web summaries marked **[S]**.
   capability + per-project activation. https://en.wikipedia.org/wiki/Project-based_organization
   (For primaries, see Starkey/Barnatt/Tempest 2000 and DeFillippi & Arthur 1998 above.)
 
-*The Family A (financial/frictional) vs Family B (coordination) constraint split in docs/05 is
+*The Family A (financial/frictional) vs Family B (coordination) constraint split in docs/02 is
 this repo's own synthesis of the above; treat it as a design hypothesis, per the repo's stance.*
 
-## Decision practice (docs/06)
+## Decision practice (docs/05)
 
-- **[S] 稟議 (ringi)** — Japanese written-proposal approval practice; docs/06 borrows only the
+- **[S] 稟議 (ringi)** — Japanese written-proposal approval practice; docs/05 borrows only the
   asynchronous written-proposal aspect (agents propose in writing, authority above decides). Real
   ringi is a consensus-formation system (nemawashi, sequential seals) and is typically slow and
   blocking; the repo's mechanism is closer to a delegation-of-authority (決裁権限) matrix plus an
@@ -246,10 +246,10 @@ this repo's own synthesis of the above; treat it as a design hypothesis, per the
   so it constrains — but does not refute — an org-first design. It remains **[S]** (a 2026 preprint, not
   peer-reviewed).
 
-### Attention allocation — intra-department work selection (docs/12)
+### Attention allocation — intra-department work selection (docs/09)
 
 How a single department internally decides what to work on next. There is **no single named
-theory** for this; docs/12 synthesizes the organization-theory *attention* tradition with the
+theory** for this; docs/09 synthesizes the organization-theory *attention* tradition with the
 operations-management *flow* tradition, and says so. These theories were formulated at the level of
 the decision-maker and the firm, not a department's private backlog — applying them at intra-unit
 granularity is a **down-scaling synthesis**, flagged as such, not a verbatim claim.
@@ -284,38 +284,38 @@ Operations management (the mechanical *how* — a separate register, kept distin
 
 *Off-target note:* Mintzberg's coordination mechanisms (cited elsewhere for inter-unit
 coordination) do **not** address intra-unit work selection — they govern how interdependent work is
-linked, not which of a unit's own items is picked next. Do not cite them for docs/12.
+linked, not which of a unit's own items is picked next. Do not cite them for docs/09.
 
-### Proxy-stack, conflict, and precedent (docs/13)
+### Proxy-stack, conflict, and precedent (docs/05)
 
 Anchors for the five gaps a theory-coverage sweep found — "is the org still solving the right
 problem?" Applied at this repo's granularity as explicit synthesis, flagged, not claimed verbatim.
 
 - **[P] Weick (1979/1995), *The Social Psychology of Organizing* / *Sensemaking in Organizations*** —
   **enactment**: organizations partly create the environment they then respond to; sensing whether the
-  premise still holds is an active, ongoing act. Anchor for PREMISE (docs/13 §1).
+  premise still holds is an active, ongoing act. Anchor for PREMISE (docs/05 §6.1).
 - **[S] Aguilar (1967), *Scanning the Business Environment*, Macmillan** — environmental scanning; the
   disciplined watch for the external shift that invalidates a strategy. Supports PREMISE.
 - **[P] Staw (1976), "Knee-deep in the Big Muddy: A Study of Escalating Commitment to a Chosen Course
   of Action," *Organizational Behavior and Human Performance* 16(1): 27–44** — **escalation of
   commitment**: decision-makers pour resources into a failing course rather than abandon a sunk
-  investment. Anchor for SUNK-COURSE (docs/13 §2).
+  investment. Anchor for SUNK-COURSE (docs/05 §6.2).
 - **[P] Argyris & Schön (1978), *Organizational Learning: A Theory of Action Perspective*,
   Addison-Wesley** — **single- vs double-loop learning**: single-loop corrects actions within a fixed
   frame; double-loop questions the governing goal/assumption itself. Anchor for FRAME-REVIEW
-  (docs/13 §3) — a canonical framework the repo previously did not cite anywhere.
+  (docs/05 §5.4) — a canonical framework the repo previously did not cite anywhere.
 - **[P] Follett (1925/1942), "Constructive Conflict," in *Dynamic Administration*** — conflict has
   three settlements: **domination, compromise, integration**; integration (an option honoring both
   parties) is the constructive one. Anchor for MANDATE-CONFLICT's "both satisfiable → integrate"
-  branch (docs/13 §4). Paired with **Lawrence & Lorsch (1967)** (already cited) on conflict-resolution
+  branch (docs/05 §6.4). Paired with **Lawrence & Lorsch (1967)** (already cited) on conflict-resolution
   modes across differentiated units.
 - **[P] Nelson & Winter (1982), *An Evolutionary Theory of Economic Change*, Harvard** — **routines as
   organizational memory**: an org's settled ways of doing things are where its operational knowledge
-  lives. Anchor for CONVENTIONS (docs/13 §5); reinforced by Cyert & March SOPs (already cited).
+  lives. Anchor for CONVENTIONS (docs/05 §6.5); reinforced by Cyert & March SOPs (already cited).
 
 ---
 
-### Manager accountability (docs/14)
+### Manager accountability (docs/09)
 
 What a manager/dept-head is answerable for across the delegation chain — the four accountabilities
 of Organ 6's vertical control facet. Applied at agent-manager granularity as explicit synthesis;
@@ -354,10 +354,10 @@ March & Simon are already cited above — referenced, not duplicated.)
 - **[S] Read (1962) / O'Reilly (1978)** — upward information distortion is *intentional* and tracks
   the reporter's incentives. Anchor A4's `report_fidelity` audit (grade the roll-up against source).
 
-### Decomposition principles — how a manager splits a task (docs/15)
+### Decomposition principles — how a manager splits a task (docs/03)
 
 How a manager turns one backlog item into sub-tasks (or keeps it single-threaded). There is **no
-single named theory** of intra-unit task decomposition; docs/15 renders four consensus results at the
+single named theory** of intra-unit task decomposition; docs/03 renders four consensus results at the
 agent-manager granularity the originals did not reach. The own-domain-vs-cross-domain boundary and its
 lint tooth are this repo's synthesis, to be verified against a running system.
 
@@ -370,19 +370,19 @@ lint tooth are this repo's synthesis, to be verified against a running system.
 - **[P] Thompson (1967), *Organizations in Action*, McGraw-Hill** — the **interdependence taxonomy**
   (pooled / sequential / reciprocal) and its rising coordination cost. The anchor for "never split
   reciprocal work; pin sequential seams; pooled splits freely" (§2.3), and the theoretical form of
-  docs/14's keep-coupled-work-single-threaded.
+  docs/09's keep-coupled-work-single-threaded.
 - **[P] Becker & Murphy (1992), "The Division of Labor, Coordination Costs, and Knowledge," *QJE*
   107(4)** (already cited) — the division of labor is bounded by **coordination cost**, not by how
   finely one could cut. The anchor for "split only while the gain beats the coordination cost" (§2.4).
 - **[P] Conway (1968), *Datamation* 14(5)** (already cited, docs/04 §3) — the artifact mirrors the
   decomposition; the split is itself an architectural decision.
-- Knowledge-boundary anchors reused from docs/07 §2.1 (role-keyed doctrine) and docs/08 §1.1 (no
+- Knowledge-boundary anchors reused from docs/06 §2.1 (role-keyed doctrine) and docs/07 §1.1 (no
   **doctrine capture** — the control layer holds no per-role domain doctrine), which ground §3's
   own-domain-vs-cross-domain rule and §5's lint tooth.
 
 ---
 
-### Loop reliability — fewer decisions, explicit state, staged trust (docs/16)
+### Loop reliability — fewer decisions, explicit state, staged trust (docs/10)
 
 The reliability discipline for the operating loop. The compound-failure law is a classical result; the
 loop-engineering framing is current practitioner literature, cited as [S] (evidence the practice exists
@@ -395,7 +395,7 @@ and is being worked out, not settled theory).
 - **[S] r_kaga (2026), "ループエンジニアリングの本質"** (zenn.dev/r_kaga/articles/a27a3879dd3ce4) — the
   three-loop decomposition (execution / completion / operation) and the thesis that the operating loop —
   start conditions, verification gates, failure recovery — is the real object of design, not raw
-  autonomy. Anchors §5's verification ladder and the framing of docs/11 as the operation loop.
+  autonomy. Anchors §5's verification ladder and the framing of docs/05 as the operation loop.
 - **[S] y-hirakaw (2026), "自動工場設計の道:ループエンジニアリングは実際に作るとどこで詰まるのか"**
   (zenn.dev/z_maruhira/articles/ba4eba465034d1) — the implementer's report: the request-layer /
   enforcement-layer split (§2), the subagent-does-not-inherit-skill-context trap (§2 corollary), the
@@ -403,7 +403,7 @@ and is being worked out, not settled theory).
   compressed to one label (§3), and read-only-first staging (§4). Anchors those sections as observed
   practice this repo's mechanisms already realize.
 
-### Ideal state — the four-concept convergence and the amplifier constraint (docs/17)
+### Ideal state — the four-concept convergence and the amplifier constraint (docs/12)
 
 The north-star synthesis. Grounds the claim that Software Factory + Harness + Loop + SDD collapse into one
 principle (externalize the tacit as source; make the verifying loop the product; borrow the substrate;
@@ -411,18 +411,18 @@ industrialize under upstream guardrails), all bounded by "autonomy is bounded by
 
 - **[P] Greenfield & Short (2003), "Software Factories," OOPSLA** (already cited, docs/sources §Lens-4) —
   the factory schema as a viewpoint graph, framework completion, model-as-source. The classical lineage
-  docs/17 §1 traces.
+  docs/12 §1 traces.
 - **[S] Anthropic, "Building Effective Agents"** (already cited) — harness-vs-model, poka-yoke tools,
-  the scaffold is the product. Anchors docs/17 §1's harness-engineering strand.
+  the scaffold is the product. Anchors docs/12 §1's harness-engineering strand.
 - **[S] r_kaga (2026) / y-hirakaw (2026)** (already cited, §16) — loop engineering: the operation loop and
-  its verification are the product; the human moves from task-giver to loop-designer. docs/17 §1 loop
+  its verification are the product; the human moves from task-giver to loop-designer. docs/12 §1 loop
   strand.
 - **[S] GitHub Spec Kit** (github.blog / github.github.com/spec-kit) and **[S] Amazon Kiro**
   (kiro.dev; "the spec is source-of-truth and code is a build artifact"; steering docs product/tech/
-  structure.md; "spec-driven codebases benefit as models improve") — the SDD lineage docs/17 §1 maps
+  structure.md; "spec-driven codebases benefit as models improve") — the SDD lineage docs/12 §1 maps
   onto orgforge's spec=organization / projection=generated-view.
 - **[S] Osmani, "Software Factories, Light and Dark"** — the comprehension-debt failure mode (months of
-  green tests while understanding erodes); move human judgment upstream. Anchors docs/17 §6's "don't
+  green tests while understanding erodes); move human judgment upstream. Anchors docs/12 §6's "don't
   measure by items-drained."
 - **[S] AI-DLC practitioner field report (2026; the user's own article)** — the **amplifier constraint**
   (DORA 2025: AI amplifies good and bad process equally; the bottleneck moves, TOC); root cause = context
@@ -430,7 +430,7 @@ industrialize under upstream guardrails), all bounded by "autonomy is bounded by
   Spec** (fragment-Specs never form system-wide coherent context; maintenance cost unsustainable);
   context accumulates as a by-product of work via co-commit, enforced by mechanism not attention;
   human-in-the-loop as design (judgment upstream). Cited as [S] first-hand practitioner evidence; it
-  supplies docs/17 §3's top-level bound and is weighed as a co-equal opinion in the ideal-state synthesis.
+  supplies docs/12 §3's top-level bound and is weighed as a co-equal opinion in the ideal-state synthesis.
   Its DORA/GitClear/Faros/CodeRabbit data points are secondary industry reports.
 
 ---

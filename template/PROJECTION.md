@@ -3,7 +3,7 @@
 This is the layer that turns the *articulated organization* (organization.yaml,
 constitution.yaml, ROLE.md, the intent block, the context packs) into the **actual config
 files a specific LLM harness reads** — so a department can launch and run. It is the one
-harness-specific layer in the repo (docs/09 §2); everything above it is harness-neutral.
+harness-specific layer in the repo (docs/08 §2); everything above it is harness-neutral.
 
 Two things get projected, per running department:
 
@@ -29,26 +29,26 @@ The projected instruction file is assembled, in order, from the articulated org:
                                              loaded by reference from its ledger-stamped version
 2. THIS ROLE'S JOB     (division of labor) ← ROLE.md instance: mission, duties, the standard
                                              its output must meet, its named checker
-3. THIS ROLE'S DOCTRINE (current norms)    ← docs/07, the gate-admitted doctrine file
+3. THIS ROLE'S DOCTRINE (current norms)    ← docs/06, the gate-admitted doctrine file
 4. THE DECISION LINE   (what to escalate)  ← the constitution's tier lists, reduced to
                                              "what you may do now / must propose / must hold"
                                              FOR THIS ROLE
 5. DISCIPLINE PREAMBLE  (immutable)         ← ROLE.md's charter-protected discipline block, verbatim
-6. GRANTED CONTEXT      (need-to-know)      ← the role's scoped context-pack views (docs/08),
+6. GRANTED CONTEXT      (need-to-know)      ← the role's scoped context-pack views (docs/07),
                                              written into the working dir as files it reads
 ```
 
 Items 1–5 are the *content* of the instruction file. Item 6 is *files in the working
 directory* the harness can read — "assembling the context pack" is exactly this
-file-writing step (docs/09 §2), not a runtime.
+file-writing step (docs/08 §2), not a runtime.
 
-**Manager duty — hand each subordinate a scoped brain AND a seam contract (docs/07 §2.1).**
+**Manager duty — hand each subordinate a scoped brain AND a seam contract (docs/06 §2.1).**
 Item 3 (this role's doctrine) is auto-injected by the SessionStart hook only for a *top-level*
 launch. A manager that spawns subordinates in-process (the Agent/subagent tool) must build the
 hand-off itself with `tools/handoff.py`, prepended to the child's prompt. The packet fixes
 (a) the child's **slice**, (b) the **seam contract** — inputs/outputs/owns/forbid, the hard
 interface the manager later integrates against; this, not a global decomposition axis, is what
-makes siblings compose (docs/07 §2.1.1), and (c) the child's **brain scoped to its slice**
+makes siblings compose (docs/06 §2.1.1), and (c) the child's **brain scoped to its slice**
 (only doctrine whose `affected_roles` name the child role, so the manager's broader brain does
 not leak down). The child role is named by trade (`ui-worker`, not `worker`). A manager profile
 states this as an explicit step, the same way it states spec-driven delegation; omitting the
@@ -85,7 +85,7 @@ model_family: family-A      # NEUTRAL family label (§3 maps it to a concrete ve
                             # (skeptic) must declare a DIFFERENT family from the gate/maker it
                             # judges — same base model, same blind spots. The lint enforces it.
 effort: medium              # low | medium | high — reasoning depth intent; mapped per harness
-context_budget_tokens: 20000  # must match this role's information_flow.scopes grant (docs/08)
+context_budget_tokens: 20000  # must match this role's information_flow.scopes grant (docs/07)
 stop:
   goal: "candidate submitted to the gate"   # the verifiable stop condition (loop delegated to host)
   max_iterations: 8                          # a cap the host loop enforces
@@ -146,9 +146,9 @@ The projection is a *rendering*, so it must not lose or alter the articulated or
 
 - **The decision line survives.** A role's projected instruction file must give it exactly
   its delegated bounds — no more. It may not grant a maker the authority to admit its own
-  work (the separation the lint checks structurally must hold at launch, docs/09 §5).
+  work (the separation the lint checks structurally must hold at launch, docs/08 §5).
 - **Need-to-know survives.** Only the role's granted views are written into its working dir
-  (docs/08). The projection cannot smuggle context a role wasn't granted — that would
+  (docs/07). The projection cannot smuggle context a role wasn't granted — that would
   re-tacit-ify the information flow the org just articulated.
 - **The discipline preamble survives verbatim.** Item 5 is charter-protected; the
   projection copies it, never edits it.
@@ -158,5 +158,5 @@ The projection is a *rendering*, so it must not lose or alter the articulated or
 
 *Status: the projection contract (this file, `role-settings.yaml`, and the per-harness map)
 is specified here; wiring it for a concrete harness is the adopter's step and the founding
-rehearsal (docs/10) did it by hand. Automating the render is the remaining build item flagged
+rehearsal (demos/S1-founding-rehearsal) did it by hand. Automating the render is the remaining build item flagged
 in docs/01 §7 #1.*

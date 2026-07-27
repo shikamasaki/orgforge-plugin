@@ -1,7 +1,7 @@
 # integrations — running the articulated org on a real harness
 
 The `tools/*.py` organs are harness-neutral (they read the ledger and exit `0`=allow / `10`=escalate).
-This directory is the **projection layer** (PROJECTION.md, docs/09) that makes them *actually fire*
+This directory is the **projection layer** (PROJECTION.md, docs/08) that makes them *actually fire*
 as direct features of a real coding-agent harness — so a guardrail **blocks a real tool call**, a
 department **runs headless and unattended**, and doctrine **loads into context** every cycle. Two
 harnesses are wired; the core stays neutral.
@@ -20,7 +20,7 @@ integrations/
                            #   BLOCKS (exit 2 / deny-JSON) when the organ escalates. Fail-safe:
                            #   an unevaluable guardrail blocks, never silently allows.
     org_session_start.py   # A SessionStart hook (both): renders the role's doctrine + conventions
-                           #   and injects them as context — the "load" step of docs/07 / docs/13.
+                           #   and injects them as context — the "load" step of docs/06 / docs/05.
   claude-code/
     .claude-plugin/plugin.json   # a Claude Code PLUGIN bundling the below (install once)
     hooks/hooks.json             # wires org_hook.py (PreToolUse) + org_session_start (SessionStart)

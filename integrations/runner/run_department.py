@@ -2,7 +2,7 @@
 """run_department — launch ONE department as a headless agent turn, on Claude Code or Codex.
 
 The projection of a role from organization.yaml onto an actual unattended agent process (the
-thing docs/09 delegates to the host). It reads the role's neutral settings and builds the
+thing docs/08 delegates to the host). It reads the role's neutral settings and builds the
 harness-specific headless invocation:
 
   Claude Code:  claude -p "<task>" --append-system-prompt "<profile>" --allowedTools "<tools>"

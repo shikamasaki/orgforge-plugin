@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""conventions — internally-originated reusable precedent (docs/13 §5).
+"""conventions — internally-originated reusable precedent (docs/05 §6.5).
 
 Human orgs coordinate massively through routines and precedent — "how we do X here," settled once
 and silently reused. An AI org that cold-starts each cycle from profile + doctrine + ledger has no
@@ -7,7 +7,7 @@ shared memory of its OWN established conventions, so peer depts independently re
 recurring cross-cutting thing (a naming scheme, an interface shape, an escalation format, "we
 settled on approach B last week") and diverge — the exact tacit-not-articulated failure the whole
 repo exists to prevent, reappearing one level down. This is a THIRD box distinct from the others:
-  - not doctrine (docs/07): doctrine is EXTERNAL world-knowledge; a convention is INTERNAL precedent.
+  - not doctrine (docs/06): doctrine is EXTERNAL world-knowledge; a convention is INTERNAL precedent.
   - not the constitution: the constitution says WHO decides, not the CONTENT of a settled non-charter
     operational choice.
   - not reconcile.py: that catches a LIVE collision; a convention is the upstream shared prior so the
@@ -60,7 +60,7 @@ def _save(root, data):
 def cmd_adopt(a):
     if a.by != "checker":
         print("adopt: --by must be 'checker' — the dept that proposed a convention may not adopt "
-              "its own (same maker/checker split as doctrine, docs/07 §4)", file=sys.stderr)
+              "its own (same maker/checker split as doctrine, docs/06 §4)", file=sys.stderr)
         return 2
     data = _load(a.root)
     # conflict guard: a different settled choice already exists for this scope
@@ -70,6 +70,14 @@ def cmd_adopt(a):
                   f"use `conflict` to adjudicate before forking precedent", file=sys.stderr)
             return ESCALATE
     cid = "v" + hashlib.sha256(f"{a.scope}:{a.choice}".encode()).hexdigest()[:10]
+    # idempotency (docs/11 §0): the cid IS the natural key ((scope, choice) hash). Re-adopting the
+    # IDENTICAL convention (a replayed /org-work cycle co-committing the same rule) must NOT append a
+    # second row and a second convention_adopted event — that would inflate the domain-model growth
+    # count (conventions.py growth, read by the tick). No-op on an existing active cid.
+    if any(c["id"] == cid and c.get("status") == "active" for c in data["conventions"]):
+        print(f"adopt: convention {cid} for scope '{a.scope}' ({a.choice}) already active — "
+              f"idempotent no-op (docs/11 §0). Not re-adopted.")
+        return OK
     data["conventions"].append({
         "id": cid, "scope": a.scope, "choice": a.choice, "owner": a.owner,
         "provenance": {"adopted_by": a.by}, "review_by": a.review_by or "UNSET",
@@ -129,7 +137,7 @@ def cmd_stale(a):
 def cmd_growth(a):
     """DOMAIN-MODEL GROWTH — the domain model (settled conventions: ubiquitous language, boundaries,
     naming) must GROW as the org runs, not stay a static founding artifact; a rising, well-scoped
-    convention base is the org's inferability rising over time (docs/17 §5.5, the user's amplifier
+    convention base is the org's inferability rising over time (docs/12 §5.5, the user's amplifier
     constraint made dynamic). This reports the active convention count and the scopes covered so
     "the SSoT/domain model is growing" is a checked fact. It does not escalate — it is a health
     breadcrumb the tick surfaces; a FLAT domain model over many cycles is the signal that the org is
@@ -145,7 +153,7 @@ def cmd_growth(a):
     if not active:
         print("  the domain model is EMPTY — no ubiquitous language / boundaries settled yet. As the "
               "org runs, settle domain rules IN the work cycle (co-commit) so inferability rises; an "
-              "org that never grows its model amplifies a fixed ambiguity (docs/17 §5.5).")
+              "org that never grows its model amplifies a fixed ambiguity (docs/12 §5.5).")
     return OK
 
 

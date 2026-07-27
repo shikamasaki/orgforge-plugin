@@ -86,6 +86,73 @@ def test_ledger_requires_prior_refuted_not_enough(tmp_path):
     assert code == 3, out   # only verdict==survives satisfies requires_prior
 
 
+# ── SDLC phase gate (docs/11 §2) — the forced, non-skippable phase order, reproducibility's spine ──
+def test_phase_requirements_may_always_start(tmp_path):
+    # requirements has no predecessor, so it starts against an empty history
+    code, out = run("ledger.py", "append", str(tmp_path), "--actor", "r",
+                    "--class", "phase_started",
+                    "--payload", '{"deliverable":"D1","phase":"requirements","role":"r"}',
+                    "--ts", "2026-07-16T00:00:00Z")
+    assert code == 0, out
+
+
+def test_phase_design_blocked_without_requirements_admitted(tmp_path):
+    # design may not start until requirements is admitted — the non-skippable phase order
+    code, out = run("ledger.py", "append", str(tmp_path), "--actor", "r",
+                    "--class", "phase_started",
+                    "--payload", '{"deliverable":"D1","phase":"design","role":"r"}',
+                    "--ts", "2026-07-16T00:10:00Z")
+    assert code == 3 and "requires a prior" in out, out
+
+
+def test_phase_deploy_cannot_skip_test(tmp_path):
+    # with only requirements admitted, deploy must NOT start (it skips design/implement/test)
+    seed(tmp_path, "a", "phase_admitted",
+         {"deliverable": "D1", "phase": "requirements", "verdict": "pass",
+          "evidence_ref": "e", "admitter": "a"})
+    code, out = run("ledger.py", "append", str(tmp_path), "--actor", "r",
+                    "--class", "phase_started",
+                    "--payload", '{"deliverable":"D1","phase":"deploy","role":"r"}',
+                    "--ts", "2026-07-16T00:20:00Z")
+    assert code == 3, out   # prior(deploy)==test, which is not admitted
+
+
+def test_phase_design_starts_after_requirements_admitted(tmp_path):
+    seed(tmp_path, "a", "phase_admitted",
+         {"deliverable": "D1", "phase": "requirements", "verdict": "pass",
+          "evidence_ref": "e", "admitter": "a"})
+    code, out = run("ledger.py", "append", str(tmp_path), "--actor", "r",
+                    "--class", "phase_started",
+                    "--payload", '{"deliverable":"D1","phase":"design","role":"r"}',
+                    "--ts", "2026-07-16T00:30:00Z")
+    assert code == 0, out
+
+
+# ── idempotency (docs/11 §0) — a natural-keyed event counts once under replay/retry ──
+def test_append_natural_key_is_idempotent(tmp_path):
+    args = ("ledger.py", "append", str(tmp_path), "--actor", "h",
+            "--class", "exposure_budget_checked",
+            "--payload", '{"dimension":"file_mutations","allow":true}',
+            "--natural-key", "call-abc")
+    c1, _ = run(*args, "--ts", "2026-07-16T00:00:00Z")
+    c2, out2 = run(*args, "--ts", "2026-07-16T00:01:00Z")   # retry, same key, later ts
+    assert c1 == 0 and c2 == 0 and "idempotent no-op" in out2, out2
+    # exactly one event landed — the retry did not double-count
+    code, out = run("ledger.py", "view", str(tmp_path), "raw") if False else (0, "")
+    events = [l for l in (tmp_path / "ledger.jsonl").read_text().splitlines() if l.strip()]
+    assert len(events) == 1, f"expected 1 event, got {len(events)}"
+
+
+def test_append_different_natural_keys_both_land(tmp_path):
+    base = ("ledger.py", "append", str(tmp_path), "--actor", "h",
+            "--class", "exposure_budget_checked",
+            "--payload", '{"dimension":"file_mutations","allow":true}')
+    run(*base, "--natural-key", "call-1", "--ts", "2026-07-16T00:00:00Z")
+    run(*base, "--natural-key", "call-2", "--ts", "2026-07-16T00:01:00Z")
+    events = [l for l in (tmp_path / "ledger.jsonl").read_text().splitlines() if l.strip()]
+    assert len(events) == 2, f"distinct keys must both append; got {len(events)}"
+
+
 def test_ledger_actor_not_from_payload(tmp_path):
     code, out = run("ledger.py", "append", str(tmp_path), "--actor", "m",
                     "--class", "cycle_completed", "--payload", '{"actor":"evil","role":"m"}')
@@ -93,7 +160,7 @@ def test_ledger_actor_not_from_payload(tmp_path):
 
 
 def test_report_up_requires_prior_conformance(tmp_path):
-    # A4 (docs/14): a manager may not report subordinate work up without a prior A3 conforms —
+    # A4 (docs/09): a manager may not report subordinate work up without a prior A3 conforms —
     # the schema promised requires_prior; this pins it as actually enforced at write time.
     rp = {"supervisor": "s", "parent": "ceo", "window": "w", "basis_refs": [],
           "intent_status": "met", "exceptions": [], "exceptions_none_asserted": True,
@@ -312,7 +379,7 @@ def test_guardrails_cap_allows(tmp_path):
     assert code == 0 and "allow" in out and '"decision": "allow"' in out
 
 
-# ── SILENCE-CONSENT (docs/06 §2.1): reversible flows, irreversible holds ───────
+# ── SILENCE-CONSENT (docs/05 §2.1): reversible flows, irreversible holds ───────
 def test_consent_reversible_proceeds_on_silence(tmp_path):
     code, out = run("guardrails.py", "consent", str(tmp_path),
                     "--action-class", "reprioritize", "--item-ref", "i1")
@@ -465,7 +532,7 @@ def test_attention_escalates_on_coverage_gap(tmp_path):
 
 
 def test_attention_mandate_rides_a_floor_over_self_work(tmp_path):
-    # zone of acceptance (docs/12): a top-down mandate on an in-ranking objective is floored so a live
+    # zone of acceptance (docs/09): a top-down mandate on an in-ranking objective is floored so a live
     # instruction is not starved by low-priority self work. Both serve in-ranking objectives ranked
     # low (rank 3 → rank_score 0.33, weight 0.2 → base 0.53 each). The self item's base 0.53 loses to
     # the mandate floored to 1.0. With --wip-limit 1 the floor must select the mandate.
@@ -491,7 +558,7 @@ def test_attention_mandate_rides_a_floor_over_self_work(tmp_path):
 
 def test_attention_off_ranking_mandate_is_not_floored(tmp_path):
     # a mandate whose objective is OFF the ranking is OUTSIDE the acceptance zone — no floor, it stays
-    # a visible drift signal (docs/12). Only the in-ranking self item is picked.
+    # a visible drift signal (docs/09). Only the in-ranking self item is picked.
     seed(tmp_path, "registrar", "priority_ranking_set",
          {"ranking_id": "r1", "ordered_objectives": [{"objective_id": "growth", "rank": 1, "weight": 0.9}]})
     seed(tmp_path, "eng", "candidate_submitted",

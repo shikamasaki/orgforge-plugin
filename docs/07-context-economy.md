@@ -1,4 +1,6 @@
-# 08 — The Context Economy: Need-to-Know Collaboration, Intent for Everyone
+# 07 — The Context Economy: Need-to-Know Collaboration, Intent for Everyone
+
+*Part II · Design — see [the four-part map](README.md).*
 
 > Organ 5's rule says: *increase information sharing in the same proportion you increase
 > autonomy.* Read naively, that means "share everything with everyone" — which, for
@@ -14,11 +16,11 @@
 > **Framing (read before the mechanisms): context packs are delivered by projection, not
 > assembled by a bespoke engine.** A "context pack" is a set of **files the projection
 > writes into the working directory before the consuming department's harness launches**
-> (docs/09 §2, docs/01 R2) — the intent block, the role's contract and doctrine, its
+> (docs/08 §2, docs/01 R2) — the intent block, the role's contract and doctrine, its
 > granted views, nearby failures. The "registrar" that does this is itself **a department
 > the host runs** on a schedule, not a runtime this repo ships; "pack assembly" is that
 > file-writing step, and "on the next cycle" / "on a cadence" is a schedule the **host
-> scheduler** realizes (docs/09 §4). Read the mechanisms below as *what files go where and
+> scheduler** realizes (docs/08 §4). Read the mechanisms below as *what files go where and
 > who is granted to read them* — need-to-know as file placement — not as a live gatekeeper.
 
 ## 1. The refinement of the Organ 5 rule
@@ -51,7 +53,7 @@ also **vertical**, and the vertical separation is deliberate in *both* direction
 - **The upper layers do NOT accumulate the field's knowledge, and this is correct, not a
   gap.** A supervisor reads `direction_flags, sensor_readings`, never a maker's
   `coverage_map`; the control layer holds no per-role doctrine (that would be *doctrine
-  capture* — a self-taught gate, docs/07). The upper layers hold a *cross-cutting* picture
+  capture* — a self-taught gate, docs/06). The upper layers hold a *cross-cutting* picture
   (direction, sensor state, the full evidence trail for the item under review), not a copy
   of the field's domain knowledge. **The boss does not need to know what the specialist
   knows; the boss needs to know whether the specialist's output is on-purpose.**
@@ -81,8 +83,8 @@ scripting the method. **Org-wide policy propagation is exactly an intent-block r
 version-stamped in the ledger, then delivered by the registrar — a host-run department, not
 a runtime — writing the revised block into each role's working directory the next time the
 host launches that role on its schedule ("on the next cycle" = a host-realized schedule,
-docs/09 §2/§4), and never forked per department (one intent, everywhere, or coordination
-dissolves into local interpretations). Purpose changes are human-held (docs/06 §2.5); priority
+docs/08 §2/§4), and never forked per department (one intent, everywhere, or coordination
+dissolves into local interpretations). Purpose changes are human-held (docs/05 §2.5); priority
 re-weighting within an unchanged purpose is charter-tier (proposed via the approval
 queue, adjudicated by humans).
 
@@ -96,9 +98,9 @@ misaligned optimizer with extra context is an attacker with extra reconnaissance
 scoping is realized by **which files the projection writes into each working directory** —
 need-to-know as file placement — enforced structurally for every org (Tier A) and, for
 asset-touching orgs, by the host environment (Tier B), not by a runtime gatekeeper
-intercepting reads (docs/01 §5, docs/09 §5). The standard pack formula, for every role:
+intercepting reads (docs/01 §5, docs/08 §5). The standard pack formula, for every role:
 
-> intent block + own contract & doctrine (docs/07) + **live state of adjacent
+> intent block + own contract & doctrine (docs/06) + **live state of adjacent
 > contracts** (its declared `depends_on` seams) + nearby failures relevant to its scope.
 
 The intent block and the role's own doctrine are the **only** two items a pack carries
@@ -113,7 +115,7 @@ otherwise unenforce least privilege). Nothing else rides along by default. Every
 **reviewed on a cadence and unused grants are revoked** (access recertification —
 scope creep is how need-to-know quietly becomes share-everything). "On a cadence" here is
 host-realized: a scheduled run of the responsible department (the host's scheduler firing
-it), declared as intent — this repo ships no scheduler (docs/09 §4).
+it), declared as intent — this repo ships no scheduler (docs/08 §4).
 
 ### 2.3 Contract interfaces (how departments collaborate)
 
@@ -132,12 +134,12 @@ intended one or not.
 
 Every pack and every handoff has a **size budget**. Over budget → summarize and link:
 the receiving role gets the abstraction plus ledger/KB references it can expand on
-demand (the RAG pull of docs/07). Push what fits attention; let the reader pull depth.
+demand (the RAG pull of docs/06). Push what fits attention; let the reader pull depth.
 A budget forces the sender to do the distillation work once instead of exporting its
 processing load to every reader — Galbraith's lever again. Budgets are set per seam in
 the scope matrix and enforced at **pack assembly** — the registrar department's
 file-writing step, when the host launches it on its schedule, deciding what fits and what
-gets summarized-and-linked before the files land in the working dir (docs/09 §2/§4). The
+gets summarized-and-linked before the files land in the working dir (docs/08 §2/§4). The
 registrar is a host-run department applying the budget as it writes, not a runtime
 gatekeeper intercepting reads.
 
@@ -176,7 +178,7 @@ Need-to-know applies to the exploration front's *lateral* traffic. It never rest
   their duties require, and a maker can never scope-fence its Checker out of the evidence
   (that would be separation of duties defeated by information starvation). This is
   guaranteed structurally: the projection writes the evidence files into the checker's
-  working directory regardless of the maker's grants (Tier-A SoD, docs/09 §5). **The budget
+  working directory regardless of the maker's grants (Tier-A SoD, docs/08 §5). **The budget
   cannot do it either.** The over-budget summarize-and-link rule (§2.4) applies to the
   exploration front, NOT to a checker's `full_evidence_trail`: lossily summarizing a large
   candidate's evidence away is the same SoD-by-starvation attack, committed through a size
@@ -207,9 +209,9 @@ Need-to-know applies to the exploration front's *lateral* traffic. It never rest
 *Status: this is a design for how the context economy **maps onto host-run departments**.
 Context packs are delivered by the projection writing files into each working directory
 before launch, and the registrar that does so is a department the host launches on a
-schedule (docs/09 §1/§2, docs/01 R2) — scoping, budgets, and grants are enforced
+schedule (docs/08 §1/§2, docs/01 R2) — scoping, budgets, and grants are enforced
 structurally (Tier A) or by the host environment (Tier B), not by a bespoke gatekeeper
-(docs/09 §5). The mechanisms are this repo's synthesis of the cited frames plus
+(docs/08 §5). The mechanisms are this repo's synthesis of the cited frames plus
 standard security practice; the sensor thresholds and budget sizes are unvalidated design
 parameters. Treat the dial metaphor seriously — both failure directions are real, and only
 a running system tells you where your dial sits.*

@@ -28,7 +28,7 @@ Verified: rendering each role's doctrine (the exact step the SessionStart hook r
 **only that role's claims** — the CTO never sees the keypad rule, the ui-worker never sees the
 DB rule. Same store, same tool, keyed by `ORG_ROLE`. Widen the naming to a single `worker`
 brain and the specialist thins into a generalist — the keying is what buys narrow-and-deep
-(docs/08 §1.1).
+(docs/07 §1.1).
 
 ## 2. Two load paths — and why a manager must hand down the brain
 
@@ -41,7 +41,7 @@ The fix, verified in a second run: the **manager renders the child's brain befor
 (`doctrine.py render <root> eng-manager`) and prepends it to the child's prompt. The child
 then started holding its own `eng-manager` doctrine (2 claims, verbatim in its transcript) and
 **none** of the parent CTO's brain. That is the manager duty now written into
-`template/PROJECTION.md` §1 and docs/07 §2.1.
+`template/PROJECTION.md` §1 and docs/06 §2.1.
 
 ## 3. Refound re-routes the brains (assets intact)
 
@@ -55,7 +55,7 @@ declares. Verified on these brains:
 | Orphan guard | `{"api-worker": ["x-worker", "y-worker"]}` | **blocked (exit 2)** — api claims map to neither target; refound refuses rather than lose a brain |
 
 `--allow-orphans` instead surfaces orphans to `UNROUTED.json` for a human to place. No brain
-is ever silently dropped — the admission principle (docs/07) run in reverse. Regression tests:
+is ever silently dropped — the admission principle (docs/06) run in reverse. Regression tests:
 `tests/test_organs.py::test_doctrine_remap_*` (rename, split, orphan-block, allow-orphans).
 
 ## 4. Delegation fixes the seam, not the axis

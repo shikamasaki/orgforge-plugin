@@ -1,8 +1,8 @@
 {
   "name": "orgforge-plugin",
-  "displayName": "OrgForge — the org as guardrails",
-  "version": "0.7.2",
-  "description": "Runs an articulated AI organization on Claude Code: the org's organs (blast-radius caps, mandate-conflict adjudication, doctrine, ledger, schedule) enforce as PreToolUse hooks that actually block, plus per-department subagents and organ slash-commands. Harness-neutral core; this is the Claude Code projection.",
+  "displayName": "OrgForge — stand up an AI-native IT company",
+  "version": "0.8.0",
+  "description": "Stands up and runs an AI-native IT business company on Claude Code: it decides what to build, builds through a forced non-skippable SDLC (requirements→design→implement→test→deploy→operate), ships via CI/CD, operates on a reliability budget, and produces REPRODUCIBLE work — same spec ⇒ same process/gates/contracts, and repos that clone-and-run the same for anyone. The org's organs (phase gate, blast-radius caps, doctrine, ledger, schedule) enforce as PreToolUse hooks that actually block, plus per-department subagents and organ slash-commands. Harness-neutral core; this is the Claude Code projection.",
   "author": {
     "name": "shikamasaki"
   },
@@ -12,6 +12,10 @@
     "guardrails",
     "governance",
     "hooks",
-    "organization"
+    "organization",
+    "sdlc",
+    "reproducibility",
+    "ci-cd",
+    "software-factory"
   ]
 }

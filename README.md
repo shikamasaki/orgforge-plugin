@@ -1,39 +1,66 @@
 # orgforge-plugin
 
-**The goal is to run the engineer's problem-solving process autonomously, around the clock — AI
-that keeps working while you sleep, with you deciding only the essential calls.** This repository
-is a template for getting there. The hard part isn't the model; it's that a system left running
-unattended drifts, duplicates, over-spends, and ships the wrong thing unless the org it runs as is
-written down.
+**orgforge stands up and runs an AI-native IT business company: it decides what to build, builds it
+through a forced, non-skippable SDLC, ships continuously via CI/CD, operates on a reliability budget,
+and does it all reproducibly — the org and the system it builds grow together.** This repository is
+the template for standing one up. AI is an amplifier — it magnifies whatever process it's dropped
+into, good or bad — so the hard part isn't the model; it's that a company left running unattended
+drifts, skips phases, duplicates, over-spends, and ships the wrong thing unless the organization it
+runs as, and the mold it builds through, are **written down and enforced**.
 
-**New here?** [`QUICKSTART.md`](QUICKSTART.md) installs the plugin and proves a guardrail blocks
-in a few minutes — no OSS publish required (a private repo or local path both install).
+Four properties are the headline, and each has a chapter behind it:
+
+- **A business, not just an org.** It decides *what to build as a business* — customer / RFP /
+  priority — not merely "does tasks." (THEORY §1b, [docs/01](docs/01-requirements.md) R0b.)
+- **A forced SDLC mold.** Every deliverable travels a non-skippable phase chain —
+  requirements → design → implement → test → deploy → operate — enforced by a ledger phase-gate, not
+  a prompt. ([docs/11](docs/11-sdlc-mold.md).)
+- **Ships and operates continuously.** Deploy is a phase; CI/CD (GitHub Actions) is its spine; the
+  running company navigates by a reliability/error budget and DORA metrics to the moving bottleneck.
+  ([docs/05](docs/05-lifecycle-operations.md), [docs/11](docs/11-sdlc-mold.md).)
+- **Reproducible, at two levels.** *Same org spec + RFP ⇒ same process, gates, contracts, and
+  verification* (Level 1); and *the repos it builds clone-and-run the same for anyone* (Level 2 —
+  committed lockfile, pinned toolchain, one-command setup+test, green CI from a clean clone), checked
+  by a deterministic tooth, not asserted. This is the **deep purpose** of forcing the SDLC type.
+  ([docs/11](docs/11-sdlc-mold.md) §0/§4a, [docs/01](docs/01-requirements.md) J14/S9.)
+
+**New here?** [`QUICKSTART.md`](QUICKSTART.md) installs the plugin and walks the happy path — found a
+company, watch it build and ship a backlog item through the forced SDLC, then operate — in a few
+minutes, no OSS publish required (a private repo or local path both install).
 [`ARCHITECTURE.md`](ARCHITECTURE.md) is the whole-system map: the ecosystem (neutral core → projection
-→ harness), the organs, and the full founding → operation → evolution lifecycle.
+→ harness), the organs, and the two coupled lifecycles — the org's metabolism and the product's SDLC.
 [`REFERENCE.md`](REFERENCE.md) is the flat lookup: every env var, command, ledger event, cap, and the
 fixes for problems people actually hit.
-[`CHANGELOG.md`](CHANGELOG.md) tracks what's new (0.7.0: the ideal-state build-out — enforcement-layer
-runaway caps, non-progress circuit breaker, concurrent-write prevention, learning that feeds forward,
-a growing domain model, an external-signal front door, and a single `/org` status board).
+[`docs/README.md`](docs/README.md) is the reasoning, in **four Parts / twelve chapters**.
+[`CHANGELOG.md`](CHANGELOG.md) tracks what's new.
+
+### How it gets there — the load-bearing bet
 
 Concretely, a "department" here is nothing exotic: **an existing coding-agent harness — Claude
 Code, Codex — pointed at a working directory whose instruction file is that one role's job.** The
 template doesn't build a runtime; it writes down the organization and projects each role onto a
-harness that already exists.
+harness that already exists. The heavy machinery a running company needs — the loop, the scheduler,
+the tools, sandboxing, **and the CI/CD substrate** — is *borrowed* from the host, not rebuilt (R0).
 
-So the design act reduces to one thing: **put the organization into words the AI can act on.**
-The payoff is concrete and vendor-neutral. The *same* neutral guardrail blocks a real tool call
-because Claude Code and Codex share the pre-tool hook contract — verified on the Claude Code CLI,
-and designed to block identically on Codex through that shared contract (the Codex run is the
-adopter's step, not yet exercised here). No rewrite per vendor, no bespoke per-vendor runtime.
+So the design act reduces to one thing: **put the organization into words the AI can act on**, and
+force the shape the work travels through. The payoff is concrete and vendor-neutral. The *same*
+neutral guardrail blocks a real tool call because Claude Code and Codex share the pre-tool hook
+contract — verified on the Claude Code CLI, and designed to block identically on Codex through that
+shared contract (the Codex run is the adopter's step, not yet exercised here). No rewrite per vendor,
+no bespoke per-vendor runtime.
 
-That is the load-bearing bet, and it is the opposite of the field's other "company of agents"
-frameworks (MetaGPT, ChatDev, CrewAI), which each build their own bespoke runtime. Here the harness
-and the loop are organs the industry *already built*, so the template ships only a thin neutral
-core — the org skeleton as declarative data, a **projection** of each role onto its harness's
-instruction-file convention, and a machine audit of the skeleton. What the product must do is
-**[docs/01-requirements.md](docs/01-requirements.md)** (read it before judging the repo: a design
-or review is measured against it first).
+That is the opposite of the field's other "company of agents" frameworks (MetaGPT, ChatDev, CrewAI),
+which each build their own bespoke runtime. Here the harness, the loop, and CI/CD are organs the
+industry *already built*, so the template ships only a thin neutral core — the org skeleton as
+declarative data, a **projection** of each role onto its harness's instruction-file convention, the
+forced-SDLC phase-gate, and a machine audit of the skeleton and the repos it produces. What the
+product must do is **[docs/01-requirements.md](docs/01-requirements.md)** (read it before judging the
+repo: a design or review is measured against it first).
+
+Enforcement is never *forced delegation*: **doctrine promotes** the right shape and **lint/hooks
+enforce** the load-bearing constraints (the phase-gate, the caps, separation of duties). The tacit
+knowledge a human company runs on has to become explicit — that is the *how* under the four
+properties above, not a competing thesis.
 
 > A human company runs on things it never writes down — what we're trying to do, who needs to
 > know what, who owns which deliverable, and which calls the boss makes vs. delegates. People
@@ -43,23 +70,31 @@ or review is measured against it first).
 
 ---
 
-## Why the org, not the parts
+## Why a company, decomposed as an org
+
+The unit orgforge stands up is an **AI-native IT business company** (THEORY §1b): its purpose isn't
+"solve tasks" but *decide what to build as a business, build it through a disciplined SDLC, ship it,
+and operate it* — with the org and the system growing together. That is the content of the seven
+organs; everything below is how you make a *company* run unattended without it drifting.
 
 An LLM agent produces aligned work only if the **right information reaches it in the right amount**
 (context) and the **division of labor is clear** (roles) — otherwise the output is a coarse,
-essence-missing average, and over a 24/7 run those small misalignments compound. Those are
-organizational problems. The industry re-invented fragments bottom-up — *context engineering*,
-*harness engineering*, *loop engineering* — without forcing the questions that decide whether an
-unattended system stays on-goal: *is the goal propagated? is the division of labor clear? which
-decisions stay with the human, which run unattended?* This template centers on those, and it does
-so by borrowing the large frames the field already has — classical management theory (Mintzberg,
-Greiner, span of control, separation of duties), where that grounding is still thin for agents —
-and turning them into **machine-checkable constraints**: an org chart the lint validates, a
-decision line the projection enforces, a separation of duties a hook actually blocks on. The
-empirical backing is direct: multi-agent LLM systems fail mostly at role clarity, information flow,
-and verification (the MASFT study) — precisely the tacit things left un-said. See
-**[THEORY.md](THEORY.md)** for the full picture (its §0–§1 are the core; the rest is reference);
-the research map is in [docs/sources.md](docs/sources.md).
+essence-missing average, and over a 24/7 run those small misalignments compound. And because AI is an
+**amplifier**, a company with *no enforced mold* doesn't build faster — it produces more, faster, of
+whatever it was already doing wrong. Those are organizational problems. The industry re-invented
+fragments bottom-up — *context engineering*, *harness engineering*, *loop engineering* — without
+forcing the questions that decide whether an unattended company stays on-goal: *is the goal
+propagated? is the division of labor clear? did the work actually pass every SDLC phase? which
+decisions stay with the human?* This template centers on those, and it does so by borrowing the
+large frames the field already has — classical management theory (Mintzberg, Greiner, span of
+control, separation of duties) plus the software-delivery canon (the SDLC, CI/CD, DORA, error
+budgets), where that grounding is still thin for agents — and turning them into
+**machine-checkable constraints**: an org chart the lint validates, a decision line the projection
+enforces, a separation of duties a hook actually blocks on, and a **forced phase-gate** that refuses
+to let a deliverable skip a phase. The empirical backing is direct: multi-agent LLM systems fail
+mostly at role clarity, information flow, and verification (the MASFT study) — precisely the tacit
+things left un-said. See **[THEORY.md](THEORY.md)** for the full picture (its §0–§1b are the core;
+the rest is reference); the research map is in [docs/sources.md](docs/sources.md).
 
 ## What decomposing from the org tells you that harness+loop can't
 
@@ -92,33 +127,24 @@ tools are its machine-checkable proof; the templates are what you fill in for yo
 
 | Path | What it is |
 |---|---|
-| [docs/01-requirements.md](docs/01-requirements.md) | **The product spec** — actors (client vs operator vs department vs host harness), jobs-to-be-done, success criteria, the two-tier threat model, and the load-bearing requirement (R0): an LLM must run autonomously on an *existing* harness, no bespoke runtime. A design or review is judged against this first. |
+| [docs/README.md](docs/README.md) | **The map** — the reasoning in four Parts / twelve chapters, read as one argument (Part I Foundations → Part IV North star). Start here for the *why*. |
+| [docs/01-requirements.md](docs/01-requirements.md) | **The product spec** — actors, jobs-to-be-done, success criteria, the IT-business-company scope (R0b), reproducibility (J14/S9), and the load-bearing requirement (R0): an LLM must run autonomously on an *existing* harness, no bespoke runtime. A design or review is judged against this first. |
+| [THEORY.md](THEORY.md) | The intellectual core: organization → seven organs (harness & loop are two of them, delegated to existing harnesses — not rebuilt), and §1b — *which* organization: an AI-native IT business company. §0–§1b are the point. |
 
-**Core theory**
+**The four Parts** (full chapter list in [docs/README.md](docs/README.md)):
 
-| Path | What it is |
-|---|---|
-| [THEORY.md](THEORY.md) | The core: organization → seven organs (harness & loop are two of them, delegated to existing harnesses — not rebuilt). |
-| [docs/05-elastic-organization.md](docs/05-elastic-organization.md) | Why "no salary cost" changes everything (and what it doesn't): design the ideal org fully on day one, run it elastically. |
-| [docs/06-lifecycle-operations.md](docs/06-lifecycle-operations.md) | Cradle to grave: founding from an RFP, 24-hour autonomous operation (an approval queue with a delegation-of-authority (決裁権限) matrix — inspired by the written-proposal aspect of 稟議 (*ringi*), not its consensus formation — plus night safe mode), maintenance, handover, sunset. |
-| [docs/07-doctrine-and-knowledge.md](docs/07-doctrine-and-knowledge.md) | The knowledge organ: market-watching boundary spanners feed a role-scoped knowledge base; each role's doctrine (べき論 — its current normative playbook) is updated through Maker/Checker and always loaded as context. |
-| [docs/08-context-economy.md](docs/08-context-economy.md) | Need-to-know information flow: scoped context packs, contract-interface collaboration, context budgets, and commander's-intent policy propagation. |
-| [docs/09-runtime.md](docs/09-runtime.md) | Execution: **delegate the heavy organs to the host harness, project the profile onto its instruction-file convention.** What the system adds (projection + skeleton + lint) vs. what the host provides (perception, tools, loop, scheduling, sandboxing). |
-| [docs/10-founding-rehearsal.md](docs/10-founding-rehearsal.md) | **S1, demonstrated:** a real RFP run end-to-end on a real host harness — maker, gate, and skeptic as three separate agents, no bespoke runtime — where the adversarial checker caught a genuine bug (a U+212A unicode edge case) the maker and gate both missed. Artifacts in [examples/founding-rehearsal/](examples/founding-rehearsal/). |
-| [docs/12-attention-allocation.md](docs/12-attention-allocation.md) | How a single department decides **what to work on next** — the intra-unit attention organ (Carnegie School sequential attention + problemistic search, Ocasio situated attention, ToC/Kanban WIP). The org-wide ranking finally reaches the work, and the work's ordering becomes auditable. Running code: [tools/attention.py](tools/attention.py). |
-| [docs/15-decomposition-principles.md](docs/15-decomposition-principles.md) | How a manager **splits one task** into sub-tasks — the decomposition doctrine (Parnas information-hiding, Simon near-decomposability, Thompson interdependence, Becker & Murphy coordination cost, Conway). Split by design secret where coupling is sparse; **never split reciprocal work**; a role implements its **own-domain** coupled work but must **route another role's domain** to that role (no doctrine-capture, docs/08 §1.1). Doctrine + skeptic review for *sense*; hook + a new lint tooth for *shape*. |
-| [docs/16-loop-reliability.md](docs/16-loop-reliability.md) | Why an **unattended loop** survives: a loop pass is a series system, so `n` decisions at `p` succeed `p^n` (10×0.95 ≈ 60%) — **cut the decision count** before sharpening steps (Barlow & Proschan 1965). Load-bearing constraints go in the **enforcement layer** (hooks/lint, deterministic), not the request layer (prompts, probabilistic) — and a **subagent doesn't inherit the parent's prompt**, so cross-fan-out control must be a hook. State is **explicit in the ledger** (stages + checkpoints), not held in context; **stage trust read-only-first** (`/org-tick` before `/org-work`). |
-| [docs/17-ideal-state.md](docs/17-ideal-state.md) | The north star: Software Factory + Harness + Loop + **SDD** collapse into one act — *externalize the tacit as source, make the verifying loop the product, borrow the substrate, industrialize under upstream guardrails* — bounded by **autonomy is bounded by verifiability**. The **amplifier constraint** (AI amplifies good & bad process equally; context absence is the root cause; SSoT is the inferable artifact, not task-Specs) is the top-level bound. Then the honest, enumerated **gap** in three layers: close the self-contradictions, become a context-compounding factory, contract the user surface. |
-| [docs/13-proxy-stack-and-conflict.md](docs/13-proxy-stack-and-conflict.md) | Is the org still solving the **right problem**? Five gaps a theory-coverage sweep found — PREMISE/telos-validity, sunk-course, double-loop frame-review (the proxy stack), mandate-conflict adjudication (against a human-declared precedence), and internal precedent — plus the honest DROP list (motivation, culture-as-whole, politics: no AI analog). Running code across [tools/alignment.py](tools/alignment.py), [tools/reconcile.py](tools/reconcile.py), [tools/conventions.py](tools/conventions.py). |
-| [docs/11-operating-events.md](docs/11-operating-events.md) | What a 24/7 **unattended** org needs beyond founding, named by essence not by human ritual: why 1-on-1 / team-sync / exec-review *dissolve* into existing organs (only lateral peer reconciliation is net-new), and the governing rule — **reconcile by exception, never stop to meet** (default silent; escalate only the exception). The three load-bearing safety events are running code ([tools/guardrails.py](tools/guardrails.py)). |
+| Part | Chapters | What it covers |
+|---|---|---|
+| **I — Foundations** | [01 Requirements](docs/01-requirements.md), [04 Failure Modes](docs/04-failure-modes.md) | What the system must be (the IT-business-company scope, reproducibility) and what organization theory warns will break it (Goodhart, Conway, tall hierarchies, phase-skipping, the amplifier failure). |
+| **II — Design** | [02 Scaling](docs/02-growth-stages.md), [03 Control skeleton & decomposition](docs/03-organic-vs-mechanistic.md), [07 Context economy](docs/07-context-economy.md), [08 Execution / R0](docs/08-runtime.md) | The design law: grow staged / run elastic, design the control skeleton and split along the right seams, need-to-know context, and **delegate the loop / harness / scheduler / CI-CD to the host** — ship no runtime. |
+| **III — Operate** | [05 Operating a running company](docs/05-lifecycle-operations.md), [06 Doctrine](docs/06-doctrine-and-knowledge.md), [09 Supervising role](docs/09-attention-allocation.md), [10 Loop reliability](docs/10-loop-reliability.md), [11 SDLC mold](docs/11-sdlc-mold.md) | The 24/7 mechanics: lifecycle + operating/safety events (blast-radius, reconciliation, the reliability-budget and DORA instruments), doctrine that grows with the system, attention & accountability, why the loop survives, and **the forced SDLC mold that makes the build reproducible**. |
+| **IV — North star** | [12 Ideal state](docs/12-ideal-state.md) | What orgforge is *for* — an AI-native IT business company with a spec-driven build engine — bounded by *autonomy is bounded by verifiability* and the **amplifier constraint**, plus the honest, enumerated gap still to close. |
 
-**Playbooks & maps**
+**The demonstrated run & maps**
 
 | Path | What it is |
 |---|---|
-| [docs/02-growth-stages.md](docs/02-growth-stages.md) | Greiner-based playbook: which organ to add at each stage of growth. |
-| [docs/03-organic-vs-mechanistic.md](docs/03-organic-vs-mechanistic.md) | Resolving "designed structure vs self-organization" via a two-layer split. |
-| [docs/04-failure-modes.md](docs/04-failure-modes.md) | The failure modes organizational theory warns about, mapped to agent orgs. |
+| [demos/S1-founding-rehearsal.md](demos/S1-founding-rehearsal.md) | **S1, demonstrated:** a real RFP run end-to-end on a real host harness — maker, gate, and skeptic as three separate agents, no bespoke runtime — where the adversarial checker caught a genuine bug (a U+212A unicode edge case) the maker and gate both missed. Artifacts in [examples/founding-rehearsal/](examples/founding-rehearsal/). |
 | [docs/sources.md](docs/sources.md) | Every citation, with primary/secondary honestly distinguished. |
 
 **Templates**
@@ -135,24 +161,25 @@ tools are its machine-checkable proof; the templates are what you fill in for yo
 | [template/sensors.yaml](template/sensors.yaml) | Every crisis signal as a measurement: source views, formula, window, threshold, machine/llm judge, and the night-preregistration list. |
 | [template/PROJECTION.md](template/PROJECTION.md) | **The LLM-config layer** — how the articulated org renders into each harness's actual config: what goes into a department's instruction file (CLAUDE.md / AGENTS.md / …), and the neutral→per-harness settings map. The one harness-specific layer; everything above it is neutral. |
 | [template/role-settings.yaml](template/role-settings.yaml) | The neutral model/runtime settings per role — model *tier* (not vendor string), effort, capability scope (the deontic "who may do what"), stop condition, output form. Risk-calibrated; lint-checked (optional extra file) for coherence with the org chart. |
-| [template/schedule.yaml](template/schedule.yaml) | The declarative operating schedule (docs/11 §5): which operating-event check runs on which cadence, whether it is night-safe, and the `verify_event` that proves it ran. The registrar (an LLM) edits it; `org_lint.py`'s `SCH` checks are the guardrail keeping edits R0-safe, night-safe, and missed-tick-detectable. Data, not a runtime — [tools/tick.py](tools/tick.py) plans from it; the host cron drives. |
+| [template/schedule.yaml](template/schedule.yaml) | The declarative operating schedule (docs/05 §5.6): which operating-event check runs on which cadence, whether it is night-safe, and the `verify_event` that proves it ran. The registrar (an LLM) edits it; `org_lint.py`'s `SCH` checks are the guardrail keeping edits R0-safe, night-safe, and missed-tick-detectable. Data, not a runtime — [tools/tick.py](tools/tick.py) plans from it; the host cron drives. |
 
 **Tools**
 
 | Path | What it is |
 |---|---|
 | [tools/org_lint.py](tools/org_lint.py) | The audit gate: meant to run as the gate on every founding/reorg commit (run it as a pre-commit check; it cross-validates all five data files — organization, constitution, moves, ledger-schema, sensors) against the theory (Goodhart, span, SoD, control-never-dormant, need-to-know packs). |
-| [tools/doctrine.py](tools/doctrine.py) | The knowledge organ as running code (docs/07): a file-backed per-role doctrine store + admission gate + render + stale check. Enforces no-anonymous-doctrine (provenance), untrusted-until-admitted (gate-only admit), TTL, and render-admitted-only within a token budget. The curator's watch and the scheduler that calls it are the host's (R0). |
+| [tools/doctrine.py](tools/doctrine.py) | The knowledge organ as running code (docs/06): a file-backed per-role doctrine store + admission gate + render + stale check. Enforces no-anonymous-doctrine (provenance), untrusted-until-admitted (gate-only admit), TTL, and render-admitted-only within a token budget. The curator's watch and the scheduler that calls it are the host's (R0). |
 | [tools/ledger.py](tools/ledger.py) | The record organ as running code (ledger-schema.yaml): append-only, hash-chained (tamper-evident, replayable by `verify` — the watchdog primitive), gapless seq, actor-from-runtime-not-payload, `requires_prior` enforced at write time (the skeptic is load-bearing), and deterministic view/census/**digest** projections (same window + same ledger ⇒ byte-identical). |
 | [tools/sensors.py](tools/sensors.py) | Evaluates the **machine** sensors of sensors.yaml as pure formulas over the ledger (red_tape_ratio, doctrine_stale, blocked_on_missing_context, …). `llm` sensors and those whose inputs aren't fully in the ledger are honestly **deferred**, never silently skipped. |
-| [tools/guardrails.py](tools/guardrails.py) | The three load-bearing safety events for 24/7 unattended operation (docs/11 §2): BLAST-RADIUS-CAP (aggregate exposure the approval queue can't see), STATE-RECONCILED (ledger-belief vs external ground truth), STALE-REFERENCE (roles silent against a reference that moved). Each is fail-quiet on the happy path (exit 0) and escalates the exception (exit 10). |
-| [tools/reconcile.py](tools/reconcile.py) | Lateral, in-flight reconciliation between peers (docs/11 §2.4) — the one net-new information flow the meetings dissolved into: COLLISION-SCAN (overlapping claims), DEPENDENCY-STALL (silence-as-block made explicit), CONTRACT-CHANGE (a breaking seam change announced before it lands). Duplicate self-heals laterally; only a true conflict escalates. |
-| [tools/resource.py](tools/resource.py) | Allocation, prioritization, and grant-decay events (docs/11 §3): PRIORITY-RANKING (emits only when the order changes), ALLOCATION-RECLAIM (takes back stranded compute from idle/low-yield holders, safe-direction), AUTHORITY-EXPIRED (auto-narrows stale grants; escalates only to widen). |
-| [tools/learning.py](tools/learning.py) | OUTCOME-DELTA (docs/11 §3): the org learning from its OWN track record (distinct from doctrine's outside-world intel). Joins closed decisions to realized outcomes; silent when they matched; escalates only when the same miss recurs systemically. |
-| [tools/attention.py](tools/attention.py) | A department's INTERNAL work selection (docs/12): given its backlog, picks what to do next by situated attention (anchored to the org-wide priority ranking), problemistic search (what's failing vs aspiration), sequential attention (rank-order prefix), and a WIP limit. Records why in the ledger, flags choices that drift off the org ranking. |
-| [tools/alignment.py](tools/alignment.py) | The proxy-stack guards (docs/13): PREMISE (is the founding premise still true — the sensor for the human's pivot/sunset decision), SUNK-COURSE (a running course outrunning its own progress — the runaway BLAST-RADIUS-CAP can't see), FRAME-REVIEW (accurate predictions against a target that may itself be wrong — double-loop). Each surfaces; the human decides. |
-| [tools/conventions.py](tools/conventions.py) | Internal precedent (docs/13 §5): the org's own settled "how we do X here," adopted through a checker, projected into a role's workspace, TTL'd. A third knowledge box — internal (vs doctrine's external), reusable, so peers don't re-derive and diverge. |
-| [tools/tick.py](tools/tick.py) | The self-driving schedule **planner** (docs/11 §5), not a scheduler (R0). Given [template/schedule.yaml](template/schedule.yaml) + now + the ledger, it computes which checks are due, applies the night fail-safe, and — the guardrail — **detects a due check that did NOT run** (a missing verify_event) and escalates it. "It was supposed to run" becomes a paged fact. The host cron only invokes this planner. |
+| [tools/guardrails.py](tools/guardrails.py) | The three load-bearing safety events for 24/7 unattended operation (docs/05 §5.1): BLAST-RADIUS-CAP (aggregate exposure the approval queue can't see), STATE-RECONCILED (ledger-belief vs external ground truth), STALE-REFERENCE (roles silent against a reference that moved). Each is fail-quiet on the happy path (exit 0) and escalates the exception (exit 10). |
+| [tools/reconcile.py](tools/reconcile.py) | Lateral, in-flight reconciliation between peers (docs/05 §5.2) — the one net-new information flow the meetings dissolved into: COLLISION-SCAN (overlapping claims), DEPENDENCY-STALL (silence-as-block made explicit), CONTRACT-CHANGE (a breaking seam change announced before it lands). Duplicate self-heals laterally; only a true conflict escalates. |
+| [tools/resource.py](tools/resource.py) | Allocation, prioritization, and grant-decay events (docs/05 §5.4): PRIORITY-RANKING (emits only when the order changes), ALLOCATION-RECLAIM (takes back stranded compute from idle/low-yield holders, safe-direction), AUTHORITY-EXPIRED (auto-narrows stale grants; escalates only to widen). |
+| [tools/learning.py](tools/learning.py) | OUTCOME-DELTA (docs/05 §5.4): the org learning from its OWN track record (distinct from doctrine's outside-world intel). Joins closed decisions to realized outcomes; silent when they matched; escalates only when the same miss recurs systemically. |
+| [tools/attention.py](tools/attention.py) | A department's INTERNAL work selection (docs/09): given its backlog, picks what to do next by situated attention (anchored to the org-wide priority ranking), problemistic search (what's failing vs aspiration), sequential attention (rank-order prefix), and a WIP limit. Records why in the ledger, flags choices that drift off the org ranking. |
+| [tools/alignment.py](tools/alignment.py) | The proxy-stack guards (docs/05): PREMISE (is the founding premise still true — the sensor for the human's pivot/sunset decision), SUNK-COURSE (a running course outrunning its own progress — the runaway BLAST-RADIUS-CAP can't see), FRAME-REVIEW (accurate predictions against a target that may itself be wrong — double-loop). Each surfaces; the human decides. |
+| [tools/conventions.py](tools/conventions.py) | Internal precedent (docs/05 §6.5): the org's own settled "how we do X here," adopted through a checker, projected into a role's workspace, TTL'd. A third knowledge box — internal (vs doctrine's external), reusable, so peers don't re-derive and diverge. |
+| [tools/tick.py](tools/tick.py) | The self-driving schedule **planner** (docs/05 §5.6), not a scheduler (R0). Given [template/schedule.yaml](template/schedule.yaml) + now + the ledger, it computes which checks are due, applies the night fail-safe, and — the guardrail — **detects a due check that did NOT run** (a missing verify_event) and escalates it. "It was supposed to run" becomes a paged fact. The host cron only invokes this planner. |
+| [tools/repro_lint.py](tools/repro_lint.py) | The **Level-2 reproducibility gate** (docs/11 §4a): deterministic check that a repo the org *builds* is reproducible for a stranger — committed lockfile + populated manifest, pinned toolchain, one-command setup+test in a README, idempotent migrations, `.env.example`, a green CI-from-clean-clone workflow. Tagged by the earliest SDLC phase that requires each artifact; run BY THE GATE at the implement/test/deploy phase gates, not trusted from a maker's "I verified it." Exit 0 = present, 10 = a gate should HOLD. |
 
 ## How to use it
 
@@ -183,11 +210,11 @@ tools are its machine-checkable proof; the templates are what you fill in for yo
 4. The founding commit must pass [tools/org_lint.py](tools/org_lint.py) **and** human charter
    approval.
 5. **Project** each active department's profile onto the host harness that will run it (its
-   instruction-file convention — [docs/09-runtime.md](docs/09-runtime.md) §2), and let that harness
+   instruction-file convention — [docs/08-runtime.md](docs/08-runtime.md) §2), and let that harness
    supply the loop, tools, and scheduling. The org runs within the constitution
-   ([docs/06-lifecycle-operations.md](docs/06-lifecycle-operations.md)), reorganizing only through
+   ([docs/05-lifecycle-operations.md](docs/05-lifecycle-operations.md)), reorganizing only through
    [template/moves.yaml](template/moves.yaml); doctrine and scopes evolve per
-   [docs/07](docs/07-doctrine-and-knowledge.md) and [docs/08](docs/08-context-economy.md).
+   [docs/06](docs/06-doctrine-and-knowledge.md) and [docs/07](docs/07-context-economy.md).
 
 **Track C — wire it to a real harness ([integrations/](integrations/)).** Step 5 above, made
 concrete for Claude Code and Codex. The organs become **direct harness features**: a `PreToolUse`
@@ -216,10 +243,10 @@ span of control, separation of duties) to agent design is where the literature i
 
 The design is **harness-neutral and delegation-first**: the heavy organs (perception, tools, loop,
 scheduling, sandboxing) are the host harness's job; this repo ships the skeleton, the profile
-projection, and the lint (docs/01, docs/09). The lint cross-validates all five data files and is the
+projection, and the lint (docs/01, docs/08). The lint cross-validates all five data files and is the
 one part that runs standalone today. **S1 — one organization from this template launching and doing
 useful work on an existing harness end-to-end, with nothing bespoke in the loop — has now been
-demonstrated once ([docs/10](docs/10-founding-rehearsal.md), artifacts in
+demonstrated once ([demos/S1-founding-rehearsal.md](demos/S1-founding-rehearsal.md), artifacts in
 [examples/founding-rehearsal/](examples/founding-rehearsal/)): three departments ran as separate
 agents, the maker/checker separation held structurally, and the adversarial checker caught a real bug
 the maker and gate both missed.** That answers the load-bearing "has it ever run?" question. What

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""alignment — the proxy-stack guards: is the org still solving the right problem? (docs/13)
+"""alignment — the proxy-stack guards: is the org still solving the right problem? (docs/05)
 
 Three gaps a theory-coverage audit found, all of one family: a local optimizer perfecting a lossy
 proxy while the real thing drifts, at three altitudes of the metric→goal→purpose→world stack. Prior

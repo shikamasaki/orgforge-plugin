@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""status — one glanceable health board for the org (docs/17 §5 Layer-3).
+"""status — one glanceable health board for the org (docs/12 §5 Layer-3).
 
 The user should be able to ask "how's my org?" and get one answer — green / amber / red — without
 reading the ledger or knowing the words "tick", "sensor", or "chain". This reads the ledger and rolls
@@ -108,7 +108,7 @@ def cmd_status(a):
 
 
 def cmd_redline(a):
-    """One-line RED signal for a Monitor to consume (docs/17 §5 Layer-3, escalation transport). Prints a
+    """One-line RED signal for a Monitor to consume (docs/12 §5 Layer-3, escalation transport). Prints a
     single line ONLY when the org is RED (needs the human) — nothing when GREEN/AMBER. A `Monitor` polling
     this turns each RED into a push the moment it appears, so "unattended" is not "unobservable": the
     exception reaches the user without them opening /org. Silent (no output) when healthy — fail-quiet."""

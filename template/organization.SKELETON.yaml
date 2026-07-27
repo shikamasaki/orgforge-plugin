@@ -8,7 +8,7 @@
 #   python3 tools/org_lint.py organization.yaml constitution.yaml moves.yaml \
 #           ledger-schema.yaml sensors.yaml
 #
-# Read docs/01 (what it must be), docs/05 (elastic design), docs/08 (scopes) as you fill it.
+# Read docs/01 (what it must be), docs/02 (elastic design), docs/07 (scopes) as you fill it.
 # Prefer /found <your RFP> to have the org draft this for you, then review — see the plugin command.
 
 # ── PURPOSE (Organ 1) ────────────────────────────────────────────────────────
@@ -53,7 +53,7 @@ information_flow:
       - { role: registrar,  views: [sensor_readings, moves_catalog, proposal_queue, ledger_census],   pack_budget_tokens: 30000 }
       - { role: supervisor, views: [direction_flags, sensor_readings, recent_ledger_census],          pack_budget_tokens: 30000 }
 
-  total_token_budget: null               # carved down at delegation (docs/14 §granularity)
+  total_token_budget: null               # carved down at delegation (docs/09 §granularity)
 
 # ── ROLES ─────────────────────────────────────────────────────────────────────
 # Each role: id, regime (organic=may self-organize / mechanistic=fixed), active, a mission, and
@@ -79,7 +79,7 @@ roles:
     active: true
     profile_lineage: control-registrar-v1
     mission: >
-      The org clerk (docs/06 §2.6): evaluate sensors, select legal moves, author reorg diffs (as
+      The org clerk (docs/05 §2.6): evaluate sensors, select legal moves, author reorg diffs (as
       Maker), assemble context packs, generate the digest, own the org-wide priority ranking
       (resource.py rank), service the approval queue. Approves nothing.
     context_pack: [intent_block, sensor_readings, moves_catalog, proposal_queue, ledger_census]
@@ -119,7 +119,7 @@ roles:
   #     standard: <the bar its output must meet>
   #     checker: gate                    # who admits its output (usually the gate)
   #     depends_on: []                   # roles whose output it consumes (the depends_on edges)
-  #   supervises: []                     # non-empty => this role is a manager (docs/14)
+  #   supervises: []                     # non-empty => this role is a manager (docs/09)
   #   context_pack: [intent_block, doctrine, <the views this role is granted above>]
   #   loop: { cadence: <on_candidate|every_N_min>, stop_condition: <verifiable stop> }
 

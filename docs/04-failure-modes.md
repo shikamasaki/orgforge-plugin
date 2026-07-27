@@ -1,5 +1,7 @@
 # 04 — Failure Modes: What Organization Theory Warns About
 
+*Part I · Foundations — see [the four-part map](README.md).*
+
 Organization theory earns its keep here not as decoration but as a **catalogue of
 known failure modes**. Human organizations have been failing in structured,
 repeatable ways for a century, and those failures were named, studied, and given
@@ -93,6 +95,96 @@ ship, whether you intended it or not.
   first, then shape the agent organization (its communication and context-sharing
   paths) to match it. If you want an integrated result, wire integrated
   communication.
+
+---
+
+## 3b. The company-scope failures: a broken SDLC mold and a blown reliability budget
+
+Conway's law is the one place above where *software architecture* enters the catalogue.
+The re-scope of this system — from "an org that produces artifacts" to **a plugin that
+stands up and runs an AI-native IT company** — drags in the rest of the software-delivery
+failure modes, and they belong right here, next to Conway, because they are also failures
+of *how the organization's shape stamps itself onto what it ships*. The company builds
+through a forced, non-skippable SDLC mold (docs/11), ships via CI/CD, and operates under a
+reliability budget (docs/05 §reliability-budget). Each of those disciplines has a
+characteristic failure when the organization routes around it.
+
+### 3b.1 Phase-skipping — the SDLC mold violated
+
+**(a) In human organizations.** Software teams under delivery pressure skip lifecycle
+phases: they implement before the design is settled, or push to production before the test
+gate has run. The skipped phase does not disappear — its cost is deferred to a worse time,
+as a production defect, a rework loop, or an architecture that has to be reverse-engineered
+after the fact.
+
+**(b) In agent organizations.** An agent org is *more* prone to this, not less: an eager
+maker will happily write code before requirements are fixed (implement-before-design) or
+mark work shippable before an independent gate has admitted it (deploy-before-test),
+because nothing in a loose pipeline structurally forbids the ordering. The result is
+Goodhart-flavored (§2) — the maker satisfies "produced output" without satisfying "output
+that passed the phase it was supposed to pass." The mold was there; the agent stepped
+around it.
+
+**(c) Countermeasures.**
+
+- Make the SDLC a **forced, non-skippable mold** (docs/11): each phase's exit gate is a
+  hard precondition on the next phase's entry, enforced by lint/hooks, not by convention.
+  A `deploy` event that cannot point to the `test` gate that admitted it is refused, not
+  warned. Doctrine *promotes* the ordering; the gate *enforces* it — description alone
+  never held a phase boundary.
+
+### 3b.2 The amplifier failure — throughput up, bottleneck moved, budget blown downstream
+
+**(a) In human organizations.** A process improvement that speeds up one stage does not
+speed up the whole line; by Theory of Constraints it just **moves the bottleneck** to the
+next stage, which now floods. Teams that celebrate the local speedup and keep pushing at
+the old rate overwhelm the newly-binding constraint — the classic "we made coding faster
+and drowned in code review" pattern.
+
+**(b) In agent organizations.** This is the signature failure of the amplifier
+(docs/12 §3): **AI magnifies throughput, and the binding constraint shifts *downstream* to
+review, test, and deploy.** Generation becomes nearly free, so the org produces change
+faster than its verification and deployment stages can absorb — and the reliability budget
+(docs/05 §reliability-budget) is burned down *at the newly-moved constraint*: change piles
+up at review, half-verified work reaches deploy, and stability degrades even though every
+individual act looked in-scope. The amplifier did not add a new kind of mistake; it made
+the *existing* downstream constraint the thing that breaks first, faster.
+
+**(c) Countermeasures.**
+
+- Navigate by the **moving bottleneck, not local speed** (docs/05 §DORA): read the four
+  keys to see the constraint shift downstream, and allocate attention (docs/09) and
+  priority to the *newly-binding* stage — review/test/deploy capacity — rather than to more
+  generation. Optimizing the whole lifecycle beats optimizing the cheap stage.
+- Bound deploy velocity by the reliability budget (docs/05 §reliability-budget) so the
+  amplifier cannot outrun the org's ability to stay up: when the budget is spent, deploys
+  freeze regardless of how much change is queued.
+
+### 3b.3 Continuous-operation failures — no error budget, no monitoring
+
+**(a) In human organizations.** An org that runs a live product but never sets a
+reliability target (or sets one and never enforces it) has no principled brake on change:
+deploys go out at whatever rate the team can produce them, and reliability is discovered
+*by outage*. Compounding it, a monitoring gap means the org cannot even see the reliability
+it is burning — it operates blind between incidents.
+
+**(b) In agent organizations.** A 24/7 unattended org makes both failures acute. With **no
+error budget**, deploy velocity is unbounded and the amplifier (§3b.2) drives *runaway
+deploys* — the org ships all night against a product whose stability no one is metering. A
+**monitoring gap** is worse here than for a human team, because the org's fail-quiet
+discipline (docs/05 §5.0) means *silence is consent*: an unmonitored reliability regression
+emits nothing and looks exactly like a healthy night. The org needs continuous operation to
+be an instrumented, budgeted state, not an assumption.
+
+**(c) Countermeasures.**
+
+- Run continuous operation under an **enforced error budget** (docs/05 §reliability-budget)
+  that freezes deploys when spent — the machine governor the deploy gate reads, so runaway
+  deploys are structurally impossible, not merely discouraged.
+- Close the monitoring gap with standing **DORA instrumentation** (docs/05 §DORA) and the
+  reliability sensors, so a regression debits a visible budget and *surfaces* rather than
+  hiding in the fail-quiet silence. Operate is a phase with its own gate (docs/11), not the
+  place discipline stops.
 
 ---
 
@@ -221,6 +313,12 @@ Run this checklist against your agent organization periodically:
   separate real results from spec-gaming? (§2)
 - [ ] **Conway** — Do the agents that must integrate actually share a communication
   path / common ledger? (§3)
+- [ ] **Phase order** — Can any agent implement before design or deploy before test, or
+  is the SDLC mold a hard, gate-enforced precondition? (§3b.1)
+- [ ] **Amplifier** — Is attention going to the *moving* bottleneck (review/test/deploy)
+  rather than to faster generation? (§3b.2)
+- [ ] **Reliability budget** — Is deploy velocity bounded by an enforced error budget, and
+  is the reliability it burns actually monitored? (§3b.3)
 - [ ] **Layers** — Can every hierarchy layer name the specific load it relieves, or
   is it dead weight adding latency and tokens? (§4)
 - [ ] **Separation** — Is any agent verifying its own output? (§5)

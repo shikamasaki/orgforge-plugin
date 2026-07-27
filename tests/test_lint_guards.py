@@ -93,7 +93,7 @@ def test_human_judged_move_cannot_be_delegated(tmp_path):
 
 
 def test_orphan_role_fails_attribution_closure(tmp_path):
-    # O2d (docs/14 §A1): an active role no supervisor owns → its output is owned by nobody
+    # O2d (docs/09 §A1): an active role no supervisor owns → its output is owned by nobody
     def org(o):
         for r in o["roles"]:
             if r["id"] == "supervisor":
@@ -117,7 +117,7 @@ def test_double_supervised_role_fails_attribution(tmp_path):
 
 
 def test_contract_checker_must_exist_parity(tmp_path):
-    # O2e (docs/14 §A2): a deliverable-bearing role whose checker isn't a real role → parity fail
+    # O2e (docs/09 §A2): a deliverable-bearing role whose checker isn't a real role → parity fail
     def org(o):
         for r in o["roles"]:
             if r.get("contract", {}).get("deliverable"):
@@ -132,7 +132,7 @@ def test_contract_checker_must_exist_parity(tmp_path):
 
 
 def test_o8_control_role_that_adjudicates_and_implements_is_capture(tmp_path):
-    # O8 (docs/08 §1.1, docs/15 §3): a control role that JUDGES/REVIEWS and also IMPLEMENTs collapses
+    # O8 (docs/07 §1.1, docs/03 §3): a control role that JUDGES/REVIEWS and also IMPLEMENTs collapses
     # maker and checker — domain knowledge would pool in the boss (doctrine capture). Give the gate
     # (functions: [judge]) an extra `implement` → must fail O8.
     def org(o):
@@ -146,7 +146,7 @@ def test_o8_control_role_that_adjudicates_and_implements_is_capture(tmp_path):
 
 def test_o8_does_not_fire_on_a_non_judging_clerk_that_implements(tmp_path):
     # The registrar is mechanistic and carries `implement` (it authors reorg diffs as a Maker the
-    # gate admits — docs/06 §2.6, "approves nothing, ever"). It does NOT judge/review, so it is a
+    # gate admits — docs/05 §2.6, "approves nothing, ever"). It does NOT judge/review, so it is a
     # clerk, not capture. The shipped template must stay clean of O8 — a guard against the tooth
     # regressing into the coarse "any control implement" false positive that flagged the registrar.
     code, out = _lint(tmp_path)
@@ -155,7 +155,7 @@ def test_o8_does_not_fire_on_a_non_judging_clerk_that_implements(tmp_path):
 
 
 def test_o9_mechanistic_role_may_not_own_a_domain_deliverable(tmp_path):
-    # O9 (docs/15 §5): a control role that owes a contract.deliverable swallows a field role's domain
+    # O9 (docs/03 §6.5): a control role that owes a contract.deliverable swallows a field role's domain
     # work. Give the supervisor a deliverable → must fail. Catches the implement-without-judge case O8 misses.
     def org(o):
         for r in o["roles"]:
@@ -171,3 +171,50 @@ def test_o9_does_not_fire_on_the_clean_template(tmp_path):
     # no mechanistic role in the shipped template owes a domain deliverable — O9 must stay clean.
     code, out = _lint(tmp_path)
     assert code == 0 and "O9" not in out
+
+
+# ── O10 (docs/11 §0, §4a) — the founding coverage gate: contracts converge across founders ──
+def _first_maker_with_contract(o):
+    for r in o["roles"]:
+        c = r.get("contract") or {}
+        if c.get("deliverable") and c.get("standard"):
+            return r
+    return None
+
+
+def test_o10_deliverable_without_acceptance_standard_fails(tmp_path):
+    # a deliverable with no acceptance bar is unverifiable → two founders "satisfy" it differently.
+    def org(o):
+        r = _first_maker_with_contract(o)
+        r["contract"].pop("standard", None)
+        return o
+    code, out = _lint(tmp_path, organization=org)
+    assert code == 1 and "O10" in out, out
+
+
+def test_o10_deliverable_owned_by_two_roles_fails(tmp_path):
+    # the same deliverable declared under two roles → ownership is not reproducible.
+    def org(o):
+        makers = [r for r in o["roles"] if (r.get("contract") or {}).get("deliverable")]
+        if len(makers) >= 2:
+            makers[1]["contract"]["deliverable"] = makers[0]["contract"]["deliverable"]
+        return o
+    code, out = _lint(tmp_path, organization=org)
+    assert code == 1 and "O10" in out, out
+
+
+def test_o10_self_check_fails(tmp_path):
+    # checker must be distinct from the maker (reuses the SoD rule) — a self-checked deliverable
+    # has no independent bar, so its "acceptance" is not reproducible across founders.
+    def org(o):
+        r = _first_maker_with_contract(o)
+        r["contract"]["checker"] = r["id"]
+        return o
+    code, out = _lint(tmp_path, organization=org)
+    assert code == 1 and "O10" in out, out
+
+
+def test_o10_does_not_fire_on_the_clean_template(tmp_path):
+    # the shipped template already declares {deliverable, standard, checker!=maker}, owned once — clean.
+    code, out = _lint(tmp_path)
+    assert code == 0 and "O10" not in out

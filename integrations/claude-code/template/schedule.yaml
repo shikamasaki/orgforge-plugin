@@ -1,13 +1,13 @@
-# schedule.yaml — the DECLARATIVE operating schedule (docs/11 §5, docs/09 R0).
+# schedule.yaml — the DECLARATIVE operating schedule (docs/05 §5, docs/08 R0).
 #
 # This is the org's answer to "what operating-event check runs when, and what runs unattended
-# overnight." It is DATA, not a runtime: an allowed skeleton artifact (docs/09 §2 whitelist
+# overnight." It is DATA, not a runtime: an allowed skeleton artifact (docs/08 §2 whitelist
 # item 2), lint-checked (item 3). The system ships NO scheduler — a host cron/CI/harness loop
 # invokes tools/tick.py on a base interval, and tick.py computes which checks are DUE this tick.
 # The registrar (an LLM agent, organization.yaml) OWNS this file: it edits the cadences to set
 # the org's own schedule; the lint + tick.py are the guardrail that keeps its edits R0-safe and
 # night-safe, and — critically — that a due check which did NOT run is DETECTED, never silently
-# skipped ("起動するはずだった" must become an escalated fact, not an excuse — docs/11 §5.2).
+# skipped ("起動するはずだった" must become an escalated fact, not an excuse — docs/05 §5.6).
 #
 # Cadence vocabulary is the EXISTING one (organization.yaml loop.cadence, sensors.yaml):
 #   every_<n>_min | every_<n>_hours   — clock-triggered (level)
@@ -25,7 +25,7 @@ base_interval: every_5_min      # the host cron's tick; must be <= the smallest 
 
 checks:
 
-  # ── safety guardrails (docs/11 §2) — running code, tools/guardrails.py ───────────────
+  # ── safety guardrails (docs/05 §2) — running code, tools/guardrails.py ───────────────
   - id: exposure_cap
     tool: "guardrails.py cap"
     cadence: on_asset_act          # edge: fires at every act touching a real asset
@@ -48,7 +48,7 @@ checks:
     verify_event: reference_staleness_checked
     escalates_to: nudge_then_ceo
 
-  # ── knowledge organ (docs/07) — running code, tools/doctrine.py ─────────────────────
+  # ── knowledge organ (docs/06) — running code, tools/doctrine.py ─────────────────────
   - id: doctrine_stale_sweep
     tool: "doctrine.py stale"
     cadence: every_12_hours        # matches the curator's loop (organization.yaml)
@@ -56,7 +56,7 @@ checks:
     verify_event: doctrine_diff_admitted
     escalates_to: fire_curator
 
-  # ── sensor battery (docs/11 D1) — running code, tools/sensors.py ────────────────────
+  # ── sensor battery (docs/05 D1) — running code, tools/sensors.py ────────────────────
   - id: machine_sensors
     tool: "sensors.py eval"
     cadence: every_30_min          # = sensors.yaml defaults.evaluation_cadence (registrar clock)
@@ -64,7 +64,7 @@ checks:
     verify_event: sensor_reading
     escalates_to: registrar_selects_move
 
-  # ── ledger integrity (docs/11 D3/D4) — running code, tools/ledger.py ────────────────
+  # ── ledger integrity (docs/05 D3/D4) — running code, tools/ledger.py ────────────────
   - id: chain_verify
     tool: "ledger.py verify"
     cadence: every_30_min
@@ -79,7 +79,7 @@ checks:
     verify_event: digest_generated
     escalates_to: none             # the digest IS the escalation surface
 
-  # ── lateral reconciliation (docs/11 §2.4) — design; tools/reconcile.py stub-runs ────
+  # ── lateral reconciliation (docs/05 §5.2) — design; tools/reconcile.py stub-runs ────
   - id: collision_scan
     tool: "reconcile.py collision"
     cadence: on_work_claimed       # edge: a peer claims territory
@@ -101,7 +101,7 @@ checks:
     verify_event: contract_change_proposed
     escalates_to: skeptic_then_ceo
 
-  # ── resource & learning (docs/11 §3) ───────────────────────────────────────────────
+  # ── resource & learning (docs/05 §5.4) ───────────────────────────────────────────────
   - id: allocation_reclaim
     tool: "resource.py reclaim"
     cadence: every_6_hours
@@ -130,7 +130,7 @@ checks:
     verify_event: outcome_delta
     escalates_to: ceo_on_systemic_recurrence
 
-  # ── intra-department attention allocation (docs/12) — tools/attention.py ────────────
+  # ── intra-department attention allocation (docs/09) — tools/attention.py ────────────
   - id: attention_select
     tool: "attention.py select"
     cadence: on_cycle_start         # edge: a department begins a cycle and must pick its next work
@@ -138,7 +138,7 @@ checks:
     verify_event: attention_allocated
     escalates_to: ceo_on_coverage_gap
 
-  # ── proxy-stack guards (docs/13) — is the org still solving the RIGHT problem? ───────
+  # ── proxy-stack guards (docs/05) — is the org still solving the RIGHT problem? ───────
   - id: premise_check
     tool: "alignment.py premise"
     cadence: every_24_hours        # + the calling agent supplies the environmental snapshot
@@ -174,7 +174,7 @@ checks:
     verify_event: convention_adopted   # the store's proof-of-life event
     escalates_to: owner_reconfirm
 
-# ── missed-tick policy (docs/11 §5.2) — the "it was SUPPOSED to run" guard ────────────
+# ── missed-tick policy (docs/05 §5.6) — the "it was SUPPOSED to run" guard ────────────
 # A check whose cadence made it DUE in the window but whose verify_event is ABSENT from the
 # ledger for that window is a MISS. A miss is not silent: tick.py reports it, and repeated
 # misses of a night_safe check escalate — because a schedule the host quietly stopped firing

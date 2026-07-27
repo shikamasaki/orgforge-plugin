@@ -1,7 +1,7 @@
 # Wiring the org's schedule onto Claude Code's own scheduler
 
 `template/schedule.yaml` declares the org's cadences as **data** — it ships no scheduler, by design
-(docs/09 R0: the loop/scheduler is the host's, not this repo's). docs/01 R2.3 and docs/09 §4 name the
+(docs/08 R0: the loop/scheduler is the host's, not this repo's). docs/01 R2.3 and docs/08 §4 name the
 valid realizations verbatim: *"a cron, the harness's own loop, a CI trigger."* **Claude Code's built-in
 scheduler is exactly "the harness's own loop."** So realizing the schedule on Claude Code is the
 R0-conformant path — nothing about R0 changes, and none of this wiring belongs in the neutral skeleton;
@@ -95,11 +95,11 @@ running while no session is open — for everything else, the three `/loop`s abo
 
 ## The stop/night discipline still holds
 
-The scheduler fires the cadence; the **stop conditions remain the org's** (docs/09 §4): a check marked
+The scheduler fires the cadence; the **stop conditions remain the org's** (docs/08 §4): a check marked
 `night_safe: false` in `schedule.yaml` suspends overnight, and the guardrail hook + the blast-radius
 cap bound what any fired cycle may do. Scheduling more runs does not widen authority — it only changes
 *when* the same gated cycle runs. Keep `/org-work`'s fan-out a judgment (parallelize genuinely
-independent work, keep coupled work single-threaded — docs/15); the cadence decides *when* a cycle
+independent work, keep coupled work single-threaded — docs/03); the cadence decides *when* a cycle
 runs, not *how finely* it splits.
 
 ## Why the missed-check detector survives the wiring

@@ -16,7 +16,7 @@ file on launch exactly the way it would read a prompt — so the old intuition "
 agent's prompt" still holds — but the neutral profile is **canonical** and the per-harness files are
 **regenerated views, never hand-forked** (the same derived-view discipline the ledger already uses,
 Organ 5). Swapping harnesses changes only which instruction file gets generated, nothing in this
-profile. (docs/01 R2; docs/09 §2.)
+profile. (docs/01 R2; docs/08 §2.)
 
 Copy this file per department. Keep it short and concrete. Fields map to the organs in `THEORY.md`.
 
@@ -49,18 +49,18 @@ Perception, tools, and memory (Organ 3) are provided **by the host harness**, no
 This profile does not run a bespoke context-assembly process; it **declares what context to load**,
 and the projection **writes those files into the working directory before launch** for the harness
 to read. "Assembling the context pack" is exactly that file-writing step, not a custom runtime.
-(docs/09 §2–§3.)
+(docs/08 §2–§3.)
 
 Non-negotiable: **before doing anything, load the prior context this role needs.** This is the
 onboarding briefing that turns a role into a competent member. List exactly what to pull:
 
-- the **intent block** — purpose, current priorities, constraints (docs/08 §2.1; identical for
+- the **intent block** — purpose, current priorities, constraints (docs/07 §2.1; identical for
   every member, loaded by reference from its ledger-stamped version);
 - this role's **doctrine** — its current normative playbook, distilled from the knowledge base
-  and admitted by the gate (docs/07); never act on last quarter's world;
+  and admitted by the gate (docs/06); never act on last quarter's world;
 - **nearby failures** relevant to this role (what already died, why, and revival conditions);
 - **live findings / adjacent-contract state** this role builds on (within its granted scopes —
-  docs/08 §2.2; the pack is need-to-know by default and budget-capped).
+  docs/07 §2.2; the pack is need-to-know by default and budget-capped).
 
 A member that acts without onboarding acts blind, and the organization does not compound its
 learning. (Deliver this via the `context_pack` mechanism named in `organization.yaml`.)
@@ -79,7 +79,7 @@ A full member does all six; a narrow control member (e.g. a gate) may do only on
 6. **Operate** — keep the run healthy over time: monitor what survived, retire what died into the
    parts inventory, keep this role's board/record and heartbeat current.
 
-### Decomposition — how you split an assignment (docs/15)
+### Decomposition — how you split an assignment (docs/03)
 
 When an assignment arrives, decide honestly whether to subdivide. It is a **per-task judgment**, not a
 mandate and not a target depth:

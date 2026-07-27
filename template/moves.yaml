@@ -2,7 +2,7 @@
 # with its preconditions, authorization tier, and reversal.
 #
 # The org never free-edits its own chart. A reorg is: a sensor fires (reading recorded
-# in the ledger) -> the REGISTRAR (docs/06 s2.6) selects a move whose preconditions the
+# in the ledger) -> the REGISTRAR (docs/05 s2.6) selects a move whose preconditions the
 # recorded readings satisfy -> the diff passes tools/org_lint.py -> the gate authorizes
 # -> the commit lands on organization.yaml. Anything not in this catalog is not a legal
 # reorg. Adding a move is itself charter-tier (constitution.yaml).
@@ -23,9 +23,9 @@
 #   red_tape_ratio         - (gate + reporting tokens) / (task tokens) above threshold
 #   queue_empty            - a department idle for a full review cycle
 #   demand_signal          - arriving work matching a latent department's contract
-#   doctrine_stale         - doctrine claims past their review-by date (docs/07)
-#   blocked_on_missing_context - grant-request denial rate at a seam (docs/08)
-#   context_utilization    - share of a pack actually used by the role's outputs (docs/08)
+#   doctrine_stale         - doctrine claims past their review-by date (docs/06)
+#   blocked_on_missing_context - grant-request denial rate at a seam (docs/07)
+#   context_utilization    - share of a pack actually used by the role's outputs (docs/07)
 
 moves:
 
@@ -33,14 +33,14 @@ moves:
     tier: delegated
     preconditions:
       - sensor: demand_signal
-      - judgment: "specialization gate: the work is recurring, OR would dilute an active generalist's context pack, OR requires SoD independence (docs/05 s4)"
+      - judgment: "specialization gate: the work is recurring, OR would dilute an active generalist's context pack, OR requires SoD independence (docs/02 s4)"
         judge: llm
       - check: span_check_on_supervisor
       - check: named_checker_active_with_it     # a maker never activates without its Checker
       - check: requester_is_not_target_checker_maker   # no dept (de)activates its own checker
       - check: requester_scope_covers_target    # TARGET must lie in the transitive closure of the
                                                 # initiator's supervises: — a manager scales only
-                                                # within its span-of-authority (docs/05 §scale-authority)
+                                                # within its span-of-authority (docs/02 §scale-authority)
     effect:
       patch:
         - { role: TARGET, set: { active: true } }
@@ -57,7 +57,7 @@ moves:
         judge: llm
       - check: not_a_control_role_while_exploration_active
       - check: requester_is_not_maker_checked_by_target   # makers cannot starve their Checker off
-      - check: requester_scope_covers_target    # scale only within span-of-authority (docs/05)
+      - check: requester_scope_covers_target    # scale only within span-of-authority (docs/02)
     effect:
       patch:
         - { role: TARGET, set: { active: false } }
@@ -89,7 +89,7 @@ moves:
     tier: delegated
     preconditions:
       - sensor: doctrine_stale
-      - judgment: "or the curator files an intelligence item affecting this role (docs/07 s2)"
+      - judgment: "or the curator files an intelligence item affecting this role (docs/06 s2)"
         judge: llm
       - check: diff_admitted_by_gate                     # anti-poisoning: gate admission first
       - check: target_regime_is_organic                  # mechanistic doctrine is charter-tier
@@ -102,7 +102,7 @@ moves:
     tier: delegated
     preconditions:
       - sensor: blocked_on_missing_context               # widening; OR
-      - sensor: context_utilization                      # narrowing/revocation (docs/08 s3)
+      - sensor: context_utilization                      # narrowing/revocation (docs/07 s3)
       - check: both_ends_of_seam_are_organic             # control-layer scopes are charter-tier
       - check: grant_recorded_in_ledger
       - check: requester_scope_covers_target    # a manager may re-scope only within its span-of-
@@ -178,7 +178,7 @@ moves:
       - judgment: "successor designated by humans"
         judge: human
     effect:
-      prose: "generate the succession package from the ledger (docs/06 s4.2) - read-only projection"
+      prose: "generate the succession package from the ledger (docs/05 s4.2) - read-only projection"
     reverse: none                       # package generation is read-only
 
   - id: sunset
@@ -193,14 +193,14 @@ moves:
   - id: refound
     tier: charter                       # a FOUNDING act — humans author the new structure inside
                                         # the unchanged constitution; only the CEO/human may reshape
-                                        # the whole chart (docs/06 §4.4). Re-mints the SoD skeleton.
+                                        # the whole chart (docs/05 §4.4). Re-mints the SoD skeleton.
     preconditions:
       - judgment: "a ROOT problem in how the org is shaped (not an edge that a scale/reorg move
           fixes) — the human decides the structure itself is wrong"
         judge: human
       - check: doctrine_remap_covers_every_live_claim   # every role-keyed doctrine claim maps to a
                                                         # new role or is surfaced to the human; none
-                                                        # silently orphaned (docs/06 §4.4)
+                                                        # silently orphaned (docs/05 §4.4)
       - check: new_structure_passes_lint                # the new chart passes org_lint like any founding
     effect:
       prose: "tear down the role structure and re-found with new roles, ASSETS INTACT — the ledger

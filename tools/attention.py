@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""attention — a department's INTERNAL work selection (docs/12, the attention-allocation organ).
+"""attention — a department's INTERNAL work selection (docs/09, the attention-allocation organ).
 
 The org-wide priority ranking (resource.py rank) says which OBJECTIVES matter; nothing said how
 a single department, given its own backlog, decides WHAT TO WORK ON NEXT. That decision was left
@@ -29,7 +29,7 @@ tools/ledger.py (ships no scheduler; a host-run department calls it at the start
       — so "why did this dept do X before Y" is a ledger fact, and a choice that ignores the org
       ranking is visible (an auditable drift signal), not a silent local optimum.
 
-Fail-quiet like the rest (docs/11 §0): a normal selection is a silent breadcrumb (exit 0); it
+Fail-quiet like the rest (docs/05 §5.0): a normal selection is a silent breadcrumb (exit 0); it
 ESCALATES (exit 10) only when the department CANNOT serve the org's top priority from its backlog
 at all (a coverage gap the CEO/registrar must close), or when WIP is saturated by stalled work.
 """
@@ -85,16 +85,29 @@ def _in_flight(events, role):
     return max(0, started - completed)
 
 
-def _aspiration_gap(events, item, aspiration):
-    """PROBLEMISTIC SEARCH: has this item's objective recently under-performed aspiration?
-    We look for an outcome_delta or a below-aspiration observed_outcome tied to its objective."""
+def _aspiration_gap(events, item, aspiration, role=None):
+    """PROBLEMISTIC SEARCH: has this item recently under-performed aspiration?
+    We look for an outcome_delta or a below-aspiration observed_outcome tied to THIS item —
+    scoped to the item's own department/candidate, not any dept's failure org-wide."""
     boost = 0.0
+    this_cid = item.get("candidate_id")
     for e in events:
         if e["class"] == "outcome_delta" and e["payload"].get("department"):
-            # a negative delta on this dept's work raises search priority near the problem
+            # a negative delta raises search priority near the problem — but ONLY when it ties to
+            # THIS item: the same department (outcome_delta carries `department` but no objective),
+            # or the exact item by candidate_id. A blanket boost from any dept's negative delta
+            # pushed every backlog item up equally, which is no signal at all; scoping it to this
+            # item's own department/candidate is what makes problemistic search discriminate.
             if e["payload"].get("delta_sign", 0) < 0:
-                boost = max(boost, 0.3)
+                d_dept = e["payload"].get("department")
+                d_cid = e["payload"].get("candidate_id")
+                if (role is not None and d_dept == role) or \
+                   (this_cid is not None and d_cid == this_cid):
+                    boost = max(boost, 0.3)
         if e["class"] in ("result_deployed", "result_retired"):
+            # a below-aspiration observed outcome boosts search only for the item it landed on
+            if this_cid is not None and e["payload"].get("candidate_id") != this_cid:
+                continue
             oo = e["payload"].get("observed_outcome")
             try:
                 if oo is not None and float(oo) < aspiration:
@@ -126,11 +139,11 @@ def cmd_select(a):
         align = (r["weight"] if r and "weight" in r else 0.0)
         # lower rank number = higher priority; convert to a positive score component
         rank_score = (1.0 / r["rank"]) if r and r.get("rank") else 0.0
-        boost = _aspiration_gap(events, it, a.aspiration)   # PROBLEMISTIC SEARCH
+        boost = _aspiration_gap(events, it, a.aspiration, role)   # PROBLEMISTIC SEARCH
         base = align + rank_score + boost
         # ZONE OF ACCEPTANCE: a mandate whose objective IS in the ranking (inside the zone) is floored
         # to ride above self-generated work; a mandate off the ranking gets NO floor — it stays a
-        # visible drift signal, never silently promoted (docs/12, Simon zone of acceptance).
+        # visible drift signal, never silently promoted (docs/09, Simon zone of acceptance).
         in_ranking = obj in ranking
         floored = (it.get("source") == "mandate" and in_ranking and base < a.mandate_floor)
         score = round(max(base, a.mandate_floor) if floored else base, 4)
@@ -138,7 +151,12 @@ def cmd_select(a):
                        "problemistic_boost": boost, "score": score,
                        "mandate_floored": floored, "in_ranking": in_ranking})
     # SEQUENTIAL ATTENTION: rank order, pick a PREFIX up to the WIP limit (pull, don't push).
-    scored.sort(key=lambda s: (-s["score"], s["seq"]))
+    # Tie-break by candidate_id, NOT by seq (append order): candidate_id is now a deterministic
+    # function of the item's identity (role+contract_ref+normalized-gap, see org-discover.md §2a),
+    # so a spec+ledger replayed in any append order yields the SAME ordering — the backlog is
+    # reproducible (docs/11 §0 F4). seq is non-reproducible (it depends on how many times/what order
+    # discovery fired), which is exactly the drift F4 removes.
+    scored.sort(key=lambda s: (-s["score"], s.get("candidate_id") or ""))
     in_flight = _in_flight(events, role)
     room = max(0, a.wip_limit - in_flight)
     selected = scored[:room]
@@ -193,7 +211,7 @@ def main(argv):
     q.add_argument("root"); q.add_argument("--role", required=True)
     q.add_argument("--wip-limit", dest="wip_limit", type=int, default=2)
     q.add_argument("--aspiration", type=float, default=0.5)
-    # zone of acceptance (Simon 1947 / Barnard inducement-contribution, docs/12): a top-down MANDATE
+    # zone of acceptance (Simon 1947 / Barnard inducement-contribution, docs/09): a top-down MANDATE
     # rides above self-generated work at a floor score — but only INSIDE the acceptance zone. A
     # mandate whose objective is off the org ranking is OUTSIDE the zone and is NOT auto-floored; it
     # surfaces as a drift signal (and, if it is the sole coverage of the top objective, ESCALATEs).

@@ -1,4 +1,6 @@
-# 09 — Execution: Delegate to the Host Harness, Project the Profile
+# 08 — Execution: Delegate to the Host Harness, Project the Profile
+
+*Part II · Design — see [the four-part map](README.md).*
 
 > An agent organization does not need its own execution engine. The repository's first
 > principle (docs/01, R0) and its thesis (THEORY.md) hold that **the harness and the loop
@@ -23,6 +25,7 @@ already runs on, using that harness's own mechanisms:
 | Perceive→decide→act loop, stop, iteration cap (Organ 4) | **Host harness** | Declared `loop.cadence` / stop intent; the harness enforces it |
 | Token budget, no-progress halt | **Host harness** | Declared budget intent; the harness's own budget/turn caps enforce it |
 | Scheduling (activate on cadence) | **Host environment** | The schedule as data; a cron / CI trigger / the harness loop fires it |
+| CI/CD + deploy target (the deploy phase, Organ 6 / docs/11) | **Host environment** | The org authors a workflow (GitHub Actions) as an owned deliverable; the host builds, runs the test evidence, and releases — the org ships no pipeline runner |
 | Tool permissions, sandboxing, secret custody | **Host environment** | Chosen to fit the org's threat tier (docs/01 §5); the system does not reimplement it |
 | The org skeleton (who/what/checks) | **This repository** | organization.yaml, constitution.yaml, moves/sensors/schemas |
 | The shared record | **Host storage + this repo's schema** | An append-only store the host provides; ledger-schema.yaml defines its shape |
@@ -42,7 +45,7 @@ convention — the file the harness reads on launch to know its job:
 - The neutral profile is the **source of truth**; the per-harness instruction files are
   **generated views**, regenerated from it, never hand-forked (the derived-view discipline
   of Organ 5, applied to profiles).
-- Projection assembles, into the working directory, what docs/08's context-pack formula
+- Projection assembles, into the working directory, what docs/07's context-pack formula
   requires: the intent block, the role's contract and doctrine, the granted views of the
   shared record, and nearby failures — as files the harness reads. "Assembling the context
   pack" is **writing those files into the working dir before launch**, not running a
@@ -73,6 +76,15 @@ coding agents already do:
 - **A control loop with stop conditions** (turn/iteration caps, a token budget) — Loop
   engineering, which the harness already implements.
 - **A launch/stop signal on a schedule** (a scheduler the environment provides).
+- **A CI/CD pipeline and a deploy target** (GitHub Actions and a deploy environment) —
+  the spine of the SDLC mold's **deploy phase** (docs/11 §3). The org *declares intent*
+  into a workflow (build → run the test phase's evidence → gate on `survives` + error
+  budget → release) and the host runs it; a green pipeline carrying those checks is the
+  machine form of the deploy gate. **CI/CD-as-host is exactly the R0 discipline already
+  applied to scheduling** — GitHub Actions is to deploy what cron / `/loop` is to the
+  metabolism, and GitHub is the natural web-projection environment for a software company's
+  work. The org authors and maintains the workflow (a gated maker deliverable); it does not
+  implement a pipeline runner.
 - **An append-only place to write the shared record** whose shape matches
   ledger-schema.yaml.
 
@@ -91,7 +103,7 @@ The skeleton declares *intent*; the host enforces it. Concretely:
   loop's own stop mechanisms; the skeleton names the goal, the host stops on it.
 - **Budget** (a per-window token cap, the no-progress rule) maps onto the host's budget/turn
   controls. "24-hour operation" is the host running the schedule unattended, with the
-  approval queue (docs/06) holding charter/irreversible actions for the operator — not a
+  approval queue (docs/05) holding charter/irreversible actions for the operator — not a
   bespoke daemon.
 
 ## 5. Control enforcement — split by threat tier (docs/01 §5)
@@ -112,7 +124,7 @@ in the lint. *How* they're enforced depends on the threat tier the org is deploy
   custody, and sandboxing. **These are host-environment features you select, not runtime you
   build** (docs/01 R2, C4): run such an org on an environment whose sandbox and permission
   model already provide them. The system's job is to *require the right host* for the tier,
-  and to keep the irreversible-action approval gate (docs/06) between "prepared" and
+  and to keep the irreversible-action approval gate (docs/05) between "prepared" and
   "executed."
 
 Tier-B guarantees are not built inside this repo. Under R0/C4 that would be the
@@ -133,7 +145,7 @@ An organization built from this repo is *runnable* when, on a chosen host harnes
       scheduler, from the declared intent
 - [ ] the shared record is an append-only store the host provides, shaped per
       ledger-schema.yaml
-- [ ] charter/irreversible actions are held for the operator's approval queue (docs/06),
+- [ ] charter/irreversible actions are held for the operator's approval queue (docs/05),
       and — for a Tier-B org — the host environment provides the sandboxing/custody the tier
       requires
 - [ ] the lint passes on the skeleton and every reorg diff

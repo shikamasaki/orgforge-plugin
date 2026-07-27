@@ -20,7 +20,7 @@ persistent local filesystem (verified against the Claude Code docs). Two consequ
 2. **The human steers through GitHub, compressed to a label.** The backlog is *projected* to GitHub
    Issues (a view, not a second SSoT — the ledger stays authoritative). The human's whole input is
    applying a label to an Issue from their phone. This is the y-hirakaw "instruction compressed to one
-   label," and the docs/17 §5 front door, realized on GitHub.
+   label," and the docs/12 §5 front door, realized on GitHub.
 
 The plugin itself works unchanged: Claude Code on the web loads repo-committed `.claude/settings.json`
 hooks (PreToolUse / SessionStart fire) and plugin commands — so the guardrails, the doctrine injection,
@@ -29,7 +29,25 @@ location and the steering surface differ.
 
 ## Labels: work-lock, state, priority, dependency
 
-The Issue label system carries four orthogonal things the org already tracks internally:
+The Issue label system carries five orthogonal things the org already tracks internally:
+
+### 0. Kind & hierarchy — the big-picture objective vs. a department's task
+The org has two levels: an **objective** (the RFP / business goal) and the **department tasks** that
+decompose it. Both project onto GitHub Issues, and the two are kept distinct so a phone view — and a
+web or local session picking work — never confuses "the goal" with "a unit of work":
+
+- `orgforge:kind:objective` — the **big-picture Issue** (a projection of an org objective). It is a
+  *parent / roll-up*, not something an agent claims and works directly.
+- `orgforge:kind:task` — a **department's unit of work** (a projection of a `candidate_submitted`).
+  This is the workable item: it is claimed, staged, and closed.
+- A task is attached to its objective as a **native GitHub sub-issue** (`github_sync create --kind task
+  --parent <objective#>` → the REST `sub_issues` API), so GitHub itself shows the objective's sub-issue
+  list and progress roll-up — R0: we borrow GitHub's own parent/child primitive rather than invent a
+  link. `orgforge:dept:<name>` tags which department owns the task.
+- `github_sync ready` lists **tasks** by default (objectives are parents, not claimable work); pass
+  `--kind objective` to see objectives or `--kind any` for both. **SSoT is unchanged:** the objective
+  Issue projects an org objective, the task Issue projects a candidate — the ledger stays authoritative,
+  the two-level Issue tree is its regenerated window.
 
 ### 1. Work-lock (prevent concurrent work — the user's requirement)
 GitHub's atomic label operation IS the exclusion lock (R0: borrow the host's primitive; the org does not
@@ -44,13 +62,24 @@ audited fact but does not arbitrate the race.
   reclaim signal (the registrar sweeps it).
 
 ### 2. State (the backlog stage — the label-machine)
-The Issue's lifecycle label mirrors the ledger stage (docs/12), so the board is legible on a phone:
+The Issue's lifecycle label mirrors the ledger stage (docs/09), so the board is legible on a phone:
 
 - `orgforge:ready` — a triaged backlog item, available to claim. *The human applies this to steer.*
 - `orgforge:in-progress` — a cycle is working it (`cycle_started`).
 - `orgforge:blocked` — waiting on a dependency (see below).
 - `orgforge:needs-human` — escalation; the human decides (mandate clash, irreversible action).
 - `orgforge:done` — completed (`cycle_completed`); the Issue closes.
+
+### 2b. Work-log — progress accrues on the Issue as it happens (the user's requirement)
+The stage label is the *coarse* state; the **work-log** is the fine-grained running record. On each
+milestone the cycle appends to the ledger (`cycle_started`, `progress_recorded`, `phase_admitted`,
+`cycle_completed`), it **also posts a comment to the task Issue** (`github_sync log --issue N --event …
+--event-id <ledger id>`), so a human watching from a phone sees the work advance in real time — the
+next step, the phase reached, a blocker — without opening the ledger. This is a **projection, not a
+second SSoT**: the ledger event is the fact; the comment mirrors it. It is **idempotent** — each comment
+carries a hidden `orgforge:event:<id>` marker keyed to the ledger event id, so a replayed or retried
+cycle logs each milestone exactly once (docs/11 §0, the same reproducibility rule the ledger append
+follows). A ledger-only run (no `ORG_GITHUB_REPO`) simply skips the projection.
 
 ### 3. Priority (measured, not guessed — the user's requirement)
 Priority is not a raw label the human sets by feel; it is **`attention.py`'s situated-attention score**

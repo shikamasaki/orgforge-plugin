@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""resource — allocation, prioritization, and grant-decay events (docs/11 §3).
+"""resource — allocation, prioritization, and grant-decay events (docs/05 §5.4).
 
 Grants exist in this org (context_budget, model_tier, dept-slot, delegated authority) but no
 event ever TAKES THEM BACK, and every allocation is only correct relative to a current
 priority ranking that nothing maintains. This tool supplies the missing events, each a pure
 projection over tools/ledger.py, each fail-quiet with escalation only in the risk-increasing
-direction (docs/11 §0). Ships no scheduler (R0): a host-run agent calls these on a cadence /
+direction (docs/05 §5.0). Ships no scheduler (R0): a host-run agent calls these on a cadence /
 event; tick.py plans WHEN.
 
   rank <root> --objectives ID:WEIGHT,ID:WEIGHT [--basis E,E]   PRIORITY-RANKING. The reference

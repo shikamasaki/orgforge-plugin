@@ -7,7 +7,7 @@ allowed-tools: Bash(echo *), Monitor
 Bring the organization to its **running state** for this session. The drive — firing each cycle on a
 cadence — is delegated to Claude Code's built-in **`/loop`** (R0: borrow the harness's loop, don't build
 one). The org keeps only what `/loop` can't give it: the **missed-tick detection** in `/org-tick` that
-notices when a cycle that was due did *not* run (docs/11 §5.2) — so "the loop stopped" is a detected fact,
+notices when a cycle that was due did *not* run (docs/05 §5.2) — so "the loop stopped" is a detected fact,
 not silence.
 
 Role: **${1:-supervisor}** · tick every **${2:-15}** min · work every **${3:-60}** min · discover every
@@ -56,4 +56,4 @@ or kept-open session, the three `/loop`s above are all you need.
 that's an org-specific fact only `tick.py` can judge (a due check with no `verify_event` in the ledger is
 a MISS). So the drive is delegated, the monitoring is not: `/org-tick` (driven by `/loop`) still detects a
 missed cycle and surfaces it, exactly as before. Delegating the drive removed the CronCreate/OS-cron
-bookkeeping; keeping the monitor preserved the "silence must not read as success" guarantee (docs/16).
+bookkeeping; keeping the monitor preserved the "silence must not read as success" guarantee (docs/10).

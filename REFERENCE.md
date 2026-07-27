@@ -12,6 +12,14 @@ fixes for the problems people actually hit.
 Set these in your harness config (`.claude/settings.json` → `"env"`, or the shell before a headless
 run). Only `ORG_LEDGER_ROOT` is required to turn the guardrails on; everything else has a safe default.
 
+> **Spec vs. dev override.** The enforcement knobs — the caps, the window, the iteration/cycle limits,
+> and the seam gate — are **declared in the org spec**, in `constitution.yaml`'s `enforcement:` block
+> (see §7). That is the source of truth, so *every install of the same org fans out and throttles the
+> same way* (reproducibility, docs/11 §0). The `ORG_CAP_*`, `ORG_WINDOW`, `ORG_WINDOW_SINCE`,
+> `ORG_MAX_CYCLES`, `ORG_MAX_TOKENS`, and `ORG_REQUIRE_SEAM` variables below are **dev overrides** over
+> that spec — for a local run or a test, not the way you configure a real org. Set the value in the
+> constitution for anything you want to persist.
+
 ### Core
 
 | Variable | What it does | Default |
@@ -91,14 +99,100 @@ An org is these source files (templates in `template/`), validated by `tools/org
 | File | What it declares |
 |---|---|
 | `organization.yaml` | the chart: purpose, latent layers, roles + contracts, separation-of-duties, info-flow scopes |
-| `constitution.yaml` | the charter: decision line, invariants, change tiers, mandate precedence — **no agent edits it** |
+| `constitution.yaml` | the charter: decision line, invariants, change tiers, mandate precedence, and the **`enforcement:` block** (below) — **no agent edits it** |
 | `moves.yaml` | the catalog of legal structural changes, each tiered (delegated / charter / irreversible) |
 | `ledger-schema.yaml` | the ledger's event vocabulary + derived views (incl. the backlog and work-in-progress views) |
 | `sensors.yaml` | the sensors that trigger reorg moves |
 | `role-settings.yaml` | neutral per-role runtime knobs (model tier, tools, budget, stop) — the projection input |
 | `ROLE.md` / `SUPERVISOR.md` / `FOUNDER.md` / `PROJECTION.md` | neutral role/supervisor/founder profiles + the projection contract |
 
+### The `enforcement:` block (`constitution.yaml`)
+
+The org's enforcement knobs are **declared in the spec**, not left to env vars, so every install of the
+same org throttles and fans out the same way (reproducibility, docs/11 §0). The `ORG_*` variables in §1
+are **dev overrides** over these values:
+
+```yaml
+enforcement:
+  caps:                    # per-day blast-radius budgets — a gate HOLDS when the window sum would exceed
+    destructive_ops: 50    #   ← overridden by ORG_CAP_DESTRUCTIVE_OPS
+    external_writes: 30    #   ← ORG_CAP_EXTERNAL_WRITES
+    infra_changes: 20      #   ← ORG_CAP_INFRA_CHANGES
+    file_mutations: 500    #   ← ORG_CAP_FILE_MUTATIONS
+  window: daily            # daily = per-day budget resetting at UTC midnight; or `all`   ← ORG_WINDOW
+  iteration:               # runaway read-think-edit kill, DEFAULT-ON (docs/11 §0; the amplifier failure)
+    max_cycles: 50         #   ← ORG_MAX_CYCLES   (null = unlimited)
+    max_tokens: 2000000    #   ← ORG_MAX_TOKENS
+  seam_gate: on            # the fan-out seam/independence gate, DEFAULT-ON   ← ORG_REQUIRE_SEAM
+  catastrophic_denylist: on # rm -rf / , mkfs, fork bomb … — always on; a spec cannot opt a shipped org out
+```
+
+Precedence: the spec value is the default; an `ORG_*` env var, if set, overrides it for that run. Set
+the value **in the constitution** for anything you want an org to carry to every install.
+
 Validate: `python3 tools/org_lint.py organization.yaml constitution.yaml moves.yaml ledger-schema.yaml sensors.yaml [role-settings.yaml]` (exit 0 = pass, 1 = violations).
+
+`org_lint.py` teeth include **O10 — contract coverage** (docs/11 §0, docs/01 J14/S9): every declared
+`contract.deliverable` must be *owned* by a role and *independently checked* by a different role (a
+role may not be the checker of its own deliverable, and a deliverable owned by two roles is a
+separation-of-duties violation). O10 is the chart side of the RFP-coverage manifest — the guarantee
+that the founding contracts cover what the RFP asked for, which is one half of Level-1 reproducibility.
+
+### The reproducibility gate (`repro_lint.py`)
+
+The **Level-2 reproducibility gate** (docs/11 §4a) — checks that a repository the org *builds* is
+reproducible for a stranger who clones it, not asserted by the maker. Run **by the gate** at the SDLC
+implement/test/deploy phase gates:
+
+```
+python3 tools/repro_lint.py check <repo_dir> [--phase implement|test|deploy] [--json]
+```
+
+Exit `0` = all artifacts required *for that phase* are present · `10` = one or more missing (the gate
+should HOLD) · `2` = usage error. Each artifact is tagged with the earliest phase that requires it, so
+an implement-phase candidate is held to a lighter bar than a deploy-phase one:
+
+| Phase gate | Requires (presence, not correctness) |
+|---|---|
+| `implement → test` | a committed lockfile + populated manifest; a pinned toolchain |
+| `test → deploy` | a one-command setup + one-command test documented in a README; idempotent migrations; `.env.example` |
+| `deploy` | a committed CI workflow (GitHub Actions) that runs setup + test from a clean clone, and is green |
+
+It checks *presence/shape*, not correctness ("is there a lockfile", not "does install work") — the
+gate re-runs setup+test from a clean clone for the correctness half. Presence is the cheap
+deterministic first tooth; the clean-clone re-run is the expensive second one the deploy pipeline
+performs.
+
+### GitHub Issue projection (`github_sync.py` — the web harness, `integrations/web`)
+
+Projects the org's backlog onto GitHub Issues so an org can be steered from a phone. **SSoT is
+unchanged** — the ledger stays authoritative; Issues are its regenerated window (R0: labels are the
+lock, the native sub-issue is the hierarchy). Two levels:
+
+- **objective Issue** (`orgforge:kind:objective`) — the big-picture RFP/objective (parent). Created by
+  `/org-found` after CEO sign-off.
+- **task Issue** (`orgforge:kind:task` + `orgforge:dept:<name>`) — a department's unit of work, linked
+  as a **native GitHub sub-issue** of its objective. Created by `/org-discover`.
+
+```
+github_sync.py create --repo R --kind objective --objective <id> --title T                # the parent
+github_sync.py create --repo R --kind task --parent <objective#> --dept D --objective <id> --title T
+github_sync.py claim  --repo R --issue N --agent A     # exit 10 if already claimed (concurrent-write lock)
+github_sync.py stage  --repo R --issue N --stage ready|in-progress|blocked|needs-human|done
+github_sync.py log    --repo R --issue N --event E [--phase P] [--detail T] --event-id <ledger id>
+github_sync.py ready  --repo R [--kind task|objective|any]   # tasks only by default (objectives are parents)
+```
+
+- **`log`** appends a **work-log comment** on each milestone (`cycle_started`, `progress_recorded`,
+  `phase_admitted`, `cycle_completed`), so progress accrues on the Issue as it happens. **Idempotent**:
+  the comment carries a hidden `<!-- orgforge:event:<id> -->` marker keyed to the ledger event id, so a
+  replay logs each milestone once (docs/11 §0). `/org-work` calls it at each of its three record points.
+- Labels: `orgforge:claimed:<agent>` · `orgforge:{ready,in-progress,blocked,needs-human,done}` ·
+  `orgforge:kind:{objective,task}` · `orgforge:dept:<name>` · `orgforge:objective:<id>` ·
+  `orgforge:{mandate,self}` · `orgforge:off-ranking`.
+- All three creation paths are **idempotent**: `create` no-ops when an open Issue with the same
+  title+objective exists, so a re-run/replay never mints a duplicate. `ORG_GITHUB_REPO` unset ⇒ a
+  ledger-only run (the projection is skipped silently).
 
 ---
 
@@ -114,9 +208,29 @@ The backlog and progress live in the ledger. The events that drive the metabolis
 | `cycle_completed` | `role, candidate_id, outputs, …` | the item is done and drains from the backlog |
 | `exposure_budget_checked` | `dimension, committed_so_far, delta_requested, cap, decision` | one blast-radius cap decision (allow / hold) |
 
+**The forced-SDLC phase gate** (docs/11 §2) — the mold is enforced *in the ledger*, via `requires_prior`:
+
+| Event | Payload (key fields) | Meaning |
+|---|---|---|
+| `phase_started` | `deliverable, phase: requirements\|design\|implement\|test\|deploy\|operate, role` | a deliverable entered a phase. **Invalid** unless a `phase_admitted{prior(phase), verdict:pass}` exists for it (`prior(requirements)=∅`) — this is what makes a phase un-skippable. |
+| `phase_admitted` | `deliverable, phase, verdict: pass\|rework\|reject, evidence_ref, admitter` | a gate ruled on a phase; a `pass` is the precondition the *next* `phase_started` requires. |
+
+**The operate instruments** (docs/05 §reliability-budget / §DORA, docs/11 §4):
+
+| Event | Payload (key fields) | Meaning |
+|---|---|---|
+| `reliability_budget_checked` | `service, slo, window_id, budget_total, budget_burned, budget_remaining, deploy_verdict: allow\|freeze, caused_by_event` | the SRE error budget the deploy gate reads. Silent while healthy; surfaces on the transition to `freeze`; a fast burn escalates as a systemic regression. |
+| `dora_snapshot` | `window_id, deploy_frequency, lead_time_p50, change_fail_rate, mttr_p50, inferred_bottleneck: design\|review\|test\|deploy\|operate, delta_vs_prior` | DORA's four keys computed from the ledger's own events; names the **moving bottleneck**. Escalates only when a key regresses past a systemic threshold or the bottleneck moves. |
+
 Views (read with `python3 tools/ledger.py view <root> <view>`):
 - `open_experiments` — the backlog (submitted, not yet completed).
 - `work_in_progress` — started-but-not-completed candidates with their latest checkpoint (the resume source).
+
+**Idempotent append** (docs/11 §0 reproducibility): `ledger.py append … --natural-key <key>` makes a
+write **idempotent** — if an event of the same class with that natural key already exists in history,
+the append is a **no-op (exit 0)** instead of a duplicate. A retried tick or a replayed phase
+transition lands the same event once, so the log is a deterministic function of the spec + actions
+(the same guarantee the phase-gate needs to be reproducible).
 
 ---
 

@@ -20,7 +20,7 @@
 # This chart is HARNESS-AGNOSTIC. Nothing here assumes a specific vendor or a bespoke
 # runtime. Each department RUNS ON AN EXISTING CODING-AGENT HARNESS (Claude Code, Codex,
 # any general coding agent), which reads that department's PROJECTED PROFILE as its
-# instruction file (docs/09 §2). The heavy organs — perception, tools, the control loop,
+# instruction file (docs/08 §2). The heavy organs — perception, tools, the control loop,
 # scheduling, budgets — are supplied BY THAT HOST HARNESS/ENVIRONMENT, not by this file.
 # What this file declares is INTENT (who/what/checks, cadences, scopes); the chosen host
 # enforces it. Swap harnesses and only the projection changes — nothing in this skeleton.
@@ -30,7 +30,7 @@
 
 # ── Organ 1: PURPOSE (telos) ────────────────────────────────────────────────
 # One sentence. Not a metric — a purpose. The metric lives one level below it (see admission).
-# Delivered to every role as part of the intent block (docs/08 §2.1).
+# Delivered to every role as part of the intent block (docs/07 §2.1).
 purpose: >
   Discover, express, and accumulate reusable, reproducible, economically-valuable material,
   and combine it into results — growing a durable asset, not a pile of outputs.
@@ -42,7 +42,7 @@ objective_metric:
   reward_agents_on_this: false          # non-negotiable: proxies are instruments, not incentives
   gaming_defenses: [random-null, placebo, forward-out-of-sample test]
 
-# ── Organ 7: GROWTH STAGE (a diagnostic label, not a ratchet — see docs/02, docs/05) ──
+# ── Organ 7: GROWTH STAGE (a diagnostic label, not a ratchet — see docs/02, docs/02) ──
 growth:
   stage: creativity                      # creativity | direction | delegation | coordination | collaboration
   coordination_mechanism: direct_supervision   # Mintzberg: which mechanism dominates today
@@ -51,14 +51,14 @@ growth:
   # A layer is added only via the charter-tier add_layer move, only after
   # widen_span_via_context has been attempted (docs/02 §3; template/moves.yaml).
 
-# ── Elastic activation (docs/05): design fully, run elastically ─────────────
+# ── Elastic activation (docs/02): design fully, run elastically ─────────────
 # The chart below is the COMPLETE ideal org — every department the purpose will ever
 # need, INCLUDING the maintenance watch and the handover packager, declared up front
 # (design is cheap). `active:` per role is the current activation state; it changes only
 # through moves.yaml, authored by the registrar, gated by tools/org_lint.py and the gate.
 # A dormant department = its profile + doctrine + ledger history, at zero cost,
 # losslessly re-activatable. The control skeleton is never dormant while anything explores.
-# Each ACTIVE department runs on a host harness reading its projected profile (docs/09 §2);
+# Each ACTIVE department runs on a host harness reading its projected profile (docs/08 §2);
 # `active:` is declared intent that the host's scheduler/launcher realizes, not a process
 # this file spins up.
 elastic:
@@ -104,24 +104,24 @@ separation_of_duties:
     - { maker: packager,   checker_must_not_be: packager }
     - { maker: registrar,  checker_must_not_be: registrar }   # the clerk's diffs are gate-admitted
 
-# ── Organ 5: INFORMATION FLOW (shared consciousness, on a budget — docs/07, docs/08) ──
+# ── Organ 5: INFORMATION FLOW (shared consciousness, on a budget — docs/06, docs/07) ──
 information_flow:
   shared_record: append-only-ledger      # SSoT; derived views are regenerated, never hand-edited
-  knowledge_base: role-scoped-kb         # external knowledge, gate-admitted, provenance'd (docs/07)
+  knowledge_base: role-scoped-kb         # external knowledge, gate-admitted, provenance'd (docs/06)
   context_delivery: context_pack         # assembled by the registrar BEFORE every cycle
-  # The refined Organ 5 rule (docs/08): broadcast the intent, need-to-know the details.
+  # The refined Organ 5 rule (docs/07): broadcast the intent, need-to-know the details.
   intent_block:
     contains: [purpose, current_priorities, constraints_in_force]
     version: ledger-stamped              # loaded by reference, never copied into profiles
     in_every_pack: true
-  # The two special pack items every role carries WITHOUT a per-role scope grant (docs/08 §2.1,
+  # The two special pack items every role carries WITHOUT a per-role scope grant (docs/07 §2.1,
   # ledger-schema.yaml special_pack_items): the intent (broadcast) and the role's OWN doctrine
   # (its own べき論, per-role — not another role's). Declaring them here makes the lint's
   # exemption articulated, not a hidden hardcode: a context_pack may contain a special item OR a
   # granted view, nothing else. `doctrine` is per-role by construction (tools/doctrine.py keys
   # the store by role), so carrying it does not cross the need-to-know boundary.
   universal_pack_items: [intent_block, doctrine]
-  scopes:                                # deny-by-default seam grants (docs/08 §2.2)
+  scopes:                                # deny-by-default seam grants (docs/07 §2.2)
     default: deny
     grants:                              # who may read which derived views, and the pack budget
       - { role: miner,      views: [coverage_map, live_findings, nearby_deaths],    pack_budget_tokens: 20000 }
@@ -133,21 +133,21 @@ information_flow:
       - { role: packager,   views: [recent_ledger_census],                                pack_budget_tokens: 30000 }
       - { role: supervisor, views: [direction_flags, sensor_readings, recent_ledger_census], pack_budget_tokens: 30000 }
       # control-layer scopes are charter-tier to change; a maker can never scope-fence
-      # its Checker out of the evidence (docs/08 §4)
+      # its Checker out of the evidence (docs/07 §4)
       - { role: gate,       views: [admission_standard, candidate_under_review, full_evidence_trail], pack_budget_tokens: 40000 }
       - { role: skeptic,    views: [claim_under_review, refutation_checklist, full_evidence_trail],   pack_budget_tokens: 40000 }
       - { role: registrar,  views: [sensor_readings, moves_catalog, proposal_queue, ledger_census],   pack_budget_tokens: 30000 }
-  recertification: weekly                # unused grants are revoked (docs/08 §3)
+  recertification: weekly                # unused grants are revoked (docs/07 §3)
 
 # ── Organ 2 detail + Organ 3/4 per member: THE DEPARTMENTS (roles) ──────────
 # Each role: regime (may it self-organize?), active (elastic state), profile_lineage
 # (anti-puppet-checker — a checker must never share lineage with its makers),
 # contract (the deliverable slice of the RFP: what it owes, to what standard, judged by
-# whom — docs/06 §1, step 3), context_pack (Organ 3 onboarding), loop (Organ 4 cadence),
-# doctrine (docs/07 — its current normative playbook, loaded every cycle).
+# whom — docs/05 §1, step 3), context_pack (Organ 3 onboarding), loop (Organ 4 cadence),
+# doctrine (docs/06 — its current normative playbook, loaded every cycle).
 # Each role's `loop.cadence` below is a SCHEDULE THE HOST SCHEDULER REALIZES (a cron, a CI
-# trigger, or the harness's own loop — docs/09 §4), not a timer this file runs; and each
-# role runs on a host harness reading its projected profile (docs/09 §2).
+# trigger, or the harness's own loop — docs/08 §4), not a timer this file runs; and each
+# role runs on a host harness reading its projected profile (docs/08 §2).
 roles:
 
   - id: supervisor
@@ -169,7 +169,7 @@ roles:
     active: true
     profile_lineage: control-registrar-v1
     mission: >
-      The org clerk (docs/06 §2.6): evaluate sensors from ledger-recorded readings, select
+      The org clerk (docs/05 §2.6): evaluate sensors from ledger-recorded readings, select
       legal moves, author reorg diffs (as Maker — the lint and the gate admit them),
       assemble context packs within budget, generate the deterministic morning digest with
       its mandatory census, and service the approval queue. Approves nothing, ever.
@@ -247,7 +247,7 @@ roles:
     active: true
     profile_lineage: exploration-v1
     mission: >
-      The boundary spanner (docs/07): watch declared external sources on cadence, file
+      The boundary spanner (docs/06): watch declared external sources on cadence, file
       intelligence items into the knowledge base with full provenance, and PROPOSE
       doctrine diffs per affected role. Never writes doctrine directly — the gate admits.
     contract:
@@ -279,7 +279,7 @@ roles:
     regime: organic
     active: false   # latent: activates with prepare_handover (charter)
     profile_lineage: exploration-v1
-    mission: Assemble the succession package from the ledger (docs/06 §4.2) — read-only.
+    mission: Assemble the succession package from the ledger (docs/05 §4.2) — read-only.
     contract:
       deliverable: the succession package (purpose/intent history, contracts + admission
         records, profiles + doctrines, scope matrix, open-risk register)
@@ -297,7 +297,7 @@ roles:
     profile_lineage: control-gate-v1
     mission: >
       Admit or reject candidates against the purpose-grounded standard. The authorization
-      duty — for work candidates, doctrine diffs (docs/07), and the registrar's reorg diffs
+      duty — for work candidates, doctrine diffs (docs/06), and the registrar's reorg diffs
       alike. Admitted positives are handed to the skeptic for adversarial review.
     context_pack: [intent_block, admission_standard, candidate_under_review, full_evidence_trail]
     functions: [judge]                    # control members are narrow by design
@@ -317,20 +317,20 @@ roles:
 # How the organization runs continuously and safely. Stop conditions are non-optional.
 # Night windows, token caps, and safe-mode rules live in the constitution (delegated.night).
 #
-# IMPORTANT (docs/09 §3–§4): every key below is DECLARED INTENT handed to the host
+# IMPORTANT (docs/08 §3–§4): every key below is DECLARED INTENT handed to the host
 # harness/environment, NOT a runtime this file's system implements. The system does not
 # ship a scheduler, a durability layer, a halt switch, or a budget daemon — it names the
 # requirement, and the CHOSEN HOST enforces it: continuous/durable operation is the host
 # running the schedule unattended and resuming from the host-provided ledger store; the
 # halt flag and budget guard map onto the host's own stop conditions and token/turn caps.
-# Keep these keys as intent; do not read them as "build this." (docs/09 §3–§4.)
+# Keep these keys as intent; do not read them as "build this." (docs/08 §3–§4.)
 runtime:
-  continuous: true                        # intent: host runs the schedule unattended (docs/09 §4)
+  continuous: true                        # intent: host runs the schedule unattended (docs/08 §4)
   durable: true                           # intent: host survives crashes; resumes from the ledger store
   global_halt_flag: true                  # intent: host provides a single stop signal for all members
   budget_guard: true                      # intent: host's token/turn caps + no-progress; schedule: constitution
   # total_token_budget: the whole org's token allowance — the pool the top holds and carves down at
-  # delegation (docs/14 §granularity). A manager passes a spec_delegated.token_budget to each
+  # delegation (docs/09 §granularity). A manager passes a spec_delegated.token_budget to each
   # subordinate from its own share; the sum of a manager's outgoing budgets may not exceed its own
   # (checked by lint MB — hierarchical budget, the machine form of "you spawn within your budget").
   # Since ~1 subagent ≈ ~50k tokens (measured), the budget — not a depth/width knob — sets how deep

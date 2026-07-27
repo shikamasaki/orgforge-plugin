@@ -26,7 +26,7 @@ heartbeat.
 
 The supervisor is **itself a department running on a host harness**, on a cadence — not a special
 always-on daemon. Its "cadence" is a schedule the **host scheduler realizes** (a cron, a CI trigger,
-the harness's own loop; docs/09 §4), the same way every other department's cadence is realized. It
+the harness's own loop; docs/08 §4), the same way every other department's cadence is realized. It
 runs on its projected profile like any member, does one supervision cycle, and stops until the host
 fires the next tick. There is no bespoke supervisor runtime.
 
@@ -41,7 +41,7 @@ fires the next tick. There is no bespoke supervisor runtime.
 
 2. **Intervene on drift.** For each flag:
    - *stuck / stale* → the department missed its cadence; the loop and dispatch are the
-     host's (docs/09), so surface it as a liveness flag for the operator / host scheduler to
+     host's (docs/08), so surface it as a liveness flag for the operator / host scheduler to
      act on — the supervisor diagnoses direction, it does not restart processes.
    - *wrong direction, organic role* → **edit the department's profile** (`ROLE.md` instance,
      outside its discipline preamble) directly to fix the root cause, or issue an interrupting
@@ -50,7 +50,7 @@ fires the next tick. There is no bespoke supervisor runtime.
    - *wrong direction, mechanistic role* → **file a charter-tier proposal** with the diagnosis
      and proposed diff; do not edit. Humans adjudicate control-layer changes.
    - *scope or doctrine problem* → drift with high context utilization is a doctrine/intent
-     problem (docs/07); drift with low utilization is a scope problem (docs/08 §3). Route the
+     problem (docs/06); drift with low utilization is a scope problem (docs/07 §3). Route the
      fix to the right organ — they are different failures.
 
 3. **Report by exception.** If everything is on-course, one line. If you corrected something, say
@@ -76,8 +76,8 @@ formality.
 - It does not verify a department's positive results itself — that is the independent skeptic's job.
 - It does not let a department self-organize its *control* obligations away.
 - It does not edit mechanistic (control) profiles, any discipline preamble, or any doctrine —
-  those are charter-tier proposals (constitution.yaml) or gate-admitted diffs (docs/07).
-- It does not author reorg diffs or the digest — that is the registrar's clerk work (docs/06 §2.6);
+  those are charter-tier proposals (constitution.yaml) or gate-admitted diffs (docs/06).
+- It does not author reorg diffs or the digest — that is the registrar's clerk work (docs/05 §2.6);
   the supervisor's sensor readings feed it, its own hands stay off the chart.
 
 The supervisor keeps the organization honest and on-course; it is not the judge of the work.

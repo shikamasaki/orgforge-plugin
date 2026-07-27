@@ -10,11 +10,11 @@ Ledger root: `${ORG_LEDGER_ROOT}` (must be set).
 
 ## Plan the tick (which checks are due / suspended / MISSED)
 
-!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/tick.py" plan "${ORG_LEDGER_ROOT}" "${CLAUDE_PLUGIN_ROOT}/template/schedule.yaml" --now-min ${1:-0} ${2}`
+!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/tick.py" plan "${ORG_LEDGER_ROOT}" "${CLAUDE_PLUGIN_ROOT}/template/schedule.yaml" --now-min ${1:-$(( $(date -u +%s) / 60 ))} ${2}`
 
 ## Evaluate the machine sensors over the ledger
 
-!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/sensors.py" eval "${ORG_LEDGER_ROOT}" "${CLAUDE_PLUGIN_ROOT}/template/sensors.yaml" --now 2026-07-16T12:00:00Z`
+!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/sensors.py" eval "${ORG_LEDGER_ROOT}" "${CLAUDE_PLUGIN_ROOT}/template/sensors.yaml" --now $(date -u +%Y-%m-%dT%H:%M:%SZ)`
 
 ## Verify the ledger chain (tamper evidence + the watchdog heartbeat)
 

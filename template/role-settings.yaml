@@ -45,7 +45,7 @@ roles:
     effort: medium
     context_budget_tokens: 20000
     stop: { goal: "gate-admitted doctrine diffs and provenance-complete items filed", max_iterations: 6 }
-    tools: { allow: [read, write, web_read], deny: [deploy, secrets] }   # external watch (docs/07)
+    tools: { allow: [read, write, web_read], deny: [deploy, secrets] }   # external watch (docs/06)
 
   - role: gate                          # CHECKER of high-stakes admission — warrants the judge tier
     model_tier: judge

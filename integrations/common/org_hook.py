@@ -30,8 +30,8 @@ the thin policy-decision-point client; the organ tool is the policy engine; the 
 Mapping (tool_name + tool_input) -> which organ guards it, declared in RULES below. Each rule
 names an organ command and how to derive its args from the tool_input. A rule that ESCALATES
 (the organ exits 10) becomes a BLOCK with the organ's stderr as the reason — "the org's decision
-line reached into the harness and held this action for the human" (docs/11 §0). Fail-OPEN is never
-the default: a rule whose organ errors blocks with a clear message (fail-safe, docs/06 §2.4),
+line reached into the harness and held this action for the human" (docs/05 §5.0). Fail-OPEN is never
+the default: a rule whose organ errors blocks with a clear message (fail-safe, docs/05 §2.4),
 unless ORG_HOOK_FAIL_OPEN=1 is set for a permissive dev mode.
 
 Usage (wired identically in Claude settings.json and Codex hooks.json):
@@ -40,7 +40,15 @@ Usage (wired identically in Claude settings.json and Codex hooks.json):
 Environment:
   ORG_LEDGER_ROOT   directory holding ledger.jsonl (required; the org's state)
   ORG_TOOLS_DIR     directory holding the organ *.py (default: <this>/../../tools)
+  ORG_CONSTITUTION  path to constitution.yaml (default: <ORG_LEDGER_ROOT>/../constitution.yaml)
   ORG_HOOK_FAIL_OPEN=1  allow on organ error instead of blocking (dev only)
+
+The GATE REGIME (caps, budget window, iteration limits, seam gate) is declared in
+constitution.yaml's `enforcement:` block, so every install of the same org enforces the SAME gates
+(docs/11 §0 reproducibility). The ORG_CAP_<DIM> / ORG_WINDOW / ORG_MAX_CYCLES / ORG_MAX_TOKENS /
+ORG_REQUIRE_SEAM env vars remain as DEV OVERRIDES only (resolution order: env → constitution →
+built-in default); the shipped org's behavior is what the spec declares, not what a host's
+environment happens to set.
 """
 import json
 import os
@@ -104,7 +112,7 @@ def _append_emitted(output):
 def _run_organ(argv):
     """Run an organ command; return (exit_code, combined_output). Never raises.
 
-    BOUNDED RETRY on a TRANSIENT failure (docs/17 §5): a timeout / crash (an exception, or a run that
+    BOUNDED RETRY on a TRANSIENT failure (docs/12 §5): a timeout / crash (an exception, or a run that
     produced no clean verdict) is retried a bounded number of times with a short backoff, so a single
     flake in a long unattended run does not convert to a hard fail-safe block. A CLEAN verdict (exit 0
     allow, 10 escalate) never retries — only genuinely transient failures do. After the bounded retries
@@ -292,6 +300,52 @@ _DEFAULT_CAPS = {
     "file_mutations":  "500",  # overwriting existing files per day — reversible under VCS; high ceiling
 }
 
+# ── the spec-declared enforcement policy (docs/11 §0 reproducibility) ─────────
+# The gate regime (caps, window, iteration limits, seam gate) is declared in constitution.yaml so
+# that EVERY install of the same org enforces the SAME gates — not in per-host env vars, which made
+# two adopters diverge. We read it once (cached). Resolution order for any value: env var (a DEV
+# OVERRIDE, kept for a developer loosening a cap locally) → constitution.enforcement → built-in
+# default. So the shipped org's behavior is the spec's; env is only a local escape hatch.
+_ENFORCEMENT_CACHE = None
+
+
+def _enforcement():
+    """Load constitution.yaml's `enforcement:` block (cached). constitution.yaml lives at the org
+    root — ORG_CONSTITUTION if set, else next to the ledger (LEDGER_ROOT/../constitution.yaml). If
+    yaml is unavailable or the file is absent, return {} (the built-in defaults apply — the org still
+    runs, just on defaults rather than spec-declared values)."""
+    global _ENFORCEMENT_CACHE
+    if _ENFORCEMENT_CACHE is not None:
+        return _ENFORCEMENT_CACHE
+    _ENFORCEMENT_CACHE = {}
+    path = os.environ.get("ORG_CONSTITUTION")
+    if not path and LEDGER_ROOT:
+        cand = os.path.join(os.path.dirname(LEDGER_ROOT.rstrip("/")), "constitution.yaml")
+        if os.path.exists(cand):
+            path = cand
+    if path and os.path.exists(path):
+        try:
+            import yaml  # yaml may be absent in a minimal interpreter; degrade to defaults
+            with open(path, encoding="utf-8") as f:
+                doc = yaml.safe_load(f) or {}
+            _ENFORCEMENT_CACHE = doc.get("enforcement", {}) or {}
+        except Exception:
+            _ENFORCEMENT_CACHE = {}
+    return _ENFORCEMENT_CACHE
+
+
+def _cap_for(dimension):
+    """The per-day cap for a dimension. env ORG_CAP_<DIM> (dev override) → constitution.enforcement.caps
+    → built-in default. Returns a string (the guardrails.py --cap arg is a string)."""
+    env = os.environ.get(f"ORG_CAP_{dimension.upper()}")
+    if env is not None:
+        return env
+    caps = _enforcement().get("caps") or {}
+    if dimension in caps:
+        return str(caps[dimension])
+    return _DEFAULT_CAPS.get(dimension, "3")
+
+
 def _now_ts():
     """The host's 'now', as an ISO ts. Used BOTH for the ts stamped on appended events and for the
     rolling window boundary — they MUST share one clock, or events are written under one epoch and
@@ -310,7 +364,7 @@ def _now_ts():
 
 def _window_since():
     """The start of the CURRENT blast-radius window. The cap bounds exposure PER WINDOW (a rolling
-    budget that resets — the "death by a thousand cuts" guard of docs/11 §2.1), so the window must
+    budget that resets — the "death by a thousand cuts" guard of docs/05 §2.1), so the window must
     ROLL FORWARD, or committed exposure accumulates for all time and the cap eventually blocks every
     action (the frozen-epoch deadlock). Default: a rolling DAILY window (the day of _now_ts, at
     00:00), so the budget resets each day with no operator action. Override with ORG_WINDOW_SINCE for
@@ -318,7 +372,9 @@ def _window_since():
     override = os.environ.get("ORG_WINDOW_SINCE")
     if override:
         return override
-    if os.environ.get("ORG_WINDOW") == "all":
+    # env ORG_WINDOW (dev override) → constitution.enforcement.window → daily default (docs/11 §0)
+    window = os.environ.get("ORG_WINDOW") or str(_enforcement().get("window", "daily"))
+    if window == "all":
         return "1970-01-01"                       # explicit, deliberate all-time budget
     # the day-boundary of the same clock the appends use — keep read-window and write-ts consistent
     return _now_ts()[:10] + "T00:00:00Z"
@@ -359,13 +415,13 @@ def rule_blast_radius(tool_name, ti):
     if not dim:
         return None
     dimension, delta = dim
-    cap = os.environ.get(f"ORG_CAP_{dimension.upper()}", _DEFAULT_CAPS.get(dimension, "3"))
+    cap = _cap_for(dimension)   # env override → constitution.enforcement.caps → default (docs/11 §0)
     return ["guardrails.py", "cap", LEDGER_ROOT, "--dimension", dimension,
             "--delta", str(delta), "--cap", cap, "--actor", "harness-agent",
             "--window-since", _window_since()]
 
 
-# ── Agent spawn discipline (docs/07 §2.1.1) ──────────────────────────────────
+# ── Agent spawn discipline (docs/06 §2.1.1) ──────────────────────────────────
 # A manager that spawns a subordinate must either hand it a SEAM CONTRACT (so integrating
 # siblings don't drift) or declare the child INDEPENDENT (a non-integrating fan-out — e.g. a
 # parallel enumeration whose outputs are never merged). This turns the profile's "please use
@@ -379,7 +435,7 @@ _INDEP_MARKERS = ("independent:", "non-integrating", "no seam", "outputs are not
 
 def _declared_owns(prompt):
     """Parse the `owns:` / `owns —` territory list a seam contract declares in a spawn prompt.
-    handoff.py writes an `Owns:` line (docs/07 §2.1.1); we read the paths/globs after it so the gate
+    handoff.py writes an `Owns:` line (docs/06 §2.1.1); we read the paths/globs after it so the gate
     can check them against live sibling claims. Best-effort line/inline parse; returns a set of tokens."""
     owns = set()
     for m in re.finditer(r"(?im)^\s*owns\s*[:\-—]\s*(.+)$", prompt):
@@ -423,16 +479,23 @@ def _live_claimed_territories(ledger_root):
 def spawn_needs_seam_or_independence(tool_name, ti):
     """Return None to allow, or a deny-reason string to block. Gate the Agent/Task spawn tool.
 
-    DEFAULT-ON (docs/17 §5 Layer-1 #1): a must-not-violate control across a fan-out belongs in the
-    enforcement layer, not a prompt (docs/16 §2). Opt OUT with ORG_REQUIRE_SEAM=0 for a deliberately
+    DEFAULT-ON (docs/12 §5 Layer-1 #1): a must-not-violate control across a fan-out belongs in the
+    enforcement layer, not a prompt (docs/10 §2). Opt OUT with ORG_REQUIRE_SEAM=0 for a deliberately
     ungated dev run. Two gates: (a) SHAPE — the child must carry a seam contract or an independence
     declaration; (b) NON-COLLISION — if it declares `owns:` territory, that territory must not intersect
     a sibling's live claim in the ledger, turning reconcile.py's post-hoc collision SCAN into a
     spawn-time PRECONDITION (the research's single-writer-ownership, prevented not detected)."""
     if tool_name not in ("Agent", "Task"):
         return None
-    if os.environ.get("ORG_REQUIRE_SEAM", "1") in ("0", "false", "no", "off"):
-        return None                      # explicit opt-out for an ungated dev run
+    # spec-first (docs/11 §0): env ORG_REQUIRE_SEAM (dev override) → constitution.enforcement.seam_gate
+    # → default ON. An org ships the gate ON in its spec; a dev may loosen it locally, but two installs
+    # of the same org fan out the same way.
+    seam_env = os.environ.get("ORG_REQUIRE_SEAM")
+    if seam_env is not None:
+        if seam_env in ("0", "false", "no", "off"):
+            return None                  # explicit dev opt-out
+    elif str(_enforcement().get("seam_gate", "on")).lower() in ("0", "false", "no", "off"):
+        return None                      # the spec declared the gate off
     prompt_raw = ti.get("prompt") or ""
     prompt = prompt_raw.lower()
     has_seam = any(m in prompt for m in _SEAM_MARKERS)
@@ -441,7 +504,7 @@ def spawn_needs_seam_or_independence(tool_name, ti):
         return ("this Agent spawn carries neither a seam contract (build it with tools/handoff.py: "
                 "slice + inputs/outputs the child integrates to) nor an explicit independence "
                 "declaration (start the child prompt with 'INDEPENDENT: ...' if its output is never "
-                "merged with a sibling's). Recursive splits drift without an owned seam — docs/07 §2.1.1.")
+                "merged with a sibling's). Recursive splits drift without an owned seam — docs/06 §2.1.1.")
     # NON-COLLISION: a declared owns territory must not overlap a live sibling claim (concurrent-write
     # drift is PREVENTED here, not detected later by reconcile.py collision).
     if LEDGER_ROOT:
@@ -454,7 +517,7 @@ def spawn_needs_seam_or_independence(tool_name, ti):
                 return (f"this spawn's declared owns-territory collides with a live sibling claim: "
                         f"{holders}. Two agents writing the same territory concurrently is the "
                         f"concurrent-write drift the org prevents at spawn time — give the child a "
-                        f"disjoint `owns:` set, or wait for the holder to release (docs/17 §5).")
+                        f"disjoint `owns:` set, or wait for the holder to release (docs/12 §5).")
     return None
 
 
@@ -464,15 +527,25 @@ def spawn_needs_seam_or_independence(tool_name, ti):
 # them as tool-loop rules is future work; the honest surface is one enforced rule + one injected
 # organ (doctrine at session start), not three enforced here (external review, 2026-07).
 def rule_iteration_cap(tool_name, ti):
-    """ITERATION/SPEND-CAP (docs/17 §5 #2): on a spawn (each Agent/Task = a delegated cycle), hold the
+    """ITERATION/SPEND-CAP (docs/12 §5 #2): on a spawn (each Agent/Task = a delegated cycle), hold the
     role if its cycle count or token spend in the window would exceed a cap. Enforcement-layer home for
     the runaway kill — active only when a cap env is set, so an org that hasn't opted into a budget is
     unaffected. Role from ORG_ROLE; caps from ORG_MAX_CYCLES / ORG_MAX_TOKENS."""
     if tool_name not in ("Agent", "Task"):
         return None
     role = os.environ.get("ORG_ROLE", "")
+    # spec-first (docs/11 §0): env ORG_MAX_* (dev override) → constitution.enforcement.iteration →
+    # built-in default. DEFAULT-ON: an org ships iteration limits in its spec, so a runaway loop is
+    # killed on every install, not only where three env vars happened to be set. null in the spec = no
+    # cap for that dimension. Role is still the runtime identity (ORG_ROLE); without a role we can't
+    # attribute cycles, so the cap can't apply.
+    itr = _enforcement().get("iteration") or {}
     max_cycles = os.environ.get("ORG_MAX_CYCLES")
+    if max_cycles is None and itr.get("max_cycles") is not None:
+        max_cycles = str(itr["max_cycles"])
     max_tokens = os.environ.get("ORG_MAX_TOKENS")
+    if max_tokens is None and itr.get("max_tokens") is not None:
+        max_tokens = str(itr["max_tokens"])
     if not role or (not max_cycles and not max_tokens):
         return None
     argv = ["guardrails.py", "cycles", LEDGER_ROOT, "--role", role,
@@ -513,7 +586,7 @@ def main():
 
     # Agent-spawn discipline is a pure shape check on the spawn prompt — it needs no ledger, so
     # it runs before the ledger gate. Blocks a manager that spawns a child with neither a seam
-    # contract nor an independence declaration (docs/07 §2.1.1); opt-in via ORG_REQUIRE_SEAM.
+    # contract nor an independence declaration (docs/06 §2.1.1); opt-in via ORG_REQUIRE_SEAM.
     seam_reason = spawn_needs_seam_or_independence(tool_name, tool_input)
     if seam_reason:
         _deny(f"org guardrail HELD this {tool_name} spawn: {seam_reason}")
@@ -540,7 +613,7 @@ def main():
             continue        # keep checking other rules
         # ANY other code (2 = interpreter couldn't run the script, 99 = our sentinel, a crash,
         # a timeout) means the guardrail did NOT return a clean allow. Fail-SAFE: block, never
-        # let an unevaluable guardrail become a silent allow (docs/06 §2.4). Dev may opt out.
+        # let an unevaluable guardrail become a silent allow (docs/05 §2.4). Dev may opt out.
         if FAIL_OPEN:
             print(f"org_hook: organ returned {code}: {output} (fail-open) — allowing",
                   file=sys.stderr)

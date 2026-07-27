@@ -1,6 +1,8 @@
-# 16 — Loop reliability: fewer decisions, explicit state, staged trust
+# 10 — Loop reliability: fewer decisions, explicit state, staged trust
 
-docs/11 named what a running org checks and when. docs/12/15 said how a unit picks and splits work.
+*Part III · Operate — see [the four-part map](README.md).*
+
+docs/05 named what a running org checks and when. docs/09/15 said how a unit picks and splits work.
 None of them addressed the property that decides whether an *unattended* loop survives contact with
 reality: **a loop is a series system, and a series of probabilistic steps fails compoundingly.** This
 document is the reliability discipline for the operating loop — why the goal is *fewer decision points*,
@@ -38,8 +40,8 @@ The 10-decisions → ~60% figure is the load-bearing intuition (y-hirakaw, docs/
    (not execute a fixed step) is a factor in the product. Collapse judgments: pre-decide with a fixed
    rule where a rule suffices, batch several small judgments into one, remove steps that don't earn their
    risk.
-2. **Prefer one bigger reliable step to three small flaky ones.** This is the reliability face of docs/15
-   §2.4 (split only when the parallelism beats the coordination cost) and docs/14's "keep tightly-coupled
+2. **Prefer one bigger reliable step to three small flaky ones.** This is the reliability face of docs/03
+   §2.4 (split only when the parallelism beats the coordination cost) and docs/09's "keep tightly-coupled
    work single-threaded": each extra sub-task is another factor in `p^n`, so fan out only when the pieces
    are genuinely independent — needless subdivision multiplies failure, not throughput.
 3. **Put the load-bearing constraints in the enforcement layer, not the request layer** (§2) — a
@@ -61,7 +63,7 @@ common way a loop silently degrades:
 
 **The rule: a constraint that must not be violated goes in the enforcement layer; a preference that should
 usually be honored goes in the request layer.** This is exactly the division docs already draws —
-guardrails/lint *block* (docs/11 §2, docs/09), doctrine/conventions *guide* (docs/07, docs/13) — stated
+guardrails/lint *block* (docs/05 §2, docs/08), doctrine/conventions *guide* (docs/06, docs/05) — stated
 here as a reliability principle. It is also why the org's hard guarantees (blast-radius cap, no
 doctrine-capture, seam-on-spawn) are hooks and lint teeth, **not** lines in a role's profile: a profile
 line is a probabilistic factor, a hook is `p = 1.0`.
@@ -76,7 +78,7 @@ tool call actually reaches the hook is a property of the *harness* (does Claude 
 for a subagent's calls?), not of this plugin. The plugin is correct-by-construction if the harness fires
 the event for every agent; on a harness that does not, the guarantee degrades to the top level. Choose a
 harness that gates subagent tool calls when the org fans out — this is the same host-selection contract
-as docs/09 (the plugin requires the right host; it does not reimplement the host).
+as docs/08 (the plugin requires the right host; it does not reimplement the host).
 
 ## §3 State is explicit, not held in context
 
@@ -84,7 +86,7 @@ An unattended loop cannot keep its state in an agent's working memory — a cont
 or a scheduled wake starts blank. So **the loop's state lives in the ledger, as named, inspectable
 facts**, and the human's steering is compressed to setting one of those facts:
 
-- Each backlog item carries an explicit **stage** and a **checkpoint** (docs/12: `candidate_submitted` →
+- Each backlog item carries an explicit **stage** and a **checkpoint** (docs/09: `candidate_submitted` →
   `cycle_started` → `progress_recorded {fraction, next_step, blocked_by}` → `cycle_completed`), so at any
   moment "what stage is this in, and what's the next step" is a lookup, not a memory
   (`ledger.py view work_in_progress`), and a resumed session continues from `next_step` rather than
@@ -94,7 +96,7 @@ facts**, and the human's steering is compressed to setting one of those facts:
   a `source: mandate` item or a stage.
 - Because each stage is explicit and independent, the loop's phases can run on **independent cadences**
   and still compose — the health tick, the PM cycle, and discovery each fire on their own schedule and
-  coordinate only through the shared, stage-tagged backlog (docs/11 §0's reconcile-by-exception), never
+  coordinate only through the shared, stage-tagged backlog (docs/05 §5.0's reconcile-by-exception), never
   by holding shared state in a live context. Explicit state is what lets the phases decouple without
   drifting.
 
@@ -127,14 +129,14 @@ is checked by a ladder of increasing cost and independence, so a bad step is cau
 than shipped, which is what makes a long loop survivable despite `p^n`:
 
 1. **Mechanical gates** — tests, lint, type-checks, `org_lint.py` (deterministic, `p≈1`, cheap).
-2. **Agent self-check** — the maker runs/verifies its own output before handing off (docs/07 §2.1.1).
-3. **Independent verification** — a *separate* context reviews: the gate/skeptic (docs/03 §3, docs/06),
+2. **Agent self-check** — the maker runs/verifies its own output before handing off (docs/06 §2.1.1).
+3. **Independent verification** — a *separate* context reviews: the gate/skeptic (docs/03 §3, docs/05),
    never the maker signing off its own positive.
 4. **Human judgment** — requirements, UX, high-risk/irreversible calls, release (constitution's
    charter/irreversible tiers).
 
 Put each check at the lowest rung that can decide it (a mechanical gate over an agent opinion, an agent
-opinion over a human page), so the human sees only the essential exception (docs/11 §0). The ladder is
+opinion over a human page), so the human sees only the essential exception (docs/05 §5.0). The ladder is
 why "fewer decisions" (§1) and "not zero verification" coexist: cut the decision *count*, but keep every
 surviving decision *checked* — cheaply and independently.
 
@@ -142,6 +144,6 @@ surviving decision *checked* — cheaply and independently.
 reliability, Barlow & Proschan 1965) with the current loop-engineering / software-factory practice
 (docs/sources.md §16, r_kaga and y-hirakaw). The compound-failure law and the request-vs-enforcement
 split are already realized in this repo (the hook/lint enforcement layer, the explicit ledger stages of
-docs/12, the read-only `/org-tick` vs acting `/org-work` staging); this doc states the principle the
+docs/09, the read-only `/org-tick` vs acting `/org-work` staging); this doc states the principle the
 existing mechanisms follow, and the "count and cut the decisions per pass" rule is guidance for authoring
 loops, to be verified against a running system.*

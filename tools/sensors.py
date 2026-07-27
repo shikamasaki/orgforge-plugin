@@ -8,7 +8,7 @@ no code computed any of them (the audit's D1 gap), except doctrine_stale which d
 happens to compute. This tool computes the `machine` sensors as pure functions of the ledger,
 so a `judge: machine` sensor actually measures instead of merely being declared.
 
-It ships no scheduler (docs/09, R0): the registrar is the agent a host runs every 30 min
+It ships no scheduler (docs/08, R0): the registrar is the agent a host runs every 30 min
 (sensors.yaml defaults.evaluation_cadence); this tool is the pure formula it calls and whose
 result it ledgers as a sensor_reading BEFORE any move consumes it. `llm` sensors are NOT
 evaluated here — they require a judgment; this tool reports them as `judge: llm (deferred to

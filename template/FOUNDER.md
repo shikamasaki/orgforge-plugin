@@ -62,15 +62,15 @@ Contract rules:
 The founder produces the **neutral profiles** (ROLE.md instances) for these departments — not a
 runtime. **Running the org means projecting those profiles onto the chosen host harness(es)** and
 letting that harness supply the perceive→decide→act loop, the tools, and the scheduling (docs/01
-R0/R2; docs/09 §2). The founder never builds an execution engine; it authors the harness-neutral
+R0/R2; docs/08 §2). The founder never builds an execution engine; it authors the harness-neutral
 source of truth that a host harness will read.
 
-### 4. Design fully, activate minimally (docs/05)
+### 4. Design fully, activate minimally (docs/02)
 
 Enumerate **every** department the RFP will ever need — including the maintenance-phase
 watch and the handover packager — and declare them all, latent. Seed each role's
-**doctrine** (docs/07: the starting normative playbook, with provenance) and the
-**scope matrix** (docs/08: deny-by-default grants matching the contract seams). Then
+**doctrine** (docs/06: the starting normative playbook, with provenance) and the
+**scope matrix** (docs/07: deny-by-default grants matching the contract seams). Then
 compute the first activation set: the smallest group of departments the first milestone
 requires, plus the control skeleton (gate, skeptic, supervisor, registrar — active
 whenever anything is). Check the set against the span budget; if it exceeds a

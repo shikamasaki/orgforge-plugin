@@ -5,7 +5,7 @@
 # vocabulary — if it isn't an event class, it didn't happen), its derived views (the ONLY
 # things context packs may contain), and how packs are assembled. Views are regenerated
 # from events, never hand-edited. The runtime that serves this schema is specified in
-# docs/09-runtime.md; the lint cross-checks every reference in organization.yaml,
+# docs/08-runtime.md; the lint cross-checks every reference in organization.yaml,
 # moves.yaml, and sensors.yaml against this file.
 
 # ── Envelope: every event, no exceptions ─────────────────────────────────────
@@ -23,12 +23,12 @@ envelope:
     append_only: true
     single_writer: ledger_service  # agents call append(); they never hold the file/store
     actor_identity_source: runtime_session   # an agent cannot claim another's actor id
-    verification: external_watchdog_replays_hash_chain   # docs/06 §2.4, docs/09 §5
+    verification: external_watchdog_replays_hash_chain   # docs/05 §2.4, docs/08 §5
 
 # ── Event classes: the org's complete factual vocabulary ────────────────────
 event_classes:
   # metabolism (Organ 4)
-  # candidate_id: WHICH backlog item this cycle is working (docs/12). Ties the cycle to the
+  # candidate_id: WHICH backlog item this cycle is working (docs/09). Ties the cycle to the
   # candidate_submitted it drains, so "in flight" is per-item, not just a per-role count — and so a
   # cycle interrupted (e.g. by /clear) is recoverable: the work_in_progress view pairs the started
   # candidate with its latest progress_recorded. Absent ⇒ an untracked cycle (legacy / not backlog-driven).
@@ -40,10 +40,10 @@ event_classes:
   # replays it to continue exactly where the cycle stopped. This is the backlog's memory of "how far".
   progress_recorded:    { role, candidate_id, fraction, phase, done_so_far, next_step,
                           blocked_by, artifacts: [ref] }
-  # accountable_supervisor (docs/14 §A1): which supervising role owns this output up the chain,
+  # accountable_supervisor (docs/09 §A1): which supervising role owns this output up the chain,
   # set from the runtime supervision edge (never the payload — a manager cannot forge who owns a
   # result, mirroring actor_identity_source). Empty for the top (human-owned) tier.
-  # reused: the reusable_modules/parts this cycle PULLED FROM instead of re-authoring (docs/17 §5 #7).
+  # reused: the reusable_modules/parts this cycle PULLED FROM instead of re-authoring (docs/12 §5 #7).
   # Recorded so reuse is a visible, auditable fact ("I can see reuse happened, and how much it saved"),
   # not an invisible discipline — the factory compounds only if reuse actually fires.
   cycle_completed:      { role, candidate_id, tokens: {task, gate, reporting}, outputs: [ref],
@@ -51,23 +51,36 @@ event_classes:
   heartbeat:            { component, invariants_hold: bool }
   halt_tripped:         { trigger, scope: global|role }
   # work (Organs 2/6)
-  # source: how this backlog item entered the department's backlog (docs/12, docs/15). `mandate` =
+  # source: how this backlog item entered the department's backlog (docs/09, docs/03). `mandate` =
   # a top-down instruction handed down; `self` = a self-generated task the department raised from its
   # own aspiration gap (problemistic search). Both land in the SAME backlog (open_experiments) and are
   # prioritized on one footing by attention.py; source only lets a mandate carry a floor (zone of
   # acceptance, Simon 1947) and lets an audit see where work came from. Absent ⇒ treated as `self`.
   candidate_submitted:  { maker, candidate_id, contract_ref, evidence: [ref], source: mandate|self }
   # predicted_outcome: the gate's expected result for this admission — the input the OUTCOME-DELTA /
-  # FRAME-REVIEW organs (learning.py, alignment.py) join against the realized outcome (docs/11 §3,
-  # docs/13 §3). Declared here so the emitting role knows to populate it; the organs are inert
+  # FRAME-REVIEW organs (learning.py, alignment.py) join against the realized outcome (docs/05 §5.4,
+  # docs/05 §5.4). Declared here so the emitting role knows to populate it; the organs are inert
   # (silently) without it.
   admission_decided:    { gate, candidate_id, verdict: admit|reject|park, standard_ref,
                           predicted_outcome, evidence: [ref] }
   refutation_attempted: { skeptic, claim_id, verdict: refuted|survives, checklist_ref }
+  # ── SDLC phase mold (docs/11) — the forced, non-skippable phase chain, reproducibility's spine ──
+  # A deliverable travels requirements → design → implement → test → deploy → operate. Each phase is
+  # ENTERED by phase_started and CLEARED by phase_admitted{verdict:pass}. The chain is enforced by the
+  # SAME requires_prior idiom as result_deployed: phase_started{P} is INVALID unless a
+  # phase_admitted{prior(P), pass} exists for the deliverable. prior(requirements)=∅. This is what makes
+  # the PROCESS reproducible: same spec ⇒ the same phases run in the same order for every founder/run.
+  # The existing test→deploy gate (result_deployed requires survives) and design→implement conformance
+  # (conformance_reviewed) are the two hardest phase boundaries, already enforced below; these two
+  # events extend the identical mechanism to the earlier boundaries.
+  phase_started:        { deliverable, phase: requirements|design|implement|test|deploy|operate, role,
+                          requires_prior: "phase_admitted{deliverable==deliverable, phase==prior(phase), verdict==pass} (∅ for requirements)" }
+  phase_admitted:       { deliverable, phase: requirements|design|implement|test|deploy|operate,
+                          verdict: pass|rework|reject, evidence_ref, admitter }
   # A result may only deploy AFTER the skeptic refuted-and-failed (verdict: survives) for it.
   # requires_prior makes the skeptic load-bearing: without a `survives` for this candidate_id,
   # a result_deployed event is INVALID (the deploy path cannot skip adversarial review).
-  # observed_outcome: the realized result the organs diff against predicted_outcome (docs/11 §3).
+  # observed_outcome: the realized result the organs diff against predicted_outcome (docs/05 §5.4).
   result_deployed:      { candidate_id, net_effect_ref, observed_outcome,
                           requires_prior: "refutation_attempted{claim_id==candidate_id, verdict==survives}" }
   result_retired:       { candidate_id, cause, observed_outcome }
@@ -78,39 +91,51 @@ event_classes:
   proposal_adjudicated: { proposal_id, decision: approve|reject|amend, human }
   irreversible_staged:  { action_class, effect_diff_ref, checker_signature }
   irreversible_executed: { staged_id, human }
-  # SILENCE-CONSENT (docs/06 §2.1): may a backlog action proceed on silence, or hold for an ack?
+  # SILENCE-CONSENT (docs/05 §2.1): may a backlog action proceed on silence, or hold for an ack?
   # Reversible => delegated tier (silence is consent); irreversible => irreversible-hold (ack).
   consent_decided:      { action_class, item_ref, reversible: bool, tier: delegated|irreversible,
                           decision: silence_is_consent|explicit_ack_required }
-  # profiles, doctrine, scopes (Organs 3/5, docs/07-08)
+  # profiles, doctrine, scopes (Organs 3/5, docs/06-08)
   profile_edited:       { role, diff_ref, editor, section: body|preamble }
   doctrine_diff_admitted: { role, claims: [{claim, provenance: {source, retrieved_at, confidence}, review_by}] }
   intelligence_filed:   { curator, item_ref, provenance, affected_roles }
   scope_grant_changed:  { seam: {from, to}, change: open|widen|narrow|revoke, grantor }
   intent_revised:       { version, diff_ref, human }
   refounding_committed: { old_structure_ref, new_structure_ref, doctrine_remap: {old_role: new_role},
-                          unmapped_claims_surfaced: [claim_id], human }   # docs/06 §4.4 — atomic re-found,
+                          unmapped_claims_surfaced: [claim_id], human }   # docs/05 §4.4 — atomic re-found,
                           # assets intact: the ledger persists, doctrine is re-mapped, none orphaned
   digest_generated:     { window, census: {class: count}, exceptions_ref }
   anomaly_detected:     { detector, description, matched_pattern: pattern_id|none }
-  # operating events (docs/11) — the recurring checks a 24/7 unattended org needs beyond
+  # operating events (docs/05) — the recurring checks a 24/7 unattended org needs beyond
   # founding. Each obeys reconcile-by-exception: the silent path emits the event as an audit
   # breadcrumb; only the exception routes up. §2.1–2.3 have running code (tools/guardrails.py).
   exposure_budget_checked: { window_id, dimension, committed_so_far, delta_requested, cap,
                              actor_role, decision: allow|hold, caused_by_event }   # BLAST-RADIUS-CAP
-  # ITERATION/SPEND-CAP (docs/16 §1, docs/17 §5 #2): a role's loop cycles + cumulative tokens per window;
+  # ITERATION/SPEND-CAP (docs/10 §1, docs/12 §5 #2): a role's loop cycles + cumulative tokens per window;
   # HOLDs a runaway loop the blast-radius cap can't see (reversible read-think-edit spinning forever).
   iteration_budget_checked: { window_id, role, cycles_so_far, tokens_so_far, max_cycles, max_tokens,
                               decision: allow|hold, limiting }
-  # CIRCUIT-BREAKER (docs/17 §5 #3): trips when a candidate's progress_recorded stream stops advancing
+  # RELIABILITY-BUDGET (docs/05 §reliability-budget): an SRE error budget (100%−SLO) that bounds
+  # DEPLOY velocity — a sibling of BLAST-RADIUS-CAP (aggregate limit over a window) but a DIFFERENT
+  # axis: blast-radius meters irreversibility per act; this meters reliability BURN and FREEZES deploys
+  # when the budget is spent. The docs/11 deploy gate reads it (result_deployed also gates on a healthy
+  # budget). Emitted on each deploy-gate check; the exception (budget exhausted) routes up.
+  reliability_budget_checked: { service, slo, window_id, budget_total, budget_burned, budget_remaining,
+                                deploy_verdict: allow|freeze, caused_by_event }
+  # DORA (docs/05 §DORA): the four keys — deploy frequency, lead time, change-fail rate, MTTR — as the
+  # named/instrumented generalization of OUTCOME-DELTA. The org's navigation instrument for the moving
+  # bottleneck (Theory of Constraints, docs/12 §3). A periodic snapshot; a regressed key routes up.
+  dora_snapshot: { window_id, deploy_frequency, lead_time_p50, change_fail_rate, mttr_p50,
+                   inferred_bottleneck: design|review|test|deploy|operate, delta_vs_prior }
+  # CIRCUIT-BREAKER (docs/12 §5 #3): trips when a candidate's progress_recorded stream stops advancing
   # (identical next_step repeated, or fraction flat) — flag for a human, free the WIP slot.
   stall_breaker_checked: { candidate_id, role, checkpoints, repeat_run, no_advance_run,
                            decision: trip|ok, reason }
-  # REPEATED-DEATH (docs/07, docs/17 §5.5): a death cause reappeared on a later candidate — the org
+  # REPEATED-DEATH (docs/06, docs/12 §5): a death cause reappeared on a later candidate — the org
   # re-made a mistake it had recorded, i.e. accumulated learning was NOT fed forward. The direct
   # measure that "the team's output quality rises over time" is holding (or not).
   repeated_death_detected: { cause, occurrences, candidate_ids: [ref] }
-  # PROVEN-ROLLBACK (docs/11 §4, docs/17 §5): a reversible action must carry a declared undo, or its
+  # PROVEN-ROLLBACK (docs/05 §4, docs/12 §5): a reversible action must carry a declared undo, or its
   # reversibility is an untested claim the silence-consent tier must not trust.
   rollback_declared:    { action_ref, undo }
   rollback_unproven:    { action_ref, reason }
@@ -118,7 +143,7 @@ event_classes:
                           unaccounted_events: [ref] }                              # STATE-RECONCILED
   reference_staleness_checked: { trigger_event, bound_roles: [role], stale_roles: [role],
                                  silent_duration_per_role, result: all_current|stale_found } # STALE-REFERENCE
-  # lateral reconciliation family (docs/11 §2.4) — DESIGN, not yet coded. The horizontal seam
+  # lateral reconciliation family (docs/05 §2.4) — DESIGN, not yet coded. The horizontal seam
   # no other organ watches; shared shape unifies the three timings of peer divergence.
   work_claimed:         { role, work_territory, intent_summary,
                           depends_on: [{producer_role, seam_id}] }                 # COLLISION-SCAN (claim); depends_on = the blocked-on edges DEPENDENCY-STALL reads
@@ -132,7 +157,7 @@ event_classes:
                              stalled_ticks, downstream_impact: [ref], route_to }   # DEPENDENCY-STALL; route_to = lowest common owner
   contract_change_proposed: { seam_id, producer_role, current_hash, proposed_shape,
                               is_breaking: bool, dependents: [role], objection_deadline_tick } # CONTRACT-CHANGE
-  # resource, learning, and the schedule planner (docs/11 §3, §5)
+  # resource, learning, and the schedule planner (docs/05 §5.4, §5.6)
   priority_ranking_set: { ranking_id, ordered_objectives: [{objective_id, rank, weight,
                           rationale_hash}], supersedes, basis_event_ids: [ref] }   # PRIORITY-RANKING
   allocation_reclaimed: { holder, resource_type, from_level, to_level, yield_metric,
@@ -142,11 +167,11 @@ event_classes:
                           delta_magnitude, delta_sign, department, recurrence_count } # OUTCOME-DELTA
   tick_planned:         { now_min, night: bool, due: [check_id], suspended: [check_id],
                           missed: [check_id] }   # tick.py's own run — a gap proves the host cron died
-  # intra-department attention allocation (docs/12) — how ONE dept picks what to work on next
+  # intra-department attention allocation (docs/09) — how ONE dept picks what to work on next
   attention_allocated:  { role, wip_limit, in_flight, ranking_id,
                           selected: [{candidate_id, objective, score, in_ranking, source}],
                           deferred: [{candidate_id, score}], reason }   # ATTENTION-ALLOCATION
-  # proxy-stack guards (docs/13) — is the org still solving the RIGHT problem?
+  # proxy-stack guards (docs/05) — is the org still solving the RIGHT problem?
   premise_reconciled:   { premise_id, asserted, observed, status: holds|weakened|broken } # PREMISE/TELOS
   sunk_course_reviewed: { course_id, attempts, cost, outcome_trend, still_open: bool,
                           decision: continue|abandon }                          # SUNK-COURSE (Staw)
@@ -154,14 +179,14 @@ event_classes:
   mandate_conflict_raised: { subjects: [role], contested_decision, mandate_refs: [role],
                              resolution: precedence_applies|integrate|escalate, evidence_ids: [ref] } # MANDATE-CONFLICT
   convention_adopted:   { scope, settled_choice, owner, review_by }              # internal precedent (Nelson&Winter)
-  # manager accountability (docs/14) — the VERTICAL control down the supervision edge, distinct
-  # from the gate/skeptic's cross-cutting admission (docs/14 §honest-distinction).
-  # spec_delegated (docs/14 §spec-driven): the manager pushes the per-task intent DOWN as an explicit
+  # manager accountability (docs/09) — the VERTICAL control down the supervision edge, distinct
+  # from the gate/skeptic's cross-cutting admission (docs/09 §honest-distinction).
+  # spec_delegated (docs/09 §spec-driven): the manager pushes the per-task intent DOWN as an explicit
   # spec BEFORE work starts (Deming's acceptance-spec), with a token_budget carved from its own —
   # the producer of conformance_reviewed.delegated_intent_ref. confirmed == the supervisor affirms
   # the spec conforms to the intent it holds (down-front A3). token_budget is how granularity is
   # controlled: a subordinate spawns within its budget (~1 agent per ~50k tokens, measured), so the
-  # budget — not a depth/width knob — sets how deep/wide the sub-tree grows (docs/14 §granularity).
+  # budget — not a depth/width knob — sets how deep/wide the sub-tree grows (docs/09 §granularity).
   spec_delegated:       { supervisor, subordinate, spec_ref, contract_ref, intent_basis_ref,
                           token_budget, confirmed: bool }                        # spec-driven + budget
   conformance_reviewed: { supervisor, subordinate, reviewed_ref, delegated_intent_ref,
@@ -209,9 +234,9 @@ views:
   full_evidence_trail:  { from: ["*"], shape: everything touching the item under review — control roles only }
   moves_catalog:        { from: [proposal_adjudicated], shape: current legal moves (mirror of moves.yaml at its adopted version) }
   proposal_queue:       { from: [proposal_filed, proposal_adjudicated], shape: open proposals by subject }
-  pending_conformance_review: { from: [cycle_completed, conformance_reviewed], shape: subordinate outputs a supervisor owns (accountable_supervisor) but has not yet conformance-reviewed — an over-span manager's unreviewed backlog (docs/14 §A3) }
+  pending_conformance_review: { from: [cycle_completed, conformance_reviewed], shape: subordinate outputs a supervisor owns (accountable_supervisor) but has not yet conformance-reviewed — an over-span manager's unreviewed backlog (docs/09 §A3) }
 
-# ── Context-pack assembly (docs/08; executed by the registrar) ───────────────
+# ── Context-pack assembly (docs/07; executed by the registrar) ───────────────
 context_pack:
   algorithm: |
     1. intent block, by reference to its latest intent_revised version (never copied).

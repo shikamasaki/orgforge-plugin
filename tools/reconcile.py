@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""reconcile — lateral, in-flight reconciliation between peers (docs/11 §2.4).
+"""reconcile — lateral, in-flight reconciliation between peers (docs/05 §5.2).
 
 The one genuinely net-new information flow the operating-events sweep found: the horizontal
 seam no other organ watches. The gate sees FINISHED outputs, doctrine is EXTERNAL, the digest
 reports UPWARD — none look sideways at peer work while it is still in flight. Three siblings
-share one shape, one fire rule, one escalation rule (docs/11 §2.4):
+share one shape, one fire rule, one escalation rule (docs/05 §5.2):
 
   collision <root> [--now-role R --now-territory T]   COLLISION-SCAN: reconcile the open
       work.claimed set. Two peers who picked up overlapping territory unaware of each other
@@ -25,7 +25,7 @@ share one shape, one fire rule, one escalation rule (docs/11 §2.4):
       a breaking change to a charter-scoped dependency.
 
   mandate <root> --subjects R,R --decision D --precedence R>R>R [--satisfiable BOOL]
-      MANDATE-CONFLICT (docs/13): two depts each acting INSIDE their granted authority reach
+      MANDATE-CONFLICT (docs/05): two depts each acting INSIDE their granted authority reach
       decisions that cannot both stand (growth says "ship", safety says "hold") — not a resource
       grab, not a file collision. `collision` resolves by "one yields", legitimate only for a
       DUPLICATE; a genuine CONTRADICTION it correctly refuses and dead-ends at "escalate". This
@@ -35,7 +35,7 @@ share one shape, one fire rule, one escalation rule (docs/11 §2.4):
       the true exception). Anchor: Follett (constructive conflict), Lawrence & Lorsch. Belongs to
       Organ 6 — the repo ranked OBJECTIVES by weight but never precedence BETWEEN MANDATES.
 
-Every command obeys the fixed rule (docs/11 §0): silent when consistent (exit 0); lateral
+Every command obeys the fixed rule (docs/05 §5.0): silent when consistent (exit 0); lateral
 self-heal before the CEO; escalate the true exception (exit 10). Each prints the ledger event
 it would emit. This is a pure projection over tools/ledger.py; it ships no scheduler (R0) —
 a host-run agent calls it, event-triggered (a peer's claim / edit / freshness-cross), never

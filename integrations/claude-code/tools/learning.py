@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""learning — the org learning from its OWN outcomes (docs/11 §3, OUTCOME-DELTA).
+"""learning — the org learning from its OWN outcomes (docs/05 §5.4, OUTCOME-DELTA).
 
-The doctrine organ (docs/07) imports EXTERNAL best-practice and is, by explicit design,
+The doctrine organ (docs/06) imports EXTERNAL best-practice and is, by explicit design,
 structurally blind to THIS org's own miscalibration. Without a self-outcome event the org
 repeats its own mistakes forever — nothing converts "our prediction was wrong" into a durable,
 injectable fact. This tool joins closed decisions to their realized outcomes and emits an
@@ -124,7 +124,7 @@ def cmd_repeats(a):
     print(f"REPEATED DEATH: cause {worst[1][0]['cause']!r} recurred {len(worst[1])} times "
           f"(candidates {[h['candidate_id'] for h in worst[1]]}) — the org re-made a mistake it had "
           f"already recorded. Accumulated learning was NOT fed forward; strengthen the death into "
-          f"doctrine and inject it before the next attempt (docs/07). This is the org's core purpose "
+          f"doctrine and inject it before the next attempt (docs/06). This is the org's core purpose "
           f"failing — escalate.", file=sys.stderr)
     return ESCALATE
 

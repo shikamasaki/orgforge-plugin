@@ -4,7 +4,7 @@ argument-hint: "<signal text, or an issue/bug reference>"
 allowed-tools: Bash(python3 *)
 ---
 
-The factory's **front door** (docs/17 §5 #6). An external signal — **$1** — becomes a triaged backlog
+The factory's **front door** (docs/12 §5 #6). An external signal — **$1** — becomes a triaged backlog
 item so the org can work it unattended. The human's input is compressed to *handing over the signal*;
 triage does the rest. This is what makes orgforge a factory (work flows in from the world) rather than a
 workshop (a human types every task).
@@ -26,7 +26,7 @@ Decide, from the signal:
   purpose, do NOT mint an item — say why and stop. Not every signal becomes work.
 - **Is it a known death?** If the signal asks for something the org already tried and retired, surface
   that (don't re-open blindly); a human decides whether to override.
-- **What department's domain is it?** Route it to the owning role (docs/15 §3 — domain work to the
+- **What department's domain is it?** Route it to the owning role (docs/03 §3 — domain work to the
   domain role), not to a coordinator.
 
 For an actionable, novel, in-scope signal, mint a backlog item as a **mandate** (a top-down instruction

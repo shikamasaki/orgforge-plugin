@@ -128,6 +128,77 @@ equally necessary and were simply harder to see from inside the tooling.
 
 ---
 
+## 1b. The organization this template stands up: an IT business company
+
+The definition in §1 is deliberately **neutral** — it holds for any organization, human or agent,
+software or not. That neutrality is load-bearing: the seven organs are *derived* from it, so it must
+not be narrowed. But orgforge does not stand up an arbitrary organization. It stands up a **specific
+kind**: an **AI-native IT business company** — an organization whose purpose is to *decide what
+software to build as a business, build it, ship it, operate it, and keep both the system and itself
+growing*. This section does not add an eighth organ; it **fills and specializes** the organs §1
+already derived, the way the human-org theory is itself re-parameterized for agents — now
+re-parameterized one level down, for a software company.
+
+Concretely, being an IT business company is the **content** of five organs:
+
+- **The purpose (Organ 1) is a business telos, not an abstract goal.** The company exists to serve a
+  customer: it decides *what to build* from a market intent — a customer, an RFP, a priority ranking —
+  and is answerable for delivery and economics, not for volume of output. The purpose slot is filled
+  with "ship valuable software to whoever the org is a vendor to," and the admission standard is
+  grounded in that (docs/01 already speaks *vendor / client / delivery / economics*; this is where it
+  comes from).
+
+- **The structure (Organ 2) owns SDLC phases, not just deliverables.** A software company's division
+  of labor runs the work through a **lifecycle**: requirements → design → implement → test → deploy →
+  operate. Roles own *phases* as well as slices, and the coordination mechanism re-integrates a
+  *pipeline*, not just parallel outputs. **The SDLC is a mold the work is forced through** — the phase
+  order is a shape, not a suggestion (docs/11).
+
+- **The loop (Organ 4) is the SDLC cadence plus continuous delivery.** The metabolism of a software
+  company is not generic experiment-cycling; it is *build → integrate → test → deploy → operate*,
+  running continuously, keeping the trunk always-shippable, with **CI/CD (GitHub Actions) as the
+  deploy phase's spine** — delegated to the host under R0 exactly as scheduling is (docs/08, docs/11).
+
+- **The decision line (Organ 6) gates phases, not only admissions.** The `requires_prior` mechanism
+  that already stops a maker from admitting its own work generalizes to the **phase gate**: design may
+  not start before requirements are signed off, deploy may not fire before test passes. The same
+  doctrine + lint + routing that enforces separation-of-duties enforces the **non-skippable phase
+  chain** (docs/03, docs/09, docs/11). A running product also carries a **reliability/error budget**
+  that *bounds deploy velocity* — the SRE governor, a decision-line instrument (docs/05 §reliability-budget).
+
+- **Growth (Organ 7) grows the system and the org together.** A software company does not only reshape
+  its own chart; it grows the *system it is building* alongside itself, and navigates by **DORA-style
+  metrics** (deploy frequency, lead time, change-fail rate, MTTR) to find the **moving bottleneck**
+  (Theory of Constraints) and reshape toward it. "The system and the organization grow together" is
+  the through-line: the org's structure, its doctrine, and the product's architecture co-evolve
+  (docs/06, docs/05 §DORA, docs/12 §5.5).
+
+One cross-cutting claim frames all five, and it is why the *forced* mold matters: **AI is an
+amplifier.** It magnifies whatever process it is dropped into — good process and bad process
+equally — and, by accelerating the upstream, it *degrades stability* and shifts the binding
+constraint **downstream** to review, test, and deploy (DORA 2024–2025). An organization that lets an
+amplifier run without a mold does not go faster; it produces more, faster, of whatever it was already
+producing — including defects — and blows its reliability budget at the newly-moved bottleneck. So
+the company's shape is not enforced to slow it down; it is enforced because **an amplifier without a
+mold amplifies the wrong things**. The enforcement is the standing lesson of this repo: *doctrine
+promotes* the SDLC type (what good practice now is, loaded every cycle), and *lint/hooks enforce* the
+few places a phase must not be skipped — never forced delegation, always a checkable tooth.
+
+And the reason to force the type, beyond amplifier-discipline, is **reproducibility**: the same org
+spec and RFP must yield the same *process, contracts, gates, and verification* no matter who founds
+the company or when — and the *repositories* the company builds must be reproducible for anyone who
+clones them (one command, same result). The generated code may vary — an LLM is non-deterministic —
+but a mold is a shape that makes many pourings come out the same, so everything *around* the code
+converges. This is the two-level reproducibility docs/11 makes concrete: Level 1, the org itself;
+Level 2, the repos it ships.
+
+The rest of this document develops the seven organs in their neutral form. Read §1b as the lens that
+says *which* organization these organs are being articulated for: an IT business company, whose
+purpose is software delivery, whose metabolism is the SDLC, and which grows its system and itself
+together.
+
+---
+
 ## 2. The seven organs
 
 ### Organ 1 — Purpose (telos)
@@ -229,7 +300,7 @@ org chart, not an organization. So the substrate is one of the tacit things that
 explicit — but it is also the organ least worth building, because the substrate a human org tacitly
 provides is exactly what an existing coding-agent harness already ships. The articulation here is
 mostly a matter of *pointing at* the host and stating what perception/tools/memory each role needs;
-the realization is delegated (see docs/09).
+the realization is delegated (see docs/08).
 
 **Agent realization — this is exactly harness engineering.** The harness is the set of means through
 which an agent perceives (its context window, retrieval, tools that read), acts (tools that write,
@@ -248,7 +319,7 @@ control loop. The decomposition's job is to *place* those existing wheels, not r
 profile.** The system delegates Organ 3 to the host harness and adds only a thin *projection* of the
 neutral profile onto that harness's instruction-file convention. Reimplementing the harness would
 contradict the thesis — see `docs/01-requirements.md` (R0, the harness-neutrality requirement) and
-`docs/09-runtime.md` (delegate + project).
+`docs/08-runtime.md` (delegate + project).
 
 **Failure mode.** Give an agent authority (a role) without the substrate to exercise it well and you
 get confident, well-formed, wrong work — the equivalent of an employee empowered to decide but
@@ -289,7 +360,7 @@ adjacent organs, anatomy and metabolism.
 **Like the harness, the loop is delegated, not built.** Stop conditions, iteration caps, token
 budgets, and self-scheduling are things the host harness and host environment already do. This
 template *declares* the loop's intent — a role's cadence, its stop goal, its budget window — and the
-host realizes it with its own scheduler and loop controls (`docs/09-runtime.md` §4). "24-hour
+host realizes it with its own scheduler and loop controls (`docs/08-runtime.md` §4). "24-hour
 autonomous operation" is the host running the declared schedule unattended, with the operator's
 approval queue holding charter/irreversible actions — not a daemon this repository ships.
 
@@ -392,7 +463,7 @@ principle of this organ: control is proportioned to risk, never applied uniforml
 **Failure mode.** Two symmetric failures. *Under-control:* let the Maker check its own high-stakes work
 and you have built the single point at which a false positive can be "committed and concealed" — the
 discovery stamped valid by the very agent with an interest in it passing. *Over-control:* bolt full
-maker/checker onto cheap reversible work and you pay for it — the founding rehearsal (docs/10) spent
+maker/checker onto cheap reversible work and you pay for it — the founding rehearsal (demos/S1-founding-rehearsal) spent
 four agents (~15× tokens, a rough magnitude) on a slugify function, and the gate's admission was itself
 wrong: over-governance that still failed. And note the coupling: **overloading a supervisor's
 verification bandwidth (Organ 2) collapses whatever control you did calibrate**, because a supervisor
@@ -535,7 +606,7 @@ Note that harness+loop (step 2) is the *earliest* and most visible milestone —
 the industry saw and named those organs first. The set only *reads as an organization* at step 3, when
 division of labor and the decision line are articulated.
 
-One qualification from the elastic model (`docs/05-elastic-organization.md`): under that model, this
+One qualification from the elastic model (`docs/02-elastic-organization.md`): under that model, this
 sequence is an **activation order, not an articulation order**. The full chart — every organ, every
 latent department — is articulated at founding (`template/FOUNDER.md`), and steps 2–5 describe which
 parts of that latent organization come alive when. The ordering logic above still holds; what changes
@@ -584,11 +655,11 @@ is never a substitute for delivering.
 - `docs/02-growth-stages.md` — which organ to add at each stage.
 - `docs/03-organic-vs-mechanistic.md` — the two-layer law in full.
 - `docs/04-failure-modes.md` — the failure modes, cataloged.
-- `docs/05-elastic-organization.md` — the elastic model: design the full org at founding, run it elastically.
-- `docs/06-lifecycle-operations.md` — founding to sunset: 24-hour operation, the approval queue, handover.
-- `docs/07-doctrine-and-knowledge.md` — the knowledge organ: boundary spanners, role-scoped doctrine.
-- `docs/08-context-economy.md` — need-to-know information flow: scoped context packs, budgets, commander's intent.
-- `docs/09-runtime.md` — execution: delegate the loop to the host, project the profile.
-- `docs/10-founding-rehearsal.md` — the first end-to-end run (S1), with artifacts.
+- `docs/02-elastic-organization.md` — the elastic model: design the full org at founding, run it elastically.
+- `docs/05-lifecycle-operations.md` — founding to sunset: 24-hour operation, the approval queue, handover.
+- `docs/06-doctrine-and-knowledge.md` — the knowledge organ: boundary spanners, role-scoped doctrine.
+- `docs/07-context-economy.md` — need-to-know information flow: scoped context packs, budgets, commander's intent.
+- `docs/08-runtime.md` — execution: delegate the loop to the host, project the profile.
+- `demos/S1-founding-rehearsal-founding-rehearsal.md` — the first end-to-end run (S1), with artifacts.
 - `tools/org_lint.py` — the machine audit: cross-validates all five data files (+ optional role-settings).
 - `docs/sources.md` — every citation, primary/secondary distinguished.

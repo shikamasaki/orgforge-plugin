@@ -19,7 +19,7 @@ picks a prefix within the WIP limit.
 
 ## 1.5 Learn from prior deaths BEFORE delegating — do not repeat a known failure
 
-The org's accumulated failures are its most valuable context (docs/07). Before spawning, read what
+The org's accumulated failures are its most valuable context (docs/06). Before spawning, read what
 already died near this work and what caused it, so a selected item that would repeat a known death is
 reshaped or dropped — not re-attempted blindly. This is how accumulated learning lifts output quality
 (the org's core purpose); skipping it is how the same mistake gets mass-produced.
@@ -52,20 +52,20 @@ For each selected item:
 
 ## 2. Delegate the selected items — in parallel, but only where the split is genuine
 
-Read the `selected[]` above. Then apply the **decomposition doctrine (docs/15)** before spawning:
+Read the `selected[]` above. Then apply the **decomposition doctrine (docs/03)** before spawning:
 
 - **One `Task` per selected item that is a genuinely independent unit.** Emit them in a SINGLE message
   (multiple Task calls) so they run concurrently — this is the parallel fan-out. Do NOT call them one
   at a time.
-- **Do not fan out reciprocally-coupled work** (docs/15 §2.3, docs/14 §granularity): if two selected
+- **Do not fan out reciprocally-coupled work** (docs/03 §6.2, docs/09 §granularity): if two selected
   items must constantly adjust to each other, keep them in one Task. Fineness follows *independence*,
   bounded by coordination cost — not a target depth.
 - **Each child Task MUST carry a seam contract** (its slice, inputs, outputs, and the files it `owns`
   vs `must-not-touch`) — the spawn guardrail blocks a contract-less spawn, and the `owns`/`forbid`
-  fields are what stop two siblings from redoing each other's work (docs/07 §2.1.1, docs/04 §6).
-- **Route by domain, don't swallow it** (docs/15 §3): an item whose domain belongs to a subordinate
+  fields are what stop two siblings from redoing each other's work (docs/06 §2.1.1, docs/04 §6).
+- **Route by domain, don't swallow it** (docs/03 §3): an item whose domain belongs to a subordinate
   role goes to that role, so its knowledge accrues to that role's doctrine — never absorbed here.
-- If an item is your OWN-domain tightly-coupled work, implementing it yourself is fine (docs/14).
+- If an item is your OWN-domain tightly-coupled work, implementing it yourself is fine (docs/09).
 
 ## 3. Record work as you go — so nothing is lost to a context wipe
 
@@ -90,12 +90,33 @@ points, keyed by `candidate_id`:
 
 !`echo 'Record the cycle (never fabricate completion): python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/ledger.py" append "'"${ORG_LEDGER_ROOT}"'" --actor "'"$1"'" --class cycle_started|progress_recorded|cycle_completed --payload {role,candidate_id,...}. AND, in the same cycle, if a domain rule/boundary/naming was settled: python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/conventions.py" adopt "'"${ORG_CONVENTIONS_ROOT:-$ORG_LEDGER_ROOT}"'" --scope <area> --choice "<the settled rule>" --owner "'"$1"'" --by checker. Checkpoint BEFORE you risk stopping.'`
 
+### 3b. Project each milestone onto the GitHub Issue (work-log — the user's requirement)
+
+If this task is being run through a GitHub Issue (the web harness, or a local session working an Issue —
+`ORG_GITHUB_REPO` set and the Issue number known from the claim), **mirror each of the three milestones
+above onto the Issue as a work-log comment, at the same moment you append it to the ledger**, so the
+human watching from a phone sees progress accrue without opening the ledger. The ledger stays the SSoT;
+the comment is its projection. Pass the ledger event's `id` as `--event-id` so a replayed/retried cycle
+logs the milestone **once** (the comment carries a hidden `orgforge:event:<id>` marker and `log` no-ops
+on a duplicate — docs/11 §0 reproducibility applied to the projection too):
+
+!`echo 'On each milestone, also project it to the Issue: python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/github_sync.py" log --repo "$ORG_GITHUB_REPO" --issue <N> --event cycle_started|progress_recorded|phase_admitted|cycle_completed [--phase <sdlc-phase>] [--detail "<next_step or done_so_far>"] --event-id <the ledger event id>. Skip silently if ORG_GITHUB_REPO is unset (a ledger-only run).'`
+
 ## Discipline — work only from the backlog
 
 **Always work an item that is on the backlog.** If you are about to implement something that is not a
 `candidate_submitted` item, submit it first (as `/org-discover` does) — otherwise the work is invisible
 to the org and unrecoverable after a wipe. Pull from the backlog, record as you go; do not do untracked
 work on the side.
+
+When you submit such an item, derive its `candidate_id` DETERMINISTICALLY (do not invent a free-form id)
+so the backlog stays reproducible (docs/11 §0) — the same gap must always produce the same id:
+
+!`echo 'candidate_id := python3 -c '"'"'import hashlib,sys,re; role,contract,gap=sys.argv[1],sys.argv[2],sys.argv[3]; norm=re.sub(r"\s+"," ",gap.strip().lower()); print("cand-"+hashlib.sha256(("\x1f".join([role,contract,norm])).encode()).hexdigest()[:12])'"'"' "'"$1"'" "<objective>" "<one-line gap>"'`
+
+then append with that id as BOTH `candidate_id` and `--natural-key` (idempotent under replay):
+
+!`echo 'python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/ledger.py" append "'"${ORG_LEDGER_ROOT}"'" --actor "'"$1"'" --class candidate_submitted --natural-key "<derived-cand-id>" --payload {"maker":"'"$1"'","candidate_id":"<derived-cand-id>","contract_ref":"<objective>","source":"self","evidence":[<gap-refs>]}'`
 
 ## Discipline
 

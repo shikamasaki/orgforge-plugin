@@ -7,7 +7,7 @@ allowed-tools: Bash(python3 *), Task
 Certify the enforcement layer before the org runs unattended. The blast-radius cap, catastrophic
 denylist, and seam gate only protect the org if the PreToolUse hook fires — **including for a spawned
 subagent's tool calls**, which is where multi-agent risk is highest and where a harness that doesn't gate
-subagents silently regresses the guarantee to top-level-only (docs/16 §2, docs/17 §5 #5).
+subagents silently regresses the guarantee to top-level-only (docs/10 §2, docs/12 §5 #5).
 
 ## Level 1 — the hook script blocks a gated call
 
@@ -35,10 +35,10 @@ Interpret:
 - **Child reports the command RAN (or wasn't blocked)** → ⚠️ this harness does **not** gate subagent tool
   calls. The enforcement layer only protects the top level. **Do NOT run this org with fan-out unattended**
   — either keep it single-agent (no `Task`/`Agent` spawns), or switch to a harness that fires PreToolUse
-  for subagents (the docs/09 host-selection contract). Report this clearly to the human.
+  for subagents (the docs/08 host-selection contract). Report this clearly to the human.
 
 ## Report
 
 State plainly: Level 1 pass/fail, Level 2 blocked/not-blocked, and the verdict — **fan-out-safe** or
 **top-level-only, do not fan out**. This certification is what lets the org fan out unattended with trust
-(docs/17 §5).
+(docs/12 §5).

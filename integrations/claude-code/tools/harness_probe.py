@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""harness_probe — verify the enforcement layer actually blocks, at two levels (docs/17 §5 #5).
+"""harness_probe — verify the enforcement layer actually blocks, at two levels (docs/12 §5 #5).
 
 The org's whole safety story rests on one assumption: the PreToolUse hook fires and blocks a gated
 tool call — INCLUDING a spawned subagent's call, which is exactly where multi-agent risk is highest
-(a subagent inherits thin context and discards the parent's prompt constraints, docs/16 §2). But
+(a subagent inherits thin context and discards the parent's prompt constraints, docs/10 §2). But
 whether the child's tool call actually reaches the hook is a property of the HARNESS, not this repo.
 If a harness does not fire PreToolUse for subagents, the blast-radius cap, catastrophic denylist, and
 seam gate all silently regress to top-level-only.
@@ -71,7 +71,7 @@ def main(argv):
           "SUBAGENT's tool call. Run the Level-2 check in /org-verify-guards: spawn a trivial subagent, "
           "have it attempt a gated command, and confirm the hook fired (the ledger shows the block / the "
           "call was denied). If it did not, this harness does not gate subagents — do not certify the org "
-          "as fan-out-safe (docs/17 §5).")
+          "as fan-out-safe (docs/12 §5).")
     return 0
 
 

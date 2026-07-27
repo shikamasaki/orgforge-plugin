@@ -5,7 +5,7 @@ The approval queue gates by action CLASS and the skeptic gates finished OUTPUTS,
 failure modes of an org that runs all night with the human asleep are covered by neither —
 each surfaced by decomposing "what a human org's meetings/reviews actually prevent" to its
 essence (not the ritual). These are pure functions over the ledger (tools/ledger.py); they
-ship no scheduler (docs/09, R0) — a host-run agent calls them on the cadence / at the act,
+ship no scheduler (docs/08, R0) — a host-run agent calls them on the cadence / at the act,
 and their verdict is itself ledgered so the next decision can see it. All three obey the same
 rule the design fixes: **default silent (fail-quiet); escalate only the exception.**
 
@@ -99,7 +99,7 @@ def cmd_cycles(a):
     blast-radius cap does not cover — a reversible read-think-edit loop touches no metered asset yet
     can spin forever ("endless file-reading loop"). This sums the role's cycle_started count and
     reported tokens in the window and HOLDS when either would exceed its cap, so a runaway is killed
-    early ("$3-5, not $180"). docs/16 §1 / docs/17 §5 #2: a hard iteration/spend cap belongs in the
+    early ("$3-5, not $180"). docs/10 §1 / docs/12 §5 #2: a hard iteration/spend cap belongs in the
     enforcement layer, not a role-settings 'please stop at N' the host must honor."""
     events = read_events(a.root)
     cycles = 0
@@ -128,7 +128,7 @@ def cmd_cycles(a):
                   else f"{tokens:.0f} tokens > max {a.max_tokens}")
         print(f"HOLD: role '{a.role}' hit its {reason} cap ({detail}) — the loop is killed at the "
               f"budget, not left to spin. Raise --max-cycles/--max-tokens or let a human intervene. "
-              f"This is the runaway kill the blast-radius cap can't make (docs/17 §5).",
+              f"This is the runaway kill the blast-radius cap can't make (docs/12 §5).",
               file=sys.stderr)
         return ESCALATE
     print(f"allow: role '{a.role}' {cycles} cycles / {tokens:.0f} tokens — under budget.")
@@ -136,7 +136,7 @@ def cmd_cycles(a):
 
 
 def cmd_stall(a):
-    """CIRCUIT-BREAKER on non-progress (docs/17 §5 #3). A wedged cycle consumes its WIP slot and budget
+    """CIRCUIT-BREAKER on non-progress (docs/12 §5 #3). A wedged cycle consumes its WIP slot and budget
     until a human notices — the most common real failure (wrong-solution loops). This reads a candidate's
     progress_recorded stream and TRIPS (escalate) when it is not advancing: either the same next_step/
     done_so_far repeated `--repeat-threshold` times in a row (AgentMesh's identical-output heuristic), or
@@ -186,7 +186,7 @@ def cmd_stall(a):
     if tripped:
         print(f"TRIP: candidate '{a.candidate_id}' is not progressing ({why}). The circuit breaker "
               f"opened — flag for a human and FREE its WIP slot; do not respawn the same wedged cycle. "
-              f"Its last next_step: {checkpoints[-1].get('next_step','(none)')!r} (docs/17 §5).",
+              f"Its last next_step: {checkpoints[-1].get('next_step','(none)')!r} (docs/12 §5).",
               file=sys.stderr)
         return ESCALATE
     print(f"progressing: candidate '{a.candidate_id}' advancing "
@@ -195,7 +195,7 @@ def cmd_stall(a):
 
 
 def cmd_rollback(a):
-    """PROVEN-ROLLBACK (docs/11 §4, docs/17 §5). The silence-is-consent tier lets a REVERSIBLE action
+    """PROVEN-ROLLBACK (docs/05 §4, docs/12 §5). The silence-is-consent tier lets a REVERSIBLE action
     proceed unattended — but "reversible" claimed and never tested is not reversibility, it is a latent
     lie. This asserts a reversible-classified action carries a declared, non-empty undo (its rollback
     command / compensation ref). It does NOT execute the undo (R0 — the host runs commands); it makes an
@@ -206,7 +206,7 @@ def cmd_rollback(a):
         emit_event("rollback_unproven", {"action_ref": a.action_ref, "reason": "no undo declared"})
         print(f"UNPROVEN: reversible action '{a.action_ref}' declares no undo/compensation — a "
               f"reversibility claim with no rollback is untested and must not ride silence-as-consent. "
-              f"Declare its undo (--undo) or treat it as IRREVERSIBLE (full approval). (docs/11 §4)",
+              f"Declare its undo (--undo) or treat it as IRREVERSIBLE (full approval). (docs/05 §4)",
               file=sys.stderr)
         return ESCALATE
     emit_event("rollback_declared", {"action_ref": a.action_ref, "undo": a.undo})
@@ -252,15 +252,15 @@ def cmd_reconcile(a):
     return ESCALATE
 
 
-# event classes that MOVE a reference roles are bound to — the auto-trigger set (docs/11 §2.3,
-# docs/12 §3.1). When one lands, the roles bound to that reference must re-derive.
+# event classes that MOVE a reference roles are bound to — the auto-trigger set (docs/05 §5.1.3,
+# docs/09 §3.1). When one lands, the roles bound to that reference must re-derive.
 REFERENCE_CHANGE_CLASSES = ("priority_ranking_set", "doctrine_diff_admitted",
                             "scope_grant_changed", "intent_revised")
 
 
 def _auto_trigger_and_bound(events):
     """Derive (trigger_event_id, bound_roles) from the ledger instead of taking them as args —
-    the wiring docs/11 §2.3/§12 §3.1 imply. The trigger is the latest reference-change event;
+    the wiring docs/05 §5.1.3/docs/09 §3.1 imply. The trigger is the latest reference-change event;
     the bound roles are those the change affects, read from the event payload where the schema
     carries them (doctrine_diff_admitted.role; scope_grant_changed via grantor's scope; a
     priority/intent change binds every role that has run a cycle — all of them re-rank)."""
@@ -343,9 +343,9 @@ def cmd_staleref(a):
 
 
 # action classes whose effect is IRREVERSIBLE — a backlog item that triggers one of these
-# cannot ride "silence = consent"; it drops to the irreversible-hold tier (docs/06 §2.1). The
+# cannot ride "silence = consent"; it drops to the irreversible-hold tier (docs/05 §2.1). The
 # reversible default (re-ordering, in-workspace work) flows silently. This mirrors the blast-
-# radius classifier's reversibility split (docs/11 §2.1), applied to priority instead of tools.
+# radius classifier's reversibility split (docs/05 §2.1), applied to priority instead of tools.
 IRREVERSIBLE_ACTION_CLASSES = {
     "deploy", "production_deploy", "release", "publish", "spend", "payment", "transfer",
     "external_write", "destructive_migration", "drop", "delete_data", "send_external",
@@ -358,7 +358,7 @@ def cmd_consent(a):
     explicit human ack? Reversible actions (re-prioritization, in-workspace work) ride the
     delegated tier — silence is consent, they proceed (OK). An irreversible action_class drops
     to the irreversible-hold tier and REQUIRES an explicit ack — silence is NOT consent for it
-    (ESCALATE). This is docs/06 §2.1 as code: 'no meeting' never means 'no gate on the few
+    (ESCALATE). This is docs/05 §2.1 as code: 'no meeting' never means 'no gate on the few
     actions that can't be undone'."""
     ac = (a.action_class or "").strip().lower()
     reversible = ac not in IRREVERSIBLE_ACTION_CLASSES
@@ -372,7 +372,7 @@ def cmd_consent(a):
               f"proceeds on the delegated tier, no ack needed.")
         return OK
     print(f"HOLD: '{ac}' is irreversible ({a.item_ref}) — silence is NOT consent; requires an "
-          f"explicit human ack (irreversible-hold tier, docs/06 §2.1).", file=sys.stderr)
+          f"explicit human ack (irreversible-hold tier, docs/05 §2.1).", file=sys.stderr)
     return ESCALATE
 
 
@@ -422,7 +422,7 @@ def main(argv):
     q.add_argument("--bound")                                 # not required when --auto derives it
     q.add_argument("--auto", action="store_true",
                    help="derive the trigger event + bound roles from the ledger's latest "
-                        "reference-change event (docs/11 §2.3) instead of passing them in")
+                        "reference-change event (docs/05 §5.1.3) instead of passing them in")
     q.add_argument("--stale-threshold-cycles", dest="stale_threshold_cycles",
                    type=int, default=3)
 

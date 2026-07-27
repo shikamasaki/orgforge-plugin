@@ -13,7 +13,7 @@
 ## What was run
 
 A real RFP — build a tested `slugify(text)` utility — was taken through the FOUNDER
-process (docs/06 §1) and instantiated as a minimal three-department organization, each
+process (docs/05 §1) and instantiated as a minimal three-department organization, each
 department a **separate agent on the host harness** with its own working directory:
 
 - **miner** (organic maker) — wrote `slugify.py` + `test_slugify.py` toward its contract.
@@ -25,7 +25,7 @@ department a **separate agent on the host harness** with its own working directo
 No bespoke runtime was involved. Each department was launched on the host harness, read
 its contract and discipline from its working directory (the projection), did a cycle of
 real work with the harness's own tools and loop, and wrote its output as files. That is
-exactly the delegation model of docs/09 — the host supplied perception, tools, and the
+exactly the delegation model of docs/08 — the host supplied perception, tools, and the
 loop; the repository supplied only the skeleton (who owes what, who checks whom) and the
 separation.
 
@@ -34,7 +34,7 @@ separation.
 1. **Founding.** The RFP was distilled to a telos and a gaming-defense-backed admission
    standard ("the tests must actually RUN and PASS when an *independent* party runs
    them"), decomposed into one maker contract with a named, distinct checker. (Genesis in
-   the ledger; docs/06 §1.)
+   the ledger; docs/05 §1.)
 
 2. **maker cycle.** The miner produced `slugify.py` + `test_slugify.py`, ran pytest
    itself (7 passed), and — critically — **flagged a genuine spec ambiguity in its
@@ -90,7 +90,7 @@ review), the defect reaches production. It didn't, because the structure forbade
 **Closes:** S1's core claim (docs/01 §4). An organization from this template launched on
 an existing harness, its departments ran as separate agents with no bespoke runtime, the
 maker/checker separation held structurally, and the control system did real work —
-catching a defect the producing agent could not have caught. Delegation (docs/09) is not
+catching a defect the producing agent could not have caught. Delegation (docs/08) is not
 just specified; it ran.
 
 **Does not close:** this was a **Tier-A** rehearsal (docs/01 §5) — no assets, no
@@ -98,7 +98,7 @@ production, no external boundary — so it exercised structural separation and t
 delegation, not the Tier-B host-environment controls (sandboxing, tamper-evident storage,
 credential custody). It used the harness's own scheduler implicitly (sequential launches),
 not a declared cadence over many cycles. And it was one small RFP, not the elastic
-multi-department lifecycle of docs/05–06. The projection was done by hand (files written
+multi-department lifecycle of docs/02–06. The projection was done by hand (files written
 into working directories), not by an automated projection tool — which remains the open
 build item (docs/01 §7 #1). So: the load-bearing claim is now demonstrated; the fuller
 autonomy story (24h operation, elasticity, Tier-B, automated projection) is still ahead.

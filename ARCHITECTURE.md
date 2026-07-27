@@ -5,12 +5,17 @@ projection, organs), and what an org built with it **does over time** (the lifec
 projection → operation → guardrails → evolution). For the design *reasoning* behind each piece, follow
 the `docs/NN` links; this file is the connective tissue that shows how they fit together.
 
-> **Core thesis** (THEORY.md, docs/01): *designing an AI organization = articulating, in
-> machine-actionable form, the tacit knowledge a human company runs on* — its goal, its division of
-> labor, its information flow, its decision line. A human manager holds that knowledge in their head;
-> an AI department can only act on what is written down. So the whole system exists to make the org's
-> operating knowledge **explicit, enforced, and auditable**, and then to let a general coding agent
-> run on it.
+> **Core thesis** (THEORY.md §1b, docs/01 R0b): orgforge stands up an **AI-native IT business
+> company** — an org whose purpose is to *decide what to build as a business, build it through a
+> disciplined SDLC, ship it, and operate it*. Making that run unattended is an articulation problem:
+> *designing the AI organization = articulating, in machine-actionable form, the tacit knowledge a
+> human company runs on* — its goal, its division of labor, its information flow, its decision line —
+> **plus the shape the work is forced to travel through** (the SDLC mold). A human manager holds that
+> knowledge in their head; an AI department can only act on what is written down. So the whole system
+> exists to make the org's operating knowledge and its build discipline **explicit, enforced, and
+> auditable**, and then to let a general coding agent run on it. Two lifecycles result and are
+> **coupled**: the org's own metabolism (Part II) and the product's SDLC (Part III) — the system and
+> the org grow together.
 
 ---
 
@@ -19,10 +24,11 @@ the `docs/NN` links; this file is the connective tissue that shows how they fit 
 ### 1. The neutral core, projected onto a host harness
 
 The single most important structural fact: **orgforge ships a neutral core and projects it onto a host
-harness; it ships no execution engine of its own** (docs/09, the R0 principle). The harness — Claude
-Code or Codex — already provides the loop, the tools, the file access, the sub-agent spawning, and the
-scheduler. orgforge adds the thin layer that a general coding agent lacks: the articulated org and the
-guardrails that hold it.
+harness; it ships no execution engine of its own** (docs/08, the R0 principle). The harness — Claude
+Code or Codex — already provides the loop, the tools, the file access, the sub-agent spawning, the
+scheduler, and the **CI/CD substrate** (GitHub Actions is the deploy phase's spine — docs/11 §3).
+orgforge adds the thin layer that a general coding agent lacks: the articulated org, the **forced SDLC
+mold** the work travels through, and the guardrails that hold both.
 
 ```
         NEUTRAL CORE (harness-agnostic, the source of truth)
@@ -106,7 +112,14 @@ The fourteen tools in `tools/`:
 | `doctrine.py` | per-role external-knowledge store, gated + TTL'd, injected | `propose` `admit` `render` `remap` |
 | `conventions.py` | internal reusable precedent ("how we do X here") | `adopt` `conflict` `render` |
 | `handoff.py` | build a delegation packet: slice + seam contract + scoped doctrine | *(single command)* |
+| `repro_lint.py` | the **Level-2 reproducibility gate** — deterministic check that a repo the org *builds* clones-and-runs the same for anyone (docs/11 §4a) | `check <repo> [--phase]` |
 | `_organ.py` | shared substrate: ledger reader, event emitter, exit-code contract | *(library)* |
+
+`repro_lint.py` is the enforcement half of **reproducibility as a first-class property** (docs/11 §0,
+docs/01 J14/S9): it runs at the SDLC implement/test/deploy gates and holds a repo that a stranger
+couldn't reproduce (missing lockfile, unpinned toolchain, no one-command setup+test, no green
+CI-from-clean). The org's own reproducibility (Level 1 — same spec ⇒ same process/gates) is enforced
+by the forced phase-gate and `org_lint`; this tool enforces the repos it *produces* (Level 2).
 
 ### 4. Enforcement vs advisory — where the teeth are
 
@@ -129,6 +142,21 @@ verdict is routed through `org_hook` — today only the blast-radius cap is so w
 ---
 
 ## Part II — The lifecycle
+
+orgforge runs **two coupled lifecycles**, and it is worth naming them separately before either:
+
+- **The org metabolism** (this Part II) — how the *organization itself* comes to be and reshapes over
+  time: founding → projection → operation → guardrails → evolution.
+- **The product SDLC** (Part III below) — the *forced phase mold every deliverable travels through*:
+  requirements → design → implement → test → deploy → operate, ships via CI/CD, operating under a
+  reliability budget.
+
+They are **coupled — the system and the org grow together**: a product moving through the SDLC (a
+maturing test/deploy pipeline, a rising DORA bottleneck) is exactly what fires the metabolism's
+evolution (a sensor → a reorg move), and an evolved org (a new department, refreshed doctrine) is what
+lets the next deliverable clear its phases. Neither lifecycle is primary; they drive each other.
+
+### The org metabolism, in five phases
 
 An org built with orgforge moves through five phases. Founding happens once; projection happens at every
 launch; operation, guardrails, and evolution run continuously.
@@ -180,10 +208,10 @@ A department is a host harness running in a working directory, reading that role
 (`CLAUDE.md` for Claude Code, `AGENTS.md` for Codex) is a regenerated view, assembled in order:
 
 1. the **intent block** (broadcast org purpose) → 2. **this role's job** (ROLE.md: mission, duties, the
-decomposition doctrine of docs/15) → 3. **this role's doctrine** (its gate-admitted normative playbook)
+decomposition doctrine of docs/03) → 3. **this role's doctrine** (its gate-admitted normative playbook)
 → 4. the **decision line** reduced to this role → 5. the **discipline preamble** (charter-protected,
 verbatim) → 6. the **granted context-pack views** written as files in the working dir (need-to-know,
-deny-by-default — docs/08).
+deny-by-default — docs/07).
 
 Two mechanisms make projection live:
 - **SessionStart doctrine injection** (`integrations/common/org_session_start.py`): a SessionStart hook
@@ -207,17 +235,17 @@ a health tick — all realized on the harness's own scheduler.
 
 | Command | Role | Mechanism |
 |---|---|---|
-| **`/org-work <role>`** | the **PM loop** (acts) | `attention.py select` prioritizes the whole backlog on one footing (situated attention to the org ranking + problemistic-search boost), **floors an in-zone mandate** (zone of acceptance — a live instruction is never starved by low-priority self work), picks a prefix within the WIP limit → delegates the selected items **in parallel** (one `Task` each, only where the split is genuine per docs/15) → records `cycle_completed`. |
+| **`/org-work <role>`** | the **PM loop** (acts) | `attention.py select` prioritizes the whole backlog on one footing (situated attention to the org ranking + problemistic-search boost), **floors an in-zone mandate** (zone of acceptance — a live instruction is never starved by low-priority self work), picks a prefix within the WIP limit → delegates the selected items **in parallel** (one `Task` each, only where the split is genuine per docs/03) → records `cycle_completed`. |
 | **`/org-discover <role>`** | the **discovery loop** (adds only) | surfaces aspiration gaps and raises them as `source: self` backlog items, scoped to the role's own domain, deduped, append-only. Fail-quiet when there is no gap. |
 | **`/org-tick`** | the **health tick** (read-only) | which checks are due / MISSED, machine sensors, ledger-chain integrity. Surfaces, never acts. |
 
-**Prioritization is grounded, not ad-hoc** (docs/12): the score is the Carnegie-School synthesis —
+**Prioritization is grounded, not ad-hoc** (docs/09): the score is the Carnegie-School synthesis —
 situated attention (Ocasio: align to the org ranking), problemistic search (Cyert & March: boost what is
 failing its aspiration), sequential attention within a WIP limit (March & Simon; Goldratt/Kanban), and
 the mandate floor (Simon's zone of acceptance). `attention.py` **escalates** only when the backlog
 cannot serve the org's top objective (a coverage gap) or WIP is saturated by stalled work.
 
-**Decomposition is a judgment, not a mandate** (docs/15, injected into every ROLE profile): subdivide
+**Decomposition is a judgment, not a mandate** (docs/03, injected into every ROLE profile): subdivide
 only genuinely independent work; **never split reciprocally-coupled work**; cut seams at the design
 secret; each child carries a seam contract (its slice, inputs, outputs, `owns`/`must-not-touch`); route
 another role's domain to *that* role (own-domain coupled work you may implement yourself). Parallelism
@@ -225,7 +253,7 @@ follows independence, bounded by coordination cost — no target depth.
 
 **Scheduling** (`integrations/claude-code/SCHEDULER.md`): `template/schedule.yaml` is data; the host
 realizes its cadences on Claude Code's own scheduler — `/schedule` (cron routines) for the unattended
-24/7 cadence, `/loop` for attended runs. This is R0-conformant: docs/09 names "the harness's own loop"
+24/7 cadence, `/loop` for attended runs. This is R0-conformant: docs/08 names "the harness's own loop"
 as a valid realization, so no R0 change is needed and the wiring stays in the integration layer.
 `tick.py`'s missed-check detector survives the wiring as the org's own heartbeat — a scheduler can be
 down, and silence must never read as success.
@@ -244,7 +272,7 @@ harnesses, reading each tool call **and the ledger**:
    spawn is blocked unless the prompt carries a seam contract or an explicit `INDEPENDENT:` declaration
    (turns "please split cleanly" into structure), and a declared `owns:` territory that collides with a
    live sibling's claim in the ledger is refused — concurrent-write drift is prevented at spawn time, not
-   detected after the fact (docs/17 §5).
+   detected after the fact (docs/12 §5).
 3. **Word-boundary destructive detection** — classifies destructive commands on *whole tokens*, so a
    path like `.../fx-ml-platform/…` or a flag like `grep -f` never misfires as `rm` / `-f`. **Fail-safe**:
    an unevaluable guardrail blocks.
@@ -279,6 +307,74 @@ The chart is not fixed — it is elastic, and change flows through a controlled 
 
 The top of the chart is not agent-mutable: an agent never mints a new top-level department. Changing the
 top layer requires the charter/founding ceremony (human authority), not an agent's free judgment.
+
+---
+
+## Part III — The product SDLC (the second, coupled lifecycle)
+
+Part II is how the *org* comes to be and evolves. This Part is what the org *does with every
+deliverable*: forces it through a non-skippable software lifecycle, ships it via CI/CD, and operates it
+under a reliability budget. This is the enforcement of THEORY §1b — an amplifier without a mold just
+produces more of whatever it was already doing wrong (docs/04), so the *shape of the work* is forced,
+not suggested. See **docs/11** for the full doc; this is the architectural summary.
+
+### The forced phase mold
+
+Every deliverable travels one non-skippable chain:
+
+```
+  requirements ──▶ design ──▶ implement ──▶ test ──▶ deploy ──▶ operate
+        │            │           │           │         │          │
+        └────────────┴───── each phase: phase_started, then a gate's ─────┘
+                            phase_admitted{verdict:pass} BEFORE the next
+                            phase_started is a legal ledger event (docs/11 §2)
+                                                                     │
+                            operate closes the loop back to requirements ◀┘
+```
+
+**How the mold is enforced — not by a prompt, by the ledger.** The phase-gate generalizes the same
+`requires_prior` idiom that already makes the skeptic load-bearing (Part I §2): `ledger.py append`
+*rejects* a `phase_started{implement}` unless a `phase_admitted{design, verdict:pass}` already exists
+for that deliverable (`prior(requirements)=∅`). A phase cannot be skipped because the record won't
+accept the skip. This is deterministic enforcement, in the same class as the blast-radius cap — not a
+checklist the model can talk past. New ledger events: `phase_started` and `phase_admitted` (docs/11 §2).
+
+### CI/CD is the deploy phase's spine (borrowed, not built)
+
+Deploy is a real phase, and its machine form is **CI/CD on the host's substrate** (GitHub Actions) —
+R0-consistent: orgforge ships no pipeline runner, it *requires and reads one*. The deploy gate re-runs
+setup + tests **from a clean clone** and admits only when a committed workflow is green from that clean
+clone (docs/11 §3/§4a). "Green CI from a clean clone" is reproducibility *proven continuously*, and it
+is an **admission artifact**, not an aspiration.
+
+### The reproducibility gate
+
+Reproducibility is a first-class property at two levels (docs/11 §0):
+- **Level 1 — the org.** Same org spec + RFP ⇒ same process, gates, contracts, verification. Enforced
+  by the forced phase-gate above + `org_lint` (including the **O10** tooth: every declared contract
+  deliverable is owned and independently checked — the chart side of the RFP-coverage manifest).
+- **Level 2 — the repos the org builds.** A stranger who clones gets the same system: committed
+  lockfile, pinned toolchain, one-command setup+test, idempotent migrations, `.env.example`, green
+  CI-from-clean. Enforced by **`tools/repro_lint.py`**, run *by the gate* at the implement/test/deploy
+  phase gates (each artifact tagged with the earliest phase that requires it). Presence is checked
+  deterministically; the clean-clone re-run is the expensive second tooth the deploy pipeline performs.
+
+The generated *code* is free to vary (LLM non-determinism, accepted); the mold makes everything around
+it — process, contracts, gates, dev experience — reproducible.
+
+### The operate organ: reliability budget + DORA
+
+Once shipped, the deliverable enters `operate`, and the running company navigates by two standing
+instruments (docs/05 §reliability-budget / §DORA, docs/11 §4):
+- **A reliability / error budget** — `reliability_budget_checked` fires at every deploy gate and on a
+  burn-rate cadence; on the transition to `freeze` it surfaces (a frozen deploy pipeline is an
+  exception the org must see), and a fast burn escalates as a systemic regression.
+- **DORA's four keys** — `dora_snapshot` computes deploy frequency, lead time, change-fail rate, and
+  MTTR from the ledger's own events. Their purpose is **navigation**: read together they locate the
+  **moving bottleneck**. When the amplifier makes generation cheap, the constraint moves *downstream*
+  to review/test/deploy — the exact signal the attention layer (docs/09) and the priority ranking
+  (docs/05 §5.4) steer by. This is where the two lifecycles couple: a moved bottleneck is a
+  re-prioritization signal the registrar reads, and can be the sensor that fires an org evolution.
 
 ---
 

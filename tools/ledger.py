@@ -9,7 +9,7 @@ events are appended under a hash chain, the chain is independently replayable (t
 watchdog's primitive), views are projected DETERMINISTICALLY from events, and the census /
 digest are exact projections (same window + same ledger ⇒ byte-identical), never curated.
 
-It ships no runtime and no scheduler (docs/09, R0): the registrar/watchdog are agents a host
+It ships no runtime and no scheduler (docs/08, R0): the registrar/watchdog are agents a host
 runs on a cadence; this tool is the file-backed store + the projection + the verify they call.
 The ledger is one JSON-lines file (append-only) plus a companion HEAD file holding the last
 hash, so a writer never has to load the whole log to append:
@@ -48,11 +48,41 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _organ import read_events, LedgerCorruption   # noqa: E402
 
+# ── the forced SDLC phase order (docs/11) — reproducibility's spine ──
+# A deliverable travels these phases in this order; a phase may not START until the prior phase is
+# ADMITTED (phase_admitted{verdict==pass}) for the same deliverable. This is the same requires_prior
+# idiom as result_deployed, generalized from admission-gating to phase-gating so that the PROCESS is
+# reproducible: same spec ⇒ the same phases run in the same order for every founder and every run.
+PHASE_ORDER = ["requirements", "design", "implement", "test", "deploy", "operate"]
+
+
+def _prior_phase(phase):
+    """The phase that must be admitted before `phase` may start; None for the first phase."""
+    try:
+        i = PHASE_ORDER.index(phase)
+    except ValueError:
+        return None  # unknown phase name — the schema enum will reject it upstream; don't gate here
+    return PHASE_ORDER[i - 1] if i > 0 else None
+
+
 # ── event classes with a required-prior constraint (ledger-schema §event_classes) ──
 # result_deployed{candidate_id==C} is INVALID without a prior refutation_attempted with
 # claim_id==C and verdict==survives. This is the one write-time invariant the schema states
 # in prose ("requires_prior"); we execute it against the actual event history.
 REQUIRES_PRIOR = {
+    # SDLC phase gate (docs/11 §2): phase_started{deliverable==D, phase==P} is INVALID unless a
+    # phase_admitted{deliverable==D, phase==prior(P), verdict==pass} exists. requirements (prior==None)
+    # is always allowed to start. Same shape as result_deployed — one predicate, more events.
+    "phase_started": lambda ev, hist: (
+        _prior_phase(ev["payload"].get("phase")) is None
+        or any(
+            e["class"] == "phase_admitted"
+            and e["payload"].get("deliverable") == ev["payload"].get("deliverable")
+            and e["payload"].get("phase") == _prior_phase(ev["payload"].get("phase"))
+            and e["payload"].get("verdict") == "pass"
+            for e in hist
+        )
+    ),
     "result_deployed": lambda ev, hist: any(
         e["class"] == "refutation_attempted"
         and e["payload"].get("claim_id") == ev["payload"].get("candidate_id")
@@ -61,7 +91,7 @@ REQUIRES_PRIOR = {
     ),
     # A4 report-up is INVALID unless this supervisor has done at least one A3 conformance review
     # that CONFORMS — a manager may not report subordinate work up as its own without having
-    # verified it against the intent it delegated (docs/14 §A3/§A4). Without this, the schema's
+    # verified it against the intent it delegated (docs/09 §A3/§A4). Without this, the schema's
     # requires_prior promise (ledger-schema.yaml) is prose, not enforced.
     "report_up": lambda ev, hist: any(
         e["class"] == "conformance_reviewed"
@@ -70,7 +100,7 @@ REQUIRES_PRIOR = {
         for e in hist
     ),
     # A3 conformance review is INVALID unless the intent it reviews against was actually delegated
-    # as a spec first (spec-driven, docs/14): the delegated_intent_ref must resolve to a prior
+    # as a spec first (spec-driven, docs/09): the delegated_intent_ref must resolve to a prior
     # spec_delegated for the same (supervisor, subordinate). Otherwise delegated_intent_ref dangles
     # — a manager cannot "verify against the intent it delegated" if it never delegated one.
     "conformance_reviewed": lambda ev, hist: any(
@@ -84,14 +114,18 @@ REQUIRES_PRIOR = {
 # an honest per-class reason for a requires_prior rejection (the reject message uses this instead
 # of a single hardcoded 'skeptic is load-bearing' line that only fit result_deployed).
 REQUIRES_PRIOR_WHY = {
+    "phase_started": "a phase_admitted{deliverable, phase==prior(phase), verdict==pass} — the SDLC "
+                     "phase order is non-skippable (requirements→design→implement→test→deploy→operate); "
+                     "a phase cannot start before its predecessor is admitted (docs/11 §2). This is what "
+                     "makes the process reproducible across founders and runs.",
     "result_deployed": "a refutation_attempted{claim_id==candidate_id, verdict==survives} — the "
                        "skeptic is load-bearing; a result cannot deploy without surviving adversarial review",
     "report_up": "a conformance_reviewed{verdict==conforms} by this supervisor — a manager cannot "
                  "report subordinate work up as its own without verifying it against the intent it "
-                 "delegated (docs/14 §A3/§A4)",
+                 "delegated (docs/09 §A3/§A4)",
     "conformance_reviewed": "a spec_delegated for this (supervisor, subordinate) — a manager cannot "
                             "verify against 'the intent it delegated' if it never delegated a spec "
-                            "(docs/14 §spec-driven)",
+                            "(docs/09 §spec-driven)",
 }
 
 # ── view -> the event classes it derives from (ledger-schema §views). "*" = all classes. ──
@@ -163,9 +197,24 @@ def cmd_append(a):
         return 2
     hist = _read_events(a.root)
     head = _read_head(a.root)
+    # ── idempotency (docs/11 §0 reproducibility): if a natural key is given, this event is a
+    # RETRY of a logical event that must be counted once. A replayed/re-fired cycle (a hook that
+    # re-fires PreToolUse, a resumed session, a crash-retry) must NOT double-append — else the
+    # aggregate caps (exposure, cycles, WIP) drift with how many times the tool ran, not with the
+    # spec+action. We no-op (exit 0) when (class, natural_key) already exists in history. The seq
+    # counter is monotonic, so without this an identical logical event would land twice under two
+    # ids — the non-idempotency the "idempotent under replay" note wrongly claimed we already had.
+    nk = getattr(a, "natural_key", None)
+    if nk:
+        for e in hist:
+            if e["class"] == a.cls and e.get("payload", {}).get("_nk") == nk:
+                print(f"append: idempotent no-op — {a.cls} with natural key {a.natural_key!r} "
+                      f"already recorded at seq={e['seq']} id={e['id']} (docs/11 §0). Not re-appended.")
+                return 0
+        payload["_nk"] = a.natural_key   # stamp the key so a future retry can find this event
     seq = head["seq"] + 1
     # id is derived from (seq, class, canonical payload) so append is deterministic and
-    # idempotent under replay — no wall-clock/random id (docs/09: tools stay deterministic).
+    # idempotent under replay — no wall-clock/random id (docs/08: tools stay deterministic).
     eid = "e" + hashlib.sha256(
         f"{seq}:{a.cls}:{json.dumps(payload, sort_keys=True, ensure_ascii=False)}".encode()
     ).hexdigest()[:12]
@@ -346,6 +395,9 @@ def main(argv):
     q.add_argument("--class", dest="cls", required=True)
     q.add_argument("--payload", required=True)
     q.add_argument("--ts")
+    q.add_argument("--natural-key", dest="natural_key",
+                   help="idempotency key: if a prior event of this class carries the same key, "
+                        "this append is a no-op (docs/11 §0 — replay/retry must count once)")
 
     q = sub.add_parser("verify"); q.set_defaults(fn=cmd_verify)
     q.add_argument("root")

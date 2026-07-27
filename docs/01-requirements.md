@@ -1,5 +1,7 @@
 # 01 — Requirements: What This System Must Actually Be
 
+*Part I · Foundations — see [the four-part map](README.md).*
+
 > Every other document describes *how* the organization is decomposed. This one fixes
 > *what the whole thing is for and what it must do to count as working* — the actors it
 > serves, the jobs those actors need done, the success criteria, the threat model, and
@@ -49,6 +51,21 @@ is not "it runs." If the smallest useful configuration cannot be launched on a
 general-purpose coding agent as it ships, the requirement is unmet — no matter how
 complete the spec is.
 
+And R−1/R0 say nothing yet about *which* organization is being articulated. This
+repository does not stand up an arbitrary org; it stands up a **specific kind**, and that
+narrows the requirements — so it is fixed here as the first principle after articulation
+itself (THEORY §1b):
+
+> **R0b — The thing being stood up is an IT business company.** The org's purpose slot
+> (Organ 1) is filled with a *business telos*: it **decides what software to build as a
+> business** from a market intent (a customer, an RFP, a priority ranking), builds it,
+> ships it, operates it, and is answerable for **delivery and economics — not volume of
+> output**. This is why §1's *client* actor, §3's *serve-the-client* and *manage-delivery*
+> jobs, and §4's *acceptance* / *unit-economics* / *on-time* criteria are requirements at
+> all and not decoration: they are the concrete obligations a company-shaped org owes that
+> an abstract "agent org" does not. The neutral seven-organ theory is untouched; R0b only
+> says which organization these requirements are written for.
+
 ---
 
 ## 1. Actors
@@ -59,7 +76,7 @@ of agents. That is too coarse and hid real requirements. The actors are:
 | Actor | Who / what | What they need from the system |
 |---|---|---|
 | **Client** | The party the RFP is *for* — a paying customer, an internal stakeholder, a downstream team. Distinct from the operator. | A way to submit and amend the RFP, see milestone-level progress in their terms, and accept or reject deliverables at a gate. |
-| **Operator** | The human running the org day-to-day; holds charter authority (docs/06). Not the client. | A morning digest, an approval queue for charter/irreversible actions, delegation-bound tuning, purpose/intent revision. |
+| **Operator** | The human running the org day-to-day; holds charter authority (docs/05). Not the client. | A morning digest, an approval queue for charter/irreversible actions, delegation-bound tuning, purpose/intent revision. |
 | **Department** | An LLM agent (or a self-organizing pool behind one contract) running on a host harness. A *member* of the org. | Its profile projected into the harness it runs on, a scoped context pack, its contract and doctrine, a way to hand work to its checker. |
 | **Host harness** | The existing LLM coding-agent runtime a department runs on (e.g. Claude Code, Codex). Supplies Organs 3 & 4. | A neutral profile it can read as its instruction file; a working directory; a launch/stop signal on a schedule. |
 | **Founder process** | Runs once, turns an RFP into the latent org (FOUNDER.md). | The RFP, the human-authored constitution, the moves/sensors/schema templates. |
@@ -119,7 +136,7 @@ What the system must let its actors accomplish. Each is testable.
   hand a positive result to its checker — with **no bespoke runtime in the loop**. (R0)
 - **J3 — Coordinate independent departments.** Multiple departments pursue their own
   contracts and integrate through contract seams + the shared record, without a central
-  agent scripting their steps. (docs/06 §1, docs/08)
+  agent scripting their steps. (docs/05 §1, docs/07)
 - **J4 — Keep control honest.** No maker admits its own work; the maker/checker line and
   the three incompatible duties hold at runtime, not just on paper. (Organ 6)
 - **J5 — Serve the client across the lifecycle.** Accept RFP amendments as they arrive,
@@ -134,12 +151,37 @@ What the system must let its actors accomplish. Each is testable.
   discovered by building. (new; the moves-catalog gap)
 - **J8 — Run around the clock, human above the loop.** Delegated work proceeds
   unattended; charter/irreversible actions queue for asynchronous human decision; the
-  human audits a night in minutes. (docs/06)
+  human audits a night in minutes. (docs/05)
 - **J9 — Scale elastically and end cleanly.** Activate/deactivate departments by load;
-  enter maintenance, hand over, sunset — cradle to grave. (docs/05, docs/06)
+  enter maintenance, hand over, sunset — cradle to grave. (docs/02, docs/05)
 - **J10 — Compound assets across projects.** Profiles, doctrine, parts, and failure
   lessons outlive any single RFP and seed the next org from a company-level pool — the
   purpose's "durable asset" promise. (new; the company-layer gap)
+- **J11 — Build through the forced SDLC mold.** Every deliverable travels a
+  **non-skippable phase chain** — requirements → design → implement → test → deploy →
+  operate — and a phase may not start until the prior phase's output carries an admission
+  verdict. This is the `requires_prior` mechanism (Organ 6, docs/03/14) *generalized from
+  admission-gating to phase-gating*; the mold is promoted by doctrine and enforced by
+  lint/hook, never by forced delegation. (new; the SDLC gap — docs/11)
+- **J12 — Ship continuously (CI/CD).** The org keeps the trunk always-shippable and
+  releases through a continuous-integration/continuous-delivery spine — **GitHub Actions**
+  — that the org *declares intent into* and the host runs, exactly as scheduling is
+  delegated (R0/R2.3). A green pipeline that includes the `survives` check *is* the machine
+  form of the deploy gate. (new; the continuous-delivery gap — docs/11 §3)
+- **J13 — Operate under a reliability budget, navigate by DORA.** A running product carries
+  a **reliability/error budget** that *bounds deploy velocity* (an SRE governor at the
+  deploy gate), and the org steers by **DORA metrics** — deploy frequency, lead time,
+  change-fail rate, MTTR — to the moving bottleneck (Theory of Constraints). The budget and
+  the metrics live with the other 24/7 operating instruments (docs/05). (new; the
+  reliability/DORA gap)
+- **J14 — Produce reproducible outcomes, at two levels.** Given the same org spec + RFP, the
+  **process, contracts, gates, and verification must converge** no matter who founds the company
+  or when (Level 1) — the generated code may vary, an LLM is non-deterministic, but the mold makes
+  everything around it the same. And the **repositories the org builds must be reproducible for
+  anyone who clones them** (Level 2): a committed lockfile + pinned toolchain, a one-command
+  documented setup and test the gate re-runs from a clean clone, idempotent migrations, a
+  `.env.example`, and a green from-clean CI workflow — each an *admission artifact*, not a maker's
+  self-claim. (new; the reproducibility gap — docs/11 §0, §4a)
 
 ---
 
@@ -162,10 +204,24 @@ Concretely, the system succeeds when:
   hold on a live run.
 - **S6 — A night of autonomous operation is auditable in ≤15 minutes** and no
   irreversible action fired without human approval.
+- **S7 — The phase order holds mechanically.** No deliverable reaches deploy without a
+  ledgered admission verdict on each prior phase; the lint refuses a routing that lets a
+  phase skip its predecessors, and the deploy hook refuses a `phase_started` with no
+  admitted predecessor (J11 — docs/11 §2).
+- **S8 — Release is continuous and gated by the pipeline.** Changes ship through the CI/CD
+  spine, and the pipeline *itself* refuses to release without the `survives` check and a
+  healthy budget — the deploy gate is machine-enforced, not a human watching a checklist
+  (J12/J13 — docs/11 §3, docs/05).
+- **S9 — The same spec yields a reproducible outcome.** Two foundings from the same org spec + RFP
+  pass the *same gates* and satisfy the *same contracts* (Level 1), and every repository the org
+  admits clones-and-runs deterministically for a stranger — lockfile + pinned toolchain present,
+  one-command setup+test green from a clean checkout, migrations idempotent, CI green from clean
+  (Level 2). Reproducibility is checked by a deterministic tooth, not asserted (J14 — docs/11 §0,
+  §4a).
 
 The honest status line for the repo: **S1 has been demonstrated once** — a small Tier-A
 RFP run end-to-end on an existing harness, three departments as separate agents, with the
-maker/checker separation holding structurally (docs/10). S2–S6 — scale, on-time delivery,
+maker/checker separation holding structurally (demos/S1-founding-rehearsal). S2–S6 — scale, on-time delivery,
 unit economics, and unattended 24-hour operation — remain to be shown. R0 says a runnable
 design is the first requirement; that bar is now cleared for the smallest case, and the
 frontier is scale and autonomy.
@@ -211,7 +267,7 @@ finding targets; a Tier-B finding against a documentation-generation org is out 
   justified against R0. (R2.2)
 - **C5 — No knowledge outside the shared record**, so dormancy is lossless and departments
   are not person-dependent. Enforced by discipline + audit (and, where the host provides
-  it, by the host's storage). (docs/05 §5)
+  it, by the host's storage). (docs/02 §5)
 - **C6 — The value test governs.** Elegance of the chart is not success; a produced,
   admitted, net-positive deliverable is. (Organ 1)
 
@@ -237,14 +293,14 @@ harness-neutral skeleton:
 
 This requirements pass reframes documents that were written runtime-first:
 
-- **docs/09** must be rewritten from "the runtime you build" to "the host harness you
+- **docs/08** must be rewritten from "the runtime you build" to "the host harness you
   delegate to, and the thin projection you add" (R0/R2). Its conformance checklist becomes
   "what the host must provide" + "what the projection must generate", not "what you must
   implement."
 - **The sensor and delivery gaps** (J6/S3/S4) add progress and unit-economics signals the
   current sensors.yaml lacks.
 - **The contract-renegotiation move** (J7) is missing from moves.yaml.
-- **The client actor** (J1/J5) adds a customer-facing surface absent from docs/06.
+- **The client actor** (J1/J5) adds a customer-facing surface absent from docs/05.
 - **Reviews** must cite the threat tier (§5) and treat R0/S1 — *does it actually run on an
   existing harness?* — as the first question, ahead of any spec-completeness finding.
 

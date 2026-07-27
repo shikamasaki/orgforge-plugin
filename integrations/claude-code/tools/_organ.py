@@ -55,5 +55,5 @@ def read_events(root):
 
 def emit_event(cls, payload):
     """Print the ledger event this organ would append. The host parser keys on the
-    'LEDGER-EVENT ' prefix; the organ COMPUTES, the host APPENDS (docs/09)."""
+    'LEDGER-EVENT ' prefix; the organ COMPUTES, the host APPENDS (docs/08)."""
     print("LEDGER-EVENT " + json.dumps({"class": cls, "payload": payload}, ensure_ascii=False))

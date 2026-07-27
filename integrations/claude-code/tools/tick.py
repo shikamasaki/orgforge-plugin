@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""tick — the pure schedule PLANNER (docs/11 §5, docs/09 R0).
+"""tick — the pure schedule PLANNER (docs/05 §5, docs/08 R0).
 
 This is NOT a scheduler. It ships no loop, no daemon, no clock of its own (R0: "the system
-never ships a scheduler", docs/09 §4). It is a pure function the host's cron/CI/harness loop
+never ships a scheduler", docs/08 §4). It is a pure function the host's cron/CI/harness loop
 invokes once per base interval: given schedule.yaml + the current time + the ledger, it computes
 
   (1) which operating-event checks are DUE this tick,
@@ -12,7 +12,7 @@ invokes once per base interval: given schedule.yaml + the current time + the led
   (3) — the guardrail the whole layer exists for — which due checks DID NOT RUN: a check that
       was due but whose verify_event is ABSENT from the ledger in its window is a MISS. A miss
       is reported, and consecutive misses of one check ESCALATE. "It was supposed to run" is
-      thereby made a detected, escalated fact, never a silent excuse (docs/11 §5.2).
+      thereby made a detected, escalated fact, never a silent excuse (docs/05 §5.6).
 
 The host then actually invokes the due tools (tick.py only PLANS; it does not run them — that
 would be the bespoke runtime R0 forbids). tick.py's own run is itself ledgered (tick_planned),

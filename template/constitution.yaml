@@ -19,8 +19,8 @@
 # moves.yaml, within these bounds. THIS file is the articles of incorporation: written by
 # humans, readable by every agent, writable by NO agent.
 #
-# Three authorization tiers (docs/06 §2.1). Every action falls in exactly one. Tier BEHAVIOR
-# is fixed in docs/06; the authoritative ITEM LISTS are here and only here.
+# Three authorization tiers (docs/05 §2.1). Every action falls in exactly one. Tier BEHAVIOR
+# is fixed in docs/05; the authoritative ITEM LISTS are here and only here.
 # Overnight: delegated → execute now; charter → raise a proposal and keep working;
 # irreversible → prepare fully, hold for the human.
 #
@@ -43,15 +43,15 @@ delegated:
     - add_coordination_gate
     - lighten_gate                 # never the admission gate — lint-guarded
     - remove_layer                 # only if the parent passes the post-merge span check
-    - update_doctrine              # organic-role doctrine, after gate admission (docs/07)
-    - adjust_context_scope         # organic↔organic seams only (docs/08)
+    - update_doctrine              # organic-role doctrine, after gate admission (docs/06)
+    - adjust_context_scope         # organic↔organic seams only (docs/07)
   # Night operation: what delegated authority looks like unattended.
   night:
     exploration_token_cap_per_window: 2000000   # tokens per 8h window — example, set your own
     no_progress_rule:
       same_signal_same_move_max: 3     # then suspend that line and file ONE proposal (dedup'd)
-    safe_mode:                          # FAIL-SAFE, not fail-open (docs/06 §2.4)
-      # HOW THIS IS ENFORCED (docs/01 §5 tiers; docs/09 §5): for a Tier-A org, the night
+    safe_mode:                          # FAIL-SAFE, not fail-open (docs/05 §2.4)
+      # HOW THIS IS ENFORCED (docs/01 §5 tiers; docs/08 §5): for a Tier-A org, the night
       # admission default is enforced STRUCTURALLY + BY THE APPROVAL QUEUE — no department's
       # projection gives it its own admission authority, so a surprise cannot be self-admitted.
       # For a Tier-B (asset-touching) org, the HOST ENVIRONMENT additionally provides the
@@ -68,30 +68,30 @@ delegated:
 # diagnosis + diff + expected effect; one accountable human adjudicates. No consensus round.
 charter:
   items:
-    - founding_commit                   # the org cannot be born without human sign-off (docs/06 §1)
+    - founding_commit                   # the org cannot be born without human sign-off (docs/05 §1)
     - separation_of_duties_matrix       # the SoD map in organization.yaml
     - mechanistic_role_profiles         # gate, skeptic, supervisor, registrar job descriptions
     - profile_discipline_preambles      # the immutable block in EVERY profile (ROLE.md), any regime
     - admission_standard                # what "passing" means (Organ 1 grounding)
-    - mechanistic_role_doctrine         # what the control layer is taught (docs/07)
-    - control_layer_context_scopes      # a maker may never scope-fence its Checker (docs/08 §4)
-    - intent_block_revision             # org-wide priorities under an unchanged purpose (docs/08 §2.1)
+    - mechanistic_role_doctrine         # what the control layer is taught (docs/06)
+    - control_layer_context_scopes      # a maker may never scope-fence its Checker (docs/07 §4)
+    - intent_block_revision             # org-wide priorities under an unchanged purpose (docs/07 §2.1)
     - purpose_revision                  # Organ 1 is human-held, always
     - delegation_bounds                 # this file's Tier-1 contents themselves
     - moves_catalog                     # adding/changing legal moves
     - add_layer                         # hierarchy is charter-tier: the last resort
     - refound                           # tear down & rebuild the whole chart, assets intact — a
                                         # founding act; only the CEO/human reshapes the whole org
-                                        # (docs/06 §4.4). The constitution itself outlives it.
+                                        # (docs/05 §4.4). The constitution itself outlives it.
     - lifecycle_transitions             # enter_maintenance, prepare_handover
   queue: ledger://proposals             # append-only; adjudicated each morning
-  queue_rules:                          # anti-flooding, anti-bundling (docs/06 §2.2)
+  queue_rules:                          # anti-flooding, anti-bundling (docs/05 §2.2)
     one_concern_per_proposal: true      # multi-subject diffs are auto-rejected and split
     one_open_proposal_per_subject: true
     dedup_identical_diffs: true
     batch_adjudication_of_charter_items: false   # each gets its own human read, untimed
   morning_digest:
-    generated_by: registrar             # mechanistic clerk (docs/06 §2.6)
+    generated_by: registrar             # mechanistic clerk (docs/05 §2.6)
     deterministic_projection: true      # anyone re-running it gets the same document
     mandatory_census: all_ledger_event_class_counts   # activity cannot be hidden by curation
     then_exceptions: [reorg_commits, open_proposals, held_irreversibles, anomalies, budget_report]
@@ -104,7 +104,7 @@ irreversible:
     - external_publication              # anything leaving the boundary is published
     - asset_movement                    # funds, credentials, data exports
     - ledger_schema_change
-    - sunset                            # the org never adjudicates its own death (docs/06 §4.3)
+    - sunset                            # the org never adjudicates its own death (docs/05 §4.3)
   prepare_up_to: staged_and_verified    # build, test, stage, diff — approve-only state
   staging_guards:
     no_asset_materialization_at_boundary: true   # staging stops BEFORE secrets/data/funds
@@ -112,7 +112,7 @@ irreversible:
     max_concurrent_held_per_class: 3             # the night cannot stage 50 to swamp review
     each_held_action_carries: checker_signed_effect_diff
 
-# ── Knowledge & context rules (docs/07, docs/08) ─────────────────────────────
+# ── Knowledge & context rules (docs/06, docs/07) ─────────────────────────────
 knowledge:
   external_content_is_untrusted: true   # nothing external enters always-loaded context
   doctrine_admission: gate              # without mechanistic admission (anti-poisoning)
@@ -121,7 +121,7 @@ knowledge:
   self_serving_doctrine_is_charter: true  # a diff touching the proposer's own discipline
                                           # or any threshold the gate uses is charter-tier
 context:
-  scopes_default: deny                  # need-to-know (docs/08 §2.2)
+  scopes_default: deny                  # need-to-know (docs/07 §2.2)
   grants_recorded_in_ledger: true
   grant_recertification_cadence: weekly # unused grants are revoked
   intent_block_in_every_pack: true      # no role is "not cleared" for the purpose
@@ -131,8 +131,8 @@ context:
 escalation:
   digest: [reorg_commits, open_proposals, held_irreversibles, anomalies, budget_report]
   wake_up_push: [global_halt, safety_limit_tripped, ledger_anomaly]   # nothing else
-  watchdog:                             # docs/06 §2.4 — the backstop is NOT self-reported
-    # A REQUIREMENT ON THE HOST, tier-dependent (docs/01 §5; docs/09 §5). This block declares
+  watchdog:                             # docs/05 §2.4 — the backstop is NOT self-reported
+    # A REQUIREMENT ON THE HOST, tier-dependent (docs/01 §5; docs/08 §5). This block declares
     # that an out-of-org backstop must exist; it does not implement one in this repo (docs/01
     # R0/C4). For a Tier-A org, the checker-independence and no-self-admission this guards are
     # enforced structurally + by the approval queue. For a Tier-B (asset-touching) org, the
@@ -144,7 +144,7 @@ escalation:
     heartbeat_interval_minutes: 30
 
 # ── Invariants — no tier may touch these; violations are global-halt events ──
-# HOW ENFORCED, by tier (docs/01 §5; docs/09 §5): these are REQUIREMENTS ON THE HOST, not a
+# HOW ENFORCED, by tier (docs/01 §5; docs/08 §5): these are REQUIREMENTS ON THE HOST, not a
 # runtime this repo builds. For a Tier-A org, maker_never_own_checker and the append-only
 # discipline are enforced STRUCTURALLY (which files the projection writes into which working
 # dir — no self-admission is possible) + BY THE APPROVAL QUEUE + the lint. For a Tier-B
@@ -154,7 +154,7 @@ escalation:
 invariants:
   - ledger_append_only: true
   - no_knowledge_outside_ledger: true          # the anti-person-dependence (属人化) invariant
-                                               # (docs/05 §5 — enforced by discipline + audit)
+                                               # (docs/02 §5 — enforced by discipline + audit)
   - control_never_dormant_while_exploring: true
   - maker_never_own_checker: true
   - no_agent_writes_this_file: true            # a REQUIREMENT ON THE HOST: satisfied via repo
@@ -162,9 +162,9 @@ invariants:
                                                # environment provides. The lint verifies the
                                                # DECLARATION; the host must verify authorship —
                                                # Tier-B orgs lean on the host's tamper-evidence
-                                               # (docs/06 §2.4; docs/01 R2, C4).
+                                               # (docs/05 §2.4; docs/01 R2, C4).
 
-# ── Mandate precedence — which mandate governs when two collide (docs/13 §3) ──
+# ── Mandate precedence — which mandate governs when two collide (docs/05 §6.4) ──
 # When two departments each act INSIDE their granted authority but reach decisions that cannot
 # both stand (safety says "hold", growth says "ship"), SOMETHING must say which mandate governs.
 # The repo ranks OBJECTIVES by weight (resource.py rank), but that is "what to fund first," NOT
@@ -179,3 +179,38 @@ mandate_precedence:
   order: [safety, correctness, growth, cost]
   both_satisfiable_rule: integrate     # when both mandates CAN be honored, integrate laterally
                                        # (Follett) rather than invoke precedence — no CEO traffic
+
+# ── Enforcement policy — the gates, declared in the spec so every install enforces the SAME ones ──
+# REPRODUCIBILITY (docs/11 §0): "same org spec ⇒ same gates." Historically the caps, the budget
+# window, and which gates are on lived in ENVIRONMENT VARIABLES (ORG_CAP_*, ORG_WINDOW, ORG_MAX_*,
+# ORG_REQUIRE_SEAM) — so two adopters running the same org enforced DIFFERENT regimes, and the
+# iteration cap was inert unless three env vars happened to be set. That breaks reproducibility: the
+# enforcement surface was a property of the host environment, not of the (hash-chained, agent-
+# unwritable) spec. This block moves it into the spec. The hook reads THESE values; env vars remain
+# only as a DEV OVERRIDE (a developer's laptop may loosen a cap locally, but the shipped org's gate
+# regime is what is written here and ledgered). no_agent_writes_this_file covers this block too.
+enforcement:
+  # blast-radius caps — the per-day budget of irreversible/asset-touching exposure, by dimension.
+  # A gate HOLDS (escalates) when the rolling-window sum would exceed the cap. Dimension names match
+  # the hook's classifier (org_hook.py _DEFAULT_CAPS). Tune to YOUR org's real throughput; the
+  # defaults are generous enough not to throttle honest work (docs/05 §5.1).
+  caps:
+    destructive_ops: 50      # rm/DROP/force per day — irreversible but routine; scope-weighted
+    external_writes: 30      # outbound POST/PUT/DELETE per day — irreversible side effect
+    infra_changes: 20        # apply to real infra per day — irreversible
+    file_mutations: 500      # overwriting existing files per day — reversible under VCS; high ceiling
+  window: daily            # daily = the cap is a per-day budget resetting at UTC midnight; or `all`
+                           # for an all-time cap (rarely wanted — a long-lived org exhausts it).
+  # iteration/spend cap per role per window — DEFAULT-ON (docs/11 §0). A runaway read-think-edit
+  # loop is killed at these limits regardless of whether anyone set an env var. null = unlimited
+  # (declare a number to bound; the amplifier failure — docs/04 — is why this defaults ON).
+  iteration:
+    max_cycles: 50
+    max_tokens: 2000000
+  # the seam/independence gate on fan-out — DEFAULT-ON (docs/06 §2.1.1). A spawn with neither a seam
+  # contract nor an INDEPENDENT declaration is refused, so concurrent writers can't collide. Keeping
+  # this in the spec (not ORG_REQUIRE_SEAM) means every install of this org fans out the same way.
+  seam_gate: on
+  # catastrophic denylist (rm -rf /, mkfs, fork bomb …) — always on; a spec cannot opt a shipped org
+  # out of it (only a dev sandbox may, via ORG_ALLOW_CATASTROPHIC). Listed here for auditability.
+  catastrophic_denylist: on

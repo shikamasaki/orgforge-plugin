@@ -16,7 +16,7 @@ So when a manager delegates a slice to a child, it emits ONE packet with three p
                           files/modules it owns, files it must NOT touch. Inherited as a HARD
                           constraint the child may not renegotiate.
   3. THE CHILD'S BRAIN  — the parent's own doctrine, SCOPED DOWN to this slice (narrow-and-deep,
-                          docs/07 §2.1): only the claims whose affected_roles include the child
+                          docs/06 §2.1): only the claims whose affected_roles include the child
                           role. The parent's broader brain does not leak down.
 
 Plus a standing instruction: *if you split further, choose the axis that fits YOUR slice, and
@@ -56,7 +56,7 @@ def _load(root, role):
 def _scoped_claims(root, child_role):
     """The child's brain = the admitted claims whose affected_roles name this child. This is
     the scope-down: a manager hands its subordinate only the slice-relevant doctrine, never
-    its own broader picture (docs/08 §1.1 narrow-and-deep)."""
+    its own broader picture (docs/07 §1.1 narrow-and-deep)."""
     out = []
     # a claim lands in the child's brain if the child role is in its affected_roles, wherever
     # the claim currently lives in the store (search every role file).

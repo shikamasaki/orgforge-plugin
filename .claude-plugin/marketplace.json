@@ -3,12 +3,12 @@
   "owner": {
     "name": "shikamasaki"
   },
-  "description": "The articulated AI organization as installable Claude Code features: guardrails that actually block, per-department subagents, and organ commands. Harness-neutral core (tools/), projected here onto Claude Code.",
+  "description": "Stand up an AI-native IT business company as installable Claude Code features: it builds software through a forced non-skippable SDLC, ships via CI/CD, and produces reproducible work (same spec ⇒ same process/gates/contracts). Guardrails that actually block, per-department subagents, organ commands. Harness-neutral core (tools/), projected here onto Claude Code.",
   "plugins": [
     {
       "name": "orgforge-plugin",
       "source": "./integrations/claude-code",
-      "description": "PreToolUse guardrails (blast-radius caps, mandate adjudication) that block real tool calls; SessionStart doctrine injection; gate/skeptic/registrar/maker subagents; /org-tick and /org-mandate commands."
+      "description": "Forced SDLC phase gate + reproducibility lint; PreToolUse guardrails (blast-radius caps, spec-declared enforcement, mandate adjudication) that block real tool calls; SessionStart doctrine injection; gate/skeptic/registrar/maker subagents; /org-tick, /org-found, /org-work commands."
     }
   ]
 }

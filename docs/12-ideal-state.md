@@ -1,4 +1,6 @@
-# 17 — The ideal state: what orgforge is for, and the gap to it
+# 12 — The ideal state: what orgforge is for, and the gap to it
+
+*Part IV · North star — see [the four-part map](README.md).*
 
 The docs before this one each argue a part. This one steps back and asks the question a five-perspective
 review (loop-reliability, factory-mechanics, multi-agent-safety, conceptual-genealogy, user-experience)
@@ -6,9 +8,24 @@ plus a practitioner's field report converged on: **given why the governing conce
 is the one thing orgforge is for — and where does it fall short of being that?** It is the north star the
 other docs' mechanisms serve, and the honest ledger of the distance still to travel.
 
-## §1 The four concepts collapse into one act
+## §0 The larger frame: orgforge stands up an IT business company
 
-orgforge lives at the convergence of four ideas, each invented against a specific pain:
+Before the four concepts below, state the whole plainly, because it is larger than any of them.
+**orgforge is a plugin for standing up and running an AI-native IT business company** (THEORY §1b): an
+organization whose purpose is to *decide what software to build as a business, build it through a forced
+SDLC (docs/11), ship it continuously via CI/CD, operate it under a reliability budget, navigate by
+DORA-style metrics to the moving bottleneck, and grow the system and itself together.* The four concepts
+that follow — factory, harness, loop, SDD — describe the **build engine inside that company**: how it
+turns an intent into shipped, verified software. They are the engine, not the whole vehicle. The company
+wraps the engine with the two things a build engine alone lacks: a **business upstream** (who is the
+customer, what is worth building, in what priority — Organ 1's telos filled with a market intent) and a
+**continuous operation** (deploy, monitor, error-budget, DORA — Organs 4/6/7 running a live product). Read
+§1–§4 as the engine; read §0 and §3 as the company the engine serves.
+
+## §1 The four concepts collapse into one act (the build engine)
+
+The build engine at the company's core lives at the convergence of four ideas, each invented against a
+specific pain:
 
 - **Software Factory** (Greenfield & Short 2003; the 2025-26 AI revival) — against artisanal,
   non-repeatable, non-reused bespoke software. Load-bearing idea: *industrialize via reusable,
@@ -43,12 +60,17 @@ it is **already correct**.
 
 ## §2 The ideal, in one sentence
 
-> **orgforge is a spec-driven factory for autonomous work: the spec is the organization, the product is a
-> verifying loop that runs unattended, the substrate is borrowed, and the yield is a compounding
-> context base — reusable parts, doctrine, and an inferable codebase — not a pile of outputs.**
+> **orgforge stands up an AI-native IT business company: the spec is the organization, and inside it a
+> spec-driven factory builds through a forced SDLC — a verifying loop that runs unattended on a borrowed
+> substrate, ships continuously via CI/CD, operates under a reliability budget, and navigates by DORA to
+> the moving bottleneck — so that the system and the organization grow together, yielding a compounding
+> context base (reusable parts, doctrine, an inferable codebase, a running product), not a pile of outputs.**
 
-The spec is the org; the loop is the product; the harness is borrowed; verification is the governor; the
-compounding context base is the yield.
+The spec is the org; the factory-loop is the build engine; the harness is borrowed; verification is the
+governor; the SDLC mold is the shape (docs/11); the reliability budget and DORA are the operate-phase
+governor and compass (docs/05); the compounding context base *and the running product it operates* are
+the yield. The one-sentence §2 that this doc opened with — "a spec-driven factory for autonomous work" —
+is still true, but it is the *engine*, now named inside the larger company frame of §0.
 
 ## §3 The amplifier constraint — the practitioner's correction, adopted as the top-level bound
 
@@ -60,7 +82,11 @@ consequences bind orgforge's ideal:
    bottleneck to review, test, and upstream design. An ideal orgforge optimizes the *whole* lifecycle's
    throughput, not the coding fraction (25-35% of it) — which is exactly why its human-judgment rung sits
    on requirements/architecture (upstream), and its verification ladder sits on review (the new
-   bottleneck), not on generation.
+   bottleneck), not on generation. And because the bottleneck *keeps* moving, DORA's four keys (deploy
+   frequency, lead time, change-fail rate, MTTR) are not merely a top-level bound on velocity — they are
+   the company's **navigation instrument**: the metric that shows *where* the constraint has moved to now,
+   so the org can reshape toward it (Organ 7). The mechanism lives with the operating events (docs/05
+   §DORA); this doc only fixes it as the compass the north star steers by.
 2. **The root cause of bad output is context absence, not prompt quality.** What is missing is structured,
    team-specific context (design policy, domain rules, consistency) the agent can always reference. "Bad
    design gets mass-produced 10×." An ideal orgforge therefore treats **building and compounding the
@@ -90,7 +116,7 @@ Stated plainly so the gap in §5 is not mistaken for a weak foundation:
   (the ledger makes `result_deployed` require a prior `survives`), on a **decorrelated model family**
   (the anti-monoculture lint) — the research's "adversarial verifier caught 96.4% of injected errors" and
   "same model for plan+verify is a monoculture," both already enforced.
-- **Single-agent by default; the compound-failure law stated.** docs/14/15/16 keep coupled work
+- **Single-agent by default; the compound-failure law stated.** docs/09/15/16 keep coupled work
   single-threaded and treat `p^n` as the reason to cut decision count — resisting the multi-agent hype the
   research shows is often *worse* (17× error amplification for independent agents).
 - **Explicit resumable state, blast-radius cap, catastrophic denylist, missed-tick dead-man's switch** —
@@ -102,9 +128,9 @@ The distance to the ideal is concrete and enumerable. It is not a foundation pro
 orgforge's strongest guarantees are *enforced* while its drift/runaway/context-compounding guarantees
 still live in docs, opt-in flags, and un-run demonstrations.
 
-### Layer 1 — Close the self-contradictions (orgforge violating its own docs/16 rule)
+### Layer 1 — Close the self-contradictions (orgforge violating its own docs/10 rule)
 
-The docs/16 rule is: *must-not-violate constraints live in the enforcement layer (deterministic, p=1.0),
+The docs/10 rule is: *must-not-violate constraints live in the enforcement layer (deterministic, p=1.0),
 not the request layer (probabilistic).* These five are where orgforge breaks its own rule:
 
 1. **Prevent concurrent-write drift, don't detect it post-hoc.** The seam/independence spawn gate is
@@ -119,7 +145,7 @@ not the request layer (probabilistic).* These five are where orgforge breaks its
 3. **Circuit-breaker on non-progress.** `progress_recorded {fraction, next_step}` is written but never
    read to detect a stalled fraction or an identical output twice (AgentMesh's break-on-identical-output).
    Add a breaker over the stream the ledger already has.
-4. **Implement the docs/15 §5 tooth.** The doc specifies "a mechanistic coordinator produces no domain
+4. **Implement the docs/03 §6.5 tooth.** The doc specifies "a mechanistic coordinator produces no domain
    deliverable" and admits it is *not yet implemented*. O8 catches implement+judge; it does not catch a
    coordinator that merely implements a domain deliverable. Ship the tooth.
 5. **Harness-capability probe.** The whole tool-layer guarantee silently degrades if the harness does not
@@ -211,7 +237,7 @@ a factory that compounds and one that merely repeats.
 
 orgforge is **genuinely the SDD + harness convergence** — the lint and the shared hook contract are too
 load-bearing for "organization theory wearing the others loosely" to stick. It is **still-becoming the
-loop + factory convergence**: loop-engineered by declaration but demonstrated only at n=1 (docs/10; S2-S6
+loop + factory convergence**: loop-engineered by declaration but demonstrated only at n=1 (demos/S1-founding-rehearsal; S2-S6
 — scale, on-time delivery, unit economics, unattended 24-hour operation — remain to be shown), and
 factory-shaped but not yet operated long enough to have met the comprehension-debt failure the factory
 concept exists to warn against. The theory has, honestly, outrun the operation. The danger to guard

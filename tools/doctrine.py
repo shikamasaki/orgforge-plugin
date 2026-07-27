@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""doctrine — the knowledge/guardrail store for orgforge-plugin (docs/07).
+"""doctrine — the knowledge/guardrail store for orgforge-plugin (docs/06).
 
 This is the running implementation of the doctrine organ: external information is
 watched, admitted through the gate, distilled into per-role **doctrine** (each role's
@@ -8,7 +8,7 @@ should therefore work), version-and-TTL'd, and INJECTED into a role's working di
 before its harness launches. Doctrine is the guardrail: a role never acts on last
 quarter's world, because its current doctrine is loaded every cycle.
 
-It ships no runtime and no scheduler (docs/09): the curator/gate are agents a host harness
+It ships no runtime and no scheduler (docs/08): the curator/gate are agents a host harness
 runs on a cadence; this tool is the file-backed store + the injection step + the admission
 gate they call. Doctrine is a directory of per-role JSON files under a doctrine root:
 
@@ -24,7 +24,7 @@ Commands:
   stale    <root> [--now DATE]                                 list claims past review_by (fires the curator)
   show     <root> <role>                                       print the role's doctrine (admitted + pending)
 
-Guardrail invariants this tool enforces (docs/07 §3/§4):
+Guardrail invariants this tool enforces (docs/06 §3/§4):
   - Nothing external becomes loaded doctrine without passing `admit` (untrusted-until-admitted).
   - Every claim carries provenance {source, retrieved_at, confidence, affected_roles} — no
     anonymous doctrine (anti-poisoning).
@@ -67,10 +67,10 @@ def _find(data, cid):
 
 def cmd_propose(a):
     """curator: file an intelligence item as a PENDING claim. Never admitted here —
-    the curator proposes; only the gate admits (docs/07 §1)."""
+    the curator proposes; only the gate admits (docs/06 §1)."""
     if not (a.source and a.confidence is not None):
         print("propose: --source and --confidence are required — no anonymous doctrine "
-              "(provenance is the anti-poisoning guard, docs/07 §3)", file=sys.stderr)
+              "(provenance is the anti-poisoning guard, docs/06 §3)", file=sys.stderr)
         return 2
     data = _load(a.root, a.role)
     cid = _claim_id(a.role, a.claim)
@@ -104,11 +104,11 @@ def cmd_admit(a):
         return 2
     if a.by != "gate":
         print("admit: --by must be 'gate' — only the authorization holder admits doctrine "
-              "(a maker may not admit its own doctrine, docs/07 §4)", file=sys.stderr)
+              "(a maker may not admit its own doctrine, docs/06 §4)", file=sys.stderr)
         return 2
     if c["provenance"]["retrieved_at"] == "UNSET" or c["review_by"] == "UNSET":
         print(f"admit: claim {a.claim_id} lacks retrieved_at or review_by — incomplete "
-              f"provenance cannot be admitted (docs/07 §3)", file=sys.stderr)
+              f"provenance cannot be admitted (docs/06 §3)", file=sys.stderr)
         return 2
     c["status"] = "admitted"
     c["admitted_at"] = a.at or "UNSET"
@@ -155,7 +155,7 @@ def cmd_render(a):
     if a.budget_tokens and approx_tokens > a.budget_tokens:
         print(f"render: doctrine for {a.role} is ~{approx_tokens} tokens > budget "
               f"{a.budget_tokens} — re-distill (fewer, sharper claims); not truncating "
-              f"silently (docs/07 §3)", file=sys.stderr)
+              f"silently (docs/06 §3)", file=sys.stderr)
         return 1
     out = a.out or os.path.join(a.root, f"{a.role}.DOCTRINE.md")
     with open(out, "w", encoding="utf-8") as f:
@@ -166,7 +166,7 @@ def cmd_render(a):
 
 def cmd_stale(a):
     """List admitted claims past their review_by — the doctrine_stale signal that fires
-    the curator to re-check the world (docs/07 §3, sensors.yaml)."""
+    the curator to re-check the world (docs/06 §3, sensors.yaml)."""
     if not a.now:
         print("stale: --now DATE required to compare against review_by", file=sys.stderr)
         return 2
@@ -201,7 +201,7 @@ def _live(c):
 
 def cmd_remap(a):
     """refound executor: re-route each role's LIVE doctrine onto the new role structure,
-    ASSETS INTACT (docs/06 §4.4). This is what performs `doctrine_remapped`; org_lint's
+    ASSETS INTACT (docs/05 §4.4). This is what performs `doctrine_remapped`; org_lint's
     `doctrine_remap_covers_every_live_claim` checks the plan, this applies it.
 
     The map is a JSON object {old_role: new_role | [new_role, ...]}:
@@ -239,7 +239,7 @@ def cmd_remap(a):
 
     if orphans and not a.allow_orphans:
         print(f"remap: {len(orphans)} live claim(s) would be orphaned (no target role) — "
-              f"refound BLOCKED so no brain is silently lost (docs/06 §4.4). Fix the map or "
+              f"refound BLOCKED so no brain is silently lost (docs/05 §4.4). Fix the map or "
               f"pass --allow-orphans to surface them to UNROUTED.* for a human:", file=sys.stderr)
         for old, c in orphans:
             print(f"    [{old}] {c['claim'][:80]}", file=sys.stderr)

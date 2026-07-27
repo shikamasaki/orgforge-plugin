@@ -54,6 +54,33 @@ def test_blast_radius_window_rolls_forward_daily(tmp_path):
     assert r.returncode == 0, f"rolling window did not reset — deadlock persists: {r.stdout + r.stderr}"
 
 
+# ── F5: the gate regime comes from the SPEC, so every install enforces the same (docs/11 §0) ──
+def test_cap_read_from_constitution_not_only_env(tmp_path):
+    # org root: <root>/constitution.yaml declares a tight destructive_ops cap; ledger at <root>/ledger.
+    # No ORG_CAP_* env is set — the gate must still fire from the spec-declared cap. This is what makes
+    # two installs of the same org enforce the same gates (reproducibility), instead of diverging on
+    # per-host env vars.
+    (tmp_path / "constitution.yaml").write_text(
+        "enforcement:\n  caps:\n    destructive_ops: 2\n  window: daily\n")
+    ledger = tmp_path / "ledger"
+    ledger.mkdir()
+    # three light destructive ops: 1st/2nd commit under cap 2, 3rd exceeds → HELD, with NO env cap set
+    assert fire(ledger, "rm /tmp/a")[0] == 0
+    assert fire(ledger, "rm /tmp/b")[0] == 0
+    code, out = fire(ledger, "rm /tmp/c")
+    assert code == 2 and "HELD" in out, f"spec-declared cap did not fire: {out}"
+
+
+def test_env_cap_overrides_constitution(tmp_path):
+    # a dev override (ORG_CAP_*) must still win over the spec, so a developer can loosen locally.
+    (tmp_path / "constitution.yaml").write_text(
+        "enforcement:\n  caps:\n    destructive_ops: 1\n")
+    ledger = tmp_path / "ledger"; ledger.mkdir()
+    # spec cap is 1 (would block on the 2nd), but env raises it to 50 → several pass
+    for c in "abcd":
+        assert fire(ledger, f"rm /tmp/{c}", env_extra={"ORG_CAP_DESTRUCTIVE_OPS": "50"})[0] == 0
+
+
 # ── the BLOCKER: the emit->append loop must accumulate ────────────────────────
 def test_blast_radius_accumulates_and_blocks(tmp_path):
     # use a LIGHT destructive op (plain `rm file` = weight 1) so we can watch it accumulate;
@@ -253,7 +280,7 @@ def test_spawn_declared_independent_allowed():
 
 
 def test_spawn_gate_is_default_on():
-    # the gate is now DEFAULT-ON (docs/17 §5 Layer-1 #1): a bare spawn with no seam/independence blocks
+    # the gate is now DEFAULT-ON (docs/12 §5 Layer-1 #1): a bare spawn with no seam/independence blocks
     # even without any env flag set.
     code, out = fire_spawn("You are a worker. Build the login page.")
     assert code == 2 and "seam contract" in out
