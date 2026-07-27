@@ -1,7 +1,7 @@
 ---
 description: Start the org's metabolism in THIS session by driving its cycles with /loop. Prints the exact /loop invocations to run (health tick, PM loop, discovery) so the org runs itself while the session is open. The drive is delegated to Claude Code's /loop; the org keeps only the monitoring (missed-tick detection) that /loop can't provide.
 argument-hint: "[role] [tick-min] [work-min] [discover-hours]"
-allowed-tools: Bash(echo *)
+allowed-tools: Bash(echo *), Monitor
 ---
 
 Bring the organization to its **running state** for this session. The drive — firing each cycle on a
@@ -27,6 +27,18 @@ Role: **${1:-supervisor}** · tick every **${2:-15}** min · work every **${3:-6
   growth. This is the **monitoring the org keeps** — it catches a cycle that was due but didn't fire.
 - **`/org-work`** — the PM loop: select from the backlog, delegate in parallel, record.
 - **`/org-discover`** — raise self-tasks from aspiration gaps.
+
+## Get notified the moment the org needs you (Monitor)
+
+So a RED never waits for the next tick, arm a persistent **Monitor** that pushes only when the org needs
+you (silent while healthy — `status.py redline` prints a line only on RED):
+
+```
+Monitor (persistent): while true; do python3 "${CLAUDE_PLUGIN_ROOT}/tools/status.py" redline "${ORG_LEDGER_ROOT}"; sleep 60; done
+```
+
+Each RED line becomes a push — a wedged cycle, a repeated death, a broken chain — so you learn it without
+opening `/org`. This closes "unattended ≠ unobservable" (the transport is delegated to the harness, R0).
 
 Each `/loop` is session-scoped: it runs while this Claude Code session is open and stops when it closes.
 Check on the org any time with **`/org`** (the status board). Stop a cycle by ending its `/loop`.

@@ -31,6 +31,24 @@ the code and closed where the code fell short.
   no inherited context) and requires a harness that fires the event for subagents — the docs/09 host
   contract, not a reimplementation.
 
+## 0.7.2
+
+Close "unattended ≠ unobservable" by delegating the escalation transport to the harness — the last
+R0 replacement the audit found (loop→/loop and this notification transport were the two big ones).
+
+### Added
+- **Escalation reaches the user.** orgforge detects escalations but shipped no notify transport (R0 —
+  the host delivers them); Claude Code *is* the host, so it now uses:
+  - `/org-tick` sends a **PushNotification** on a genuine escalation only (a MISS, a tripped stall, a
+    repeated death, an unproven rollback, a broken chain) — never on a healthy tick (fail-quiet).
+  - `status.py redline` prints one line ONLY when the org is RED (silent when healthy), purpose-built
+    for a persistent **Monitor** to push the moment a RED appears — so a RED never waits for the next
+    tick. `/org-start` and SCHEDULER.md document arming it.
+
+An R0 audit confirmed the rest is already delegated or correctly self-built: the drive is `/loop`; the
+ledger (hash-chained audit spine), the doctrine/conventions admit-gate, the single-writer backlog, and
+the judgment organs stay self-built — `memory`/`TaskList` lack the audit/gate/provenance those need.
+
 ## 0.7.1
 
 Simplify the drive: delegate it to Claude Code's `/loop`, keep only the monitoring.

@@ -107,11 +107,32 @@ def cmd_status(a):
     return OK
 
 
+def cmd_redline(a):
+    """One-line RED signal for a Monitor to consume (docs/17 §5 Layer-3, escalation transport). Prints a
+    single line ONLY when the org is RED (needs the human) — nothing when GREEN/AMBER. A `Monitor` polling
+    this turns each RED into a push the moment it appears, so "unattended" is not "unobservable": the
+    exception reaches the user without them opening /org. Silent (no output) when healthy — fail-quiet."""
+    import io
+    import contextlib
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        cmd_status(a)
+    out = buf.getvalue()
+    if out.startswith("RED"):
+        first = out.splitlines()[0]
+        needs = [ln.strip("- ").strip() for ln in out.splitlines() if ln.strip().startswith("-")]
+        print(f"RED — org needs you: {'; '.join(needs) if needs else first}", flush=True)
+    return OK
+
+
 def main(argv):
     p = argparse.ArgumentParser(prog="status", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
     q = sub.add_parser("status"); q.set_defaults(fn=cmd_status)
+    q.add_argument("root")
+    q.add_argument("--role", default="")
+    q = sub.add_parser("redline"); q.set_defaults(fn=cmd_redline)
     q.add_argument("root")
     q.add_argument("--role", default="")
     a = p.parse_args(argv[1:])

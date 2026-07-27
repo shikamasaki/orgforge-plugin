@@ -1,7 +1,7 @@
 ---
-description: Run one org metabolism tick — plan the schedule, detect missed checks, evaluate machine sensors, and report what is due or escalating. Read-only; surfaces, does not decide.
+description: Run one org metabolism tick — plan the schedule, detect missed checks, evaluate machine sensors, and report what is due or escalating. Read-only; surfaces, does not decide. Pushes a notification to the user only on a genuine escalation.
 argument-hint: "[now-minutes] [--night]"
-allowed-tools: Bash(python3 *)
+allowed-tools: Bash(python3 *), PushNotification
 ---
 
 Run one operating tick of the articulated organization against its ledger.
@@ -55,7 +55,19 @@ Based on the above:
 - If any check is **MISSED** past threshold, this is "it was supposed to run" — surface it as an escalation (the host cron may be down). Do not treat silence as success.
 - If any machine sensor **FIRED**, name the move it feeds and whether that move is night-safe.
 - If any candidate's stall breaker **TRIPPED**, surface it — a wedged cycle is a wasted WIP slot, not silence.
+- If a **REPEATED DEATH** or an **unproven rollback** was found, surface it — accumulated learning isn't landing / a reversibility claim is untested.
 - If the chain is **BROKEN**, this is a global-halt condition — stop and report immediately.
 - Otherwise report "org healthy, N checks due, nothing escalating" — fail-quiet is the normal state.
+
+## Reach the human on a real escalation (the missing transport, delegated to the harness)
+
+orgforge detects escalations but ships no notify transport (R0 — the host delivers them). Claude Code
+*is* the host, so use **PushNotification** to reach the user — this closes the "unattended ≠
+unobservable" gap. **Only on a genuine escalation** (a MISS past threshold, a tripped stall, a repeated
+death, an unproven rollback, a broken chain, or a fired night-unsafe move), send ONE concise push naming
+what needs them — e.g. `PushNotification: "org: cycle X wedged (same next_step ×3) — needs you"` or
+`"org: repeated death 'null not rejected' ×2 — learning isn't landing"`. Do **not** notify on a healthy
+tick — fail-quiet stays silent; a notification the user didn't need erodes trust. One escalation → one
+push; nothing escalating → no push.
 
 Do not take any asset-touching action from this command; it is a read-only health tick.

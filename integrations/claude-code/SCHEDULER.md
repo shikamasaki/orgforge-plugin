@@ -64,6 +64,22 @@ That's the whole drive. Check on the org with `/org`; stop a cycle by ending its
 the CronCreate registration the earlier design did by hand — the harness's `/loop` is the loop, so
 orgforge no longer builds one.
 
+### Getting notified the moment the org needs you (Monitor + PushNotification)
+
+"Unattended" must not mean "unobservable." orgforge detects escalations but ships no notify transport
+(R0 — the host delivers them); Claude Code *is* the host, so use its **Monitor** + **PushNotification**
+to reach you. Arm a Monitor that streams only the RED signal:
+
+```
+# tools/status.py redline prints ONE line only when the org is RED (needs you), nothing when healthy
+Monitor: while true; do python3 <plugin>/tools/status.py redline "$ORG_LEDGER_ROOT"; sleep 60; done   (persistent)
+```
+
+Each RED line becomes a notification the moment it appears — a wedged cycle, a repeated death, a broken
+chain — so you learn it without opening `/org`. `/org-tick` also sends a `PushNotification` on a genuine
+escalation when it runs. Healthy ticks stay silent (fail-quiet); a notification you didn't need erodes
+trust.
+
 ### OS cron — only for genuinely unattended (no session open)
 
 `/loop` ends when Claude Code closes. To run 24/7 with no session, install the cadence on the OS cron:

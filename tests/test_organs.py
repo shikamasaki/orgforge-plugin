@@ -631,3 +631,16 @@ def test_status_board_red_on_repeated_death(tmp_path):
          {"cause": "y", "occurrences": 2, "candidate_ids": ["A", "B"]}, ts="2026-07-16T01:00:00Z")
     code, out = run("status.py", "status", str(tmp_path))
     assert code == 0 and out.startswith("RED") and "needs you" in out
+
+
+def test_status_redline_silent_on_green(tmp_path):
+    seed(tmp_path, "e", "cycle_completed", {"candidate_id": "A", "role": "e"}, ts="2026-07-16T01:00:00Z")
+    code, out = run("status.py", "redline", str(tmp_path))
+    assert code == 0 and out.strip() == ""          # healthy → no line for the Monitor
+
+
+def test_status_redline_emits_on_red(tmp_path):
+    seed(tmp_path, "x", "repeated_death_detected",
+         {"cause": "null", "occurrences": 2, "candidate_ids": ["A", "B"]}, ts="2026-07-16T01:00:00Z")
+    code, out = run("status.py", "redline", str(tmp_path))
+    assert code == 0 and out.startswith("RED — org needs you")
