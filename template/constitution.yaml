@@ -27,6 +27,14 @@
 # NOTE: values below are a worked example. Replace them; the audit lint fails on any
 # leftover "SET_ME"-style placeholder in an instance.
 
+# ── Org output language — human-facing text the org produces (docs/07 context) ──
+# The language the org WRITES for humans in: Issue titles/bodies, work-log comments, specs, digests,
+# escalations, the status board. A BCP-47 tag ("ja", "en", "ja-JP"). The commands (/org-found,
+# /org-discover, /org-work, github_sync) read this and produce human-facing text in it, so the CEO
+# and the team read the org in their own language. Code, ledger event *classes*, and file paths stay
+# in their canonical form (English identifiers) — only the human-readable prose follows this setting.
+output_language: ja
+
 # ── Tier 1: DELEGATED — execute immediately, record in ledger ────────────────
 delegated:
   # The exploration front's entire organic space (docs/03 §4): decomposition, methods,

@@ -42,7 +42,7 @@ done
 # the data files the org commands read (source of truth: template/): schedule/sensors/constitution
 # for /org-tick and /org-mandate; moves + ledger-schema + the SKELETON for /org-found's lint + draft.
 for f in schedule.yaml sensors.yaml constitution.yaml moves.yaml ledger-schema.yaml \
-         organization.SKELETON.yaml; do
+         organization.SKELETON.yaml SPEC.md; do
   sync_one "$REPO/template/$f" "$HERE/template/$f" || rc=1
 done
 

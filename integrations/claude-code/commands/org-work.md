@@ -9,6 +9,13 @@ delegated, recorded work. Read-only health is `/org-tick`; this command acts.
 
 Ledger root: `${ORG_LEDGER_ROOT}` (must be set).
 
+**Output language:** read `output_language` from `constitution.yaml` (default `en`) and write **all
+human-facing text** — Issue titles/bodies, work-log comments, progress notes, escalations — in that
+language, so the CEO reads the org in their own language. Code, ledger event *classes*, and file paths
+stay canonical (English identifiers).
+
+!`echo "Org output language: $(python3 -c "import yaml,os; print((yaml.safe_load(open(os.environ.get('ORG_CONSTITUTION', os.path.join(os.path.dirname(os.environ['ORG_LEDGER_ROOT'].rstrip('/')),'constitution.yaml')))) or {}).get('output_language','en'))" 2>/dev/null || echo en)"`
+
 ## 1. Select what to work on next (situated attention over the backlog)
 
 The backlog is one queue holding both **mandate** (top-down) and **self** (self-raised) items;

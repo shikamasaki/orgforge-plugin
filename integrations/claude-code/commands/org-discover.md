@@ -10,6 +10,9 @@ raise those as **self** backlog items. It only ADDS to the backlog; `/org-work` 
 
 Ledger root: `${ORG_LEDGER_ROOT}` (must be set).
 
+
+> **出力言語:** `constitution.yaml` の `output_language`（既定 `en`）を読み、Issue・spec・人間向けテキストはその言語で書く（コード・ledger のイベント名・パスは英語の正準形のまま）。
+
 ## 1. Surface the gaps (where is this role under-performing its aspiration?)
 
 Attention names two machine signals: a backlog that cannot serve the org's top objective (a coverage

@@ -9,6 +9,9 @@ it does NOT build the product. It produces a reviewable `organization.yaml` (+ a
 and an architecture with the seam contracts between parts), then stops and reports up so you — the
 CEO — approve the scope before any build.
 
+
+> **出力言語:** `constitution.yaml` の `output_language`（既定 `en`）を読み、Issue・spec・人間向けテキストはその言語で書く（コード・ledger のイベント名・パスは英語の正準形のまま）。
+
 ## The brief
 
 $ARGUMENTS
