@@ -155,7 +155,7 @@ an implement-phase candidate is held to a lighter bar than a deploy-phase one:
 | Phase gate | Requires (presence, not correctness) |
 |---|---|
 | `implement → test` | a committed lockfile + populated manifest; a pinned toolchain |
-| `test → deploy` | a one-command setup + one-command test documented in a README; idempotent migrations; `.env.example` |
+| `test → integrate → deploy` | a one-command setup + one-command test documented in a README; idempotent migrations; `.env.example` |
 | `deploy` | a committed CI workflow (GitHub Actions) that runs setup + test from a clean clone, and is green |
 
 It checks *presence/shape*, not correctness ("is there a lockfile", not "does install work") — the

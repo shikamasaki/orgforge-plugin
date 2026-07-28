@@ -148,7 +148,7 @@ orgforge runs **two coupled lifecycles**, and it is worth naming them separately
 - **The org metabolism** (this Part II) — how the *organization itself* comes to be and reshapes over
   time: founding → projection → operation → guardrails → evolution.
 - **The product SDLC** (Part III below) — the *forced phase mold every deliverable travels through*:
-  requirements → design → implement → test → deploy → operate, ships via CI/CD, operating under a
+  requirements → design → implement → test → integrate → deploy → operate, ships via CI/CD, operating under a
   reliability budget.
 
 They are **coupled — the system and the org grow together**: a product moving through the SDLC (a

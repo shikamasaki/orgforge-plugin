@@ -158,7 +158,7 @@ What the system must let its actors accomplish. Each is testable.
   lessons outlive any single RFP and seed the next org from a company-level pool — the
   purpose's "durable asset" promise. (new; the company-layer gap)
 - **J11 — Build through the forced SDLC mold.** Every deliverable travels a
-  **non-skippable phase chain** — requirements → design → implement → test → deploy →
+  **non-skippable phase chain** — requirements → design → implement → test → integrate → deploy →
   operate — and a phase may not start until the prior phase's output carries an admission
   verdict. This is the `requires_prior` mechanism (Organ 6, docs/03/14) *generalized from
   admission-gating to phase-gating*; the mold is promoted by doctrine and enforced by

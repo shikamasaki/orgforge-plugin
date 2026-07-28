@@ -3,7 +3,7 @@
 *Part III · Operate — see [the four-part map](README.md).*
 
 > **In one sentence:** an IT business company builds by forcing every deliverable through a
-> non-skippable phase chain — requirements → design → implement → test → deploy → operate — and the
+> non-skippable phase chain — requirements → design → implement → test → integrate → deploy → operate — and the
 > chain is enforced by the *same* `requires_prior` mechanism the repo already uses to stop a maker
 > from grading its own work (docs/03) and a manager from reporting up unverified work (docs/09),
 > now generalized from *admission gating* to *phase gating*.
@@ -83,7 +83,7 @@ The gate is the generalization of docs/03's `output_to: gate → skeptic` and do
 | **operate** | monitoring, corrective fixes, the realized-outcome record | `outcome_recorded` (docs/05 OUTCOME-DELTA) feeds back to requirements — the loop closes |
 
 The important observation: **the repo already implements the two hardest gates.** The
-test→deploy boundary *is* the maker→gate→skeptic chain from docs/03 (`result_deployed` already
+test→integrate→deploy boundary *is* the maker→gate→skeptic chain from docs/03 (`result_deployed` already
 requires a prior `survives`). The design→implement conformance *is* docs/09's `conformance_reviewed`.
 This doc's job is only to (a) name the phases as a chain so the *earlier* boundaries
 (requirements→design, design→implement) get the same `requires_prior` treatment, and (b) give the
@@ -112,13 +112,19 @@ a new set of events.
 - **Doctrine (the request layer, p<1):** every cycle's context pack carries "we build through the
   phase chain; do not skip." This is where the *norm* lives — it makes the right thing the default and
   is cheap to update as practice evolves (docs/06).
-- **Lint/hook (the enforcement layer, p=1):** `org_lint` refuses an organization whose routing lets a
-  phase's output reach deploy without traversing its predecessors, and the PreToolUse hook refuses a
-  spawn that asserts a `phase_started` with no admitted predecessor in the ledger — the same place the
-  seam-gate and blast-radius cap already sit. A must-not-skip belongs in the deterministic layer, not
-  in a prompt that an amplifier can rationalize past.
+- **The ledger append (the enforcement layer, p=1):** the refusal is enforced at **`ledger.py append`**
+  — appending a `phase_started` whose predecessor is not admitted is **rejected** (`REQUIRES_PRIOR`,
+  the same code path that rejects `result_deployed` without a `survives`). This is the deterministic
+  point where the mold bites: a maker cannot *record* starting a phase out of order, so it cannot
+  legitimately do the work — the ledger is the single writer and it refuses. The gate only bites when
+  the flow **emits** the phase events, so `/org-work` emits `phase_started` at delegation (docs/org-work
+  §2b) and the gate agent emits `phase_admitted` as it clears each phase — without those emits the
+  predicate is dormant, which is why the wiring, not just the predicate, is the enforcement.
 
-This is the whole enforcement story: no forced delegation, no new organ, one predicate generalized.
+This is the whole enforcement story: no forced delegation, no new organ, one predicate generalized,
+enforced at the ledger append and fired by the work cycle's emits. (An `org_lint` static check that an
+org's routing can't reach deploy skipping a predecessor is a possible *additional* belt-and-braces
+tooth, but the load-bearing enforcement is the append-time `requires_prior`, not a lint.)
 
 ---
 
@@ -167,7 +173,7 @@ the budget mechanism itself is docs/05's.
 the maker did — installs the same dependencies, runs the same tests green, builds the same artifact,
 on any machine, on any day. The generated *code* may vary (LLM non-determinism, accepted); the
 **dev experience** must not. So the mold forces a **reproducibility admission standard** on the
-repositories it produces, checked at the implement → test → deploy gates exactly like any other
+repositories it produces, checked at the implement → test → integrate → deploy gates exactly like any other
 `requires_prior` — a deterministic tooth, not a maker's "I verified it" self-claim.
 
 A candidate deliverable is **not admissible** past the phase named unless its repository carries:
@@ -176,9 +182,9 @@ A candidate deliverable is **not admissible** past the phase named unless its re
 |---|---|---|
 | **A committed lockfile + a populated, version-pinned manifest** | implement → test | `clone → install` must resolve to *one* dependency tree on every machine and every day; a manifest with version ranges and no lockfile resolves differently over time (the タテカエ failure: manifest with no deps, no lock). |
 | **A pinned toolchain** (`.nvmrc` / `.tool-versions` / `engines`, per-language) | implement → test | the same source transpiles/builds/tests identically only on a pinned runtime; an unpinned node/deno/python floats the result. |
-| **A one-command setup and a one-command test, documented in a README** | test → deploy | "verified end-to-end" must be reproducible *by a stranger from a clean clone*, not asserted by the maker; the **gate re-runs both from a fresh checkout** rather than trusting the claim. |
-| **Idempotent, re-runnable migrations + a one-command DB bring-up** | test → deploy | a second developer must be able to bring up state deterministically; bare `create table` (no `if not exists`, no seed, no apply command) is not re-runnable. |
-| **A committed `.env.example` enumerating every required variable (names only)** | test → deploy | the *set* of required secrets must be discoverable, or a stranger's setup fails with no manifest of what to provide (secrets themselves stay gitignored). |
+| **A one-command setup and a one-command test, documented in a README** | test → integrate → deploy | "verified end-to-end" must be reproducible *by a stranger from a clean clone*, not asserted by the maker; the **gate re-runs both from a fresh checkout** rather than trusting the claim. |
+| **Idempotent, re-runnable migrations + a one-command DB bring-up** | test → integrate → deploy | a second developer must be able to bring up state deterministically; bare `create table` (no `if not exists`, no seed, no apply command) is not re-runnable. |
+| **A committed `.env.example` enumerating every required variable (names only)** | test → integrate → deploy | the *set* of required secrets must be discoverable, or a stranger's setup fails with no manifest of what to provide (secrets themselves stay gitignored). |
 | **A committed CI workflow (GitHub Actions) that runs setup + test from a clean clone, and is green** | deploy | this **is** the machine form of the deploy gate (§3): a green from-clean pipeline is reproducibility *proven continuously*, not a one-time local pass. The doctrine already names CI/CD (docs/01 J12); this makes it an admission artifact, not an aspiration. |
 
 The enforcement mirrors §2: **doctrine promotes** ("we ship repos anyone can clone-and-run" — in the

@@ -24,7 +24,7 @@ repositories the company builds clone-and-run the same for anyone.
   up is an IT business company, filling Organ 1 with a business telos and specializing Organs 2/4/6/7
   with the SDLC, CI/CD, reliability budget, and DORA. The AI-as-amplifier thesis is stated here.
 - **docs/11 — The forced SDLC mold** (new chapter): the non-skippable phase chain
-  (requirements→design→implement→test→deploy→operate), enforced by generalizing the `requires_prior`
+  (requirements→design→implement→test→integrate→deploy→operate), enforced by generalizing the `requires_prior`
   predicate from admission-gating to phase-gating. §0 states reproducibility as the deep purpose;
   §4a is the Level-2 reproducibility admission standard for the repos the org builds.
 

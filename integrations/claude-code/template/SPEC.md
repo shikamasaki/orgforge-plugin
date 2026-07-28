@@ -103,5 +103,5 @@ branch → PR → `develop`; close the Issue with the DoD command's green output
 link. "Done for review" = merged to `develop` and integration-green there — not a PR against `main`.>`
 
 ---
-_SDLC phases (docs/11): requirements → design → implement → test → deploy → operate. This spec is the
+_SDLC phases (docs/11): requirements → design → implement → test → integrate → deploy → operate. This spec is the
 `requirements` artifact; the gate admits it (`phase_admitted{phase: requirements}`) before design starts._

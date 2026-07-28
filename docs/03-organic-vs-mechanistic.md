@@ -200,7 +200,7 @@ upper layers; it must not leak down into the field.**
 > **The same `requires_prior` idiom generalizes into the SDLC phase mold.** The routing
 > `output_to: gate → skeptic` with `result_deployed` requiring a prior `survives` is the
 > *test→deploy* boundary of a larger phase chain (requirements → design → implement → test →
-> deploy → operate). docs/11 lifts this one predicate from admission-gating to phase-gating so the
+> integrate → deploy → operate). docs/11 lifts this one predicate from admission-gating to phase-gating so the
 > *earlier* boundaries are enforced by the identical mechanism — no new machinery, one predicate
 > pointed at more events.
 

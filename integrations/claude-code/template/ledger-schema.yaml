@@ -65,12 +65,12 @@ event_classes:
                           predicted_outcome, evidence: [ref] }
   refutation_attempted: { skeptic, claim_id, verdict: refuted|survives, checklist_ref }
   # ── SDLC phase mold (docs/11) — the forced, non-skippable phase chain, reproducibility's spine ──
-  # A deliverable travels requirements → design → implement → test → deploy → operate. Each phase is
+  # A deliverable travels requirements → design → implement → test → integrate → deploy → operate. Each phase is
   # ENTERED by phase_started and CLEARED by phase_admitted{verdict:pass}. The chain is enforced by the
   # SAME requires_prior idiom as result_deployed: phase_started{P} is INVALID unless a
   # phase_admitted{prior(P), pass} exists for the deliverable. prior(requirements)=∅. This is what makes
   # the PROCESS reproducible: same spec ⇒ the same phases run in the same order for every founder/run.
-  # The existing test→deploy gate (result_deployed requires survives) and design→implement conformance
+  # The existing test→integrate→deploy gate (result_deployed requires survives) and design→implement conformance
   # (conformance_reviewed) are the two hardest phase boundaries, already enforced below; these two
   # events extend the identical mechanism to the earlier boundaries.
   phase_started:        { deliverable, phase: requirements|design|implement|test|integrate|deploy|operate, role,

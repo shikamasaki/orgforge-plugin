@@ -1,7 +1,7 @@
 # Quickstart — install and run in a few minutes
 
 The happy path: **found an AI-native IT business company, watch it build and ship a backlog item
-through the forced SDLC (requirements → design → implement → test → deploy → operate), and put it
+through the forced SDLC (requirements → design → implement → test → integrate → deploy → operate), and put it
 into continuous operation** — all on a real Claude Code session, with the guardrails actually
 enforcing at the tool boundary. It does not require publishing the repo — a private GitHub repo or a
 local path both work (see [Distribution](#distribution) at the end).

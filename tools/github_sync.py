@@ -407,13 +407,22 @@ def cmd_split_check(a):
                     if c == 0 and json.loads(o).get("state") == "OPEN":
                         warnings.append(f"depends_on #{num} is still OPEN — a fresh maker can't take this "
                                         f"green until it lands (single-unit assertion fails, docs/11 §4b).")
+    # (c) MUST written in EARS? A body with a MUST/acceptance section but no EARS keyword is prose
+    # ("auth works") the gate can't test (docs/11 §4b). Shape check: does an acceptance line use one
+    # of WHEN/WHILE/IF/WHERE/SHALL? Only checked if the Issue actually has a MUST/acceptance section.
+    low_body = body.lower()
+    if ("must" in low_body or "acceptance" in low_body) and "shall" not in low_body \
+            and not any(kw in body for kw in ("WHEN ", "WHILE ", "IF ", "WHERE ")):
+        warnings.append("the MUST/acceptance criteria are not in EARS (no WHEN/WHILE/IF/WHERE/SHALL) — "
+                        "prose like \"auth works\" isn't testable; rewrite each as an EARS pattern "
+                        "(docs/11 §4b), so the gate has a checkable bar.")
     if warnings:
-        print(f"RE-SPLIT CANDIDATE — issue #{a.issue} may be too coarse for a no-context maker:")
+        print(f"RE-SPLIT / RESHAPE CANDIDATE — issue #{a.issue} may not be ready for a no-context maker:")
         for w in warnings:
             print(f"  · {w}")
-        print("(shape warning only — whether the split is GOOD stays with the skeptic, docs/12 §6.)")
+        print("(shape warning only — whether the split/spec is GOOD stays with the skeptic, docs/12 §6.)")
         return 10
-    print(f"issue #{a.issue}: shape OK (one territory, deps landed).")
+    print(f"issue #{a.issue}: shape OK (one territory, deps landed, acceptance in EARS).")
     return 0
 
 

@@ -228,7 +228,7 @@ organization is born, grows, contracts, and ends. It is not the lifecycle of the
 org-metabolism loop (§2.6 — sensors, moves, the approval queue) *around* a product-delivery
 loop that turns each admitted backlog item into shipped, operated software. Every Operation
 cycle that produces a deliverable runs it through the **forced, non-skippable SDLC mold**
-(docs/11): requirements → design → implement → test → deploy → operate, in that order, with
+(docs/11): requirements → design → implement → test → integrate → deploy → operate, in that order, with
 no phase skipped and each phase gated on its predecessor's evidence. The metabolism decides
 *what* to build and *when* to reshape; the mold decides *how the building travels* — and it
 is not optional, because an IT business company that lets the shape of delivery drift is an

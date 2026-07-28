@@ -5,6 +5,7 @@
 linking) without touching GitHub. The one thing we assert is that the org builds the right gh calls and
 makes the right decisions from their results — the reproducible, testable part."""
 import importlib.util
+import json
 import pathlib
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
@@ -174,6 +175,30 @@ def test_split_check_clean_on_single_territory(monkeypatch):
     with contextlib.redirect_stdout(buf):
         rc = GS.cmd_split_check(_ns(repo="o/r", issue=9))
     assert rc == 0 and "shape OK" in buf.getvalue(), buf.getvalue()
+
+
+def test_split_check_flags_prose_must_not_in_ears(monkeypatch):
+    # a MUST section written as prose ("auth works") with no EARS keyword must be flagged
+    body = json.dumps({"body": "## MUST\n- [ ] auth works\n- **owns:** `app/auth/`\n", "title": "t"})
+    fake = FakeGh(replies={"issue view": (0, body)})
+    monkeypatch.setattr(GS, "gh", fake)
+    import io, contextlib
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = GS.cmd_split_check(_ns(repo="o/r", issue=9))
+    assert rc == 10 and "EARS" in buf.getvalue(), buf.getvalue()
+
+
+def test_split_check_clean_when_must_is_ears(monkeypatch):
+    body = json.dumps({"body": "## MUST\n- [ ] WHEN login THE system SHALL validate\n"
+                               "- **owns:** `app/auth/`\n", "title": "t"})
+    fake = FakeGh(replies={"issue view": (0, body)})
+    monkeypatch.setattr(GS, "gh", fake)
+    import io, contextlib
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = GS.cmd_split_check(_ns(repo="o/r", issue=9))
+    assert rc == 0, buf.getvalue()
 
 
 def test_ready_lists_tasks_and_excludes_objectives(monkeypatch):

@@ -65,15 +65,26 @@ under replay:
 
 !`echo 'For each self-item, append: python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/ledger.py" append "'"${ORG_LEDGER_ROOT}"'" --actor "'"$1"'" --class candidate_submitted --natural-key "<derived-cand-id>" --payload {"maker":"'"$1"'","candidate_id":"<derived-cand-id>","contract_ref":"<objective>","source":"self","evidence":[<gap-refs>]}'`
 
-### 2c. Project each candidate onto GitHub as a task sub-issue (only if `ORG_GITHUB_REPO` is set)
+### 2c. Project each candidate onto GitHub as a task sub-issue — WITH THE FULL SPEC in the body
 
 If the org is steered through GitHub Issues, mirror each `candidate_submitted` onto a **task Issue**,
 linked as a **native sub-issue of its objective's Issue** (created by `/org-found`), so the department's
-work shows up under the right objective with progress roll-up. The task's title carries the gap; the
-`--parent` is the objective Issue number; `--dept` is this role. Idempotent — a re-discovered gap has
-the same title+objective, so `create` no-ops instead of minting a duplicate (docs/11 §0):
+work shows up under the right objective with progress roll-up.
 
-!`echo 'For each candidate, project it: python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/github_sync.py" create --repo "$ORG_GITHUB_REPO" --kind task --parent <objective-issue-#> --dept "'"$1"'" --objective <objective-id> --title "<one-line gap>" --body "candidate_id: <derived-cand-id>". Skip silently if ORG_GITHUB_REPO is unset. The task Issue is a disposable work window projecting the candidate; the ledger records it (audit), and the SSoT is code + the domain model — not the Issue or the ledger.'`
+**The Issue body MUST be the filled `template/SPEC.md` structure — not just `candidate_id`.** A task
+Issue whose body is a bare id is an empty shell: a no-context maker who picks it up gets nothing to
+build from (docs/11 §4b — the spec lives in the Issue). So fill the SPEC skeleton for THIS atomic task:
+Deliverable + single-unit assertion, Working context (repo / `feat/issue-<N>-<slug>` branch / setup+run
+command / entry files), Intent, **MUST in EARS** (WHEN/WHILE/IF/WHERE…SHALL — not "it works"), Entities,
+Seam contract (provides/output-format · example input→output · `depends_on` with #Issue+state · `owns`
+disjoint from siblings · boundary · tools), Verification (DoD command + repro_lint), Decisions, Out of
+scope (+ prior deaths), Hand-back (PR → `develop`). Put `candidate_id: <id>` as a trailer for traceability.
+
+Keep it **one atomic unit** (docs/11 §4b): if the gap spans multiple `owns` territories, split it into
+several task Issues. `create` is idempotent (same title+objective → no-op). After creating, sanity-check
+the split with `github_sync split-check --issue <N>` (warns if too coarse / a dep is still open):
+
+!`echo 'For each atomic candidate, project it with the FULL spec: python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/github_sync.py" create --repo "$ORG_GITHUB_REPO" --kind task --parent <objective-issue-#> --dept "'"$1"'" --objective <objective-id> --title "<one-line gap>" --body "<the FILLED template/SPEC.md skeleton for this task — MUST in EARS, Working context, seam, DoD, Hand-back; candidate_id:<id> as a trailer>". THEN python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/github_sync.py" split-check --repo "$ORG_GITHUB_REPO" --issue <N>. Skip silently if ORG_GITHUB_REPO is unset. The Issue is the disposable work surface; the SSoT is code + the domain model.'`
 
 ## Discipline
 

@@ -149,7 +149,7 @@ Concretely, being an IT business company is the **content** of five organs:
   comes from).
 
 - **The structure (Organ 2) owns SDLC phases, not just deliverables.** A software company's division
-  of labor runs the work through a **lifecycle**: requirements → design → implement → test → deploy →
+  of labor runs the work through a **lifecycle**: requirements → design → implement → test → integrate → deploy →
   operate. Roles own *phases* as well as slices, and the coordination mechanism re-integrates a
   *pipeline*, not just parallel outputs. **The SDLC is a mold the work is forced through** — the phase
   order is a shape, not a suggestion (docs/11).

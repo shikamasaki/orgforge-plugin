@@ -13,7 +13,7 @@ Four properties are the headline, and each has a chapter behind it:
 - **A business, not just an org.** It decides *what to build as a business* — customer / RFP /
   priority — not merely "does tasks." (THEORY §1b, [docs/01](docs/01-requirements.md) R0b.)
 - **A forced SDLC mold.** Every deliverable travels a non-skippable phase chain —
-  requirements → design → implement → test → deploy → operate — enforced by a ledger phase-gate, not
+  requirements → design → implement → test → integrate → deploy → operate — enforced by a ledger phase-gate, not
   a prompt. ([docs/11](docs/11-sdlc-mold.md).)
 - **Ships and operates continuously.** Deploy is a phase; CI/CD (GitHub Actions) is its spine; the
   running company navigates by a reliability/error budget and DORA metrics to the moving bottleneck.

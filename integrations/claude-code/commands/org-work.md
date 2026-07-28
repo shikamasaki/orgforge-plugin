@@ -78,6 +78,24 @@ Read the `selected[]` above. Then apply the **decomposition doctrine (docs/03)**
   from `github_sync branch --repo "$ORG_GITHUB_REPO" --issue <N>` (or `--create` to cut it). A task's
   work lands on its branch; it does NOT commit to `develop`/`main` directly.
 
+### 2b. Fire the SDLC phase gate — this is what makes the mold actually bite
+
+The phase gate (docs/11 §2) is only real if the flow **emits the phase events** — the ledger's
+`requires_prior` predicate is dormant until a `phase_started` is appended. So at delegation, for each
+task, emit two events (they are the wiring that turns the forced mold from prose into an enforced gate):
+
+- **`spec_delegated`** — you (the manager) push the intent DOWN as an explicit spec: `spec_ref` is the
+  **task Issue #/URL** (the spec lives in the Issue body, docs/11 §4b). This is the predecessor the
+  subordinate's later `conformance_reviewed` → `report_up` requires (docs/09) — without it that chain
+  hard-blocks.
+- **`phase_started{deliverable, phase: implement}`** — the ledger **rejects** this unless a prior
+  `phase_admitted{phase: design, verdict: pass}` exists for the deliverable (and design likewise needs
+  requirements admitted). So a maker cannot start implementing before design is admitted — the mold
+  bites here, at the emit, not just in the doc. (For a walking-skeleton where requirements/design were
+  admitted at founding, emit those `phase_admitted`s first; the point is the *chain is in the ledger*.)
+
+!`echo 'At delegation, per task, fire the gate: python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/ledger.py" append "'"${ORG_LEDGER_ROOT}"'" --actor "'"$1"'" --class spec_delegated --payload {supervisor,subordinate,spec_ref:<issue#>,contract_ref,intent_basis_ref}. THEN --class phase_started --payload {deliverable:<issue#>,phase:implement,role}. The ledger REJECTS phase_started if design is not admitted — that rejection IS the gate. The gate agent appends phase_admitted as it clears each phase.'`
+
 ## 3. Record work as you go — so nothing is lost to a context wipe
 
 The backlog is the org's memory. Work that lives only in this session's context is **gone** on `/clear`
