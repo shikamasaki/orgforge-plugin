@@ -46,8 +46,16 @@ event_classes:
   # reused: the reusable_modules/parts this cycle PULLED FROM instead of re-authoring (docs/12 §5 #7).
   # Recorded so reuse is a visible, auditable fact ("I can see reuse happened, and how much it saved"),
   # not an invisible discipline — the factory compounds only if reuse actually fires.
+  # domain_model: the SSoT底上げ enforcement (docs/11 §4d). A cycle that produced code but touched no
+  # domain model silently lets the context base rot (the co-commit discipline, docs/12 §3.3). So a
+  # cycle_completed MUST state it, like exceptions_none_asserted: either it references the
+  # convention_adopted / domain-model artifact this cycle co-committed, OR it explicitly asserts none was
+  # established this cycle (a claim the skeptic can refute — "you changed the money-split rule and didn't
+  # record it"). requires_prior rejects a cycle_completed missing this field, so "forgot to update the
+  # domain model" cannot happen silently. It is what makes SDD run ON a growing context base, not in a vacuum.
   cycle_completed:      { role, candidate_id, tokens: {task, gate, reporting}, outputs: [ref],
-                          reused: [ref], views_referenced: [view_id], accountable_supervisor }
+                          reused: [ref], views_referenced: [view_id], accountable_supervisor,
+                          domain_model: {updated: [ref], none_asserted: reason} }   # exactly one of updated / none_asserted
   heartbeat:            { component, invariants_hold: bool }
   halt_tripped:         { trigger, scope: global|role }
   # work (Organs 2/6)

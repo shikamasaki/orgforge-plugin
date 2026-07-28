@@ -32,6 +32,10 @@ def run(tool, *args, cwd=None):
 
 
 def seed(root, actor, cls, payload, ts="2026-07-16T00:00:00Z"):
+    # cycle_completed requires a domain_model field (docs/11 §4d); default to none_asserted for tests
+    # that don't care about the domain-model gate, so they don't all have to spell it out.
+    if cls == "cycle_completed" and "domain_model" not in payload:
+        payload = {**payload, "domain_model": {"none_asserted": "test seed"}}
     code, out = run("ledger.py", "append", str(root), "--actor", actor,
                     "--class", cls, "--payload", json.dumps(payload), "--ts", ts)
     assert code == 0, f"seed failed: {out}"

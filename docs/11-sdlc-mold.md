@@ -201,6 +201,33 @@ command → the same running, tested system" holds for everyone.
 
 ---
 
+## 4d. The domain model must grow every cycle — SDD runs ON a rising context base
+
+The point of SDD in orgforge is not to write specs in a vacuum — it is to implement **on top of a
+domain model that is already rich**, so the LLM's context is *raised* before it writes a line, and then
+to **raise it further** with what this cycle settled (the user's AI-DLC thesis: context accumulates as a
+by-product of work, co-committed with the code, docs/12 §3.3). A cycle that produces code but leaves the
+domain model untouched silently lets the context base rot — the same fragment-decay the whole system
+exists to prevent, one level down.
+
+So the domain-model update is **forced, not encouraged**. Every `cycle_completed` must carry a
+`domain_model` field, and the ledger **rejects the append without it** (the same `requires_prior`
+machinery as the phase gate). It is the explicit-negative pattern: either
+
+- `domain_model: {updated: [<convention_ref / domain-model artifact>]}` — this cycle co-committed a
+  settled rule / boundary / ubiquitous-language term (via `conventions adopt`, checker-adopted, or an
+  ADR/domain-model file in the product repo, co-committed with the code it governs), **or**
+- `domain_model: {none_asserted: "<why>"}` — this cycle established no new domain rule (a bugfix, a
+  refactor) — an *explicit claim the skeptic can refute* ("you changed the money-split rounding and
+  didn't record it").
+
+"Forgot to update the domain model" therefore cannot happen silently: the cycle cannot be recorded
+complete without stating what it did to the SSoT's domain-model half (conventions + org spec, docs/12).
+That is what makes the context base *compound* — each SDD cycle both consumes the risen model and
+raises it for the next, instead of every cycle re-deriving the same ambiguity.
+
+---
+
 ## 4b. The spec / plan / tasks layering — SDD, mapped onto the Issue hierarchy
 
 The canonical Spec-Driven Development form (GitHub Spec Kit, AWS Kiro; docs/sources) splits the front of

@@ -107,21 +107,23 @@ points, keyed by `candidate_id`:
 2. **At each milestone** (and before you might stop — end of a phase, hitting a blocker, low on budget)
    — append `progress_recorded {role, candidate_id, fraction, phase, done_so_far, next_step, blocked_by,
    artifacts}`. `next_step` is the load-bearing field: it is what a fresh session resumes from.
-3. **On finishing** — append `cycle_completed {role, candidate_id, outputs, reused, ...}` so the item
-   drains from the backlog, and record in `reused` which existing modules/parts this cycle pulled from
-   (empty if it authored everything) — so reuse is a visible, auditable fact, not an invisible discipline.
-4. **Grow the SSoT/domain model IN THE SAME cycle** — if this work established or changed a domain rule,
-   a boundary, or a naming/convention (ubiquitous language), record it NOW as a convention, not as a
-   deferred separate task (a separate task gets postponed and the context base rots — the co-commit
-   discipline). This is how the org's inferability rises over time and how the same clarity is amplified
-   next cycle instead of the same ambiguity. *A settled decision made during the cycle must be persisted
-   as an inferable artifact **co-committed with the code**: an ADR/comment/domain-model file in the product
-   repo if it constrains code, or a `conventions adopt` if it is cross-cutting precedent. The ledger
-   receives only the RECEIPT (`convention_adopted`), never the decision as its sole home — a decision that
-   lives only as a ledger event is hoarded where no future code-reader sees it (docs/12 §3.3, §6).* A
-   convention is proposed here and adopted by a checker (never self-adopted):
+3. **On finishing** — append `cycle_completed {role, candidate_id, outputs, reused, domain_model, ...}`.
+   The **`domain_model` field is REQUIRED** — the ledger rejects a `cycle_completed` without it (docs/11
+   §4d). It is the forced domain-model update: either `{updated: [<convention/artifact ref>]}` if this
+   cycle settled a domain rule, or `{none_asserted: "<why>"}` if it established none (a claim the skeptic
+   can refute). This is how SDD runs on a *rising* context base — you cannot record a cycle done without
+   stating what it did to the domain model. Also record `reused` (which parts you pulled from).
+4. **Grow the domain model IN THE SAME cycle (this is what the `domain_model` field forces)** — if this
+   work established or changed a domain rule, a boundary, or a naming/convention (ubiquitous language),
+   record it NOW: a settled decision must be persisted as an inferable artifact **co-committed with the
+   code** — an ADR/comment/domain-model file in the product repo if it constrains code, or a `conventions
+   adopt` if it is cross-cutting precedent — and referenced in `domain_model.updated`. The ledger receives
+   only the RECEIPT (`convention_adopted`), never the decision as its sole home (a decision that lives only
+   as a ledger event is hoarded where no future code-reader sees it, docs/12 §3.3, §6). A convention is
+   proposed here and adopted by a checker (never self-adopted). If nothing was settled, say so in
+   `domain_model.none_asserted` — but do not *silently* skip it; the ledger won't let you.
 
-!`echo 'Record the cycle (never fabricate completion): python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/ledger.py" append "'"${ORG_LEDGER_ROOT}"'" --actor "'"$1"'" --class cycle_started|progress_recorded|cycle_completed --payload {role,candidate_id,...}. AND, in the same cycle, if a domain rule/boundary/naming was settled: python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/conventions.py" adopt "'"${ORG_CONVENTIONS_ROOT:-$ORG_LEDGER_ROOT}"'" --scope <area> --choice "<the settled rule>" --owner "'"$1"'" --by checker. Checkpoint BEFORE you risk stopping.'`
+!`echo 'Record the cycle (never fabricate completion): python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/ledger.py" append "'"${ORG_LEDGER_ROOT}"'" --actor "'"$1"'" --class cycle_completed --payload {role,candidate_id,outputs,reused,domain_model:{updated:[<ref>]|none_asserted:<why>}}. domain_model is REQUIRED (docs/11 §4d) — the append is rejected without it. If a domain rule was settled, FIRST: python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/conventions.py" adopt "'"${ORG_CONVENTIONS_ROOT:-$ORG_LEDGER_ROOT}"'" --scope <area> --choice "<the settled rule>" --owner "'"$1"'" --by checker, then reference its cid in domain_model.updated. Checkpoint BEFORE you risk stopping.'`
 
 ### 3b. The GitHub Issue is the MAIN work-log — so work isn't session- or terminal-bound
 

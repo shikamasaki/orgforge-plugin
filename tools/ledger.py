@@ -113,6 +113,16 @@ REQUIRES_PRIOR = {
         and e["payload"].get("subordinate") == ev["payload"].get("subordinate")
         for e in hist
     ),
+    # SSoT底上げ enforcement (docs/11 §4d): a cycle_completed is INVALID unless it STATES what it did to
+    # the domain model — either `updated` (it co-committed a convention / domain-model artifact) or
+    # `none_asserted` (it explicitly claims this cycle established no new domain rule — a claim the
+    # skeptic can refute). This is a payload-shape requirement, not a history lookup: it makes "forgot to
+    # update the domain model" impossible to do SILENTLY, so SDD runs on a growing context base, not in a
+    # vacuum. Same explicit-negative pattern as exceptions_none_asserted.
+    "cycle_completed": lambda ev, hist: (
+        isinstance(ev["payload"].get("domain_model"), dict)
+        and ("updated" in ev["payload"]["domain_model"] or "none_asserted" in ev["payload"]["domain_model"])
+    ),
 }
 
 # an honest per-class reason for a requires_prior rejection (the reject message uses this instead
@@ -130,6 +140,10 @@ REQUIRES_PRIOR_WHY = {
     "conformance_reviewed": "a spec_delegated for this (supervisor, subordinate) — a manager cannot "
                             "verify against 'the intent it delegated' if it never delegated a spec "
                             "(docs/09 §spec-driven)",
+    "cycle_completed": "a `domain_model` field — {updated: [ref]} if this cycle co-committed a "
+                       "convention/domain-model artifact, or {none_asserted: <reason>} if it "
+                       "established no new domain rule. A cycle cannot silently skip updating the "
+                       "domain model (SSoT底上げ, docs/11 §4d) — state it or the append is rejected.",
 }
 
 # ── view -> the event classes it derives from (ledger-schema §views). "*" = all classes. ──
