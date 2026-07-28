@@ -408,7 +408,7 @@ mechanism: who receives what, in what amount, at what moment.
 **Agent realization.** Two coupled mechanisms: **context delivery** (the right prior knowledge —
 nearby failures, live findings, verification state — pushed into an agent's context at the moment it
 acts; this is onboarding, done every cycle) and a **shared institutional record** (an append-only
-ledger that is the single source of truth, so learning from one agent/cycle reaches the next).
+ledger that is the **audit/enforcement record** — the SSoT is code + the domain model (conventions + the org spec) — so learning from one agent/cycle reaches the next).
 
 **Failure mode.** Two failures, both predicted by the classics and now measured by MASFT. Silo the
 departments (they don't share) and Conway's law guarantees a **siloed product**: discoveries never get
@@ -417,7 +417,8 @@ reach contradictory conclusions, and drift — the ~40% inter-agent-misalignment
 concrete. The design rule follows directly: **whenever you increase an agent's autonomy, increase
 information sharing in the same proportion** — the two are one lever, not two.
 
-**Primitives.** A context-pack mechanism run before every delegation; an append-only ledger as SSoT;
+**Primitives.** A context-pack mechanism run before every delegation; an append-only ledger as the
+**audit/enforcement record** (the SSoT is code + the domain model — conventions + the org spec);
 derived views regenerated from the ledger, never hand-edited.
 
 ---

@@ -95,7 +95,8 @@ consequences bind orgforge's ideal:
 3. **Context must accumulate as a by-product of normal work, enforced by mechanism, not by a separate
    task** (else it is deferred and rots). The rule-consistency check belongs in the loop's own gate (the
    PreToolUse hook / lint), not in human attention. And the durable source of truth is the **inferable
-   artifact** (for the practitioner, code; for orgforge, the org spec + the ledger), *not* a pile of
+   artifact** (for the practitioner, code; for orgforge, code + the domain model — conventions + the org
+   spec — with the ledger as the audit record and task-Specs as disposable prompts), *not* a pile of
    task-scoped Specs — a hundred fragment-Specs never become a system-wide coherent context, and their
    maintenance cost is unsustainable. orgforge already sits on the right side of this: its SDD spec is the
    *producer* (the organization), a small coherent set of files, not per-task Specs — so it escapes the
@@ -210,6 +211,12 @@ that runs for months without its context base growing amplifies a *fixed* ambigu
 domain model sharpens each cycle amplifies an *improving* clarity. A living SSoT is the difference between
 a factory that compounds and one that merely repeats.
 
+**SSoT = code + the domain model (conventions + the org spec).** The ledger is the audit/enforcement/resume
+record — the process journal — *not* the SSoT. A settled decision co-commits to code or conventions
+(inferable, survives the session); the ledger holds the tamper-evident receipt that it was made. A decision
+that lives *only* as a ledger event is crammed into a record no future code-reader sees — the failure this
+correction fixes.
+
 ## §6 What NOT to build (every lens agreed)
 
 - **Do not default to parallel multi-agent code-writing.** 17× error amplification independent vs 4.4×
@@ -231,7 +238,8 @@ a factory that compounds and one that merely repeats.
   keep human judgment upstream (telos, admission standard), not bolted on at the end.
 - **Do not make the SDD Spec the SSoT.** Per-task Specs are fragments; they never form a system-wide
   coherent context and their maintenance cost is unsustainable. The durable source is the *inferable*
-  artifact — the org spec + the ledger — with task-Specs used as disposable prompts.
+  artifact — code + the domain model (conventions + org spec) — with the ledger as the audit record and
+  task-Specs used as disposable prompts.
 
 ## §7 The honest status
 

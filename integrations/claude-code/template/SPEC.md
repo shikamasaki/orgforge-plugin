@@ -7,8 +7,9 @@
 > Reproducibility (docs/11 §0) starts here — two makers handed the *same* filled-in spec converge on
 > the same contract, even if the code differs.
 >
-> **This is NOT a separate SSoT file.** The SSoT is the **ledger + the org spec** (organization.yaml /
-> constitution.yaml) — never a pile of per-task Spec files (the fragment-Spec trap: task-scoped specs
+> **This is NOT a separate SSoT file.** The SSoT is **code + the domain model** (conventions + the org
+> spec — organization.yaml / constitution.yaml). The ledger is the audit record, not the SSoT — never a
+> pile of per-task Spec files (the fragment-Spec trap: task-scoped specs
 > lying around never form a coherent context and rot; the user's AI-DLC lesson, docs/12 §3.3). So the
 > task spec lives **in the Issue**, and the ledger only *points* at it: `spec_delegated`'s `spec_ref`
 > is the **Issue number/URL**, not a `docs/spec/*.md` path. The Issue is the task's working detail
@@ -24,7 +25,16 @@
 > filled-in prose follows the setting, so the CEO reads the spec in their language.
 
 ## Deliverable
-`<one line: what is being built>` — owner role: `<role id>` · contract_ref: `<objective/contract id>`
+`<one line: what is being built>` — owner role: `<role id>` · contract_ref: `<objective/contract id>` · est: `<S/M/L>`
+
+## Working context (where a fresh maker starts)
+> The #1 thing a third party — a different agent, a fresh session with none of the originating context —
+> needs to *begin*. `owns:` (below) names the territory; this names the door, the key, and the ignition.
+> Without it a stranger stalls before writing a line.
+- **repo / branch:** `<clone URL · base branch · the branch to open for this work>`
+- **setup + run:** `<the exact one-command setup and the run/test command, AND the dir to run them in —
+  e.g. `cd app && npm ci` then `npm test`. Not "install deps" — the literal command a stranger pastes.>`
+- **entry files:** `<the 1–3 files to open first (the seam of `owns`), not the whole tree>`
 
 ## Intent (why — the purpose this serves)
 `<the goal this deliverable advances, grounded in the org's telos — not a metric. Trace it to the RFP.>`
@@ -44,7 +54,11 @@
 > guidance**, and a **crisp boundary**. Intent+MUST give the objective; fill the rest here.
 - **provides (output format):** `<the interface/data the downstream consumes, in a NAMED shape — a
   function signature, a JSON schema, a table — so an integrator wires to it without guessing>`
-- **depends_on:** `<upstream deliverables/specs this needs first>`
+- **example (input → output):** `<one concrete case, e.g. `split(¥100, EQUAL, 3) → [34,33,33]` — for
+  anything with logic (math, a state machine), one example is worth ten MUST bullets and is a free
+  self-test a stranger uses to confirm they read the intent right>`
+- **depends_on:** `<#Issue · required state (admitted/merged) · the exact seam I consume from it — a
+  link the maker clicks and a state they check, not prose. "領域A" alone doesn't tell them if it's ready.>`
 - **owns:** `<the files/territory this deliverable writes — for concurrent-write safety>`
 - **boundary (NOT mine):** `<the adjacent work this deliverable must NOT touch — the sibling that owns
   it. Explicit boundaries are what stop two parallel makers from building the same thing differently.>`
@@ -52,6 +66,9 @@
   out", so siblings don't each re-derive the same search or pick divergent libraries>`
 
 ## Verification (how the gate/skeptic confirm the MUSTs — nulls/placebos/forward tests)
+- **DoD command (run this to know you're done):** `<the exact command whose green output = these MUSTs
+  pass — the SAME command the gate uses — e.g. `cd app && npm test`. "19 tests pass" is not runnable; a
+  command is.>`
 - `<the concrete test/evidence that proves each MUST — e.g. "an 11th join is rejected at the cap">`
 - Reproducibility (docs/11 §4a): the deliverable's repo must clone-and-run the same (lockfile,
   pinned toolchain, one-command setup+test, idempotent migrations, `.env.example`, green CI) — the
@@ -64,6 +81,13 @@
 
 ## Out of scope (explicitly deferred, so "done" is unambiguous)
 - `<what this deliverable does NOT do>`
+- `<and what already FAILED here — the dead ends a fresh maker must not re-derive (from the org's
+  nearby_deaths). e.g. "PayPay recipient-prefill URLは存在しない — API決済は構造的に不可、金額コピー導線で行く">`
+
+## Hand-back (how completion is submitted)
+`<the artifact and where — e.g. "PR against `main`; close the Issue with the DoD command's green output
+pasted + the CI-green link". The Issue is the work surface; a spec that never says how to put the work
+back leaves a stranger inventing a hand-back.>`
 
 ---
 _SDLC phases (docs/11): requirements → design → implement → test → deploy → operate. This spec is the

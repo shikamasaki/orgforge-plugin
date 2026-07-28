@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-"""conventions — internally-originated reusable precedent (docs/05 §6.5).
+"""conventions — the domain model: internally-originated reusable precedent (docs/05 §6.5).
+
+conventions IS the domain-model half of the SSoT (code + domain model, docs/12 §3.3): the settled
+ubiquitous language, boundaries, and "how we do X here" the product's code is built against. It is a
+first-class PERSISTENT artifact — co-committed with the code the convention governs, TTL'd, checker-
+adopted, rendered into every relevant workspace — not a mere health breadcrumb and not a ledger event.
+A convention_adopted double-writes on purpose: the DECISION lands here (the domain model, survives as
+an inferable artifact); the ledger gets only the RECEIPT that it was adopted (audit). The decision
+lives where it can be inferred; the ledger records that it happened.
 
 Human orgs coordinate massively through routines and precedent — "how we do X here," settled once
 and silently reused. An AI org that cold-starts each cycle from profile + doctrine + ledger has no

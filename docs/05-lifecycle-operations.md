@@ -322,7 +322,7 @@ found the org (a founding-tier act, Stinchcombe imprinting again).
 What "assets intact" means precisely — the structure is what changes; **the assets are
 custody-of-the-ledger, not property of any role**, so they survive a total re-map:
 
-- **The ledger** (`custody: ledger`, not an agent) is the single source of truth. Tearing down
+- **The ledger** (`custody: ledger`, not an agent) is the write-controlled **audit/enforcement record** (the SSoT is code + the domain model). Tearing down
   every role does not touch it; the append-only history, admitted results, and event chain
   persist by construction (docs/02 §5, the *no-knowledge-outside-the-ledger* invariant).
 - **Doctrine** (each role's accumulated べき論) is **role-keyed** (`<root>/<role>.json`), so a

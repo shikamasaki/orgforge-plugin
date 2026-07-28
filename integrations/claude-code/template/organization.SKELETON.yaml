@@ -36,7 +36,7 @@ structure:
 
 # ── SEPARATION OF DUTIES (Organ 6) — the three incompatible duties must not concentrate ───────
 separation_of_duties:
-  custody: ledger                        # the single protected source of truth — keep
+  custody: ledger                        # the single protected audit record (write-controlled; SSoT = code + the domain model) — keep
   # maker != checker != skeptic; the lint enforces the skeptic is a DIFFERENT model_family.
   # Keep the gate/skeptic below; name YOUR makers as the ones they check.
 

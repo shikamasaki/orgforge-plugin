@@ -92,22 +92,34 @@ points, keyed by `candidate_id`:
    a boundary, or a naming/convention (ubiquitous language), record it NOW as a convention, not as a
    deferred separate task (a separate task gets postponed and the context base rots — the co-commit
    discipline). This is how the org's inferability rises over time and how the same clarity is amplified
-   next cycle instead of the same ambiguity. A convention is proposed here and adopted by a checker
-   (never self-adopted):
+   next cycle instead of the same ambiguity. *A settled decision made during the cycle must be persisted
+   as an inferable artifact **co-committed with the code**: an ADR/comment/domain-model file in the product
+   repo if it constrains code, or a `conventions adopt` if it is cross-cutting precedent. The ledger
+   receives only the RECEIPT (`convention_adopted`), never the decision as its sole home — a decision that
+   lives only as a ledger event is hoarded where no future code-reader sees it (docs/12 §3.3, §6).* A
+   convention is proposed here and adopted by a checker (never self-adopted):
 
 !`echo 'Record the cycle (never fabricate completion): python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/ledger.py" append "'"${ORG_LEDGER_ROOT}"'" --actor "'"$1"'" --class cycle_started|progress_recorded|cycle_completed --payload {role,candidate_id,...}. AND, in the same cycle, if a domain rule/boundary/naming was settled: python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/conventions.py" adopt "'"${ORG_CONVENTIONS_ROOT:-$ORG_LEDGER_ROOT}"'" --scope <area> --choice "<the settled rule>" --owner "'"$1"'" --by checker. Checkpoint BEFORE you risk stopping.'`
 
-### 3b. Project each milestone onto the GitHub Issue (work-log — the user's requirement)
+### 3b. The GitHub Issue is the MAIN work-log — so work isn't session- or terminal-bound
 
-If this task is being run through a GitHub Issue (the web harness, or a local session working an Issue —
-`ORG_GITHUB_REPO` set and the Issue number known from the claim), **mirror each of the three milestones
-above onto the Issue as a work-log comment, at the same moment you append it to the ledger**, so the
-human watching from a phone sees progress accrue without opening the ledger. The ledger stays the SSoT;
-the comment is its projection. Pass the ledger event's `id` as `--event-id` so a replayed/retried cycle
-logs the milestone **once** (the comment carries a hidden `orgforge:event:<id>` marker and `log` no-ops
-on a duplicate — docs/11 §0 reproducibility applied to the projection too):
+When the org is steered through GitHub (`ORG_GITHUB_REPO` set — the default for any laptop-free /
+multi-terminal / web-harness run), **the task Issue is the PRIMARY surface for the spec and the
+work-log**, because the ledger is a local file (`.orgforge/ledger/`) that a phone or a different machine
+or a fresh web session cannot see — it is terminal-bound. The Issue is not: anyone, anywhere, picks up
+the work from it. So the primacy is **Issue-first**:
 
-!`echo 'On each milestone, also project it to the Issue: python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/github_sync.py" log --repo "$ORG_GITHUB_REPO" --issue <N> --event cycle_started|progress_recorded|phase_admitted|cycle_completed [--phase <sdlc-phase>] [--detail "<next_step or done_so_far>"] --event-id <the ledger event id>. Skip silently if ORG_GITHUB_REPO is unset (a ledger-only run).'`
+- **The spec lives in the Issue body** (the SPEC structure — already how a task is created).
+- **The work-log lives as Issue comments.** At each of the three milestones, post the comment to the
+  Issue **first** — that is the record a human and the next session read to know where the work stands.
+- **The ledger gets the RECEIPT** of the same milestone — for audit, `requires_prior` enforcement, and
+  crash-safe resume — but it is the *secondary* record here, not the place a human watches. (SSoT is
+  unchanged: neither Issue nor ledger is the SSoT — the code + domain model the work produces is.)
+
+Post the milestone to the Issue, keyed by the same natural id so a replay logs it **once** (the comment
+carries a hidden `orgforge:event:<id>` marker; `log` no-ops on a duplicate — docs/11 §0):
+
+!`echo 'Log the milestone to the Issue (the main work-log): python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/github_sync.py" log --repo "$ORG_GITHUB_REPO" --issue <N> --event cycle_started|progress_recorded|phase_admitted|cycle_completed [--phase <sdlc-phase>] [--detail "<next_step or done_so_far>"] --event-id <id>. THEN write the ledger receipt (audit/resume). A ledger-only run (no ORG_GITHUB_REPO) keeps the work-log in the ledger instead.'`
 
 ## Discipline — work only from the backlog
 

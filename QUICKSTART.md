@@ -37,7 +37,7 @@ Regenerate the bundle after editing neutral source: `integrations/claude-code/bu
 
 ## 2. Point it at an org state (the one required setting)
 
-The guardrails read the **ledger** — the org's single source of truth. Without it, the hook
+The guardrails read the **ledger** — the org's tamper-evident audit/enforcement record (the SSoT is code + the domain model — conventions + the org spec). Without it, the hook
 allows everything and says so loudly on stderr (so a misconfiguration is visible, never silent).
 
 ```

@@ -10,17 +10,28 @@ changes **where state lives and how the human steers**, not what the org is.
 Claude Code on the web runs in a **stateless cloud VM** — a fresh clone of the repo each session, no
 persistent local filesystem (verified against the Claude Code docs). Two consequences fix the whole design:
 
-1. **The ledger is committed to the repo.** The append-only, hash-chained ledger (the SSoT for "what
+1. **The ledger is committed to the repo.** The append-only, hash-chained ledger (the audit record of "what
    happened") lives at a repo path (e.g. `.orgforge/ledger/ledger.jsonl`), committed like any file. A
    fresh cloud session reads it to recover org state; each cycle appends and commits. This is exactly the
    pattern the Claude Code web docs recommend for carrying state. **The SSoT does not change** — it is
-   still the ledger + the org spec; they just live in git so a stateless VM (and the human's phone) can
-   reach them.
+   still code + the domain model (conventions + org spec); the committed ledger is the audit record that
+   lets a stateless VM recover process state (and the human's phone reach it).
 
 2. **The human steers through GitHub, compressed to a label.** The backlog is *projected* to GitHub
-   Issues (a view, not a second SSoT — the ledger stays authoritative). The human's whole input is
-   applying a label to an Issue from their phone. This is the y-hirakaw "instruction compressed to one
-   label," and the docs/12 §5 front door, realized on GitHub.
+   Issues (a view, not a source of truth). The human's whole input is applying a label to an Issue from
+   their phone. This is the y-hirakaw "instruction compressed to one label," and the docs/12 §5 front
+   door, realized on GitHub.
+
+**What a GitHub Issue IS here — a disposable work window, never a source of truth (docs/12 §6).** A
+task Issue is a *disposable prompt*: it holds the task's spec (the SPEC structure) and its work-log so a
+human can steer and watch from a phone. But **the Issue is not the SSoT and neither is the ledger** —
+the SSoT is **code + the domain model** (conventions + org spec). The Issue drives the work; the *result*
+of the work (the code, and any settled decision co-committed to conventions) is what survives and is
+re-inferable. Close an Issue, delete it, lose it — the truth is intact, because the decisions landed in
+the code and the domain model, not in the Issue. So do **not** treat an Issue (or a work-log comment, or
+a ledger event) as the place a decision lives: those are the *window and the receipt*; the decision lives
+in the co-committed artifact. This is the same lesson as SPEC-is-not-an-SSoT-file: a task-scoped record
+(Issue, Spec, event) is a fragment that must never become the source of truth (the fragment-rot trap).
 
 The plugin itself works unchanged: Claude Code on the web loads repo-committed `.claude/settings.json`
 hooks (PreToolUse / SessionStart fire) and plugin commands — so the guardrails, the doctrine injection,
@@ -70,16 +81,18 @@ The Issue's lifecycle label mirrors the ledger stage (docs/09), so the board is 
 - `orgforge:needs-human` — escalation; the human decides (mandate clash, irreversible action).
 - `orgforge:done` — completed (`cycle_completed`); the Issue closes.
 
-### 2b. Work-log — progress accrues on the Issue as it happens (the user's requirement)
-The stage label is the *coarse* state; the **work-log** is the fine-grained running record. On each
-milestone the cycle appends to the ledger (`cycle_started`, `progress_recorded`, `phase_admitted`,
-`cycle_completed`), it **also posts a comment to the task Issue** (`github_sync log --issue N --event …
---event-id <ledger id>`), so a human watching from a phone sees the work advance in real time — the
-next step, the phase reached, a blocker — without opening the ledger. This is a **projection, not a
-second SSoT**: the ledger event is the fact; the comment mirrors it. It is **idempotent** — each comment
-carries a hidden `orgforge:event:<id>` marker keyed to the ledger event id, so a replayed or retried
-cycle logs each milestone exactly once (docs/11 §0, the same reproducibility rule the ledger append
-follows). A ledger-only run (no `ORG_GITHUB_REPO`) simply skips the projection.
+### 2b. Work-log — the Issue is the MAIN running record (so work isn't terminal-bound)
+The stage label is the *coarse* state; the **work-log** is the fine-grained running record, and on the
+web harness **the Issue comment thread is its primary home**, not the ledger. The reason is the whole
+point of this projection: the ledger is a local file a phone or a fresh cloud session can't see, but the
+Issue is reachable from anywhere — so the record a human and the next session read to know "where does
+this stand" must be on the Issue. On each milestone the cycle **posts a comment to the task Issue**
+(`github_sync log --issue N --event … --event-id <id>`) — the main work-log — and writes the ledger a
+**receipt** of the same milestone for audit / `requires_prior` / crash-safe resume. Neither is the SSoT
+(that's the code + domain model); the Issue is the *work surface*, the ledger is the *audit record*. It
+is **idempotent** — each comment carries a hidden `orgforge:event:<id>` marker, so a replayed cycle logs
+each milestone exactly once (docs/11 §0). A ledger-only run (no `ORG_GITHUB_REPO`) keeps the work-log in
+the ledger instead — but the moment GitHub is the steering surface, the Issue leads.
 
 ### 3. Priority (measured, not guessed — the user's requirement)
 Priority is not a raw label the human sets by feel; it is **`attention.py`'s situated-attention score**
@@ -129,8 +142,8 @@ To honor "the SSoT does not change," the sync is deliberately asymmetric:
   new Issues enter the ledger through `/org-triage` (a `candidate_submitted`), exactly as an external
   signal does today. A label is a steering input; the ledger records it as the fact.
 
-So there is no two-SSoT ambiguity (the user's own "avoid dual management" rule): the ledger is truth, the
-Issue board is its regenerated window plus a gated intake — the same discipline as doctrine's per-harness
+So there is no dual-management ambiguity (the user's own "avoid dual management" rule): the ledger is the
+authoritative record of what happened, the Issue board is its regenerated window plus a gated intake — the same discipline as doctrine's per-harness
 files (spec is canonical, projections regenerate).
 
 *Status: this document is the design for the web-harness projection. The neutral core (tools/, hooks) is

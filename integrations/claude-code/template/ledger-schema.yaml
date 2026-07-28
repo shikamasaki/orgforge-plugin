@@ -1,4 +1,4 @@
-# ledger-schema.yaml — the single source of truth, specified.
+# ledger-schema.yaml — the audit + enforcement record, specified. NOT the SSoT: the SSoT is code + the domain model (conventions + org spec); this is the tamper-evident process journal views project from.
 #
 # The ledger is Organ 5's shared record and Organ 6's custody+recording holder. This file
 # defines its envelope (tamper evidence), its event classes (the org's complete factual

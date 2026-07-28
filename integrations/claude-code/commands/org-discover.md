@@ -73,7 +73,7 @@ work shows up under the right objective with progress roll-up. The task's title 
 `--parent` is the objective Issue number; `--dept` is this role. Idempotent — a re-discovered gap has
 the same title+objective, so `create` no-ops instead of minting a duplicate (docs/11 §0):
 
-!`echo 'For each candidate, project it: python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/github_sync.py" create --repo "$ORG_GITHUB_REPO" --kind task --parent <objective-issue-#> --dept "'"$1"'" --objective <objective-id> --title "<one-line gap>" --body "candidate_id: <derived-cand-id>". Skip silently if ORG_GITHUB_REPO is unset. The task Issue is the ledger candidate projected — the ledger stays the SSoT.'`
+!`echo 'For each candidate, project it: python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/github_sync.py" create --repo "$ORG_GITHUB_REPO" --kind task --parent <objective-issue-#> --dept "'"$1"'" --objective <objective-id> --title "<one-line gap>" --body "candidate_id: <derived-cand-id>". Skip silently if ORG_GITHUB_REPO is unset. The task Issue is a disposable work window projecting the candidate; the ledger records it (audit), and the SSoT is code + the domain model — not the Issue or the ledger.'`
 
 ## Discipline
 

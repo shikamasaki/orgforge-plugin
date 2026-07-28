@@ -92,7 +92,7 @@ structure:
 # organic maker's contract to name a mechanistic checker with a DIFFERENT profile lineage.
 separation_of_duties:
   authorization: gate                    # who admits/approves
-  custody: ledger                        # the single protected source of truth (not an agent)
+  custody: ledger                        # the single protected audit record (write-controlled; SSoT = code + the domain model, not an agent)
   recording: ledger
   maker_checker_forbidden_pairs:
     - { maker: miner,      checker_must_not_be: miner }
@@ -106,7 +106,7 @@ separation_of_duties:
 
 # ── Organ 5: INFORMATION FLOW (shared consciousness, on a budget — docs/06, docs/07) ──
 information_flow:
-  shared_record: append-only-ledger      # SSoT; derived views are regenerated, never hand-edited
+  shared_record: append-only-ledger      # the shared audit/enforcement record; derived views are regenerated, never hand-edited (SSoT = code + domain model, not this log)
   knowledge_base: role-scoped-kb         # external knowledge, gate-admitted, provenance'd (docs/06)
   context_delivery: context_pack         # assembled by the registrar BEFORE every cycle
   # The refined Organ 5 rule (docs/07): broadcast the intent, need-to-know the details.

@@ -2,8 +2,12 @@
 """ledger — the append-only, hash-chained record for orgforge-plugin (ledger-schema.yaml).
 
 This is the running implementation of Organ 5's record and Organ 6's custody holder: the
-single source of truth from which every derived view (and therefore every context pack) is
-projected. Before this existed, ledger-schema.yaml specified an envelope and event classes
+append-only AUDIT + ENFORCEMENT record from which every derived view (and therefore every
+context pack) is projected. It is NOT the SSoT — the SSoT is code + the domain model
+(conventions + the org spec); this ledger is the process journal (audit, requires_prior
+gating, crash-safe resume), a record of *what happened*, not of *what the system is*. A
+settled decision co-commits to code or conventions; the ledger holds only the receipt that it
+was made. Before this existed, ledger-schema.yaml specified an envelope and event classes
 that no code ever wrote, chained, or verified — the audit's D3 gap. This tool closes it:
 events are appended under a hash chain, the chain is independently replayable (the external
 watchdog's primitive), views are projected DETERMINISTICALLY from events, and the census /

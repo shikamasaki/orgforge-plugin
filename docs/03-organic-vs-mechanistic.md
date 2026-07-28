@@ -230,8 +230,8 @@ power to renegotiate:
   state.
 - **Custody boundaries** — which agent may touch assets, keys, funds, or
   production.
-- **The recording / ledger** — the source of truth, write-controlled away from
-  the agents it evaluates.
+- **The recording / ledger** — the **audit/enforcement record**, write-controlled away from
+  the agents it evaluates (the SSoT is code + the domain model, not this log).
 - **Anti-gaming defenses** — held-out evaluation, independent checkers, metrics
   the producing agent cannot see or edit.
 - **Safety limits** — hard constraints and kill-switches that no negotiation can
