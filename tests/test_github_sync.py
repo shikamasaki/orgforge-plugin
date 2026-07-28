@@ -7,6 +7,7 @@ makes the right decisions from their results — the reproducible, testable part
 import importlib.util
 import json
 import pathlib
+import sys
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 spec = importlib.util.spec_from_file_location("github_sync", REPO / "tools" / "github_sync.py")
@@ -213,3 +214,320 @@ def test_ready_lists_tasks_and_excludes_objectives(monkeypatch):
     assert rc == 0
     out = buf.getvalue()
     assert '"ready": [1]' in out, out   # only the task, not the objective
+
+
+# ── the decomposition coverage gate (docs/11 §0a) ────────────────────────────
+# /org-found's O10 lint proves each must-have has ONE owning contract (design layer). coverage-check is
+# the same guarantee one layer down: every must-have must have reached a task Issue, traced by the
+# `coverage_row:` trailer /org-decompose writes. A must-have designed but never decomposed is silently
+# unbuilt — the hardest gap to see, so it must FAIL, not warn.
+MANIFEST = (
+    "# Coverage manifest\n\n"
+    "| rfp_capability | owning_role | deliverable | acceptance |\n"
+    "|---|---|---|---|\n"
+    "| 割り勘計算 | settlement | split engine | WHEN 3人でEQUAL分割 THE system SHALL 端数を先頭に寄せる |\n"
+    "| OAuthログイン | identity | auth service | WHEN OAuth completes THE system SHALL create one account |\n"
+    "| <placeholder row> | x | y | z |\n"
+)
+
+
+def _manifest_file(tmp_path, text=MANIFEST):
+    p = tmp_path / "coverage-manifest.md"
+    p.write_text(text, encoding="utf-8")
+    return str(p)
+
+
+def _cov(monkeypatch, tmp_path, issues, manifest=MANIFEST):
+    import io, contextlib
+    fake = FakeGh(replies={"issue list": (0, json.dumps(issues))})
+    monkeypatch.setattr(GS, "gh", fake)
+    buf, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(err):
+        rc = GS.cmd_coverage_check(_ns(repo="o/r", manifest=_manifest_file(tmp_path, manifest)))
+    return rc, buf.getvalue() + err.getvalue()
+
+
+def test_manifest_parser_reads_named_columns_and_skips_placeholders(tmp_path):
+    rows = GS._manifest_rows(_manifest_file(tmp_path))
+    assert [r["rfp_capability"] for r in rows] == ["割り勘計算", "OAuthログイン"]
+    assert rows[0]["owning_role"] == "settlement"
+    assert "SHALL" in rows[0]["acceptance"]
+
+
+def test_coverage_check_passes_when_every_must_have_reached_an_issue(monkeypatch, tmp_path):
+    issues = [{"number": 11, "state": "OPEN", "body": "coverage_row: 割り勘計算"},
+              {"number": 12, "state": "OPEN", "body": "coverage_row: OAuthログイン"}]
+    rc, out = _cov(monkeypatch, tmp_path, issues)
+    assert rc == 0, out
+    assert "2/2" in out
+
+
+def test_coverage_check_fails_on_a_must_have_with_no_task_issue(monkeypatch, tmp_path):
+    """The gate's whole reason to exist: a designed-but-undecomposed must-have must exit non-zero."""
+    issues = [{"number": 11, "state": "OPEN", "body": "coverage_row: 割り勘計算"}]
+    rc, out = _cov(monkeypatch, tmp_path, issues)
+    assert rc == 10, out
+    assert "COVERAGE GAP" in out and "OAuthログイン" in out
+
+
+def test_coverage_check_flags_a_paraphrased_trailer_as_an_orphan(monkeypatch, tmp_path):
+    """A trailer must match the manifest cell verbatim — a paraphrase would otherwise hide a real gap."""
+    issues = [{"number": 11, "state": "OPEN", "body": "coverage_row: 割り勘計算"},
+              {"number": 13, "state": "OPEN", "body": "coverage_row: OAuthろぐいん"}]
+    rc, out = _cov(monkeypatch, tmp_path, issues)
+    assert rc == 10, out
+    assert "ORPHAN" in out and "OAuthログイン" in out   # the gap is still reported, not masked
+
+
+def test_coverage_check_tolerates_self_raised_issues_without_a_trailer(monkeypatch, tmp_path):
+    """/org-discover items legitimately carry no coverage_row — a note, never a failure."""
+    issues = [{"number": 11, "state": "OPEN", "body": "coverage_row: 割り勘計算"},
+              {"number": 12, "state": "OPEN", "body": "coverage_row: OAuthログイン"},
+              {"number": 99, "state": "OPEN", "body": "a self-raised refactor, no trailer"}]
+    rc, out = _cov(monkeypatch, tmp_path, issues)
+    assert rc == 0, out
+    assert "#99" in out   # surfaced as a note
+
+
+def test_coverage_check_counts_a_closed_issue_as_covered(monkeypatch, tmp_path):
+    """Coverage asks 'did it become work?', not 'is it still open' — a shipped must-have is covered."""
+    issues = [{"number": 11, "state": "CLOSED", "body": "coverage_row: 割り勘計算"},
+              {"number": 12, "state": "CLOSED", "body": "coverage_row: OAuthログイン"}]
+    rc, out = _cov(monkeypatch, tmp_path, issues)
+    assert rc == 0, out
+
+
+def test_coverage_check_errors_when_the_manifest_has_no_parsable_rows(monkeypatch, tmp_path):
+    """A manifest under a variant name/shape must be a loud error, never a silent 0/0 pass."""
+    rc, out = _cov(monkeypatch, tmp_path, [], manifest="# design doc\n\nno table here\n")
+    assert rc == 2, out
+    assert "rfp_capability" in out
+
+
+def test_coverage_check_missing_manifest_is_an_error_not_a_pass(monkeypatch, tmp_path):
+    import io, contextlib
+    monkeypatch.setattr(GS, "gh", FakeGh())
+    buf, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(err):
+        rc = GS.cmd_coverage_check(_ns(repo="o/r", manifest=str(tmp_path / "nope.md")))
+    assert rc == 2
+
+
+# ── coverage gate: the review-found defects, as regressions ──────────────────
+def test_manifest_parser_ignores_a_table_that_follows_the_manifest(tmp_path):
+    """/org-found emits an EXCLUDE list alongside the manifest. If a trailing table inherited the
+    manifest's header, its rows would read as must-haves — and since the decomposer works until
+    coverage-check is green, the org would build exactly the scope the CEO cut."""
+    text = MANIFEST + ("\n## Excluded from the first cut\n\n"
+                       "| capability | reason |\n|---|---|\n"
+                       "| Group splitting | deferred to v2 |\n| Receipt OCR | out of scope |\n")
+    rows = GS._manifest_rows(_manifest_file(tmp_path, text))
+    caps = [r["rfp_capability"] for r in rows]
+    assert caps == ["割り勘計算", "OAuthログイン"], caps
+    assert "Receipt OCR" not in caps and "capability" not in caps
+
+
+def test_coverage_check_matches_a_bold_wrapped_trailer(monkeypatch, tmp_path):
+    """An agent writing the body in the org's output_language may bold the label. Splitting the raw
+    line would leave a leading space and report a GAP for a row that IS covered."""
+    issues = [{"number": 11, "state": "OPEN", "labels": [], "body": "**coverage_row:** 割り勘計算"},
+              {"number": 12, "state": "OPEN", "labels": [], "body": "- `coverage_row:` OAuthログイン"}]
+    rc, out = _cov(monkeypatch, tmp_path, issues)
+    assert rc == 0, out
+
+
+def test_coverage_check_fails_a_mandate_task_with_no_trailer(monkeypatch, tmp_path):
+    """A MISSING trailer on an RFP-derived task is invisible to the row-side check when another Issue
+    covers the same row — so it must fail on the Issue side, like a mistyped one does."""
+    issues = [{"number": 11, "state": "OPEN", "labels": [{"name": "orgforge:mandate"}],
+               "body": "coverage_row: 割り勘計算"},
+              {"number": 12, "state": "OPEN", "labels": [{"name": "orgforge:mandate"}],
+               "body": "coverage_row: OAuthログイン"},
+              {"number": 13, "state": "OPEN", "labels": [{"name": "orgforge:mandate"}],
+               "body": "an RFP task whose trailer was forgotten"}]
+    rc, out = _cov(monkeypatch, tmp_path, issues)
+    assert rc == 10, out
+    assert "UNTRACED MANDATE" in out and "#13" in out
+
+
+def test_coverage_check_still_tolerates_a_self_labelled_task_with_no_trailer(monkeypatch, tmp_path):
+    issues = [{"number": 11, "state": "OPEN", "labels": [{"name": "orgforge:mandate"}],
+               "body": "coverage_row: 割り勘計算"},
+              {"number": 12, "state": "OPEN", "labels": [{"name": "orgforge:mandate"}],
+               "body": "coverage_row: OAuthログイン"},
+              {"number": 13, "state": "OPEN", "labels": [{"name": "orgforge:self"}],
+               "body": "a self-raised refactor"}]
+    rc, out = _cov(monkeypatch, tmp_path, issues)
+    assert rc == 0, out
+
+
+def test_create_does_not_remint_a_closed_delivered_issue(monkeypatch):
+    """`stage done` CLOSES a task. An open-only idempotency search would re-mint every delivered task
+    on the documented 're-run after a manifest amendment' repair path."""
+    listing = ('[{"number": 42, "title": "split engine", "state": "CLOSED",'
+               ' "labels": [{"name": "orgforge:objective:obj1"}]}]')
+    fake = FakeGh(replies={"issue list": (0, listing)})
+    monkeypatch.setattr(GS, "gh", fake)
+    import io, contextlib
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = GS.cmd_create(_ns(repo="o/r", title="split engine", body=None, objective="obj1",
+                               source="mandate", depends=None, priority=None, kind="task",
+                               dept="settlement", parent=None))
+    assert rc == 0
+    assert not fake.calls_matching("issue create"), "re-minted a delivered task"
+    assert "CLOSED" in buf.getvalue()
+
+
+# ── the audit record: judgments + granular work log (docs/11 §4f) ────────────
+# Human diff review is retired, so an unrecorded judgment is indistinguishable from no judgment, and a
+# terse work log records nothing recoverable. Both degradations are closed at the tool, not left to
+# discipline.
+class CommentGh(FakeGh):
+    """A FakeGh that accumulates posted comments and serves them back on `issue view`."""
+    def __init__(self):
+        super().__init__()
+        self.posted = []
+
+    def __call__(self, args, check=True):
+        self.calls.append(args)
+        if args[:2] == ["issue", "view"]:
+            return 0, json.dumps({"comments": [{"body": b} for b in self.posted]})
+        if args[:2] == ["issue", "comment"]:
+            self.posted.append(args[args.index("--body") + 1])
+            return 0, "ok"
+        return 0, ""
+
+
+def _decide_ns(**kw):
+    base = dict(repo="o/r", issue=5, event="admission_decided", verdict="admit",
+                why="all three MUSTs have failing-then-passing tests; the placebo was rejected",
+                by="gate", phase=None, evidence="npm test → 19 passed", alternatives=None,
+                standard=None, risk=None, event_id="ev-1")
+    base.update(kw)
+    return _ns(**base)
+
+
+def _quiet(fn, *a):
+    import io, contextlib
+    buf, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(err):
+        rc = fn(*a)
+    return rc, buf.getvalue() + err.getvalue()
+
+
+def test_decide_rejects_a_why_that_restates_the_verdict(monkeypatch):
+    """A bare 'admitted' is the rubber stamp this command exists to prevent."""
+    fake = CommentGh(); monkeypatch.setattr(GS, "gh", fake)
+    rc, out = _quiet(GS.cmd_decide, _decide_ns(why="admitted"))
+    assert rc == 2, out
+    assert not fake.posted
+
+
+def test_decide_rejects_a_non_judgment_event(monkeypatch):
+    fake = CommentGh(); monkeypatch.setattr(GS, "gh", fake)
+    rc, out = _quiet(GS.cmd_decide, _decide_ns(event="progress_recorded"))
+    assert rc == 2 and not fake.posted
+    assert "judgment class" in out
+
+
+def test_decide_posts_verdict_reasoning_and_the_no_human_notice(monkeypatch):
+    fake = CommentGh(); monkeypatch.setattr(GS, "gh", fake)
+    rc, _ = _quiet(GS.cmd_decide, _decide_ns(
+        why="全MUSTに対応するテストが緑。11人目の参加がcapエラーで拒否されることを実機確認した。",
+        evidence="npm test → 19 passed", alternatives="末尾寄せ案は既存規約と矛盾するため却下",
+        standard="端数は先頭に寄せる", risk="並行joinのレースは未検証", phase="test"))
+    assert rc == 0
+    body = fake.posted[0]
+    for expected in ("admission_decided", "`admit`", "Why (the reasoning)", "Evidence consulted",
+                     "Alternatives considered", "Standard applied", "Known risk accepted",
+                     "No human reviewed this change"):
+        assert expected in body, f"{expected!r} missing from:\n{body}"
+
+
+def test_decide_is_idempotent_on_replay(monkeypatch):
+    fake = CommentGh(); monkeypatch.setattr(GS, "gh", fake)
+    _quiet(GS.cmd_decide, _decide_ns())
+    rc, out = _quiet(GS.cmd_decide, _decide_ns())
+    assert rc == 0 and len(fake.posted) == 1, out
+
+
+def test_decide_records_a_rejection_too(monkeypatch):
+    fake = CommentGh(); monkeypatch.setattr(GS, "gh", fake)
+    rc, _ = _quiet(GS.cmd_decide, _decide_ns(
+        verdict="reject", why="EARS MUST 2 has no test; the placebo output passes the letter of the "
+                              "criterion while failing its intent."))
+    assert rc == 0 and "`reject`" in fake.posted[0]
+
+
+def _log_ns(**kw):
+    base = dict(repo="o/r", issue=5, event="progress_recorded", detail="実装中", phase="implement",
+                event_id="ev-9", command=None, result=None, files=None, next_step=None,
+                blocked_by=None)
+    base.update(kw)
+    return _ns(**base)
+
+
+def test_log_records_the_command_and_its_real_output(monkeypatch):
+    """A log of only successes is a fiction — a failing result must round-trip verbatim."""
+    fake = CommentGh(); monkeypatch.setattr(GS, "gh", fake)
+    rc, _ = _quiet(GS.cmd_log, _log_ns(
+        command="cd app && npm test -- split.test.ts",
+        result="FAIL split.test.ts:14 — expected [34,33,33] got [33,33,34]\n1 failed, 18 passed",
+        files="app/src/settlement/split.ts", next_step="reduceの初期値を修正",
+        blocked_by="なし"))
+    assert rc == 0
+    body = fake.posted[0]
+    assert "cd app && npm test -- split.test.ts" in body
+    assert "1 failed, 18 passed" in body          # the failure is recorded, not smoothed over
+    assert "Next step" in body and "Files" in body
+
+
+def test_log_without_the_detail_fields_still_works(monkeypatch):
+    """Backwards compatible: the enriched fields are optional, so existing callers keep working."""
+    fake = CommentGh(); monkeypatch.setattr(GS, "gh", fake)
+    rc, _ = _quiet(GS.cmd_log, _log_ns())
+    assert rc == 0 and "progress_recorded" in fake.posted[0]
+
+
+# ── the review-found defects in the audit layer, as regressions ──────────────
+def test_stable_key_is_identical_across_processes():
+    """hash() is salted per interpreter, so a CLI marker built from it never dedups across runs —
+    the 'logs once, never twice' guarantee would hold only within one process."""
+    import subprocess as sp
+    outs = {sp.run([sys.executable, "-c",
+                    "import sys;sys.path.insert(0,'tools');import github_sync as g;"
+                    "print(g._stable_key('progress_recorded','did a thing','implement'))"],
+                   capture_output=True, text=True, cwd=str(REPO)).stdout.strip() for _ in range(3)}
+    assert len(outs) == 1 and outs != {""}, outs
+
+
+def test_decide_rejects_padding_and_repetition_but_accepts_japanese():
+    """A pure length bound fails both ways: it passes 'admit admit admit' and rejects real Japanese
+    reasoning (CJK carries ~2-3x the information per codepoint, and the org's default language is ja)."""
+    reject = ["admit admit admit admit admit", "The verdict is admit. Admit.",
+              "aaaaaaaaaaaaaaaaaaaaaaaaaaaa", "....................",
+              "it looks fine to me okay ok"]
+    accept = ["テスト全通過のため許可した", "全テスト通過を確認。cap近傍の並行joinは未検証",
+              "Placebo rejected; all three MUSTs covered by failing-then-passing tests"]
+    for w in reject:
+        assert GS._reasoning_defect(w, "admit", "admission_decided"), f"should reject: {w!r}"
+    for w in accept:
+        assert GS._reasoning_defect(w, "admit", "admission_decided") is None, f"should accept: {w!r}"
+
+
+def test_decide_requires_evidence_for_an_admitting_verdict(monkeypatch):
+    """An admission with nothing consulted is a stamp however well the prose reads."""
+    fake = CommentGh(); monkeypatch.setattr(GS, "gh", fake)
+    rc, out = _quiet(GS.cmd_decide, _decide_ns(evidence=None))
+    assert rc == 2 and not fake.posted
+    assert "--evidence is required" in out
+
+
+def test_decide_allows_a_rejection_without_evidence(monkeypatch):
+    """A reject/refuted verdict blocks nothing downstream, so it is not held to the admit-side bar."""
+    fake = CommentGh(); monkeypatch.setattr(GS, "gh", fake)
+    rc, _ = _quiet(GS.cmd_decide, _decide_ns(
+        verdict="reject", evidence=None,
+        why="MUST 2 has no test and the placebo output passes the letter of the criterion"))
+    assert rc == 0 and len(fake.posted) == 1

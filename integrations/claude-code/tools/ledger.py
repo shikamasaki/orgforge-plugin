@@ -50,7 +50,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _organ import read_events, LedgerCorruption   # noqa: E402
+from _organ import read_events, LedgerCorruption, resolve_root   # noqa: E402
 
 # ── the forced SDLC phase order (docs/11) — reproducibility's spine ──
 # A deliverable travels these phases in this order; a phase may not START until the prior phase is
@@ -58,6 +58,19 @@ from _organ import read_events, LedgerCorruption   # noqa: E402
 # idiom as result_deployed, generalized from admission-gating to phase-gating so that the PROCESS is
 # reproducible: same spec ⇒ the same phases run in the same order for every founder and every run.
 PHASE_ORDER = ["requirements", "design", "implement", "test", "integrate", "deploy", "operate"]
+
+
+def _same_deliverable(a, b):
+    """Do two payloads name the same deliverable? Compared as NORMALIZED STRINGS, not by ==.
+
+    The deliverable is a GitHub Issue number that agents write freely as `42`, `"42"`, or `"#42"` across
+    the flow. Raw equality makes `42 != "42"`, so the phase chain intermittently rejects a `phase_started`
+    whose predecessor is visibly present in the ledger — an unreproducible failure whose message says
+    "design was never admitted" while the admission is right there. That is the worst possible signature
+    for an unattended run, so the comparison normalizes instead of trusting the writer's JSON type."""
+    if a is None or b is None:
+        return False
+    return str(a).strip().lstrip("#") == str(b).strip().lstrip("#")
 
 
 def _prior_phase(phase):
@@ -81,11 +94,22 @@ REQUIRES_PRIOR = {
         _prior_phase(ev["payload"].get("phase")) is None
         or any(
             e["class"] == "phase_admitted"
-            and e["payload"].get("deliverable") == ev["payload"].get("deliverable")
+            and _same_deliverable(e["payload"].get("deliverable"), ev["payload"].get("deliverable"))
             and e["payload"].get("phase") == _prior_phase(ev["payload"].get("phase"))
             and e["payload"].get("verdict") == "pass"
             for e in hist
         )
+    ),
+    # A phase may not be ADMITTED unless it was STARTED (docs/11 §2). Without this the mold is
+    # decorative: `phase_admitted{integrate}` on an empty ledger makes `phase_started{deploy}` legal,
+    # so a deliverable reaches deploy with requirements/design/implement/test never having happened.
+    # Worse, it is the move an operator naturally reaches for when phase_started is rejected — the gate
+    # would otherwise teach its own bypass.
+    "phase_admitted": lambda ev, hist: any(
+        e["class"] == "phase_started"
+        and _same_deliverable(e["payload"].get("deliverable"), ev["payload"].get("deliverable"))
+        and e["payload"].get("phase") == ev["payload"].get("phase")
+        for e in hist
     ),
     "result_deployed": lambda ev, hist: any(
         e["class"] == "refutation_attempted"
@@ -125,6 +149,53 @@ REQUIRES_PRIOR = {
     ),
 }
 
+# ── separation of duties, enforced at WRITE time (docs/03 §3.1, docs/11 §4f) ──────────────────────
+# REQUIRES_PRIOR asks "did the right events happen in the right order?" — it never asks WHO wrote them.
+# That gap was survivable while a human read the diff. With human review retired (docs/11 §4f) the gate
+# and the skeptic are the only judges left, so an actor that can write its own admission IS the whole
+# judgment layer, and the hash chain then LAUNDERS the forgery: a forged verdict is tamper-evidently
+# recorded and verifies clean, which reads as stronger evidence than no record at all.
+#
+# So judgment classes carry a distinct-actor predicate: the actor recording a verdict must not be the
+# actor whose work it judges. This is the runtime half of O6 (org_lint's O6 checks the CHART separates
+# maker from checker; this checks the RUN did too — a static chart cannot see one process writing both
+# sides). Keyed on candidate_id/claim_id, so it needs only that candidate's own history.
+#
+# (class, payload-key naming the judged candidate, [classes whose actor must differ], why)
+DISTINCT_ACTOR = {
+    "admission_decided": ("candidate_id", ("cycle_started", "cycle_completed", "candidate_submitted"),
+                          "the gate may not admit work it produced itself — the maker/checker split is "
+                          "the org's load-bearing control (docs/03 §3.1). With human review retired "
+                          "(docs/11 §4f) a self-admission is unappealable and undetectable downstream."),
+    "refutation_attempted": ("claim_id", ("cycle_started", "cycle_completed", "admission_decided"),
+                             "the skeptic may not refute work it made or already admitted — adversarial "
+                             "review decorrelates blind spots only if the reviewer is a different actor "
+                             "(docs/03 §5, docs/11 §4f.3)."),
+}
+
+
+def _distinct_actor_violation(ev, hist):
+    """Return a rejection reason if this event's actor already acted as maker/prior-judge for the same
+    candidate, else None. Compares the ACTOR (envelope), never a payload field — a payload role name is
+    agent-authored and therefore forgeable; the actor is the recorded writer."""
+    rule = DISTINCT_ACTOR.get(ev["class"])
+    if not rule:
+        return None
+    key_field, conflicting, why = rule
+    key = ev["payload"].get(key_field)
+    if key is None:
+        return None            # nothing to correlate on; the payload-shape check is elsewhere
+    actor = ev.get("actor")
+    for e in hist:
+        if e["class"] not in conflicting:
+            continue
+        # the judged candidate may be named by either key (cycle_* use candidate_id; admission uses it too)
+        e_key = e["payload"].get(key_field) or e["payload"].get("candidate_id")
+        if str(e_key) == str(key) and e.get("actor") == actor:
+            return (f"{ev['class']} rejected — actor {actor!r} already acted as {e['class']} for "
+                    f"{key_field}={key!r}: {why}")
+    return None
+
 # an honest per-class reason for a requires_prior rejection (the reject message uses this instead
 # of a single hardcoded 'skeptic is load-bearing' line that only fit result_deployed).
 REQUIRES_PRIOR_WHY = {
@@ -132,6 +203,10 @@ REQUIRES_PRIOR_WHY = {
                      "phase order is non-skippable (requirements→design→implement→test→deploy→operate); "
                      "a phase cannot start before its predecessor is admitted (docs/11 §2). This is what "
                      "makes the process reproducible across founders and runs.",
+    "phase_admitted": "a phase_started{deliverable, phase} for the SAME deliverable and phase — a phase "
+                      "cannot be admitted without having been entered (docs/11 §2). Without this the "
+                      "mold is decorative: admitting a late phase out of nowhere makes every earlier one "
+                      "skippable.",
     "result_deployed": "a refutation_attempted{claim_id==candidate_id, verdict==survives} — the "
                        "skeptic is load-bearing; a result cannot deploy without surviving adversarial review",
     "report_up": "a conformance_reviewed{verdict==conforms} by this supervisor — a manager cannot "
@@ -242,6 +317,10 @@ def cmd_append(a):
         why = REQUIRES_PRIOR_WHY.get(a.cls, "a required prior event does not exist")
         print(f"append: {a.cls} rejected — requires a prior event that does not exist: {why} "
               f"(ledger-schema §event_classes {a.cls}.requires_prior)", file=sys.stderr)
+        return 3
+    sod = _distinct_actor_violation(ev, hist)
+    if sod:
+        print(f"append: {sod}", file=sys.stderr)
         return 3
     ev["hash"] = _hash(head["hash"], ev)
     os.makedirs(a.root, exist_ok=True)
@@ -408,7 +487,7 @@ def main(argv):
     sub = p.add_subparsers(dest="cmd", required=True)
 
     q = sub.add_parser("append"); q.set_defaults(fn=cmd_append)
-    q.add_argument("root")
+    q.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)")
     q.add_argument("--actor", required=True)
     q.add_argument("--class", dest="cls", required=True)
     q.add_argument("--payload", required=True)
@@ -418,25 +497,28 @@ def main(argv):
                         "this append is a no-op (docs/11 §0 — replay/retry must count once)")
 
     q = sub.add_parser("verify"); q.set_defaults(fn=cmd_verify)
-    q.add_argument("root")
+    q.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)")
 
     q = sub.add_parser("view"); q.set_defaults(fn=cmd_view)
-    q.add_argument("root"); q.add_argument("view_id")
+    q.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)"); q.add_argument("view_id")
     q.add_argument("--since"); q.add_argument("--until")
 
     q = sub.add_parser("census"); q.set_defaults(fn=cmd_census)
-    q.add_argument("root"); q.add_argument("--since"); q.add_argument("--until")
+    q.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)"); q.add_argument("--since"); q.add_argument("--until")
 
     q = sub.add_parser("digest"); q.set_defaults(fn=cmd_digest)
-    q.add_argument("root")
+    q.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)")
     q.add_argument("--window-since", dest="window_since")
     q.add_argument("--window-until", dest="window_until")
 
     q = sub.add_parser("cat"); q.set_defaults(fn=cmd_cat)
-    q.add_argument("root")
+    q.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)")
     q.add_argument("--class", dest="cls"); q.add_argument("--actor")
 
     a = p.parse_args(argv[1:])
+    # root は省略可能: 省略時はカレントから自動発見する（.envrc 不要 — tools/discover.py）
+    if hasattr(a, "root"):
+        a.root = resolve_root(a.root)
     return a.fn(a)
 
 

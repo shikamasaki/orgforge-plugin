@@ -164,15 +164,32 @@ The plugin is the *engine*; your organization is `organization.yaml` + `constitu
 - **Write it yourself** — copy `template/organization.SKELETON.yaml` to `organization.yaml` and
   fill the `<ANGLE_BRACKET>` slots. The control skeleton (supervisor / gate / skeptic / registrar)
   is kept intact — you fill purpose, domain roles, and their contracts. Then lint it and iterate.
-- **Let the org draft it** — run **`/org-found <your RFP or brief>`**. The org does its own
-  feature inventory, architecture with seam contracts, and a linted `organization.yaml`, then
-  **stops and reports up for your review** before anything is built (founding is design; the build
-  is the CEO's next call). This is the founding flow, as a command.
+- **Let the org draft it** — the three-command path below. The org does its own feature inventory,
+  architecture with seam contracts, and a linted `organization.yaml`, then **stops and reports up for
+  your review** before anything is built (founding is design; the build is the CEO's next call).
 
-`/org-found` is *design only* — you approve the scope. It is the moment the abstract "org" becomes a
-**company**: a purpose stated as a business, a feature inventory with an explicit exclude list, and
-contracts the lint's O10 tooth checks for coverage (every deliverable is owned and independently
-checked — [docs/11](docs/11-sdlc-mold.md) §0, [docs/01](docs/01-requirements.md) J14/S9).
+```
+/org-init      "タテカエ" ja          # 1. set up:     ledger root, spec files, .envrc, labels, develop, guard probe
+/org-found     <RFP or path/to/brief> # 2. design:     the four fixed founding artifacts → STOP for your approval
+/org-decompose                        # 3. decompose:  the manifest → atomic SPEC task Issues, coverage-gated
+```
+
+**Step 2 writes four files under fixed names** ([docs/11](docs/11-sdlc-mold.md) §0a) — `RFP.md`,
+`FEATURE-INVENTORY.md`, **`ARCHITECTURE.md` (the 全体設計書)**, `coverage-manifest.md`, plus
+`organization.yaml`. The names are fixed because step 3 reads them *by name*; a renamed artifact is one
+no command can find. `/org-found` is *design only* — you approve the scope. It is the moment the abstract
+"org" becomes a **company**: a purpose stated as a business, a feature inventory with an explicit exclude
+list, and contracts the lint's O10 tooth checks for coverage (every deliverable is owned and
+independently checked — [docs/11](docs/11-sdlc-mold.md) §0, [docs/01](docs/01-requirements.md) J14/S9).
+
+**Step 3 is what makes the design workable from anywhere.** `/org-decompose` carves each must-have into
+*atomic, independently-completable* task Issues (split wherever sibling `owns` sets are disjoint; keep
+reciprocally-coupled work together), fills the full `template/SPEC.md` structure into each Issue body —
+clone URL, the literal setup+test commands, entry files, MUSTs in EARS, the seam contract, the DoD
+command — and hangs each one under its objective as a native GitHub sub-issue. Because the whole spec
+lives *in the Issue*, any environment can claim one and start: a web session, another machine, a fresh
+agent with none of your context. It ends on a **coverage gate** (`github_sync coverage-check`) that exits
+non-zero if any must-have never became an Issue — the design-to-backlog gap that is otherwise invisible.
 
 ## 8. The company builds and ships — through the forced SDLC
 

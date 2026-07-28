@@ -208,7 +208,7 @@ def main(argv):
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
     q = sub.add_parser("select"); q.set_defaults(fn=cmd_select)
-    q.add_argument("root"); q.add_argument("--role", required=True)
+    q.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)"); q.add_argument("--role", required=True)
     q.add_argument("--wip-limit", dest="wip_limit", type=int, default=2)
     q.add_argument("--aspiration", type=float, default=0.5)
     # zone of acceptance (Simon 1947 / Barnard inducement-contribution, docs/09): a top-down MANDATE

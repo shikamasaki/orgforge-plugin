@@ -8,6 +8,9 @@ import sys
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 TOOL = REPO / "tools" / "repro_lint.py"
+import importlib.util as _ilu
+_spec = _ilu.spec_from_file_location("repro_lint", TOOL)
+RL = _ilu.module_from_spec(_spec); _spec.loader.exec_module(RL)
 
 
 def run(repo, *args):
@@ -23,9 +26,18 @@ def _clean_repo(root):
         "scripts": {"setup": "npm ci", "test": "vitest"}}))
     (root / "package-lock.json").write_text("{}")
     (root / "README.md").write_text("# X\n\n## Setup\n`make setup`\n\n## Test\n`make test`\n")
+    # the unread-safe bar (docs/11 §4e): a repo with no complexity ceiling, no tests, and no
+    # duplication scan is not "clean" at fan-out scale — it is merely installable.
+    (root / "eslint.config.js").write_text(
+        'export default [{ rules: { "max-lines-per-function": ["error", 60],'
+        ' "complexity": ["error", 20], "@typescript-eslint/no-explicit-any": "error" } }]')
+    (root / "tsconfig.json").write_text('{"compilerOptions": {"strict": true}}')
+    (root / "app.test.ts").write_text("test('x', () => {})")
     wf = root / ".github" / "workflows"
     wf.mkdir(parents=True)
-    (wf / "ci.yml").write_text("name: ci\non: [push]\n")
+    (wf / "ci.yml").write_text("name: ci\non: [push]\njobs:\n  q:\n    runs-on: ubuntu-latest\n"
+                               "    steps:\n      - run: npx jscpd src\n      - run: npx knip\n"
+                               "  win:\n    runs-on: windows-latest\n    steps:\n      - run: npm test\n")
 
 
 def test_clean_repo_passes_deploy_bar(tmp_path):
@@ -90,7 +102,10 @@ def test_ci_at_repo_root_counts_for_a_subpackage(tmp_path):
     (tmp_path / ".git").mkdir()                       # mark the VCS root
     wf = tmp_path / ".github" / "workflows"
     wf.mkdir(parents=True)
-    (wf / "ci.yml").write_text("name: ci\non: [push]\n")
+    # the root workflow is also where a monorepo's cross-cutting scans live (docs/11 §4e)
+    (wf / "ci.yml").write_text("name: ci\non: [push]\njobs:\n  q:\n    runs-on: ubuntu-latest\n"
+                               "    steps:\n      - run: npx jscpd .\n      - run: npx knip\n"
+                               "  win:\n    runs-on: windows-latest\n    steps:\n      - run: npm test\n")
     app = tmp_path / "app"
     app.mkdir()
     _clean_repo(app)
@@ -107,3 +122,129 @@ def test_deterministic_same_verdict_twice(tmp_path):
     a = run(tmp_path, "--phase", "deploy")
     b = run(tmp_path, "--phase", "deploy")
     assert a == b, "same repo must yield the same verdict (reproducible check)"
+
+
+# ── the unread-safe bar (docs/11 §4e) ────────────────────────────────────────
+# At fan-out scale nobody reads every diff. These checks assert the repo has a MECHANICAL rejection
+# layer for the defects that only a careful reader would otherwise catch.
+STRICT_ESLINT = ('export default [{ rules: {'
+                 '"max-lines-per-function": ["error", 60], "complexity": ["error", 20],'
+                 '"max-depth": ["error", 4], "sonarjs/cognitive-complexity": ["error", 15],'
+                 '"@typescript-eslint/no-explicit-any": "error",'
+                 '"@typescript-eslint/ban-ts-comment": "error" } }]')
+LOOSE_ESLINT = 'export default [{ rules: { "no-console": "warn" } }]'
+
+
+def _ts_repo(root, eslint, tsconfig='{"compilerOptions":{"strict": true}}', ci=None):
+    (root / "eslint.config.js").write_text(eslint, encoding="utf-8")
+    (root / "tsconfig.json").write_text(tsconfig, encoding="utf-8")
+    (root / "package.json").write_text('{"dependencies":{"react":"18"},'
+                                       '"scripts":{"setup":"npm ci","test":"vitest"}}',
+                                       encoding="utf-8")
+    (root / "package-lock.json").write_text("{}", encoding="utf-8")
+    (root / ".nvmrc").write_text("20\n", encoding="utf-8")
+    (root / "app.test.ts").write_text("test('x', () => {})", encoding="utf-8")
+    (root / "README.md").write_text("# App\n## Setup\nnpm install\n## Test\nnpm test\n",
+                                    encoding="utf-8")
+    if ci:
+        wf = root / ".github" / "workflows"
+        wf.mkdir(parents=True, exist_ok=True)
+        (wf / "ci.yml").write_text(ci, encoding="utf-8")
+    return root
+
+
+CI_WITH_SCANS = ("jobs:\n  q:\n    runs-on: ubuntu-latest\n    steps:\n"
+                 "      - run: npx jscpd src\n      - run: npx knip\n"
+                 "  win:\n    runs-on: windows-latest\n    steps:\n      - run: npm test\n")
+
+
+def test_article_style_repo_passes_the_full_deploy_bar(tmp_path):
+    """End-to-end: a repo configured the way the fan-out thesis requires clears the deploy gate."""
+    code, out = run(_ts_repo(tmp_path, STRICT_ESLINT, ci=CI_WITH_SCANS), "--phase", "deploy")
+    assert code == 0, out
+    assert "complexity/size bars configured" in out
+    assert "jscpd" in out
+
+
+def test_loose_repo_is_held_at_the_implement_gate(tmp_path):
+    """A lint config alone is not the bar: style-only rules bound nothing, and strict:false plus an
+    unbanned `any` leaves the escape hatch an agent reaches for to turn a build green."""
+    code, out = run(_ts_repo(tmp_path, LOOSE_ESLINT,
+                             tsconfig='{"compilerOptions":{"strict": false}}'), "--phase", "implement")
+    assert code == 10, out
+    assert "complexity-bounded" in out and "type-escapes-closed" in out
+
+
+def test_no_lint_config_at_all_is_held(tmp_path):
+    (tmp_path / "package.json").write_text('{"dependencies":{"a":"1"}}', encoding="utf-8")
+    (tmp_path / "package-lock.json").write_text("{}", encoding="utf-8")
+    (tmp_path / ".nvmrc").write_text("20\n", encoding="utf-8")
+    code, out = run(tmp_path, "--phase", "implement")
+    assert code == 10
+    assert "no lint config" in out
+
+
+def test_strict_typing_without_banning_any_is_held(tmp_path):
+    """strict:true still leaves `any` / @ts-ignore available — the hole is invisible in an unread diff."""
+    code, out = run(_ts_repo(tmp_path, 'export default [{ rules: { "complexity": ["error", 20] } }]'),
+                    "--phase", "implement")
+    assert code == 10, out
+    assert "type-escapes-closed" in out
+
+
+def test_dup_and_dead_code_scan_is_required_only_at_deploy(tmp_path):
+    """Report-only tooling, required late: it catches cross-cutting waste no single diff shows."""
+    repo = _ts_repo(tmp_path, STRICT_ESLINT, ci="jobs:\n  q:\n    runs-on: ubuntu-latest\n    steps:\n      - run: npm test\n"
+                        "  w:\n    runs-on: windows-latest\n    steps:\n      - run: npm test\n")
+    assert run(repo, "--phase", "implement")[0] == 0          # not required yet
+    code, out = run(repo, "--phase", "deploy")
+    assert code == 10 and "dup-dead-code" in out
+
+
+def test_a_repo_with_no_tests_is_held_at_the_test_gate(tmp_path):
+    repo = _ts_repo(tmp_path, STRICT_ESLINT)
+    (repo / "app.test.ts").unlink()
+    code, out = run(repo, "--phase", "test")
+    assert code == 10 and "tests-present" in out
+
+
+def test_non_typescript_repo_is_not_penalised_for_tsconfig(tmp_path):
+    """The type check is n/a for a language with no static type layer — not a silent failure."""
+    (tmp_path / "main.rb").write_text("puts 1", encoding="utf-8")
+    (tmp_path / "Gemfile.lock").write_text("GEM\n", encoding="utf-8")
+    (tmp_path / ".rubocop.yml").write_text("Metrics/MethodLength:\n  Max: 30\n", encoding="utf-8")
+    (tmp_path / ".tool-versions").write_text("ruby 3.3.0\n", encoding="utf-8")
+    (tmp_path / "Gemfile").write_text("gem 'rails'\n", encoding="utf-8")
+    code, out = run(tmp_path, "--phase", "implement")
+    assert code == 0, out
+    assert "type-escapes-closed: no static type layer detected (n/a)" in out, out
+    assert "MethodLength" in out, "rubocop's size bar should satisfy the complexity check"
+
+
+def test_inline_suppression_is_held(tmp_path):
+    """A config exception carries a reason and can expire; an inline one is invisible and immortal —
+    and with nobody reading the diff it is the cheapest way to make a bar stop applying."""
+    repo = _ts_repo(tmp_path, STRICT_ESLINT, ci=CI_WITH_SCANS)
+    (repo / "src").mkdir(exist_ok=True)
+    (repo / "src" / "a.ts").write_text("// @ts-ignore\nconst x: any = 1\n", encoding="utf-8")
+    code, out = run(repo, "--phase", "test")
+    assert code == 10 and "no-inline-suppress" in out, out
+
+
+def test_targeted_coded_ignore_is_allowed(tmp_path):
+    """`# type: ignore[arg-type]` names what it suppresses — that is a scoped exception, not a blanket."""
+    repo = _ts_repo(tmp_path, STRICT_ESLINT, ci=CI_WITH_SCANS)
+    (repo / "helper.py").write_text("x = 1  # type: ignore[arg-type]\n", encoding="utf-8")
+    ok, _ = RL.check_no_inline_suppressions(str(repo))
+    assert ok
+
+
+def test_single_os_ci_is_held_at_deploy(tmp_path):
+    """One platform means no other real machine; platform breakage reaches users first."""
+    repo = _ts_repo(tmp_path, STRICT_ESLINT,
+                    ci="jobs:\n  q:\n    runs-on: ubuntu-latest\n    steps:\n"
+                       "      - run: npx jscpd src\n      - run: npx knip\n")
+    code, out = run(repo, "--phase", "deploy")
+    assert code == 10 and "multi-os-ci" in out, out
+    # not required earlier — it is a deploy-phase bar
+    assert run(repo, "--phase", "test")[0] == 0

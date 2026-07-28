@@ -65,6 +65,47 @@ Two clarifications the repo's own lessons force:
 
 ---
 
+## 0a. The founding artifacts have FIXED filenames — the rule, not a suggestion
+
+Founding (`/org-found`) runs *before* the phase chain: it turns an RFP into the org's scope and
+structure. Its outputs are the base every later phase reads, so they are the one place where **file
+names are part of the contract**. If founding writes `architecture.md` one time and `design-overview.md`
+the next, nothing downstream can find its input without a human pointing at it — a later command, a
+fresh session, or a web harness has to *guess*. That guess is exactly the tacit-not-articulated failure
+the repo exists to prevent, and it breaks reproducibility at its root (§0): two foundings from the same
+RFP must produce the same *addressable* artifacts, not merely similar prose.
+
+So founding writes **exactly these four files, at the org root, under these exact names**:
+
+| File | SDD/lifecycle role | What it holds |
+|---|---|---|
+| `RFP.md` | the received brief | the RFP verbatim (or the brief restated), + the one-sentence purpose. The immutable input the rest traces to. |
+| `FEATURE-INVENTORY.md` | the 洗い出し | every capability the RFP requires, grouped must / should / nice, + the explicit EXCLUDE list |
+| `ARCHITECTURE.md` | **the 全体設計書** — the whole-system design, distinct from any per-task spec | layers/components + the **seam contracts** between them, each in the normalized shape `{deliverable, standard, checker, depends_on}` |
+| `coverage-manifest.md` | the RFP→contract coverage map | one row per must-have: `{rfp_capability, owning_role, deliverable, acceptance}` |
+
+Plus `organization.yaml` (the machine-checkable side of the manifest), which already had a fixed name.
+
+Three consequences that make this load-bearing rather than cosmetic:
+
+- **`ARCHITECTURE.md` is the 全体設計書, and it is NOT an SDD artifact.** SDD's three layers (§4b) —
+  spec / plan / tasks — live in the *Issue hierarchy* and are per-objective and per-task. `ARCHITECTURE.md`
+  sits *above* all of them: it is the whole-system design the objectives are carved out of, authored once
+  at founding and amended at reorg. Keeping it a file (not an Issue) is deliberate — it is not disposable
+  work surface, it is the standing shape of the system. It does not contradict §4b's "no `plan.md` files":
+  that rule forbids **per-task** fragment files, which rot; a single whole-system design does not fragment.
+- **Downstream commands address these by name, not by search.** `/org-decompose` reads
+  `coverage-manifest.md` + `ARCHITECTURE.md` to mint task Issues; `/org-init` scaffolds their paths. A
+  fixed name is what lets a command take the artifact as *input* instead of asking the operator where it is.
+- **The names are the same in every org.** A stranger — or an agent with none of the founding context —
+  opening any orgforge org finds the design in the same place. That is Level-1 reproducibility (§0)
+  applied to the founding artifacts themselves.
+
+`ARCHITECTURE.md` (the org's own repo has one too, describing orgforge) is the whole-system design *of the
+product the org builds*, written into the product/org root — not a copy of this repo's file.
+
+---
+
 ## 1. The seven phases and what each admits
 
 Each phase produces an artifact the next phase depends on, and each transition is a **gate**: the
@@ -78,7 +119,7 @@ The gate is the generalization of docs/03's `output_to: gate → skeptic` and do
 | **design** | an approach + the seams it will touch (`owns:` sets, interfaces) | `design_reviewed` — conforms to the requirement (docs/09 A3 conformance, applied one phase up) |
 | **implement** | the deliverable | the maker's own `judge` (docs/03 §3.1.1 — *not* admission) |
 | **test** | evidence the deliverable meets the acceptance criteria (its own unit tests green) | `admission_decided{admit}` by the **gate**, then `refutation_attempted{survives}` by the **skeptic** (docs/03) — the existing maker→gate→skeptic chain, per-unit |
-| **integrate** | the unit merged into the integration branch (`develop`) and passing the *combined* suite alongside its siblings | `integration_admitted` — the fanned-out siblings build and test **together** green on `develop` (§6). This is where fan-out fans back in; green CI on `develop` is its machine form |
+| **integrate** | the unit merged into the integration branch (`develop`) and passing the *combined* suite alongside its siblings | `integration_admitted` — the fanned-out siblings build and test **together** green on `develop` (§4c). This is where fan-out fans back in; green CI on `develop` is its machine form |
 | **deploy** | the change, live (`develop` → `main`) | `result_deployed` — requires the prior `survives` (today's schema) **and** a healthy reliability budget (docs/05 §reliability-budget); CI/CD is the spine (§3) |
 | **operate** | monitoring, corrective fixes, the realized-outcome record | `outcome_recorded` (docs/05 OUTCOME-DELTA) feeds back to requirements — the loop closes |
 
@@ -201,6 +242,180 @@ command → the same running, tested system" holds for everyone.
 
 ---
 
+## 4e. The unread-safe bar — the diff nobody reads must still be safe to merge
+
+§4a makes the repo reproducible for a stranger. This section addresses a different consequence of the
+same fan-out: **at parallel-agent throughput, no one reads every diff.** Not the CEO, not a reviewing
+agent, not the maker who wrote it. An org running many makers concurrently produces more change per day
+than any reader can absorb, and the honest response is not to read faster or to throttle generation —
+it is to **make the classes of defect that only a careful reader catches impossible to merge**.
+
+This is the repo's own thesis (docs/03 §6.5) applied one level down. The standing lesson is that
+*forcing a judgment* is a design error while *forcing a checkable invariant* is correct. "Review this
+diff carefully" is a judgment, and it degrades silently as volume rises — a reviewer who cannot keep up
+does not announce it, they skim. "No function exceeds N lines" is an invariant: it is either configured
+and enforced, or it is not, and the answer is mechanical.
+
+The bar has four teeth, checked by `repro_lint` at the phase gates (presence of the layer, not its
+verdict — running it is CI's job):
+
+| Tooth | Phase | What it stops |
+|---|---|---|
+| **complexity-bounded** | implement | Unbounded function size / cyclomatic / cognitive complexity / nesting depth. This is the highest-value tooth: an over-long, deeply-nested function is exactly where the defects a reader *would* have caught actually hide, and appending to a working function is the shape an agent produces most readily when the alternative is decomposing. |
+| **type-escapes-closed** | implement | Strict typing off, or `any` / `@ts-ignore` / non-null assertions available. A type checker with open escape hatches is advisory: an agent under pressure to turn a build green will reach for them, and the resulting hole is invisible in a diff nobody reads. |
+| **tests-present** | test | A repo whose CI proves only that the code compiles. Tests are the artifact that *substitutes* for a reader; without them the pipeline verifies nothing about behavior. |
+| **no-inline-suppress** | test | Blanket inline suppressions — `eslint-disable`, `@ts-ignore`, bare `# type: ignore`/`# noqa`. A config-level exception names the file it covers and *why*, and can be audited and expired; an inline one is invisible at review time and immortal. With no reader, it is the cheapest way for an agent to make a bar stop applying. A *targeted* suppression that names its code (`# type: ignore[arg-type]`) is a scoped exception and passes. |
+| **dup-dead-code** | deploy | Parallel makers re-solving each other's problems, and superseded code that is never deleted. Neither appears as a failure in any single diff — only a cross-cutting scan sees them, which is precisely what a reader-less pipeline needs. Report-only is the right default (a blocking duplication gate on day one teaches evasion, not decomposition). |
+| **multi-os-ci** | deploy | Platform-specific breakage — path case-sensitivity, reserved device names, line endings, fs-watch behaviour. A team on one platform has no other real machine, so the second OS *is* the only reader that catches these. A scheduled daily job on a second OS satisfies it; it need not gate every PR. |
+
+Three disciplines the teeth depend on:
+
+- **Drain, then ratchet.** Turning a strict bar on over a red codebase produces a wall of failures and
+  a culture of suppression comments. Land the rule as a warning, drive the count to zero, *then* make
+  it an error. A bar that is on and violated everywhere enforces nothing.
+- **Exceptions live in the config, with a reason.** An inline `eslint-disable` is invisible at review
+  time and immortal — nobody ever deletes one. An exception in the config file carries the file it
+  covers and *why*, and it can be audited and removed when the reason expires.
+- **The org's own gate is not exempt.** The gate and skeptic (docs/03) are the *judgment* layer, and
+  they remain — a different-lineage adversarial reader catches what no linter can (wrong requirement,
+  plausible-but-false reasoning). The mechanical layer does not replace them; it removes from their
+  plate everything a machine can decide, so the scarce judgment is spent where it is irreplaceable.
+
+The relationship to §4a is worth stating plainly: §4a asks *"can a stranger run this?"* — §4e asks
+*"is this safe to merge without anyone reading it?"* An org that fans out needs both, and only the
+second one scales with the number of makers.
+
+---
+
+## 4f. Human review is retired — the Issue becomes the audit record
+
+§4e removes the human from *reading the diff*. This section takes the consequence to its end: **there
+is no human review step at all.** No person reads the change before it merges — not the CEO, not a
+reviewer, not the maker in a second pass. The mechanical bar (§4e), the gate, and the skeptic are the
+entire judgment layer, and CI is the only thing standing between a commit and `develop`.
+
+That is a defensible position at fan-out scale — a reviewer who cannot keep up does not announce it,
+they skim, and a skimmed review is worse than an honest absence because it launders unread code as
+reviewed. But retiring the human removes something real, and pretending otherwise is how this decision
+goes wrong. What it removes is the **account**: when a person approves a change, the approval is a
+record that someone weighed it. Delete the person and, unless something replaces it, the change merges
+with no account of why it was allowed to.
+
+So the trade is explicit: **human review is retired; recording is not optional.** Everything the org
+decides and everything it does lands on the task Issue, in enough detail that someone with none of the
+originating context can reconstruct the merge months later. Two obligations follow, and neither is
+advisory.
+
+### 4f.1 Every judgment is recorded with its reasoning
+
+A verdict without reasoning is a stamp. `admission_decided{verdict: admit}` in the ledger proves a
+decision *happened* and is tamper-evident — it does not say what was weighed, what the alternative was,
+what evidence was consulted, or what risk was knowingly accepted. With a human in the loop that gap was
+survivable because a person remembered. With no human, an unrecorded judgment is indistinguishable from
+no judgment at all.
+
+Judgments therefore **double-write**, exactly as a settled convention does (docs/06, conventions.py):
+the **ledger gets the receipt** (tamper-evident, machine-queryable, hash-chained), the **Issue gets the
+reasoning** (readable, in context, next to the work it judged). The decision lives where it can be
+*inferred*; the ledger records that it happened. `github_sync decide` writes the Issue side and rejects
+reasoning that is empty, verdict-restating, or padding, and **requires `--evidence` for any admitting
+verdict** — an admission with nothing consulted is a stamp however well the prose reads. Be precise
+about what that buys: these are **shape** checks, the same class as `repro_lint`'s. They make the
+laziest degradations impossible; they cannot tell good reasoning from plausible reasoning. The floor is
+enforced, the ceiling is not.
+
+**Who may record a judgment is enforced at the ledger, not asked for.** `admission_decided` and
+`refutation_attempted` carry a distinct-actor predicate: the actor recording a verdict must not be the
+actor who did the work it judges, and the skeptic must differ from the gate. Without that tooth a maker
+could write its own admission and forge the skeptic's `survives`, and the hash chain would then
+*launder* the forgery — a forged verdict is tamper-evidently recorded and verifies clean, which reads as
+stronger evidence than no record at all. This is the runtime half of O6: `org_lint`'s O6 checks the
+*chart* separates maker from checker; a static chart cannot see one process writing both sides at run
+time. With no human able to notice, that check has to happen at write time.
+
+What a recorded judgment carries: the **verdict**, the **reasoning** (what was weighed), the
+**evidence consulted** (the command run and its real output, the CI run, the `repro_lint` verdict), the
+**alternatives rejected and why**, the **standard applied**, and any **risk knowingly accepted**. That
+last field matters most: a gate that admits despite a known hole must say so, or the hole becomes a
+surprise instead of a decision.
+
+**The reasoning is hashed, because a GitHub comment is not tamper-evident.** The ledger is hash-chained;
+an Issue comment is editable and deletable by anyone with write access — including the agents whose work
+it judges. Left there alone, an agent could quietly rewrite its own account (dropping the `--risk` it
+admitted, say) and `ledger verify` would still report the chain intact: the most control-critical record
+in a human-free system, stored in the one place with no integrity property. So `decide` emits a
+`reasoning_sha256` over the judgment's fields, prints it in the comment *and* on stdout, and the ledger
+receipt carries the same digest. Re-hashing the comment later either matches or it does not.
+
+Two honest limits. This makes tampering **detectable, not impossible** — that is what tamper-evidence
+means, and it is the same guarantee the hash chain gives. And detection requires someone to *run* the
+comparison: the digest is written today, the periodic re-hash sweep is not yet an organ. Until it is,
+the property holds on demand rather than continuously.
+
+### 4f.2 The work log is maximally granular
+
+The Issue is the org's primary work surface (it is terminal-independent and survives a context wipe),
+and with review gone it is also the primary audit surface. A log entry that says "progress recorded"
+satisfies the letter of logging and records nothing recoverable — it is the failure mode to design
+against, not a minor lapse.
+
+Log at every step that changed the world or changed the plan, and record what actually happened:
+
+- **the exact command run**, verbatim and re-runnable — not "ran the tests"
+- **what it returned**, the real output including failures. A log that only records successes is a
+  fiction, and the failed attempt is usually the most informative entry in the Issue.
+- **the files created or changed**
+- **the next step** — the field a fresh session resumes from
+- **what is blocking**, if anything
+- **course changes with their cause**: the approach abandoned and what made it wrong. This is what
+  stops the next maker re-deriving the same dead end (it feeds `nearby_deaths`, docs/06).
+
+The bar to hold: **a stranger reading only the Issue can reconstruct what was built, what was tried and
+abandoned, what was run, what came back, and why it was allowed to merge** — without the ledger, without
+the transcript, and without asking anyone. If they cannot, the log is too thin, whatever its volume.
+
+### 4f.3 The objection this must answer: comprehension debt
+
+docs/12 §1 names the Software Factory's defining failure mode — **comprehension debt**: *run the factory
+for months with no human reading output and green tests hide eroding understanding* (Osmani). §4f
+prescribes exactly the condition that doc names as the pathology. That has to be argued, not passed over
+in silence, because the objection is correct as far as it goes: **green tests are not comprehension.**
+
+What §4f actually claims is narrower than "understanding does not matter." It is that *reading every
+diff* was never what produced understanding — at fan-out volume it produces the **appearance** of
+understanding, which is worse than its absence because it licenses trust. A reviewer who cannot keep up
+skims, and a skimmed diff enters the record as reviewed. Retiring the ritual does not create the debt;
+it stops mislabelling it as paid.
+
+But something must actually pay it, and §4f names two things that do — neither of which is "CI is green":
+
+- **The domain model must grow every cycle (§4d).** This is the load-bearing answer. The ledger *rejects*
+  a `cycle_completed` that does not state what the cycle did to the domain model — either a settled rule
+  co-committed with the code, or an explicit `none_asserted` a skeptic can refute. Comprehension debt is
+  precisely the failure to convert work into durable understanding; §4d makes that conversion a
+  **write-time precondition of finishing**, not a discipline someone remembers. A factory that cannot
+  record a completed cycle without saying what it learned is not accruing the debt Osmani describes.
+- **The Issue audit record (§4f.1/§4f.2).** Comprehension is recoverable when the reasoning, the
+  alternatives, the accepted risks, and the failed attempts are written down at the moment they were
+  live. The bar in §4f.2 — a stranger reconstructs the merge from the Issue alone — *is* a
+  comprehension standard, and it is checkable in a way "did someone read it?" never was.
+
+The honest residue: this is an **argued substitution, not a proven one.** docs/12 §5 is right that
+orgforge has not run long enough to have met this failure, and §4f does not change that. What §4f does
+is make the substitution explicit and falsifiable — if the domain model stops growing (§4d's
+`none_asserted` rate climbs) or Issue records thin out toward the floor, the debt is accruing and the
+sensor should say so. Treat that as the open question it is; do not treat green CI as its answer.
+
+### 4f.4 What this does not license
+
+Retiring human review removes a *reading* step; it does not remove the *judgment* layer. The gate and
+the skeptic remain, and their independence remains load-bearing — O6c's distinct-lineage rule matters
+more without a human backstop, not less, because a puppet checker is now the only checker. Nor does it
+license skipping a phase: the mold (§2) is unchanged. And the CEO's charter-tier decisions (founding,
+irreversible moves, scope) are still human — what is retired is diff review, not governance.
+
+---
+
 ## 4d. The domain model must grow every cycle — SDD runs ON a rising context base
 
 The point of SDD in orgforge is not to write specs in a vacuum — it is to implement **on top of a
@@ -278,8 +493,10 @@ runtime):
   must build and pass **together** on `develop`. That green run is `integration_admitted` (the same
   `requires_prior` idiom: `result_deployed` may not fire without it). Green CI on `develop` is the
   machine form of the integrate gate, exactly as green CI on `main` is the machine form of deploy (§3).
-  This is the state a human reviews against: the work is *merged into `develop` and testable there* —
-  not a pile of per-task PRs against `main` that were never assembled.
+  This is the state the org is judged against: the work is *merged into `develop` and testable there* —
+  not a pile of per-task PRs against `main` that were never assembled. With human diff review retired
+  (§4f), this green is not a *precondition* for review — it **is** the verdict, and the reasoning behind
+  admitting it lands on the objective Issue like any other judgment.
 - **who owns it.** No new "integrator" rank (docs/09 §1 forbids minting PM ranks). The **supervising
   manager's A3 accountability** (docs/09 — "verify subordinate work against its contract") is *extended*
   from per-child conformance to the **cross-deliverable integration test on `develop`**: the manager
@@ -287,8 +504,9 @@ runtime):
 - **deploy is `develop` → `main`.** Only an integrated, green `develop` promotes to `main` (deploy, §3),
   keeping the trunk always-shippable (docs/11 §0) with the integration buffer in front of it.
 
-So the hand-back a task submits is a **PR against `develop`** (not `main`), and "done for review" means
-"merged to `develop`, integration-green" — the reviewer reads a develop that actually runs.
+So the hand-back a task submits is a **PR against `develop`** (not `main`), and "done" means "merged to
+`develop`, integration-green, with the integrate verdict and its reasoning recorded on the Issue" (§4f).
+Nobody reads the diff; the assembled, green `develop` plus the recorded judgment is the whole account.
 
 ---
 

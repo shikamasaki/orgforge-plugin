@@ -29,10 +29,29 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 _BUNDLED = os.path.join(HERE, "..", "tools")
 _REPO = os.path.join(HERE, "..", "..", "tools")
 TOOLS = os.environ.get("ORG_TOOLS_DIR", _BUNDLED if os.path.isdir(_BUNDLED) else _REPO)
+def _discover(kind, env_key):
+    """env override, else discovery from the working directory (see tools/discover.py).
+
+    Without this, a session that had not sourced `.envrc` silently got no doctrine, no conventions,
+    and no resume block — the org appeared to have no memory, which reads as "nothing in flight"
+    rather than as a misconfiguration."""
+    env = os.environ.get(env_key, "")
+    if env:
+        return env
+    try:
+        sys.path.insert(0, TOOLS)
+        import discover                                   # noqa: E402  (resolved at runtime)
+        return {"ledger": discover.ledger_root,
+                "doctrine": lambda: discover._sub_root("doctrine"),
+                "conventions": lambda: discover._sub_root("conventions")}[kind]() or ""
+    except Exception:
+        return ""
+
+
 ROLE = os.environ.get("ORG_ROLE", "")
-DOCTRINE_ROOT = os.environ.get("ORG_DOCTRINE_ROOT", "")
-CONV_ROOT = os.environ.get("ORG_CONVENTIONS_ROOT", "")
-LEDGER_ROOT = os.environ.get("ORG_LEDGER_ROOT", "")
+DOCTRINE_ROOT = _discover("doctrine", "ORG_DOCTRINE_ROOT")
+CONV_ROOT = _discover("conventions", "ORG_CONVENTIONS_ROOT")
+LEDGER_ROOT = _discover("ledger", "ORG_LEDGER_ROOT")
 
 
 def _work_in_progress():

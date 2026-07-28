@@ -24,10 +24,19 @@ Commands (all shell out to `gh`, which the host authenticates — the organ does
                                            the UI. --dept tags the owning department.
   stage   --repo R --issue N --stage S     set the lifecycle label (ready|in-progress|blocked|needs-human|done)
   log     --repo R --issue N --event E [--detail T] [--phase P] [--event-id ID]
+          [--command C] [--result R] [--files F] [--next-step S] [--blocked-by B]
                                            append a WORK-LOG comment to a task Issue on a milestone
                                            event (cycle_started/progress_recorded/phase_admitted/
                                            cycle_completed …), so progress accrues on the Issue as it
                                            happens. Idempotent per --event-id (a replay logs once).
+                                           Pass the command run + what it returned: with human review
+                                           retired the Issue is the audit record (docs/11 §4f).
+  decide  --repo R --issue N --event E --verdict V --why TEXT [--by ROLE] [--phase P]
+          [--evidence E] [--alternatives A] [--standard S] [--risk K] [--event-id ID]
+                                           record a JUDGMENT with its REASONING on the Issue. Ledger
+                                           keeps the receipt; the Issue keeps the account of why the
+                                           change was allowed to merge unread. A --why that merely
+                                           restates the verdict is REJECTED (docs/11 §4f).
   ready   --repo R [--kind task|objective|any]
                                            list Issues ready to work (no open dependency, unclaimed);
                                            default lists TASKS only (objectives are parents, not work)
@@ -35,6 +44,17 @@ Commands (all shell out to `gh`, which the host authenticates — the organ does
                                            print the DETERMINISTIC feature branch for a task Issue —
                                            `feat/issue-N-<slug>` off `develop` (docs/11 §4c). --create
                                            also `git checkout -b` it. Same Issue ⇒ same branch (repro).
+  candidate-id --role R --contract C --gap "one-line gap"
+                                           print the DETERMINISTIC candidate_id for a backlog item —
+                                           sha256 over (role, contract_ref, normalized gap) joined on
+                                           \\x1f. Same item ⇒ same id (so a replay dedups); different
+                                           items cannot collide (so neither is silently swallowed).
+  coverage-check --repo R [--manifest coverage-manifest.md]
+                                           DECOMPOSITION COVERAGE gate: every must-have row in the
+                                           founding manifest must have reached >=1 task Issue (traced
+                                           by the `coverage_row:` trailer /org-decompose writes).
+                                           Exit 10 on a gap — a must-have that never became an Issue
+                                           is silently unbuilt (docs/11 §0a).
   split-check --repo R --issue N           SHAPE check: warn (exit 10) if a task Issue is too coarse —
                                            `owns:` spans multiple territories, or a `depends_on:` is
                                            still open (docs/11 §4b). Shape only; sense is the skeptic's.
@@ -52,6 +72,7 @@ Exit: 0 ok / 10 contended-or-blocked (escalate) / 2 usage or gh error.
 """
 import argparse
 import json
+import re
 import subprocess
 import sys
 
@@ -121,14 +142,22 @@ def _ensure_labels(repo, names):
 
 
 def _find_open_issue(repo, title, objective):
-    """Return an existing OPEN Issue number matching this backlog item's natural key (title, and the
-    objective label if given), else None. The backlog projection must be idempotent (docs/11 §0): a
-    replayed discovery/founding cycle, or a web + local session projecting the same ledger, must not
-    mint duplicate Issues."""
-    code, out = gh(["issue", "list", "--repo", repo, "--state", "open",
-                    "--search", title, "--json", "number,title,labels"])
+    """Return an existing Issue number matching this backlog item's natural key (title, and the
+    objective label if given), else None — plus whether it is closed. The backlog projection must be
+    idempotent (docs/11 §0): a replayed discovery/founding cycle, or a web + local session projecting
+    the same ledger, must not mint duplicate Issues.
+
+    Searches `--state all`, NOT just open. A COMPLETED task is CLOSED (`stage done` closes it), so an
+    open-only search makes delivered work invisible: re-running decomposition after a manifest
+    amendment — the documented repair path — would re-mint a fresh Issue for every task already
+    shipped. Matching closed Issues too is what makes 'a second pass fills gaps rather than duplicating
+    the backlog' true for an org that has completed anything.
+
+    Returns (number, state) or (None, None)."""
+    code, out = gh(["issue", "list", "--repo", repo, "--state", "all",
+                    "--search", title, "--json", "number,title,labels,state"])
     if code != 0:
-        return None   # can't check — fall through to create (best effort; a dup is recoverable)
+        return None, None   # can't check — fall through to create (best effort; a dup is recoverable)
     try:
         for it in json.loads(out):
             if it.get("title") != title:
@@ -137,10 +166,10 @@ def _find_open_issue(repo, title, objective):
                 names = [l["name"] for l in it.get("labels", [])]
                 if f"orgforge:objective:{objective}" not in names:
                     continue
-            return it["number"]
+            return it["number"], (it.get("state") or "OPEN").upper()
     except Exception:
-        return None
-    return None
+        return None, None
+    return None, None
 
 
 def _issue_number(url_or_out):
@@ -195,8 +224,13 @@ def cmd_create(a):
     kind = getattr(a, "kind", None) or "task"
     # idempotency (docs/11 §0): if an open Issue with this title (+objective) already exists, this is a
     # replay — return it instead of minting a duplicate.
-    existing = _find_open_issue(a.repo, a.title, a.objective)
+    existing, state = _find_open_issue(a.repo, a.title, a.objective)
     if existing is not None:
+        if state == "CLOSED":
+            # already DELIVERED — re-minting it would duplicate finished work and re-open settled scope
+            print(f"issue #{existing} already exists for {a.title!r} and is CLOSED (delivered) — "
+                  f"idempotent no-op; not re-minting completed work (docs/11 §0).")
+            return 0
         print(f"issue #{existing} already open for {a.title!r} — idempotent no-op (docs/11 §0).")
         # still (re)assert the parent link so a replayed task lands under its objective
         parent = getattr(a, "parent", None)
@@ -275,40 +309,205 @@ def cmd_stage(a):
     return 0
 
 
+def _stable_key(*parts):
+    """A process-stable idempotency marker from the given parts.
+
+    Must NOT use hash(): Python salts str/tuple hashing per interpreter process, so each CLI run would
+    mint a different marker for identical input and the "log this milestone once" guarantee would hold
+    only within a single process — silently false for the replay case it exists to cover."""
+    import hashlib
+    joined = "\x1f".join(str(p) for p in parts)
+    return hashlib.sha256(joined.encode("utf-8")).hexdigest()[:16]
+
+
+def _already_logged(repo, issue, marker):
+    """True if a comment carrying this hidden marker is already on the Issue (idempotency, docs/11 §0)."""
+    code, out = gh(["issue", "view", str(issue), "--repo", repo, "--json", "comments"])
+    if code != 0:
+        return False   # can't read — fall through and post (a rare dup is recoverable)
+    try:
+        return any(marker in (c.get("body") or "") for c in json.loads(out).get("comments", []))
+    except Exception:
+        return False
+
+
 def cmd_log(a):
     """Append a WORK-LOG comment to a task Issue on a milestone event (cycle_started, progress_recorded,
     phase_admitted, cycle_completed, …). The ledger stays the SSoT — this comment is its projection onto
-    the Issue so the human (on a phone) sees progress accrue without opening the ledger.
+    the Issue so the CEO sees progress accrue without opening the ledger.
+
+    With human diff review retired (docs/11 §4f), the Issue is the org's PRIMARY audit surface: what was
+    tried, what was run, what came back, what changed course and why. So this command takes the detail
+    fields that make a log entry reconstructable by someone who was never in the session — the command
+    that was run and its result, the files touched, the next step. Terse logs ("progress recorded") are
+    the failure mode; they satisfy the letter of logging while recording nothing recoverable.
 
     IDEMPOTENT (docs/11 §0): each comment carries a hidden marker `<!-- orgforge:event:<id> -->`. If a
     comment with this event id already exists on the Issue, we no-op — a replayed/retried cycle logs the
     same milestone once, never twice. Pass --event-id (the ledger event's id) to key the dedup; without
     it we fall back to a hash of (event, detail)."""
-    marker_key = a.event_id or ("h" + str(abs(hash((a.event, a.detail or "")))))
+    # sha256, NOT hash(): Python salts hash() per process (PYTHONHASHSEED), so a CLI marker built from
+    # hash() differs on every invocation and the dedup NEVER fires across runs — a retried cycle
+    # double-posts while the docstring promises "logs once, never twice".
+    marker_key = a.event_id or _stable_key(a.event, a.detail or "", a.phase or "")
     marker = f"<!-- orgforge:event:{marker_key} -->"
-    # dedup: has this milestone already been logged on the Issue?
-    code, out = gh(["issue", "view", str(a.issue), "--repo", a.repo, "--json", "comments"])
-    if code == 0:
-        try:
-            for c in json.loads(out).get("comments", []):
-                if marker in (c.get("body") or ""):
-                    print(f"log: event {marker_key} already on issue #{a.issue} — idempotent no-op "
-                          f"(docs/11 §0).")
-                    return 0
-        except Exception:
-            pass   # can't read comments — fall through and post (a rare dup is recoverable)
+    if _already_logged(a.repo, a.issue, marker):
+        print(f"log: event {marker_key} already on issue #{a.issue} — idempotent no-op (docs/11 §0).")
+        return 0
     # the visible line: a compact, human-readable milestone. detail is optional free text.
     line = f"**{a.event}**"
     if a.phase:
         line += f" · phase: `{a.phase}`"
     if a.detail:
         line += f" — {a.detail}"
-    body = f"{line}\n\n{marker}"
+    parts = [line]
+    # the reconstructable detail: what was actually run, what came back, what moved.
+    if getattr(a, "command", None):
+        result = getattr(a, "result", None)
+        parts.append(f"\n**Ran:**\n```\n{a.command}\n```")
+        if result:
+            parts.append(f"**Result:**\n```\n{result}\n```")
+    for label, val in (("Files", getattr(a, "files", None)),
+                       ("Next step", getattr(a, "next_step", None)),
+                       ("Blocked by", getattr(a, "blocked_by", None))):
+        if val:
+            parts.append(f"**{label}:** {val}")
+    body = "\n".join(parts) + f"\n\n{marker}"
     code, out = gh(["issue", "comment", str(a.issue), "--repo", a.repo, "--body", body])
     if code != 0:
         print(f"gh error posting work-log comment: {out}", file=sys.stderr)
         return 2
     print(f"logged {a.event} to issue #{a.issue}.")
+    return 0
+
+
+# the judgment classes that must land on the Issue with their reasoning (docs/11 §4f)
+DECISIONS = ("admission_decided", "refutation_attempted", "phase_admitted", "conformance_reviewed",
+             "integration_admitted", "deploy_decided", "rework_requested", "scope_decided",
+             "design_decided", "tradeoff_decided")
+
+
+def _reasoning_digest(*fields):
+    """A stable digest over a judgment's reasoning fields — the tamper-evidence anchor (docs/11 §4f.1).
+
+    Normalizes whitespace so a cosmetic reflow does not read as tampering, while any change to the
+    substance (a dropped `--risk`, a rewritten `--why`) changes the digest."""
+    import hashlib
+    norm = "\x1f".join(re.sub(r"\s+", " ", (f or "").strip()) for f in fields)
+    return hashlib.sha256(norm.encode("utf-8")).hexdigest()[:32]
+
+
+def _reasoning_defect(why, verdict, event):
+    """Return a defect phrase if `why` is not actual reasoning, else None.
+
+    A pure length bound fails in both directions and must not be used alone:
+      · it PASSES `"admit admit admit admit admit"` — the literal restatement it exists to reject;
+      · it REJECTS `「全テスト通過を確認。cap近傍の並行joinは未検証」` — substantive reasoning that is
+        short in codepoints because Japanese carries ~2-3x the information per character, and the org's
+        default output_language is ja. Measuring bytes rather than codepoints fixes the CJK half.
+    So: require some substance by BYTE length, then reject text that is only verdict/filler tokens."""
+    if not why:
+        return "is required — a verdict with no reasoning is a stamp."
+    if len(why.encode("utf-8")) < 24:
+        return "is too short to be an account of the decision."
+    # strip punctuation, then see whether anything remains beyond verdict words and filler
+    words = re.findall(r"[^\W\d_]+", why.lower(), flags=re.UNICODE)
+    if not words:
+        return "contains no words — punctuation or padding is not reasoning."
+    filler = {verdict.lower(), event.lower(), "the", "is", "it", "this", "was", "a", "an", "and",
+              "ok", "okay", "fine", "good", "looks", "lgtm", "pass", "passed", "passes", "green",
+              "admit", "admitted", "approve", "approved", "yes", "no", "all", "to", "me", "verdict"}
+    substantive = [w for w in words if w not in filler]
+    if not substantive:
+        return ("only restates the verdict — that is exactly the rubber stamp this check exists to "
+                "reject.")
+    if len(set(words)) <= 2 and len(words) >= 4:
+        return "is one phrase repeated to clear a length bar, not reasoning."
+    # keyboard-mash padding: almost no distinct characters across the whole text
+    if len(set(why.replace(" ", ""))) <= 3:
+        return "is padding, not an account of the decision."
+    return None
+
+
+def cmd_decide(a):
+    """Record a JUDGMENT on the task Issue — the verdict AND the reasoning that produced it.
+
+    Human diff review is retired (docs/11 §4f): no person reads the change before it merges. That makes
+    the machine's own judgments the only judgments, and an unrecorded judgment is then indistinguishable
+    from no judgment at all. A ledger `admission_decided{verdict: admit}` proves a decision HAPPENED and
+    is tamper-evident; it does not say what was weighed, what the alternative was, or what evidence was
+    consulted — and that is exactly what someone auditing the merge six weeks later needs.
+
+    So every judgment double-writes, the same way a settled convention does (conventions.py): the ledger
+    gets the RECEIPT (tamper-evident, machine-queryable), the Issue gets the REASONING (readable, in
+    context, next to the work it judged). The Issue is where a decision can actually be inferred later.
+
+    A verdict with an empty or contentless --why is rejected — a bare "admit" is the failure mode this
+    command exists to prevent, and accepting it would let the audit trail degrade back into a stamp.
+    Admitting also requires --evidence: an admission with nothing consulted IS the stamp."""
+    if a.event not in DECISIONS:
+        print(f"decide: --event must be a judgment class {DECISIONS}; got {a.event!r}. "
+              f"For a progress milestone use `log`.", file=sys.stderr)
+        return 2
+    why = (a.why or "").strip()
+    bad = _reasoning_defect(why, a.verdict, a.event)
+    if bad:
+        print(f"decide: --why {bad} With human review retired, this text is the only account of why "
+              f"the change was allowed to merge (docs/11 §4f). Say what was weighed and what evidence "
+              f"decided it.", file=sys.stderr)
+        return 2
+    # An admission with no evidence consulted is a stamp regardless of how well the prose reads.
+    if a.verdict in ("admit", "pass", "survives", "conforms") and not (a.evidence or "").strip():
+        print(f"decide: --evidence is required for verdict {a.verdict!r}. Naming what you actually "
+              f"consulted (the command you ran and its real output, the CI run, the repro_lint verdict) "
+              f"is what separates a judgment from a stamp — and nobody read the diff (docs/11 §4f).",
+              file=sys.stderr)
+        return 2
+    marker_key = a.event_id or _stable_key(a.event, a.verdict, why)   # sha256; see cmd_log
+    marker = f"<!-- orgforge:decision:{marker_key} -->"
+    if _already_logged(a.repo, a.issue, marker):
+        print(f"decide: decision {marker_key} already on issue #{a.issue} — idempotent no-op.")
+        return 0
+    icon = {"admit": "✅", "pass": "✅", "survives": "✅", "conforms": "✅",
+            "reject": "⛔", "refuted": "⛔", "fail": "⛔",
+            "rework": "🔁", "park": "⏸️", "freeze": "🧊"}.get(a.verdict, "•")
+    parts = [f"## {icon} {a.event} — `{a.verdict}`"]
+    if a.by:
+        parts.append(f"**Decided by:** `{a.by}`" + (f" · **phase:** `{a.phase}`" if a.phase else ""))
+    elif a.phase:
+        parts.append(f"**Phase:** `{a.phase}`")
+    parts.append(f"\n**Why (the reasoning):**\n{why}")
+    if getattr(a, "evidence", None):
+        parts.append(f"\n**Evidence consulted:**\n{a.evidence}")
+    if getattr(a, "alternatives", None):
+        parts.append(f"\n**Alternatives considered and rejected:**\n{a.alternatives}")
+    if getattr(a, "standard", None):
+        parts.append(f"\n**Standard applied:** {a.standard}")
+    if getattr(a, "risk", None):
+        parts.append(f"\n**Known risk accepted:** {a.risk}")
+    # TAMPER EVIDENCE (docs/11 §4f.1). A GitHub comment is editable and deletable by anyone with write
+    # access — including the agents this record judges — while the ledger is hash-chained. Without a
+    # digest an agent could silently rewrite its own account (dropping the --risk it admitted, say) and
+    # `ledger verify` would still report the chain intact. So the reasoning is hashed here and the digest
+    # is printed for the caller to carry into the ledger receipt as `reasoning_sha256`: re-hashing the
+    # comment later either matches, or the account was altered. It does not PREVENT the edit; it makes
+    # the edit detectable, which is what "tamper-evident" means.
+    digest = _reasoning_digest(why, a.evidence, a.alternatives, a.standard, a.risk)
+    parts.append(f"\n`reasoning_sha256: {digest}` — re-hash this record's fields to detect an edit; "
+                 f"the ledger receipt carries the same digest.")
+    parts.append("\n_No human reviewed this change before merge (docs/11 §4f). This record is the "
+                 "account of why it was allowed to._")
+    body = "\n".join(parts) + f"\n\n{marker}"
+    code, out = gh(["issue", "comment", str(a.issue), "--repo", a.repo, "--body", body])
+    if code != 0:
+        print(f"gh error posting decision comment: {out}", file=sys.stderr)
+        return 2
+    print(f"recorded decision {a.event}={a.verdict} on issue #{a.issue}.")
+    print(f"reasoning_sha256={digest}")
+    print(f"NEXT: put this digest in the ledger receipt so the account is tamper-EVIDENT — "
+          f"append {a.event} with `\"reasoning_sha256\": \"{digest}\"` and "
+          f"`\"issue\": {a.issue}` in the payload. Without it, an edited or deleted comment is "
+          f"undetectable and `ledger verify` still reports the chain intact (docs/11 §4f.1).")
     return 0
 
 
@@ -426,6 +625,168 @@ def cmd_split_check(a):
     return 0
 
 
+def cmd_candidate_id(a):
+    """Derive a backlog candidate's id DETERMINISTICALLY from what it IS (docs/11 §0, reproducibility F4).
+
+    `candidate_id` is the backlog/dedup/WIP key and the ledger's `--natural-key`. If it were authored
+    freely, running discovery/decomposition twice on the same gap would mint two ids — the same spec +
+    ledger would yield a different backlog, and a replay would duplicate rather than no-op. So the id is
+    a pure function of (role, contract_ref, gap), normalized (lowercased, whitespace-collapsed) so that
+    casing/spacing differences do not change it — only a genuinely different gap does.
+
+    This lives in a tool rather than in each command's prose because the fields are joined on a UNIT
+    SEPARATOR (\\x1f): an unambiguous delimiter that cannot appear in a title, so ("auth","obj1") and
+    ("aut","hobj1") cannot collide into one id. A shell-echoed one-liner loses that byte (echo eats the
+    escape) and silently degrades to bare concatenation — which collides, and a collision means the
+    second task's ledger append is swallowed as an idempotent replay and it never enters the backlog."""
+    import hashlib
+    import re
+    norm = re.sub(r"\s+", " ", a.gap.strip().lower())
+    key = "\x1f".join([a.role, a.contract, norm])
+    print("cand-" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:12])
+    return 0
+
+
+def _manifest_rows(path):
+    """Parse coverage-manifest.md (docs/11 §0a, the FIXED name) into rows.
+
+    The manifest is a markdown table whose columns are {rfp_capability, owning_role, deliverable,
+    acceptance} — the RFP→contract coverage map /org-found emits. We read the header to locate the
+    columns by NAME (not position), so a manifest that adds a column still parses. Rows whose
+    rfp_capability cell is empty or a separator are skipped.
+
+    A non-table line ENDS the table. This matters: /org-found emits an explicit EXCLUDE list alongside
+    the manifest, so a second table below it is expected. Without the reset, that table's rows would be
+    read as must-haves — and since the decomposition agent is told to work until coverage-check is
+    green, it would mint task Issues for exactly the scope the CEO cut. A table is a contiguous block of
+    `|` lines; anything else closes it."""
+    import io
+    rows = []
+    with io.open(path, encoding="utf-8") as fh:
+        header, idx = None, {}
+        for line in fh:
+            if not line.lstrip().startswith("|"):
+                header, idx = None, {}     # blank/prose line ends this table (see docstring)
+                continue
+            cells = [c.strip().strip("`*") for c in line.strip().strip("|").split("|")]
+            if header is None:
+                header = [c.lower().replace(" ", "_") for c in cells]
+                idx = {name: i for i, name in enumerate(header)}
+                if "rfp_capability" not in idx:      # not the manifest table — keep looking
+                    header = None
+                continue
+            if all(set(c) <= set("-: ") for c in cells):
+                continue                              # the |---|---| separator
+            def get(name):
+                i = idx.get(name)
+                return cells[i] if i is not None and i < len(cells) else ""
+            cap = get("rfp_capability")
+            if not cap or cap.startswith("<"):
+                continue
+            rows.append({"rfp_capability": cap, "owning_role": get("owning_role"),
+                         "deliverable": get("deliverable"), "acceptance": get("acceptance")})
+    return rows
+
+
+def cmd_coverage_check(a):
+    """DECOMPOSITION COVERAGE gate (docs/11 §0a/§4b): every must-have row in coverage-manifest.md must
+    have reached at least one open-or-closed task Issue, and every such Issue must trace back to a row.
+
+    /org-found's O10 lint proves each must-have has ONE owning contract; that is coverage at the
+    *design* layer. This is the same guarantee one layer down, at the *decomposition* layer: a
+    must-have that never became a task Issue is silently unbuilt — the coverage gap reappears exactly
+    where it is hardest to see. The trace key is the `coverage_row:` trailer /org-decompose writes into
+    each task Issue body (the rfp_capability verbatim), so the check is mechanical, not fuzzy-matched.
+
+    Exit 0 = every must-have covered · 10 = uncovered rows (or orphan Issues) · 2 = usage/gh error."""
+    try:
+        rows = _manifest_rows(a.manifest)
+    except OSError as e:
+        print(f"cannot read manifest {a.manifest}: {e}", file=sys.stderr)
+        return 2
+    if not rows:
+        print(f"no manifest rows parsed from {a.manifest} — expected a markdown table with an "
+              f"`rfp_capability` column (docs/11 §0a).", file=sys.stderr)
+        return 2
+    code, out = gh(["issue", "list", "--repo", a.repo, "--label", "orgforge:kind:task",
+                    "--state", "all", "--limit", "500", "--json", "number,title,body,state,labels"])
+    if code != 0:
+        print(f"gh error listing task Issues: {out}", file=sys.stderr)
+        return 2
+    try:
+        issues = json.loads(out)
+    except Exception as e:
+        print(f"parse: {e}", file=sys.stderr)
+        return 2
+
+    def covered_rows(body):
+        """The coverage_row: trailers in an Issue body (one Issue may serve several rows).
+
+        Strip the markdown decoration BEFORE splitting on the colon: an agent writing the Issue body in
+        the org's output_language naturally bolds a label (`**coverage_row:** X`), and splitting the raw
+        line would yield "** X" → " X" — a leading space that fails the exact match, reporting a GAP for
+        a row that is in fact covered and sending the operator to mint a duplicate Issue."""
+        found = []
+        for line in (body or "").splitlines():
+            clean = line.strip().lstrip("*-`> ")
+            if clean.lower().startswith("coverage_row:"):
+                val = clean.split(":", 1)[1].strip().strip("`* ")
+                if val:
+                    found.append(val)
+        return found
+
+    claimed = {}
+    orphans = []           # any task Issue with no trailer (self-raised items legitimately have none)
+    mandate_orphans = []   # RFP-derived (orgforge:mandate) with no trailer — that IS a defect
+    for it in issues:
+        cs = covered_rows(it.get("body"))
+        if not cs:
+            names = [l.get("name", "") for l in (it.get("labels") or [])]
+            (mandate_orphans if "orgforge:mandate" in names else orphans).append(it["number"])
+        for c in cs:
+            claimed.setdefault(c, []).append(it["number"])
+
+    uncovered = [r for r in rows if r["rfp_capability"] not in claimed]
+    unknown = sorted(set(claimed) - {r["rfp_capability"] for r in rows})
+
+    for r in rows:
+        hits = claimed.get(r["rfp_capability"], [])
+        mark = "ok " if hits else "GAP"
+        where = ", ".join(f"#{n}" for n in hits) if hits else "— no task Issue"
+        print(f"  [{mark}] {r['rfp_capability']}  ({r['owning_role'] or '?'})  → {where}")
+    print(f"\n{len(rows) - len(uncovered)}/{len(rows)} must-have rows covered by task Issues.")
+    rc = 0
+    if uncovered:
+        print(f"\nCOVERAGE GAP — {len(uncovered)} must-have(s) never became a task Issue:", file=sys.stderr)
+        for r in uncovered:
+            print(f"  · {r['rfp_capability']} (owner: {r['owning_role'] or '?'})", file=sys.stderr)
+        print("Decompose these before starting work — an unowned must-have is silently unbuilt "
+              "(docs/11 §0a).", file=sys.stderr)
+        rc = 10
+    if unknown:
+        print(f"\nORPHAN trailers — coverage_row values matching no manifest row: {unknown}",
+              file=sys.stderr)
+        print("Either the manifest changed or a trailer is mistyped; the trailer must be the "
+              "rfp_capability verbatim.", file=sys.stderr)
+        rc = 10
+    if mandate_orphans:
+        # An RFP-derived task (source: mandate) with NO trailer at all is the likeliest decomposition
+        # mistake, and the one the row-side check cannot see: if some OTHER Issue happens to cover the
+        # same row, the manifest reads green while this task floats unattached to any requirement.
+        # A mistyped trailer already fails as an orphan; a MISSING one must fail the same way.
+        print(f"\nUNTRACED MANDATE TASKS — {len(mandate_orphans)} RFP-derived task Issue(s) carry no "
+              f"`coverage_row:` trailer: {', '.join('#' + str(n) for n in mandate_orphans)}",
+              file=sys.stderr)
+        print("Every orgforge:mandate task must name the manifest row it serves (docs/11 §0a). Add the "
+              "trailer, or relabel it orgforge:self if it is genuinely self-raised.", file=sys.stderr)
+        rc = 10
+    if orphans:
+        print(f"\nNOTE: {len(orphans)} task Issue(s) carry no `coverage_row:` trailer "
+              f"({', '.join('#' + str(n) for n in orphans[:10])}{' …' if len(orphans) > 10 else ''}) — "
+              f"self-raised items from /org-discover are expected here; RFP-derived tasks are not.")
+    return rc
+
+
 def cmd_ready(a):
     # list open Issues labeled orgforge:ready, unclaimed, with no open dependency
     code, out = gh(["issue", "list", "--repo", a.repo, "--label", "orgforge:ready",
@@ -475,10 +836,10 @@ def main(argv):
     sub = p.add_subparsers(dest="cmd", required=True)
     for name in ("claim", "release"):
         q = sub.add_parser(name)
-        q.add_argument("--repo", required=True); q.add_argument("--issue", required=True, type=int)
+        q.add_argument("--repo", help="owner/name（省略時は git remote origin から自動発見）"); q.add_argument("--issue", required=True, type=int)
         q.add_argument("--agent", required=True)
     q = sub.add_parser("create")
-    q.add_argument("--repo", required=True); q.add_argument("--title", required=True)
+    q.add_argument("--repo", help="owner/name（省略時は git remote origin から自動発見）"); q.add_argument("--title", required=True)
     q.add_argument("--body"); q.add_argument("--objective"); q.add_argument("--source")
     q.add_argument("--depends"); q.add_argument("--priority", type=int)
     q.add_argument("--kind", choices=("objective", "task"), default="task",
@@ -488,14 +849,14 @@ def main(argv):
     q.add_argument("--parent", help="parent Issue number: link this task as a NATIVE GitHub sub-issue "
                                     "of that objective (GitHub shows the hierarchy + progress roll-up)")
     q = sub.add_parser("stage")
-    q.add_argument("--repo", required=True); q.add_argument("--issue", required=True, type=int)
+    q.add_argument("--repo", help="owner/name（省略時は git remote origin から自動発見）"); q.add_argument("--issue", required=True, type=int)
     q.add_argument("--stage", required=True)
-    q = sub.add_parser("ready"); q.add_argument("--repo", required=True)
+    q = sub.add_parser("ready"); q.add_argument("--repo", help="owner/name（省略時は git remote origin から自動発見）")
     q.add_argument("--kind", choices=("task", "objective", "any"), default="task",
                    help="which kind of Issue to list as ready (default: task — objectives are "
                         "parent/roll-up Issues, not claimable units of work)")
     q = sub.add_parser("log")
-    q.add_argument("--repo", required=True); q.add_argument("--issue", required=True, type=int)
+    q.add_argument("--repo", help="owner/name（省略時は git remote origin から自動発見）"); q.add_argument("--issue", required=True, type=int)
     q.add_argument("--event", required=True,
                    help="the milestone ledger event class (cycle_started, progress_recorded, "
                         "phase_admitted, cycle_completed, …)")
@@ -503,17 +864,60 @@ def main(argv):
     q.add_argument("--phase", help="the SDLC phase, if this milestone is a phase transition")
     q.add_argument("--event-id", dest="event_id",
                    help="the ledger event's id — keys the idempotent dedup so a replay logs once")
+    q.add_argument("--command", help="the exact command run at this step (verbatim, so it is re-runnable)")
+    q.add_argument("--result", help="what that command returned — the real output, not 'it worked'")
+    q.add_argument("--files", help="the files created/changed at this step")
+    q.add_argument("--next-step", dest="next_step", help="what happens next (what a fresh session resumes from)")
+    q.add_argument("--blocked-by", dest="blocked_by", help="what is blocking, if anything")
+    q = sub.add_parser("decide")
+    q.add_argument("--repo", help="owner/name（省略時は git remote origin から自動発見）"); q.add_argument("--issue", required=True, type=int)
+    q.add_argument("--event", required=True, help=f"the judgment class, one of {DECISIONS}")
+    q.add_argument("--verdict", required=True, help="admit|reject|pass|rework|survives|refuted|park|…")
+    q.add_argument("--why", required=True,
+                   help="THE REASONING that produced the verdict — what was weighed and what evidence "
+                        "decided it. With human review retired this is the only account of why the "
+                        "change merged; a restatement of the verdict is rejected (docs/11 §4f)")
+    q.add_argument("--by", help="the role that decided (gate, skeptic, registrar, …)")
+    q.add_argument("--phase", help="the SDLC phase this judgment gates")
+    q.add_argument("--evidence", help="what was consulted — test output, CI run, repro_lint verdict, files read")
+    q.add_argument("--alternatives", help="the options considered and why they were rejected")
+    q.add_argument("--standard", help="the acceptance standard applied (the bar, not a vibe)")
+    q.add_argument("--risk", help="a known risk knowingly accepted by this decision")
+    q.add_argument("--event-id", dest="event_id", help="the ledger event's id — keys the idempotent dedup")
     q = sub.add_parser("branch")
-    q.add_argument("--repo", required=True); q.add_argument("--issue", required=True, type=int)
+    q.add_argument("--repo", help="owner/name（省略時は git remote origin から自動発見）"); q.add_argument("--issue", required=True, type=int)
     q.add_argument("--create", action="store_true",
                    help="also `git checkout -b <name> <base>` in the current repo (idempotent)")
     q.add_argument("--base", help="the branch to fork from (default: develop, docs/11 §4c)")
     q = sub.add_parser("split-check")
-    q.add_argument("--repo", required=True); q.add_argument("--issue", required=True, type=int)
+    q.add_argument("--repo", help="owner/name（省略時は git remote origin から自動発見）"); q.add_argument("--issue", required=True, type=int)
+    q = sub.add_parser("candidate-id")
+    q.add_argument("--role", required=True, help="the maker/department that owns the item")
+    q.add_argument("--contract", required=True, help="contract_ref — the objective this item serves")
+    q.add_argument("--gap", required=True, help="a SHORT one-line description of the gap/deliverable")
+    q = sub.add_parser("coverage-check")
+    q.add_argument("--repo", help="owner/name（省略時は git remote origin から自動発見）")
+    q.add_argument("--manifest", default="coverage-manifest.md",
+                   help="path to the founding coverage manifest (docs/11 §0a fixes the name)")
     a = p.parse_args(argv[1:])
+    # --repo は省略可能: 省略時は git remote origin から発見する（.envrc 不要）。
+    # バックログ Issue の所在はチェックアウトを見れば分かる事実であって、operator が
+    # 書き写す設定ではない — 書き写しは手順であり、飛ばされ、別マシンでずれる。
+    if getattr(a, "repo", None) is None:
+        import os as _os
+        _here = _os.path.dirname(_os.path.abspath(__file__))
+        sys.path.insert(0, _here)
+        import discover as _d
+        a.repo = _d.backlog_repo()
+        if not a.repo:
+            print("no --repo given and no GitHub remote found — pass --repo owner/name, or "
+                  "run inside a checkout whose origin is a GitHub repo.", file=sys.stderr)
+            return 2
     return {"claim": cmd_claim, "release": cmd_release, "create": cmd_create,
             "stage": cmd_stage, "ready": cmd_ready, "log": cmd_log,
-            "branch": cmd_branch, "split-check": cmd_split_check}[a.cmd](a)
+            "branch": cmd_branch, "split-check": cmd_split_check,
+            "coverage-check": cmd_coverage_check,
+            "candidate-id": cmd_candidate_id, "decide": cmd_decide}[a.cmd](a)
 
 
 if __name__ == "__main__":

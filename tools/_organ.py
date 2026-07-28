@@ -29,6 +29,33 @@ ESCALATE = 10   # exit: the exception surfaced — host enqueues / pages / halts
 OK = 0          # exit: fail-quiet — nothing surfaces
 
 
+def resolve_root(root=None):
+    """Resolve a ledger root: the explicit argument wins, else DISCOVER it from the working directory.
+
+    Every organ takes `root` as a positional argument, and until now the only way to fill it was to
+    know the path — which pushed the knowledge into `.envrc`, into absolute paths, and therefore into
+    one machine. Since an org is a place on disk (`.orgforge/ledger` beside `organization.yaml`), the
+    organs can find it themselves; passing `root` explicitly stays supported and still wins, for a
+    ledger deliberately kept elsewhere or pinned in CI.
+
+    Raises SystemExit(2) with an actionable message when there is no org to find, rather than
+    silently operating on a wrong or empty path."""
+    if root:
+        return root
+    try:
+        import discover
+    except ImportError:
+        _sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import discover
+    found = discover.ledger_root()
+    if not found:
+        print("no ledger root given and none discoverable from "
+              f"{os.getcwd()} — run this inside an org (a directory with organization.yaml or "
+              ".orgforge/), or pass the root explicitly.", file=_sys.stderr)
+        raise SystemExit(2)
+    return found
+
+
 def ledger_path(root):
     return os.path.join(root, "ledger.jsonl")
 
@@ -42,11 +69,14 @@ class LedgerCorruption(Exception):
         super().__init__(f"malformed ledger line {lineno}: not valid JSON")
 
 
-def read_events(root):
+def read_events(root=None):
     """Read the append-only ledger into a list of event dicts (empty if it doesn't exist yet).
     A malformed line raises LedgerCorruption — a non-JSON line IS tamper evidence; integrity
-    checkers catch it and report BROKEN rather than crashing (external review, 2026-07)."""
-    log = ledger_path(root)
+    checkers catch it and report BROKEN rather than crashing (external review, 2026-07).
+
+    `root` may be omitted: every organ funnels its reads through here, so resolving it in one place
+    makes the whole tool surface work from inside an org with no environment set up."""
+    log = ledger_path(resolve_root(root))
     if not os.path.exists(log):
         return []
     out = []

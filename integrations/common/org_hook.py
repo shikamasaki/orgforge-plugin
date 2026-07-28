@@ -66,7 +66,26 @@ _BUNDLED = os.path.join(HERE, "..", "tools")
 _REPO = os.path.join(HERE, "..", "..", "tools")
 TOOLS_DIR = os.environ.get("ORG_TOOLS_DIR",
                            _BUNDLED if os.path.isdir(_BUNDLED) else _REPO)
-LEDGER_ROOT = os.environ.get("ORG_LEDGER_ROOT", "")
+def _discover_ledger():
+    """The ledger root: env override, else DISCOVERED from the working directory.
+
+    The guardrail is off when it cannot find a ledger, so requiring `.envrc` to be sourced meant a
+    session that forgot it ran UNGATED — the failure mode is silent permissiveness, exactly what a
+    guardrail must not have. An org is a place on disk (`.orgforge/` beside `organization.yaml`), so
+    the hook finds it the same way it already finds its own tools/ dir. Env still wins, for a ledger
+    deliberately kept outside the checkout or pinned in CI."""
+    env = os.environ.get("ORG_LEDGER_ROOT", "")
+    if env:
+        return env
+    try:
+        sys.path.insert(0, TOOLS_DIR)
+        import discover                                   # noqa: E402  (resolved at runtime)
+        return discover.ledger_root() or ""
+    except Exception:
+        return ""                                          # discovery must never break the hook
+
+
+LEDGER_ROOT = _discover_ledger()
 FAIL_OPEN = os.environ.get("ORG_HOOK_FAIL_OPEN") == "1"
 
 

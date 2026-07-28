@@ -36,6 +36,13 @@ def seed(root, actor, cls, payload, ts="2026-07-16T00:00:00Z"):
     # that don't care about the domain-model gate, so they don't all have to spell it out.
     if cls == "cycle_completed" and "domain_model" not in payload:
         payload = {**payload, "domain_model": {"none_asserted": "test seed"}}
+    # phase_admitted now requires its own phase_started (docs/11 §2 — a phase cannot be admitted
+    # without having been entered). Seeding an admission therefore implies seeding its start, so a
+    # fixture that only cares about the *admitted* state doesn't have to spell both out.
+    if cls == "phase_admitted":
+        run("ledger.py", "append", str(root), "--actor", actor, "--class", "phase_started",
+            "--payload", json.dumps({"deliverable": payload.get("deliverable"),
+                                     "phase": payload.get("phase"), "role": actor}), "--ts", ts)
     code, out = run("ledger.py", "append", str(root), "--actor", actor,
                     "--class", cls, "--payload", json.dumps(payload), "--ts", ts)
     assert code == 0, f"seed failed: {out}"
@@ -715,3 +722,103 @@ def test_status_redline_emits_on_red(tmp_path):
          {"cause": "null", "occurrences": 2, "candidate_ids": ["A", "B"]}, ts="2026-07-16T01:00:00Z")
     code, out = run("status.py", "redline", str(tmp_path))
     assert code == 0 and out.startswith("RED — org needs you")
+
+
+# ── runtime separation of duties (docs/03 §3.1, docs/11 §4f) ─────────────────
+# REQUIRES_PRIOR asks whether the right events happened in the right order; it never asked WHO wrote
+# them. That was survivable while a human read the diff. With human review retired the gate and skeptic
+# are the only judges left, so an actor able to write its own admission IS the entire judgment layer —
+# and the hash chain then LAUNDERS the forgery, since a forged verdict verifies clean.
+def test_maker_cannot_admit_its_own_work(tmp_path):
+    root = tmp_path / "l"
+    seed(root, "maker-alice", "cycle_started",
+         {"role": "maker-alice", "candidate_id": "c1", "pack_manifest_id": "p"})
+    code, out = run("ledger.py", "append", str(root), "--actor", "maker-alice",
+                    "--class", "admission_decided",
+                    "--payload", json.dumps({"gate": "gate", "candidate_id": "c1",
+                                             "verdict": "admit", "standard_ref": "s",
+                                             "evidence": ["e"]}))
+    assert code == 3, out
+    assert "already acted as cycle_started" in out
+
+
+def test_maker_cannot_forge_the_skeptics_survives(tmp_path):
+    root = tmp_path / "l"
+    seed(root, "maker-alice", "cycle_started",
+         {"role": "maker-alice", "candidate_id": "c1", "pack_manifest_id": "p"})
+    code, out = run("ledger.py", "append", str(root), "--actor", "maker-alice",
+                    "--class", "refutation_attempted",
+                    "--payload", json.dumps({"skeptic": "skeptic", "claim_id": "c1",
+                                             "verdict": "survives", "checklist_ref": "x"}))
+    assert code == 3, out
+
+
+def test_the_gate_may_not_also_be_the_skeptic(tmp_path):
+    """Adversarial review decorrelates blind spots only if the reviewer is a DIFFERENT actor."""
+    root = tmp_path / "l"
+    seed(root, "maker-alice", "cycle_started",
+         {"role": "maker-alice", "candidate_id": "c1", "pack_manifest_id": "p"})
+    seed(root, "gate", "admission_decided",
+         {"gate": "gate", "candidate_id": "c1", "verdict": "admit", "standard_ref": "s",
+          "evidence": ["e"]})
+    code, out = run("ledger.py", "append", str(root), "--actor", "gate",
+                    "--class", "refutation_attempted",
+                    "--payload", json.dumps({"skeptic": "gate", "claim_id": "c1",
+                                             "verdict": "survives", "checklist_ref": "y"}))
+    assert code == 3, out
+
+
+def test_the_legitimate_maker_gate_skeptic_chain_still_passes(tmp_path):
+    """The tooth must block forgery WITHOUT blocking the normal three-actor path."""
+    root = tmp_path / "l"
+    seed(root, "maker-alice", "cycle_started",
+         {"role": "maker-alice", "candidate_id": "c1", "pack_manifest_id": "p"})
+    seed(root, "gate", "admission_decided",
+         {"gate": "gate", "candidate_id": "c1", "verdict": "admit", "standard_ref": "s",
+          "evidence": ["e"]})
+    code, out = run("ledger.py", "append", str(root), "--actor", "skeptic",
+                    "--class", "refutation_attempted",
+                    "--payload", json.dumps({"skeptic": "skeptic", "claim_id": "c1",
+                                             "verdict": "survives", "checklist_ref": "x"}))
+    assert code == 0, out
+    code, out = run("ledger.py", "verify", str(root))
+    assert code == 0 and "chain intact" in out
+
+
+# ── the phase mold must not teach its own bypass (docs/11 §2) ────────────────
+def test_phase_admitted_requires_its_own_phase_started(tmp_path):
+    """Without this, `phase_admitted{integrate}` on an empty ledger makes `phase_started{deploy}` legal
+    — deploy reached with requirements/design/implement/test never having happened. It is also the move
+    an operator reaches for when phase_started is rejected, so the gate would teach its own bypass."""
+    code, out = run("ledger.py", "append", str(tmp_path), "--actor", "gate",
+                    "--class", "phase_admitted",
+                    "--payload", '{"deliverable":"42","phase":"integrate","verdict":"pass",'
+                                 '"admitter":"gate","evidence_ref":"x"}')
+    assert code == 3, out
+    assert "phase_started" in out
+
+
+def test_deliverable_int_and_string_are_the_same_deliverable(tmp_path):
+    """The deliverable is an Issue number agents write as 42, "42", or "#42". Raw == made the chain
+    reject a phase whose predecessor is visibly present — an unreproducible failure in an unattended run."""
+    seed(tmp_path, "r", "phase_started", {"deliverable": 42, "phase": "requirements", "role": "r"})
+    seed(tmp_path, "g", "phase_admitted",
+         {"deliverable": 42, "phase": "requirements", "verdict": "pass",
+          "evidence_ref": "e", "admitter": "g"})
+    code, out = run("ledger.py", "append", str(tmp_path), "--actor", "r",
+                    "--class", "phase_started",
+                    "--payload", '{"deliverable":"#42","phase":"design","role":"r"}')
+    assert code == 0, out
+
+
+def test_the_full_phase_chain_runs_when_each_phase_is_entered_and_admitted(tmp_path):
+    """The teeth must block the bypass WITHOUT blocking the legitimate walk down the chain."""
+    for phase in ("requirements", "design"):
+        seed(tmp_path, "r", "phase_started", {"deliverable": "42", "phase": phase, "role": "r"})
+        seed(tmp_path, "g", "phase_admitted",
+             {"deliverable": "42", "phase": phase, "verdict": "pass",
+              "evidence_ref": "e", "admitter": "g"})
+    code, out = run("ledger.py", "append", str(tmp_path), "--actor", "r",
+                    "--class", "phase_started",
+                    "--payload", '{"deliverable":"42","phase":"implement","role":"r"}')
+    assert code == 0, out

@@ -171,22 +171,22 @@ def main(argv):
     sub = p.add_subparsers(dest="cmd", required=True)
 
     q = sub.add_parser("growth"); q.set_defaults(fn=cmd_growth)
-    q.add_argument("root"); q.add_argument("--now", default="2026-01-01")
+    q.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)"); q.add_argument("--now", default="2026-01-01")
 
     q = sub.add_parser("adopt"); q.set_defaults(fn=cmd_adopt)
-    q.add_argument("root"); q.add_argument("--scope", required=True)
+    q.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)"); q.add_argument("--scope", required=True)
     q.add_argument("--choice", required=True); q.add_argument("--owner", required=True)
     q.add_argument("--by", required=True); q.add_argument("--review-by", dest="review_by")
 
     q = sub.add_parser("conflict"); q.set_defaults(fn=cmd_conflict)
-    q.add_argument("root"); q.add_argument("--scope", required=True)
+    q.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)"); q.add_argument("--scope", required=True)
     q.add_argument("--choice", required=True)
 
     q = sub.add_parser("render"); q.set_defaults(fn=cmd_render)
-    q.add_argument("root"); q.add_argument("--role", required=True); q.add_argument("--out")
+    q.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)"); q.add_argument("--role", required=True); q.add_argument("--out")
 
     q = sub.add_parser("stale"); q.set_defaults(fn=cmd_stale)
-    q.add_argument("root"); q.add_argument("--now", required=True)
+    q.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)"); q.add_argument("--now", required=True)
 
     a = p.parse_args(argv[1:])
     return a.fn(a)

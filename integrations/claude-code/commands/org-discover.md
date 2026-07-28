@@ -1,12 +1,17 @@
 ---
 description: Generate self-raised backlog items for a department from its own aspiration gaps (problemistic search), and append them to the SAME backlog as source=self. This is how a department improves itself unprompted; it feeds /org-work, it does not execute work.
 argument-hint: "<role> [aspiration]"
-allowed-tools: Bash(python3 *)
+allowed-tools: Bash(python3 *), Bash(echo *)
 ---
 
 Run one **issue-discovery** pass for role **$1** — the problemistic-search half of the department's
 autonomy (Cyert & March, docs/09): surface where the role is falling short of its aspiration, and
 raise those as **self** backlog items. It only ADDS to the backlog; `/org-work` executes it.
+
+> **This is the SELF-raised half only.** RFP-derived scope — the must-haves in `coverage-manifest.md` —
+> is decomposed by **`/org-decompose`**, not here (those tasks carry a `coverage_row:` trailer and
+> `source: mandate`). If a gap you find is really an undecomposed must-have, say so and route it to
+> `/org-decompose` rather than raising it as a self-item; otherwise the coverage gate can't see it.
 
 Ledger root: `${ORG_LEDGER_ROOT}` (must be set).
 
@@ -47,9 +52,13 @@ of when or how many times discovery ran. For each self-item, derive it mechanica
   wording you'd put in a title; it is normalized (lowercased, whitespace-collapsed, trimmed) before hashing,
   so casing/spacing differences do not change the id — only a genuinely different gap does.
 
-Compute the id with this exact formula (run it per item, substituting your gap line):
+Derive it with the organ — **never hand-compute it or paste a shell one-liner.** The fields are joined
+on a unit separator that a shell `echo` silently eats; without it the id degrades to bare concatenation,
+so `(role="auth", contract="obj1")` and `(role="aut", contract="hobj1")` produce the SAME id — and a
+collision means the second item's ledger append is swallowed as an idempotent "replay" and never enters
+the backlog:
 
-!`echo 'candidate_id := python3 -c '"'"'import hashlib,sys,re; role,contract,gap=sys.argv[1],sys.argv[2],sys.argv[3]; norm=re.sub(r"\s+"," ",gap.strip().lower()); print("cand-"+hashlib.sha256(("\x1f".join([role,contract,norm])).encode()).hexdigest()[:12])'"'"' "'"$1"'" "<objective>" "<one-line gap>"'`
+!`echo 'Per item: python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/github_sync.py" candidate-id --role "'"$1"'" --contract "<objective>" --gap "<one-line gap>"'`
 
 The same (role, contract_ref, gap) always yields the same `cand-…` id; a genuinely different gap yields a
 different one. This makes the "don't duplicate an open item" check above enforceable, not just advisory —
@@ -63,7 +72,7 @@ mandates on one footing. Pass the derived id BOTH as `candidate_id` (in the payl
 (the `(class, natural_key)` dedup already lives in ledger.py append) — the backlog stays reproducible
 under replay:
 
-!`echo 'For each self-item, append: python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/ledger.py" append "'"${ORG_LEDGER_ROOT}"'" --actor "'"$1"'" --class candidate_submitted --natural-key "<derived-cand-id>" --payload {"maker":"'"$1"'","candidate_id":"<derived-cand-id>","contract_ref":"<objective>","source":"self","evidence":[<gap-refs>]}'`
+!`echo 'For each self-item, append: python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/ledger.py" append "'"${ORG_LEDGER_ROOT}"'" --actor "'"$1"'" --class candidate_submitted --natural-key "<derived-cand-id>" --payload '"'"'{"maker":"'"$1"'","candidate_id":"<derived-cand-id>","contract_ref":"<objective>","source":"self","evidence":[<gap-refs>]}'"'"''`
 
 ### 2c. Project each candidate onto GitHub as a task sub-issue — WITH THE FULL SPEC in the body
 

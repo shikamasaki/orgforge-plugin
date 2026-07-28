@@ -175,17 +175,17 @@ def main(argv):
     sub = p.add_subparsers(dest="cmd", required=True)
 
     q = sub.add_parser("premise"); q.set_defaults(fn=cmd_premise)
-    q.add_argument("root"); q.add_argument("--premise-id", dest="premise_id", required=True)
+    q.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)"); q.add_argument("--premise-id", dest="premise_id", required=True)
     q.add_argument("--asserted", required=True); q.add_argument("--observed", required=True)
     q.add_argument("--halt-on")
 
     q = sub.add_parser("sunk"); q.set_defaults(fn=cmd_sunk)
-    q.add_argument("root"); q.add_argument("--course-id", dest="course_id", required=True)
+    q.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)"); q.add_argument("--course-id", dest="course_id", required=True)
     q.add_argument("--attempt-cap", dest="attempt_cap", type=int, default=5)
     q.add_argument("--cost-cap", dest="cost_cap", type=float)
 
     q = sub.add_parser("frame"); q.set_defaults(fn=cmd_frame)
-    q.add_argument("root")
+    q.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)")
     q.add_argument("--near-target-band", dest="near_target_band", type=float, default=0.1)
     q.add_argument("--min-decisions", dest="min_decisions", type=int, default=3)
 

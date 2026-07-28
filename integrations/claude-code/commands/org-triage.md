@@ -1,7 +1,7 @@
 ---
 description: Triage an external signal (a bug report, an issue, a piece of feedback) into the backlog — the factory's front door. Turns raw incoming work into a labeled backlog item without a per-task prompt, compressing the human's input to one signal. Feeds /org-work; does not execute.
 argument-hint: "<signal text, or an issue/bug reference>"
-allowed-tools: Bash(python3 *)
+allowed-tools: Bash(python3 *), Bash(echo *)
 ---
 
 The factory's **front door** (docs/12 §5 #6). An external signal — **$1** — becomes a triaged backlog
@@ -32,7 +32,7 @@ Decide, from the signal:
 For an actionable, novel, in-scope signal, mint a backlog item as a **mandate** (a top-down instruction
 entering from outside), so attention.py floors it appropriately (zone of acceptance):
 
-!`echo 'Append the triaged item: python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/ledger.py" append "'"${ORG_LEDGER_ROOT}"'" --actor triage --class candidate_submitted --payload {"maker":"<owning-role>","candidate_id":"<id>","contract_ref":"<objective>","source":"mandate","evidence":["<the signal ref>"]}'`
+!`echo 'Append the triaged item: python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/ledger.py" append "'"${ORG_LEDGER_ROOT}"'" --actor triage --class candidate_submitted --payload '"'"'{"maker":"<owning-role>","candidate_id":"<id>","contract_ref":"<objective>","source":"mandate","evidence":["<the signal ref>"]}'"'"''`
 
 ## 3. Report
 

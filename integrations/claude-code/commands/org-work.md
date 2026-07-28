@@ -1,7 +1,7 @@
 ---
 description: Drive one work cycle for a department — select from its backlog by situated attention, delegate the selected items to subordinates in parallel (one Task each, if the split is genuine), then record completion. This is the PM loop; it ACTS. Pair with /org-tick (read-only health) and /org-discover (backlog generation).
 argument-hint: "<role> [wip-limit] [mandate-floor]"
-allowed-tools: Bash(python3 *), Task
+allowed-tools: Bash(python3 *), Bash(echo *), Task
 ---
 
 Drive one **work cycle** for role **$1** against its ledger — the PM loop that turns a backlog into
@@ -91,10 +91,16 @@ task, emit two events (they are the wiring that turns the forced mold from prose
 - **`phase_started{deliverable, phase: implement}`** — the ledger **rejects** this unless a prior
   `phase_admitted{phase: design, verdict: pass}` exists for the deliverable (and design likewise needs
   requirements admitted). So a maker cannot start implementing before design is admitted — the mold
-  bites here, at the emit, not just in the doc. (For a walking-skeleton where requirements/design were
-  admitted at founding, emit those `phase_admitted`s first; the point is the *chain is in the ledger*.)
+  bites here, at the emit, not just in the doc.
 
-!`echo 'At delegation, per task, fire the gate: python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/ledger.py" append "'"${ORG_LEDGER_ROOT}"'" --actor "'"$1"'" --class spec_delegated --payload {supervisor,subordinate,spec_ref:<issue#>,contract_ref,intent_basis_ref}. THEN --class phase_started --payload {deliverable:<issue#>,phase:implement,role}. The ledger REJECTS phase_started if design is not admitted — that rejection IS the gate. The gate agent appends phase_admitted as it clears each phase.'`
+**If this is rejected, do NOT self-emit the missing admissions.** That rejection means founding did not
+close the `requirements`/`design` phases for this deliverable — `/org-found`'s last step does that, with
+the *gate* as the admitting actor. Emitting them yourself would make the supervisor both the maker and
+the sign-off, which is the exact collapse the mold exists to prevent (and the ledger now refuses an
+admission with no matching `phase_started`, so the shortcut fails anyway). Go run that founding step, or
+say plainly that the deliverable is not ready to implement — do not route around the gate.
+
+!`echo 'At delegation, per task, fire the gate: python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/ledger.py" append "'"${ORG_LEDGER_ROOT}"'" --actor "'"$1"'" --class spec_delegated --payload '"'"'{supervisor,subordinate,spec_ref:<issue#>,contract_ref,intent_basis_ref}'"'"'. THEN --class phase_started --payload '"'"'{deliverable:<issue#>,phase:implement,role}'"'"'. The ledger REJECTS phase_started if design is not admitted — that rejection IS the gate. The gate agent appends phase_admitted as it clears each phase.'`
 
 ## 3. Record work as you go — so nothing is lost to a context wipe
 
@@ -123,9 +129,9 @@ points, keyed by `candidate_id`:
    proposed here and adopted by a checker (never self-adopted). If nothing was settled, say so in
    `domain_model.none_asserted` — but do not *silently* skip it; the ledger won't let you.
 
-!`echo 'Record the cycle (never fabricate completion): python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/ledger.py" append "'"${ORG_LEDGER_ROOT}"'" --actor "'"$1"'" --class cycle_completed --payload {role,candidate_id,outputs,reused,domain_model:{updated:[<ref>]|none_asserted:<why>}}. domain_model is REQUIRED (docs/11 §4d) — the append is rejected without it. If a domain rule was settled, FIRST: python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/conventions.py" adopt "'"${ORG_CONVENTIONS_ROOT:-$ORG_LEDGER_ROOT}"'" --scope <area> --choice "<the settled rule>" --owner "'"$1"'" --by checker, then reference its cid in domain_model.updated. Checkpoint BEFORE you risk stopping.'`
+!`echo 'Record the cycle (never fabricate completion): python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/ledger.py" append "'"${ORG_LEDGER_ROOT}"'" --actor "'"$1"'" --class cycle_completed --payload '"'"'{role,candidate_id,outputs,reused,domain_model:{updated:[<ref>]|none_asserted:<why>}}'"'"'. domain_model is REQUIRED (docs/11 §4d) — the append is rejected without it. If a domain rule was settled, FIRST: python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/conventions.py" adopt "'"${ORG_CONVENTIONS_ROOT:-$ORG_LEDGER_ROOT}"'" --scope <area> --choice "<the settled rule>" --owner "'"$1"'" --by checker, then reference its cid in domain_model.updated. Checkpoint BEFORE you risk stopping.'`
 
-### 3b. The GitHub Issue is the MAIN work-log — so work isn't session- or terminal-bound
+### 3a. The GitHub Issue is the MAIN work-log — so work isn't session- or terminal-bound
 
 When the org is steered through GitHub (`ORG_GITHUB_REPO` set — the default for any laptop-free /
 multi-terminal / web-harness run), **the task Issue is the PRIMARY surface for the spec and the
@@ -143,9 +149,43 @@ the work from it. So the primacy is **Issue-first**:
 Post the milestone to the Issue, keyed by the same natural id so a replay logs it **once** (the comment
 carries a hidden `orgforge:event:<id>` marker; `log` no-ops on a duplicate — docs/11 §0):
 
-!`echo 'Log the milestone to the Issue (the main work-log): python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/github_sync.py" log --repo "$ORG_GITHUB_REPO" --issue <N> --event cycle_started|progress_recorded|phase_admitted|cycle_completed [--phase <sdlc-phase>] [--detail "<next_step or done_so_far>"] --event-id <id>. THEN write the ledger receipt (audit/resume). A ledger-only run (no ORG_GITHUB_REPO) keeps the work-log in the ledger instead.'`
+!`echo 'Log the milestone to the Issue (the main work-log): python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/github_sync.py" log --repo "$ORG_GITHUB_REPO" --issue <N> --event cycle_started|progress_recorded|phase_admitted|cycle_completed [--phase <sdlc-phase>] [--detail "<what happened>"] [--command "<the exact command run>"] [--result "<its real output, failures included>"] [--files "<files changed>"] [--next-step "<what a fresh session resumes from>"] [--blocked-by "<blocker>"] --event-id <id>. THEN write the ledger receipt (audit/resume). A ledger-only run (no ORG_GITHUB_REPO) keeps the work-log in the ledger instead.'`
 
-## 4. Fan the work back in — integrate on `develop` before it's "done for review"
+### 3b. Log at MAXIMUM granularity — no human reads the diff (docs/11 §4f)
+
+Human diff review is **retired**: nobody reads the change before it merges. That makes the Issue the
+org's audit record, not merely a status board, and it raises the logging bar sharply. `"progress
+recorded"` satisfies the letter of logging and records nothing recoverable — that is the failure mode
+to design against.
+
+Log at **every step that changed the world or changed the plan**, not only at the three milestones, and
+record what actually happened:
+
+- **the exact command**, verbatim and re-runnable (`--command`) — never "ran the tests"
+- **what it returned** (`--result`), the real output **including failures**. A log of only successes is
+  a fiction, and the failed attempt is usually the most informative entry on the Issue.
+- **files changed** (`--files`), the **next step** (`--next-step`), the **blocker** (`--blocked-by`)
+- **course changes with their cause** — the approach abandoned and what made it wrong. This is what
+  stops the next maker re-deriving the same dead end (it feeds `nearby_deaths`).
+
+The bar: **a stranger reading only this Issue can reconstruct what was built, what was tried and
+abandoned, what was run, what came back, and why it merged** — without the ledger, without the
+transcript, without asking anyone. If they cannot, the log is too thin regardless of its volume.
+
+### 3c. Record every JUDGMENT with its reasoning — a verdict alone is a stamp
+
+With no human approving, an unrecorded judgment is indistinguishable from no judgment. So every verdict
+**double-writes**: the ledger takes the receipt (tamper-evident), the Issue takes the reasoning (where it
+can actually be inferred later). This applies to the gate's admission, the skeptic's refutation attempt,
+each `phase_admitted`, the integrate verdict, and any consequential design/scope/trade-off call:
+
+!`echo 'Per judgment: python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/github_sync.py" decide --repo "$ORG_GITHUB_REPO" --issue <N> --event admission_decided|refutation_attempted|phase_admitted|integration_admitted|design_decided|tradeoff_decided|rework_requested --verdict <admit|reject|pass|rework|survives|refuted> --why "<the REASONING: what was weighed, what decided it>" --by <role> [--phase <p>] [--evidence "<command output / CI run / repro_lint verdict>"] [--alternatives "<what was rejected and why>"] [--standard "<the bar applied>"] [--risk "<a known risk knowingly accepted>"] --event-id <ledger event id>'`
+
+`decide` **rejects a `--why` that merely restates the verdict** — the degradation back into a rubber
+stamp is closed at the tool. Record the `--risk` honestly: a gate that admits despite a known hole must
+say so, or the hole becomes a surprise instead of a decision.
+
+## 4. Fan the work back in — integrate on `develop` before it's "done"
 
 Fanning out (§2) is only half the loop; the parallel siblings must **come back together and be tested
 as a whole** before any of them deploys (docs/11 §4c — whatever you separate, you pay to reintegrate).
@@ -155,10 +195,12 @@ As the supervising manager you own this integrate phase (your A3, extended to cr
   PR against `develop`** — not `main`. Merge the green feature branches into `develop`.
 - Then run the **combined** suite on `develop`: the siblings must build and pass **together**, not just
   each alone. Green CI on `develop` is the integrate gate (`integration_admitted`) — the machine form.
-- Only an integrated, green `develop` is **"done for review"**: a reviewer reads a `develop` that
-  actually runs. A pile of per-task PRs against `main` that were never assembled is NOT done.
-- Record `integration_admitted` (the receipt) and log it to the objective Issue so the phone view shows
-  the fan-in happened. Promotion `develop → main` (deploy, docs/11 §3) is a later, separate gate.
+- Only an integrated, green `develop` is **"done"**: nobody reads the diff (docs/11 §4f), so the
+  assembled green `develop` *is* the verdict. A pile of per-task PRs against `main` that were never
+  assembled is NOT done.
+- Record `integration_admitted` (the receipt) **and post the judgment with its reasoning** to the
+  objective Issue (`github_sync decide --repo "$ORG_GITHUB_REPO" --issue <objective#> --event integration_admitted --verdict pass|fail --why …
+  --evidence "<the combined CI run>"`), so the fan-in has an account and not just a timestamp. Promotion `develop → main` (deploy, docs/11 §3) is a later, separate gate.
 
 !`echo 'Integrate: for each green child, python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/github_sync.py" branch --repo "$ORG_GITHUB_REPO" --issue <N> gives its feature branch; merge them to develop, run the combined suite on develop (green = integration_admitted), then log it to the objective Issue. Skip if this org has a single deliverable (nothing to integrate).'`
 
@@ -172,13 +214,18 @@ work on the side.
 When you submit such an item, derive its `candidate_id` DETERMINISTICALLY (do not invent a free-form id)
 so the backlog stays reproducible (docs/11 §0) — the same gap must always produce the same id:
 
-!`echo 'candidate_id := python3 -c '"'"'import hashlib,sys,re; role,contract,gap=sys.argv[1],sys.argv[2],sys.argv[3]; norm=re.sub(r"\s+"," ",gap.strip().lower()); print("cand-"+hashlib.sha256(("\x1f".join([role,contract,norm])).encode()).hexdigest()[:12])'"'"' "'"$1"'" "<objective>" "<one-line gap>"'`
+!`echo 'candidate_id := python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/github_sync.py" candidate-id --role "'"$1"'" --contract "<objective-id>" --gap "<one-line gap>"'`
+
+**Never hand-compute this or paste a shell one-liner.** The fields are joined on a unit separator that a
+shell `echo` silently eats; without it the id degrades to bare concatenation and different items collide
+onto one id — whereupon the second item's ledger append is swallowed as an idempotent "replay" and the
+work never enters the backlog at all.
 
 then append with that id as BOTH `candidate_id` and `--natural-key` (idempotent under replay):
 
-!`echo 'python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/ledger.py" append "'"${ORG_LEDGER_ROOT}"'" --actor "'"$1"'" --class candidate_submitted --natural-key "<derived-cand-id>" --payload {"maker":"'"$1"'","candidate_id":"<derived-cand-id>","contract_ref":"<objective>","source":"self","evidence":[<gap-refs>]}'`
+!`echo 'python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/ledger.py" append "'"${ORG_LEDGER_ROOT}"'" --actor "'"$1"'" --class candidate_submitted --natural-key "<derived-cand-id>" --payload '"'"'{"maker":"'"$1"'","candidate_id":"<derived-cand-id>","contract_ref":"<objective>","source":"self","evidence":[<gap-refs>]}'"'"''`
 
-## Discipline
+## Discipline — recording and delegation
 
 - **Parallelism is a judgment, not a mandate.** Fan out genuinely-parallel work; keep coupled work
   single-threaded. Over-fanning inflates your own conformance-review span toward rubber-stamping

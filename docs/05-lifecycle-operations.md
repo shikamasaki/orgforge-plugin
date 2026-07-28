@@ -76,6 +76,21 @@ works inside it and cannot write it). A **founder process** — see `template/FO
    control skeleton (gate, skeptic, supervisor, registrar), which is active whenever
    anything is.
 
+Founding's four steps produce **four fixed-name artifacts** — `RFP.md`, `FEATURE-INVENTORY.md`,
+`ARCHITECTURE.md` (the whole-system design from step 2), and `coverage-manifest.md` (step 3's
+RFP→contract map) — plus `organization.yaml`. The names are fixed by rule (docs/11 §0a) because the
+step *after* founding reads them by name.
+
+5. **Decompose the contracts into atomic task Issues.** Steps 1–4 decide *who owes what*; this turns
+   each owed deliverable into units a department can actually pick up: one independently-completable
+   task per unit, split wherever sibling `owns` territories are disjoint, each carrying its own full
+   spec so a maker with none of the founding context can start (docs/11 §4b). Founding is not finished
+   when the chart lints — it is finished when every must-have has become work. A must-have that has an
+   owning contract but no task is *designed and unbuilt*, which reads as coverage on the org chart and
+   as silence in the backlog; a mechanical coverage gate (docs/11 §0a) is what makes that state
+   impossible to hold. This step runs only **after** the human approval below — decomposing an
+   unapproved draft mints work the humans may cut.
+
 **The founding commit is charter-tier: it requires human approval, not just the lint.**
 The founding commit defines the SoD matrix, the contracts, and the admission standard —
 the most control-critical act in the org's life — and a mechanical shape-check cannot

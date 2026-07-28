@@ -3,6 +3,156 @@
 All notable changes to orgforge-plugin. This project follows a pragmatic semver:
 minor = new mechanisms/features, patch = fixes, major = breaking articulation changes.
 
+## 0.9.0
+
+**An org is a place on disk, not a shell environment — and the founding→backlog path is now a complete,
+gated chain.** Two themes: the flow from an RFP to workable Issues got its missing steps and its
+coverage gate, and human diff review was retired in exchange for a mandatory, tamper-evident record.
+Alongside them, the setup that used to be a page of `export`s is gone entirely.
+
+### Zero-setup discovery — `.envrc` is no longer part of the flow
+`ORG_LEDGER_ROOT` / `ORG_GITHUB_REPO` used to be the only way the organs and the guardrail hook knew
+where the org was. That had three costs, and the third is the serious one:
+
+- **Not portable.** A state root written as `/Users/someone/proj/.orgforge/ledger` is wrong on the next
+  machine — while the whole point of putting the full spec in the Issue is that *any* environment can
+  pick up the work.
+- **One org per shell.** A single exported variable cannot serve two checkouts, so running orgforge in
+  several repositories from one environment either cross-contaminated the audit record and the
+  blast-radius budget, or required direnv.
+- **Silent permissiveness.** A session that had not sourced `.envrc` found no ledger — and the
+  guardrail with no ledger **allows everything**. The failure mode of a forgotten setup step was an
+  ungated session, which is the one failure mode a guardrail must not have.
+
+New `tools/discover.py` resolves the org from the working directory: `.orgforge/` beside
+`organization.yaml` (walking up, so subdirectories work), and the backlog repo parsed from
+`git remote origin` (locally — no `gh`, no network). Precedence is **explicit argument > environment
+variable > discovery**, so every existing override still wins. `_organ.resolve_root()` funnels it
+through the one read path all organs share; `root` became optional on 43 tool commands and `--repo`
+on 9; both hooks discover instead of requiring env. `/org-init` no longer writes `.envrc` — it
+*verifies discovery works* instead. Multi-repo operation from one shell is now the default rather
+than a configuration.
+
+### Everything below shipped in this release
+
+
+**The founding→backlog path is now a complete, gated chain.** Previously `/org-found` designed the
+org and stopped, and the only way to get task Issues was `/org-discover`, whose input is a role's
+*aspiration gaps* — so nothing turned the RFP's must-haves into workable units, and setting up a new
+org was a page of manual `export`s. Two new commands close both ends, and a new gate proves the middle.
+
+### New: `/org-init` — the setup step
+Creates the ledger/doctrine/conventions roots, installs the org spec files, writes `.envrc` (including
+a detected `ORG_GITHUB_REPO`), ensures the backlog label vocabulary and the `develop` branch, then
+lints the spec and runs the harness probe so a session can't believe it is guarded when it isn't.
+Idempotent — safe to re-run to repair a half-set-up org. Designs nothing.
+
+### New: `/org-decompose` — RFP/全体設計書 → atomic SPEC task Issues
+The missing bridge between design and execution. Reads the approved `coverage-manifest.md` +
+`ARCHITECTURE.md`, carves each must-have into *independently-completable* units (split where sibling
+`owns` sets are disjoint; keep reciprocally-coupled work together), fills the full `template/SPEC.md`
+structure into each Issue body, and hangs each under its objective as a native GitHub sub-issue.
+Because the whole spec lives in the Issue — clone URL, literal setup/test commands, entry files, MUSTs
+in EARS, seam contract, DoD command — a task can be claimed and started from **any** environment.
+Uses the same deterministic `candidate_id` derivation as `/org-discover`, so re-running fills gaps
+rather than duplicating the backlog. RFP-derived tasks are `source: mandate`; self-raised ones stay
+with `/org-discover`.
+
+### New tooth: `github_sync coverage-check` — the decomposition coverage gate
+`/org-found`'s O10 lint proves each must-have has exactly one owning *contract* (design layer). This
+proves each one reached at least one *task Issue* (backlog layer), matching the manifest's
+`rfp_capability` against a `coverage_row:` trailer in each Issue body. A must-have that was designed
+but never decomposed is silently unbuilt — the hardest gap to see — so it now exits 10 instead of
+passing unnoticed. A paraphrased trailer is reported as an orphan (it would otherwise mask a real
+gap); Issues with no trailer are a note, not a failure, since `/org-discover` items legitimately have
+none. Eight tests cover the gate, including the closed-Issue and unparsable-manifest cases.
+
+### Rule: the founding artifacts have FIXED filenames (docs/11 §0a)
+`/org-found` now writes exactly `RFP.md`, `FEATURE-INVENTORY.md`, **`ARCHITECTURE.md` (the 全体設計書)**,
+`coverage-manifest.md`, and `organization.yaml` — under those exact names, as a rule rather than a
+convention. Downstream commands address them **by name**; a renamed artifact is an unfindable one, and
+variant names break Level-1 reproducibility at its root. `ARCHITECTURE.md` is explicitly **not** an SDD
+artifact: SDD's spec/plan/tasks live in the Issue hierarchy (§4b) and are per-objective/per-task, while
+the 全体設計書 sits above them as the standing whole-system design — which is why it is a file while task
+specs are not (a single whole-system design doesn't fragment; per-task spec files rot, docs/12 §6).
+
+### New bar: unread-safe (docs/11 §4e) — the diff nobody reads must still be safe to merge
+§4a asks *"can a stranger run this?"*; §4e asks *"is this safe to merge without anyone reading it?"* At
+parallel-agent throughput no one reads every diff — not the CEO, not a reviewing agent, not the maker —
+and a reviewer who cannot keep up does not announce it, they skim. So the defect classes only a careful
+reader catches are made **unmergeable by machine** instead. `repro_lint` gained four teeth, checking
+that the rejection layer is *configured* (running it is CI's job):
+
+- **complexity-bounded** (implement) — a ceiling on function size / cyclomatic / cognitive complexity /
+  nesting. The highest-value tooth: over-long nested functions are where unread defects hide, and
+  appending to a working function is what an agent does when the alternative is decomposing.
+- **type-escapes-closed** (implement) — strict typing on, `any` / `@ts-ignore` / non-null assertions
+  banned. Open escape hatches make a type checker advisory; an agent pushed to turn a build green
+  reaches for them, and the hole is invisible in an unread diff.
+- **tests-present** (test) — tests are what *substitutes* for a reader; a green CI with no tests proves
+  only that the code compiles.
+- **dup-dead-code** (deploy) — jscpd/knip/ts-prune/vulture. Parallel makers re-solve each other's
+  problems and orphan superseded code; neither shows up in any single diff. Report-only by default.
+
+Language-appropriate (rubocop's `Metrics/MethodLength` satisfies the complexity bar; a repo with no
+static type layer marks the type check `n/a`). The doctrine records the two operating rules the bar
+depends on — **drain then ratchet** (a rule that is on and violated everywhere enforces nothing) and
+**exceptions in the config with a reason**, never inline `eslint-disable` — and states plainly that this
+does *not* replace the gate/skeptic: the mechanical layer clears everything a machine can decide so the
+scarce different-lineage judgment is spent where it is irreplaceable.
+
+### Human diff review is RETIRED — the Issue becomes the audit record (docs/11 §4f)
+§4e removed the human from *reading* the diff; §4f takes the consequence to its end: **there is no human
+review step.** No person reads the change before it merges. The mechanical bar, the gate, and the
+skeptic are the entire judgment layer. That is defensible at fan-out scale — a reviewer who cannot keep
+up does not announce it, they skim, and a skimmed review launders unread code as reviewed — but it
+removes the **account** of why a change was allowed. So the trade is explicit: **review is retired;
+recording is not optional.**
+
+- **`github_sync decide`** (new) — records a judgment **with its reasoning** on the task Issue.
+  Judgments now double-write, the way settled conventions already do: the ledger takes the
+  tamper-evident receipt, the Issue takes the account — `--why` (what was weighed), `--evidence`
+  (commands run and their real output, CI runs, `repro_lint` verdicts), `--alternatives` rejected,
+  `--standard` applied, and `--risk` knowingly accepted. It **refuses a `--why` that merely restates
+  the verdict** and refuses non-judgment event classes, so the slide back into a rubber stamp is closed
+  at the tool. Every posted decision carries an explicit "no human reviewed this change" notice.
+- **`github_sync log` enriched** — `--command` (verbatim, re-runnable), `--result` (**the real output,
+  failures included**), `--files`, `--next-step`, `--blocked-by`. A log of only successes is a fiction,
+  and the failed attempt is usually the most informative entry on the Issue. Backwards compatible: all
+  new fields are optional.
+- **The gate and skeptic now post their reasoning**, not just ledger verdicts. The skeptic must write
+  *who this fails for and under what conditions* **even when the work survives** — a bare `survives` is
+  worthless to whoever audits the merge later. The gate must record `--risk` honestly: admitting despite
+  a known hole is a legitimate decision only if it is written down.
+- **The logging bar in `/org-work` and `template/SPEC.md`**: log at every step that changed the world or
+  changed the plan, including course changes with their cause (feeding `nearby_deaths`). The stated bar
+  — *a stranger reading only the Issue can reconstruct what was built, what was tried and abandoned,
+  what was run, what came back, and why it merged, without the ledger or the transcript.*
+- **What this does not license** (stated in §4f so it cannot drift): the *judgment* layer stays — O6c's
+  distinct-lineage rule matters **more** without a human backstop, since a puppet checker is now the
+  only checker. Phases are still non-skippable. And the CEO's charter-tier decisions (founding,
+  irreversible moves, scope) remain human — what is retired is diff review, not governance.
+
+### Other
+- `role-settings.yaml` is now bundled into the plugin template dir (`/org-init` scaffolds it).
+- `template/SPEC.md` documents the `candidate_id:` / `coverage_row:` trailers, and now carries the §4e
+  bar in its Verification section so makers configure it rather than discovering it at the gate.
+- **`github_sync candidate-id`** — the deterministic id derivation moved out of each command's prose
+  into the organ. The echoed one-liner it replaces lost its `\x1f` field separator to shell escaping,
+  so different items collided onto one id and the second one's ledger append was silently swallowed as
+  a "replay" — it never entered the backlog. Both `/org-decompose` and `/org-discover` now call the tool.
+- `create`'s idempotency search now covers **closed** Issues: a delivered task is closed, so an
+  open-only search re-minted every completed task on the documented re-run/repair path.
+- `/org-init` no longer truncates `.envrc` (a repair run was wiping `ORG_GITHUB_REPO`, silently
+  demoting a GitHub-backed org to ledger-only) and no longer reports "installed" for files it kept.
+- `/org-found`'s lint now reads the **org's own** spec files, falling back to plugin templates only for
+  what the org hasn't installed — it was validating pristine templates while the org ran on edited
+  copies, so a `SET_ME` left in the real `constitution.yaml` could never be caught.
+- `coverage-check` hardening: a table *following* the manifest no longer inherits its header (an
+  EXCLUDE list was being read as must-haves, which would have made the org build the scope the CEO
+  cut); bold/backticked trailers now match; and an `orgforge:mandate` task with no trailer now fails
+  instead of passing as a note.
+
 ## 0.8.0
 
 **orgforge is a plugin for standing up and running an AI-native IT business company** — not merely

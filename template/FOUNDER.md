@@ -35,7 +35,10 @@ humans — an org founded on a proxy is Goodhart-doomed from birth (THEORY.md, O
 ### 2. Derive architecture, then org (inverse Conway)
 
 Sketch the target system's architecture from the RFP *first*. Then draw departments and
-their communication paths to mirror that architecture (docs/04 §3). Checklist:
+their communication paths to mirror that architecture (docs/04 §3). Write it to
+**`ARCHITECTURE.md`** — that exact name (docs/11 §0a): it is the whole-system design (全体設計書),
+the standing shape every later task is carved out of, and the decomposition step reads it *by name*
+to source each task's seam contract. Checklist:
 
 - Every architectural seam has a corresponding contract interface between departments.
 - Departments that must integrate share a ledger view; departments that must stay
@@ -58,6 +61,12 @@ Contract rules:
   creep at birth — delete it.
 - Every RFP requirement traces to a contract; an uncovered requirement is a silent gap —
   the completeness check runs both directions.
+
+Record that both-directions check as **`coverage-manifest.md`** (that exact name, docs/11 §0a): one row
+per must-have — `{rfp_capability, owning_role, deliverable, acceptance}`. It is the machine-readable
+statement of "every requirement is owned exactly once, to a checkable standard," and it is the input the
+decomposition step consumes to turn each owed deliverable into atomic task Issues. A requirement absent
+from the manifest is a gap that no later gate can see.
 
 The founder produces the **neutral profiles** (ROLE.md instances) for these departments — not a
 runtime. **Running the org means projecting those profiles onto the chosen host harness(es)** and

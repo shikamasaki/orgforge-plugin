@@ -189,10 +189,16 @@ An org **is** a set of neutral source files (all templated in `template/`):
 1. **Hand-fill** — copy `template/organization.SKELETON.yaml`, fill the `<ANGLE_BRACKET>` domain-role
    slots. The control skeleton (supervisor / gate / skeptic / registrar) is kept intact; you supply the
    purpose, the domain roles, and their contracts.
-2. **`/org-found <your RFP or brief>`** — the org drafts itself: a feature inventory (must/should/nice +
-   an explicit exclude list), an architecture with seam contracts (inverse-Conway, per `FOUNDER.md`), a
-   concrete linted `organization.yaml` — then **stops and reports up** for your scope approval. Founding
-   is design; building the product is the CEO's next call.
+2. **`/org-init` → `/org-found <your RFP or brief>` → `/org-decompose`** — the org drafts itself and then
+   turns the draft into workable units. `/org-init` sets up the org's state (ledger root, spec files,
+   `.envrc`, backlog labels, `develop`, guard probe). `/org-found` produces a feature inventory
+   (must/should/nice + an explicit exclude list), an architecture with seam contracts (inverse-Conway,
+   per `FOUNDER.md`), a coverage manifest, and a concrete linted `organization.yaml` — written under
+   **fixed filenames** (`RFP.md`, `FEATURE-INVENTORY.md`, `ARCHITECTURE.md` = the 全体設計書,
+   `coverage-manifest.md`; docs/11 §0a, so downstream commands address them by name) — then **stops and
+   reports up** for your scope approval. Founding is design. After you approve, `/org-decompose` carves
+   the manifest into atomic SPEC task Issues under their objectives, ending on a coverage gate that fails
+   if any must-have never became an Issue.
 
 **Validation is a hard gate** — `tools/org_lint.py` over the five required files. It checks structural
 coherence: span budgets (O2), the organic/mechanistic regime boundary (O2b), separation of duties (O6,

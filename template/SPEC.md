@@ -86,6 +86,20 @@
 - Reproducibility (docs/11 §4a): the deliverable's repo must clone-and-run the same (lockfile,
   pinned toolchain, one-command setup+test, idempotent migrations, `.env.example`, green CI) — the
   gate runs `repro_lint` against it.
+- **Every new test must be proven to go RED.** Before claiming a test covers a MUST, break the thing it
+  tests and confirm it fails; then restore. A test that passes against broken code does not exist, and
+  with no human reading the diff nothing else will notice — an agent writing tests to satisfy a coverage
+  bar produces exactly this. Record the red output in the work log (`log --result`), not just the green.
+- **Pass environment dependencies as arguments** — the clock, the home directory, the **platform**, the
+  filesystem root. Not `process.platform` read deep inside a function, but a parameter. This is what
+  makes platform and time-dependent behaviour testable *without* that platform, and it is why the
+  multi-OS bar is affordable: most of the coverage comes from arguments, not from more CI runners.
+- **Unread-safe (docs/11 §4e):** nobody reads every diff at fan-out scale, so the repo must carry a
+  mechanical rejection layer — a configured ceiling on function size/complexity/nesting, strict typing
+  with `any`/`@ts-ignore` banned, executable tests, and duplication/dead-code scanning (report-only is
+  fine). `repro_lint` checks these at the same gates. Do not turn a strict rule on over a red codebase:
+  land it as a warning, drive the count to zero, then ratchet it to an error. Exceptions belong in the
+  config file **with a reason**, never as an inline `eslint-disable`.
 
 ## Decisions fixed by hypothesis (resolve open questions here, don't leave them tacit)
 | question | decision |
@@ -97,10 +111,32 @@
 - `<and what already FAILED here — the dead ends a fresh maker must not re-derive (from the org's
   nearby_deaths). e.g. "PayPay recipient-prefill URLは存在しない — API決済は構造的に不可、金額コピー導線で行く">`
 
+## Trailers (machine traceability — keep these last, verbatim)
+```
+candidate_id: <cand-…, derived deterministically from (role, contract_ref, one-line gap)>
+coverage_row: <the rfp_capability cell from coverage-manifest.md, CHARACTER-FOR-CHARACTER>
+```
+> `coverage_row:` is load-bearing for RFP-derived tasks: `github_sync coverage-check` matches it exactly
+> against the founding manifest to prove no must-have was dropped between design and backlog (docs/11
+> §0a). A paraphrase reads as an orphan and leaves a real gap invisible; **do not translate the value**
+> even when the rest of this Issue is written in the org's `output_language` — it is a machine key.
+> Decoration around the label (`**coverage_row:**`, backticks, a bullet) is tolerated; the value must be
+> the bare capability text. An `orgforge:mandate` task with NO trailer fails the gate. **Self-raised**
+> items from `/org-discover` (`orgforge:self`) have no `coverage_row:` — that is expected, not a violation.
+
 ## Hand-back (how completion is submitted)
 `<a PR against `develop` (NOT `main`) per the org's branch policy (docs/11 §4c): the task's feature
 branch → PR → `develop`; close the Issue with the DoD command's green output pasted + the develop-CI
-link. "Done for review" = merged to `develop` and integration-green there — not a PR against `main`.>`
+link. "Done" = merged to `develop` and integration-green there — not a PR against `main`.>`
+
+> **No human reads this diff (docs/11 §4f).** Human review is retired, so this Issue is the audit
+> record and it must stand on its own. Before closing, the Issue must carry: (a) the **work log** at
+> full granularity — every command run *verbatim* with its **real output including failures**, files
+> changed, and every course change with what caused it; and (b) every **judgment with its reasoning** —
+> the gate's admission, the skeptic's refutation attempt, each phase transition (`github_sync decide`).
+> The bar: a stranger reading only this Issue can reconstruct what was built, what was tried and
+> abandoned, what was run, what came back, and **why it was allowed to merge** — without the ledger,
+> without the transcript, without asking anyone.
 
 ---
 _SDLC phases (docs/11): requirements → design → implement → test → integrate → deploy → operate. This spec is the

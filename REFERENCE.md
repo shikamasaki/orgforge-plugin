@@ -71,7 +71,9 @@ irreversible patterns draw down a budget.
 
 | Command | What it does |
 |---|---|
-| `/org-found <RFP or brief>` | Draft an org from a brief: a feature inventory, an architecture with seam contracts, a linted `organization.yaml` — then stop and report up for scope approval. Design only; the build is a separate call. |
+| `/org-init [org-name] [ja\|en]` | **Step 1 — set up.** Create the ledger/doctrine/conventions roots, install the org spec files, write `.envrc` (incl. `ORG_GITHUB_REPO`), ensure `develop` + the backlog labels, then lint the spec and probe that the guardrails actually bite. Idempotent; designs nothing. |
+| `/org-found <RFP or brief>` | **Step 2 — design.** Draft the org from a brief and write the five **fixed-name** founding artifacts (docs/11 §0a): `RFP.md`, `FEATURE-INVENTORY.md`, **`ARCHITECTURE.md` (the 全体設計書)**, `coverage-manifest.md`, `organization.yaml` — then stop and report up for scope approval. Design only. |
+| `/org-decompose [objective-id]` | **Step 3 — decompose.** Turn the approved `coverage-manifest.md` + `ARCHITECTURE.md` into **atomic SPEC task Issues**, one per independently-completable unit, each a native sub-issue of its objective and each carrying the full spec (so any environment can pick it up). Gated by `coverage-check`: exits non-zero if a must-have never became an Issue. |
 | `/org-start [role] [tick] [work] [discover]` | Bring the org to its **running state**: register this session's recurring cycles via the scheduler. Idempotent. The SessionStart hook prompts it for you. |
 | `/org` `[role]` | The **status board** — "how's my org?" in one GREEN/AMBER/RED answer (done / in progress with next steps / what needs you), in your language. Read-only. |
 | `/org-triage <signal>` | The **front door**: turn an external bug/issue/feedback into a triaged backlog item (or reject it). Feeds `/org-work`. |
@@ -106,6 +108,25 @@ An org is these source files (templates in `template/`), validated by `tools/org
 | `role-settings.yaml` | neutral per-role runtime knobs (model tier, tools, budget, stop) — the projection input |
 | `ROLE.md` / `SUPERVISOR.md` / `FOUNDER.md` / `PROJECTION.md` | neutral role/supervisor/founder profiles + the projection contract |
 
+### The founding artifacts — FIXED filenames (docs/11 §0a)
+
+`/org-found` writes these four files at the org root under **exactly these names**. The names are part of
+the contract, not a convention: `/org-decompose` reads them **by name** as its input, and a stranger
+opening any orgforge org finds the design in the same place. A renamed artifact is an unfindable one.
+
+| File | Role |
+|---|---|
+| `RFP.md` | the received brief, verbatim + the one-sentence purpose — the immutable input everything traces to |
+| `FEATURE-INVENTORY.md` | the 洗い出し: every required capability, grouped must / should / nice, + the explicit EXCLUDE list |
+| **`ARCHITECTURE.md`** | **the 全体設計書** — the whole-system design: layers/components + seam contracts `{deliverable, standard, checker, depends_on}` |
+| `coverage-manifest.md` | the RFP→contract coverage map: one row per must-have `{rfp_capability, owning_role, deliverable, acceptance}` |
+
+**`ARCHITECTURE.md` is deliberately not an SDD artifact.** SDD's spec/plan/tasks (docs/11 §4b) live in
+the Issue hierarchy and are per-objective/per-task; the 全体設計書 sits *above* them as the standing shape
+of the system, authored once at founding and amended at reorg. That is why it is a file and the task
+specs are not — a single whole-system design does not fragment, whereas per-task spec files rot
+(the fragment-Spec trap, docs/12 §6).
+
 ### The `enforcement:` block (`constitution.yaml`)
 
 The org's enforcement knobs are **declared in the spec**, not left to env vars, so every install of the
@@ -138,10 +159,12 @@ role may not be the checker of its own deliverable, and a deliverable owned by t
 separation-of-duties violation). O10 is the chart side of the RFP-coverage manifest — the guarantee
 that the founding contracts cover what the RFP asked for, which is one half of Level-1 reproducibility.
 
-### The reproducibility gate (`repro_lint.py`)
+### The reproducibility + unread-safe gate (`repro_lint.py`)
 
 The **Level-2 reproducibility gate** (docs/11 §4a) — checks that a repository the org *builds* is
-reproducible for a stranger who clones it, not asserted by the maker. Run **by the gate** at the SDLC
+reproducible for a stranger who clones it, not asserted by the maker — **plus the unread-safe bar**
+(docs/11 §4e): at parallel-agent throughput nobody reads every diff, so the defects only a careful
+reader catches must be made unmergeable by machine instead. Run **by the gate** at the SDLC
 implement/test/deploy phase gates:
 
 ```
@@ -154,9 +177,18 @@ an implement-phase candidate is held to a lighter bar than a deploy-phase one:
 
 | Phase gate | Requires (presence, not correctness) |
 |---|---|
-| `implement → test` | a committed lockfile + populated manifest; a pinned toolchain |
-| `test → integrate → deploy` | a one-command setup + one-command test documented in a README; idempotent migrations; `.env.example` |
-| `deploy` | a committed CI workflow (GitHub Actions) that runs setup + test from a clean clone, and is green |
+| `implement → test` | a committed lockfile + populated manifest; a pinned toolchain; **§4e** a configured ceiling on function size / complexity / nesting; **§4e** strict typing with `any` / `@ts-ignore` / non-null assertions banned |
+| `test → integrate → deploy` | a one-command setup + one-command test documented in a README; idempotent migrations; `.env.example`; **§4e** executable tests |
+| `deploy` | a committed CI workflow (GitHub Actions) that runs setup + test from a clean clone, and is green; **§4e** duplication + dead-code scanning wired (report-only is fine) |
+
+The **§4e** rows are the *unread-safe* half: they check that a mechanical rejection layer is configured
+(ESLint/biome/ruff/golangci/rubocop bars, `tsconfig` strict, jscpd/knip/ts-prune/vulture), not that it
+currently passes — CI runs it. Language-appropriate: a Ruby repo satisfies the complexity bar with
+rubocop's `Metrics/MethodLength`, and a repo with no static type layer marks the type check `n/a`
+rather than failing it. Two operating rules the bar assumes: **drain then ratchet** (land a strict rule
+as a warning, drive violations to zero, *then* make it an error — a rule that is on and violated
+everywhere enforces nothing), and **exceptions in the config with a reason**, never an inline
+`eslint-disable` (invisible at review time, and nobody ever deletes one).
 
 It checks *presence/shape*, not correctness ("is there a lockfile", not "does install work") — the
 gate re-runs setup+test from a clean clone for the correctness half. Presence is the cheap
@@ -172,7 +204,8 @@ lock, the native sub-issue is the hierarchy). Two levels:
 - **objective Issue** (`orgforge:kind:objective`) — the big-picture RFP/objective (parent). Created by
   `/org-found` after CEO sign-off.
 - **task Issue** (`orgforge:kind:task` + `orgforge:dept:<name>`) — a department's unit of work, linked
-  as a **native GitHub sub-issue** of its objective. Created by `/org-discover`.
+  as a **native GitHub sub-issue** of its objective. Created by `/org-decompose` (RFP-derived, one per
+  atomic unit, carrying a `coverage_row:` trailer) or by `/org-discover` (self-raised, no trailer).
 
 ```
 github_sync.py create --repo R --kind objective --objective <id> --title T                # the parent
@@ -180,16 +213,42 @@ github_sync.py create --repo R --kind task --parent <objective#> --dept D --obje
 github_sync.py claim  --repo R --issue N --agent A     # exit 10 if already claimed (concurrent-write lock)
 github_sync.py stage  --repo R --issue N --stage ready|in-progress|blocked|needs-human|done
 github_sync.py log    --repo R --issue N --event E [--phase P] [--detail T] --event-id <ledger id>
+                      [--command "<verbatim>"] [--result "<real output>"] [--files F]
+                      [--next-step S] [--blocked-by B]
+github_sync.py decide --repo R --issue N --event <judgment> --verdict V --why "<the reasoning>"
+                      [--by ROLE] [--phase P] [--evidence E] [--alternatives A]
+                      [--standard S] [--risk K] --event-id <ledger id>
 github_sync.py ready  --repo R [--kind task|objective|any]   # tasks only by default (objectives are parents)
+github_sync.py branch --repo R --issue N [--create] [--base B]   # the deterministic feat/issue-N-<slug>
+github_sync.py split-check    --repo R --issue N   # exit 10: too coarse / dep open / acceptance not EARS
+github_sync.py coverage-check --repo R [--manifest coverage-manifest.md]   # exit 10: a must-have has no Issue
 ```
 
 - **`log`** appends a **work-log comment** on each milestone (`cycle_started`, `progress_recorded`,
   `phase_admitted`, `cycle_completed`), so progress accrues on the Issue as it happens. **Idempotent**:
   the comment carries a hidden `<!-- orgforge:event:<id> -->` marker keyed to the ledger event id, so a
   replay logs each milestone once (docs/11 §0). `/org-work` calls it at each of its three record points.
+  Since **human diff review is retired** (docs/11 §4f), the Issue is the org's audit record, so `log`
+  takes the fields that make an entry reconstructable by someone who was never in the session:
+  `--command` (verbatim, re-runnable), `--result` (**the real output, failures included** — a log of
+  only successes is a fiction), `--files`, `--next-step`, `--blocked-by`.
+- **`decide`** records a **judgment with its reasoning** on the Issue. A ledger verdict proves a
+  decision *happened*; it does not say what was weighed. With no human approving, an unrecorded
+  judgment is indistinguishable from no judgment — so judgments **double-write**: the ledger takes the
+  tamper-evident receipt, the Issue takes the account (verdict, `--why` the reasoning, `--evidence`
+  consulted, `--alternatives` rejected, `--standard` applied, `--risk` knowingly accepted). It
+  **refuses a `--why` that merely restates the verdict** and refuses a non-judgment event class, so the
+  degradation back into a rubber stamp is closed at the tool rather than left to discipline. The gate
+  and skeptic call it on every admission and refutation attempt.
 - Labels: `orgforge:claimed:<agent>` · `orgforge:{ready,in-progress,blocked,needs-human,done}` ·
   `orgforge:kind:{objective,task}` · `orgforge:dept:<name>` · `orgforge:objective:<id>` ·
   `orgforge:{mandate,self}` · `orgforge:off-ranking`.
+- **`coverage-check`** is the **decomposition coverage gate** (docs/11 §0a). `/org-found`'s O10 lint
+  proves each must-have has exactly one owning *contract*; this proves each one reached at least one
+  *task Issue*. It matches the manifest's `rfp_capability` against the `coverage_row:` trailer in each
+  task Issue body — so a must-have that was designed but never decomposed (silently unbuilt, the hardest
+  gap to see) exits 10. Task Issues with no trailer are reported as a note, not a failure: self-raised
+  `/org-discover` items legitimately have none.
 - All three creation paths are **idempotent**: `create` no-ops when an open Issue with the same
   title+objective exists, so a re-run/replay never mints a duplicate. `ORG_GITHUB_REPO` unset ⇒ a
   ledger-only run (the projection is skipped silently).

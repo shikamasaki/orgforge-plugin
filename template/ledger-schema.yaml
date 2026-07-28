@@ -69,9 +69,18 @@ event_classes:
   # FRAME-REVIEW organs (learning.py, alignment.py) join against the realized outcome (docs/05 §5.4,
   # docs/05 §5.4). Declared here so the emitting role knows to populate it; the organs are inert
   # (silently) without it.
+  # reasoning_sha256 + issue (docs/11 §4f.1): with human review retired the Issue comment holds the
+  # ACCOUNT of why the change merged, and a GitHub comment is editable by the very agents it judges.
+  # The digest is what makes that account tamper-EVIDENT — re-hash the comment and compare. Both
+  # judgment classes also carry a runtime distinct-actor rule (ledger.py DISTINCT_ACTOR): the actor
+  # recording a verdict must not be the actor whose work it judges, and the skeptic must differ from
+  # the gate. Without it a maker could self-admit and the chain would launder the forgery.
   admission_decided:    { gate, candidate_id, verdict: admit|reject|park, standard_ref,
-                          predicted_outcome, evidence: [ref] }
-  refutation_attempted: { skeptic, claim_id, verdict: refuted|survives, checklist_ref }
+                          predicted_outcome, evidence: [ref], issue, reasoning_sha256,
+                          distinct_actor: "actor != the actor of cycle_started/cycle_completed for this candidate" }
+  refutation_attempted: { skeptic, claim_id, verdict: refuted|survives, checklist_ref, issue,
+                          reasoning_sha256,
+                          distinct_actor: "actor != the maker's and != the admitting gate's" }
   # ── SDLC phase mold (docs/11) — the forced, non-skippable phase chain, reproducibility's spine ──
   # A deliverable travels requirements → design → implement → test → integrate → deploy → operate. Each phase is
   # ENTERED by phase_started and CLEARED by phase_admitted{verdict:pass}. The chain is enforced by the

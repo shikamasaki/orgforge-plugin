@@ -471,6 +471,35 @@ build); orgforge is the **organization layer** that contains it (decide what to 
 operate → grow). The fleet is one `/org-work` cycle's fan-out; the four refinements above sharpen that
 cycle.
 
+- **Singularity (Zenn), *自分のコードをレビューするのをやめた*** (2026) — a practitioner report from
+  running parallel agents at **500+ commits/day**: human diff review stopped being physically possible,
+  so the author replaced *reading* with *mechanical rejection* — ESLint size/complexity ceilings
+  (`max-lines-per-function` 60, `complexity` 20, `max-depth` 4, sonarjs cognitive-complexity 15),
+  `@typescript-eslint/strict` with `any`/`@ts-ignore`/non-null assertions banned, ~3,400 test cases over
+  294 spec files (≈8 per source file), jscpd + knip as report-only CI scans, multi-OS CI (Windows
+  daily), and a cross-model review loop (Claude Code implements → Codex reviews → CodeRabbit checks a
+  different angle). Two operating rules are load-bearing: **drain then ratchet** (land a strict rule as
+  a warning, drive violations to zero, then error) and **exceptions in the config with a reason**, never
+  inline `eslint-disable`. Also: verify a new test actually goes red by breaking its target, and pass
+  environment dependencies (clock, home dir, **platform**) as arguments so they are testable.
+
+  *Relation to orgforge:* this is the repo's own "enforced by lint, not by doctrine" principle (docs/03
+  §6.5) applied to the **product repo**, and it fills a real gap — orgforge already had the cross-model
+  review layer (gate + skeptic, with O6c enforcing distinct lineage) and the reproducibility bar (§4a),
+  but nothing bounded complexity, closed the type-escape hatches, or scanned for duplication. Folded in
+  as **docs/11 §4e (the unread-safe bar)** and implemented as four new `repro_lint` teeth. The article's
+  own framing — *"読まなくても壊れないようにしたから"* — is the same move as forcing a checkable
+  invariant instead of a judgment.
+
+  orgforge **adopts the article's position in full**: human diff review is retired (docs/11 §4f), not
+  merely reduced. The one thing it adds is the counterpart the article leaves implicit — with no human
+  approving, an unrecorded judgment is indistinguishable from no judgment, so **recording becomes
+  mandatory**: every verdict double-writes (ledger receipt + reasoning on the Issue, via
+  `github_sync decide`, which refuses a reasoning that just restates the verdict), and the work log
+  records every command with its real output including failures. The gate/skeptic remain as the
+  *judgment* layer — a linter cannot catch "built the wrong requirement," the failure mode a
+  spec-driven org must still gate — but they are machine judges, not human reviewers.
+
 ---
 
 *Preprint note:* arXiv IDs in the 2601–2606 range are 2026 preprints; treat **[S]** arXiv items as

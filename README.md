@@ -225,8 +225,12 @@ hook injects the role's doctrine + conventions every cycle; departments run head
 cadences are realized by the harness's own scheduler (Claude Code's `/schedule` / `/loop`, or a
 cron), and `tools/tick.py` detects a missed check so "the schedule stopped firing" is a paged fact
 ([integrations/claude-code/SCHEDULER.md](integrations/claude-code/SCHEDULER.md)). Ships as a Claude
-Code **plugin** — hooks + subagents + commands. The **commands you use** are few: **`/org-found`**
-(draft an org from a brief), **`/org-start`** (bring it to its running state), **`/org`** (the status
+Code **plugin** — hooks + subagents + commands. The **commands you use** are few, and the setup path is
+three of them in order: **`/org-init`** (set up the org's state, env, and labels), **`/org-found`**
+(draft the org from a brief into four fixed-name artifacts — `RFP.md`, `FEATURE-INVENTORY.md`,
+`ARCHITECTURE.md` = the 全体設計書, `coverage-manifest.md`), **`/org-decompose`** (carve those into
+atomic SPEC task Issues, coverage-gated, each self-contained enough to be picked up from any
+environment). Then **`/org-start`** (bring it to its running state), **`/org`** (the status
 board — GREEN/AMBER/RED), and **`/org-triage`** (feed a signal into the backlog); `/org-mandate` and
 `/org-verify-guards` handle the occasional exception. The org's **own metabolism** — `/org-work`,
 `/org-discover`, `/org-tick` — runs on cadence and you rarely type it. Plus a Codex `.codex/` config;
@@ -234,7 +238,7 @@ neutral core, one folder per harness. See [integrations/README.md](integrations/
 
 ## Status & honesty
 
-v0.7. This is a **framing + template**, distilled from published organizational theory and the
+v0.9. This is a **framing + template**, distilled from published organizational theory and the
 current agent-engineering literature. The parts (principal-agent theory, harness/loop engineering,
 runtime substrates like AIOS, automated agent design like ADAS/DGM) already exist; the contribution
 here is **the top-down organizational decomposition that places them** — and, per the research in
@@ -254,6 +258,19 @@ remains: an automated projection layer (which instruction-file conventions to ta
 in the rehearsal), the Tier-B host-environment controls for asset-touching orgs, the multi-cycle
 elastic lifecycle at scale, and the client/delivery/company-layer surfaces (docs/01 §7). The fuller
 autonomy story is still ahead; the design is no longer unrun.
+
+**0.9 retires human diff review** (docs/11 §4f) on the argument that at fan-out volume a reviewer who
+cannot keep up skims, and a skimmed diff enters the record as reviewed. What replaces it is mechanical:
+an unread-safe bar (complexity ceilings, closed type escapes, no blanket inline suppressions,
+duplication/dead-code scanning, multi-OS CI), a gate and an adversarial skeptic whose independence is
+now enforced at *write* time (the ledger refuses an admission from the actor that did the work), and a
+mandatory record — every judgment carries its reasoning, its evidence, and any knowingly-accepted risk
+onto the task Issue. Two limits stated plainly rather than glossed: the reasoning digest makes an
+edited account **detectable but not impossible**, and the periodic re-hash sweep that would make that
+continuous is not yet an organ. And docs/11 §4f.3 argues against comprehension debt (Osmani) rather
+than ignoring it — the substitution is argued, not proven, and the honest test is whether the domain
+model keeps growing (§4d) once an org runs for months.
+
 The value of any org design is proven by whether the organization actually **produces**, not by the
 elegance of its chart. Treat this as scaffolding for that, not a substitute for it.
 

@@ -40,9 +40,10 @@ for f in "$REPO"/tools/*.py; do
   sync_one "$f" "$HERE/tools/$(basename "$f")" || rc=1
 done
 # the data files the org commands read (source of truth: template/): schedule/sensors/constitution
-# for /org-tick and /org-mandate; moves + ledger-schema + the SKELETON for /org-found's lint + draft.
+# for /org-tick and /org-mandate; moves + ledger-schema + the SKELETON for /org-found's lint + draft;
+# SPEC.md for /org-decompose's Issue bodies; role-settings.yaml for /org-init's scaffold.
 for f in schedule.yaml sensors.yaml constitution.yaml moves.yaml ledger-schema.yaml \
-         organization.SKELETON.yaml SPEC.md; do
+         organization.SKELETON.yaml SPEC.md role-settings.yaml; do
   sync_one "$REPO/template/$f" "$HERE/template/$f" || rc=1
 done
 

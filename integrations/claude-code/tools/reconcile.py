@@ -257,16 +257,16 @@ def main(argv):
     sub = p.add_subparsers(dest="cmd", required=True)
 
     q = sub.add_parser("collision"); q.set_defaults(fn=cmd_collision)
-    q.add_argument("root")
+    q.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)")
     q.add_argument("--now-role", dest="now_role")
     q.add_argument("--now-territory", dest="now_territory")
 
     q = sub.add_parser("stall"); q.set_defaults(fn=cmd_stall)
-    q.add_argument("root")
+    q.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)")
     q.add_argument("--freshness-cycles", dest="freshness_cycles", type=int, default=2)
 
     q = sub.add_parser("contract"); q.set_defaults(fn=cmd_contract)
-    q.add_argument("root")
+    q.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)")
     q.add_argument("--seam", required=True)
     q.add_argument("--producer", required=True)
     q.add_argument("--breaking", required=True)
@@ -275,7 +275,7 @@ def main(argv):
     q.add_argument("--deadline-tick", dest="deadline_tick")
 
     q = sub.add_parser("mandate"); q.set_defaults(fn=cmd_mandate)
-    q.add_argument("root")
+    q.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)")
     q.add_argument("--subjects", required=True)
     q.add_argument("--decision", required=True)
     q.add_argument("--precedence", required=True)

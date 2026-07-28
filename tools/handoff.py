@@ -80,7 +80,7 @@ def _scoped_claims(root, child_role):
 def main(argv):
     p = argparse.ArgumentParser(prog="handoff", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("root")
+    p.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)")
     p.add_argument("child_role")
     p.add_argument("--slice", required=True, dest="slice_")
     p.add_argument("--inputs", required=True)

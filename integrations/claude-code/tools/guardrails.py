@@ -382,7 +382,7 @@ def main(argv):
     sub = p.add_subparsers(dest="cmd", required=True)
 
     q = sub.add_parser("cap"); q.set_defaults(fn=cmd_cap)
-    q.add_argument("root")
+    q.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)")
     q.add_argument("--dimension", required=True)
     q.add_argument("--delta", type=float, required=True)
     q.add_argument("--cap", type=float, required=True)
@@ -391,33 +391,33 @@ def main(argv):
     q.add_argument("--caused-by", dest="caused_by")
 
     q = sub.add_parser("cycles"); q.set_defaults(fn=cmd_cycles)
-    q.add_argument("root")
+    q.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)")
     q.add_argument("--role", required=True)
     q.add_argument("--max-cycles", dest="max_cycles", type=int)
     q.add_argument("--max-tokens", dest="max_tokens", type=float)
     q.add_argument("--window-since", dest="window_since")
 
     q = sub.add_parser("stall"); q.set_defaults(fn=cmd_stall)
-    q.add_argument("root")
+    q.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)")
     q.add_argument("--candidate-id", dest="candidate_id", required=True)
     q.add_argument("--role", default="")
     q.add_argument("--repeat-threshold", dest="repeat_threshold", type=int, default=2)
     q.add_argument("--stall-threshold", dest="stall_threshold", type=int, default=3)
 
     q = sub.add_parser("rollback"); q.set_defaults(fn=cmd_rollback)
-    q.add_argument("root")
+    q.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)")
     q.add_argument("--action-ref", dest="action_ref", required=True)
     q.add_argument("--undo", default="")
 
     q = sub.add_parser("reconcile"); q.set_defaults(fn=cmd_reconcile)
-    q.add_argument("root")
+    q.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)")
     q.add_argument("--domain", required=True)
     q.add_argument("--observed", required=True)
     q.add_argument("--expected", required=True)
     q.add_argument("--halt-magnitude", dest="halt_magnitude", type=float)
 
     q = sub.add_parser("staleref"); q.set_defaults(fn=cmd_staleref)
-    q.add_argument("root")
+    q.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)")
     q.add_argument("--trigger-event", dest="trigger_event")   # not required when --auto derives it
     q.add_argument("--bound")                                 # not required when --auto derives it
     q.add_argument("--auto", action="store_true",
@@ -427,7 +427,7 @@ def main(argv):
                    type=int, default=3)
 
     q = sub.add_parser("consent"); q.set_defaults(fn=cmd_consent)
-    q.add_argument("root")
+    q.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)")
     q.add_argument("--action-class", dest="action_class", required=True,
                    help="the downstream action a backlog item would trigger (deploy/spend/... "
                         "are irreversible; everything else rides silence=consent)")
