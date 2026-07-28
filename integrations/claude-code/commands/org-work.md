@@ -73,6 +73,10 @@ Read the `selected[]` above. Then apply the **decomposition doctrine (docs/03)**
 - **Route by domain, don't swallow it** (docs/03 §3): an item whose domain belongs to a subordinate
   role goes to that role, so its knowledge accrues to that role's doctrine — never absorbed here.
 - If an item is your OWN-domain tightly-coupled work, implementing it yourself is fine (docs/09).
+- **Each child works on its OWN feature branch off `develop`** (the branch policy, docs/11 §4c): the
+  child opens `feat/issue-<N>-<slug>` — deterministic, so siblings never collide. Get the exact name
+  from `github_sync branch --repo "$ORG_GITHUB_REPO" --issue <N>` (or `--create` to cut it). A task's
+  work lands on its branch; it does NOT commit to `develop`/`main` directly.
 
 ## 3. Record work as you go — so nothing is lost to a context wipe
 
@@ -120,6 +124,23 @@ Post the milestone to the Issue, keyed by the same natural id so a replay logs i
 carries a hidden `orgforge:event:<id>` marker; `log` no-ops on a duplicate — docs/11 §0):
 
 !`echo 'Log the milestone to the Issue (the main work-log): python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/github_sync.py" log --repo "$ORG_GITHUB_REPO" --issue <N> --event cycle_started|progress_recorded|phase_admitted|cycle_completed [--phase <sdlc-phase>] [--detail "<next_step or done_so_far>"] --event-id <id>. THEN write the ledger receipt (audit/resume). A ledger-only run (no ORG_GITHUB_REPO) keeps the work-log in the ledger instead.'`
+
+## 4. Fan the work back in — integrate on `develop` before it's "done for review"
+
+Fanning out (§2) is only half the loop; the parallel siblings must **come back together and be tested
+as a whole** before any of them deploys (docs/11 §4c — whatever you separate, you pay to reintegrate).
+As the supervising manager you own this integrate phase (your A3, extended to cross-deliverable):
+
+- Each child's per-unit `test` passing (its own suite green on its feature branch) admits it to **open a
+  PR against `develop`** — not `main`. Merge the green feature branches into `develop`.
+- Then run the **combined** suite on `develop`: the siblings must build and pass **together**, not just
+  each alone. Green CI on `develop` is the integrate gate (`integration_admitted`) — the machine form.
+- Only an integrated, green `develop` is **"done for review"**: a reviewer reads a `develop` that
+  actually runs. A pile of per-task PRs against `main` that were never assembled is NOT done.
+- Record `integration_admitted` (the receipt) and log it to the objective Issue so the phone view shows
+  the fan-in happened. Promotion `develop → main` (deploy, docs/11 §3) is a later, separate gate.
+
+!`echo 'Integrate: for each green child, python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/github_sync.py" branch --repo "$ORG_GITHUB_REPO" --issue <N> gives its feature branch; merge them to develop, run the combined suite on develop (green = integration_admitted), then log it to the objective Issue. Skip if this org has a single deliverable (nothing to integrate).'`
 
 ## Discipline — work only from the backlog
 

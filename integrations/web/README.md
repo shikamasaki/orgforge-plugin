@@ -42,10 +42,20 @@ location and the steering surface differ.
 
 The Issue label system carries five orthogonal things the org already tracks internally:
 
-### 0. Kind & hierarchy — the big-picture objective vs. a department's task
-The org has two levels: an **objective** (the RFP / business goal) and the **department tasks** that
-decompose it. Both project onto GitHub Issues, and the two are kept distinct so a phone view — and a
-web or local session picking work — never confuses "the goal" with "a unit of work":
+### 0. Kind & hierarchy — the objective vs. a task, mapping SDD's spec/plan/tasks
+The org has two Issue levels, and they are how orgforge maps **Spec-Driven Development's three layers**
+(GitHub Spec Kit / Kiro; docs/11 §4b) onto GitHub — *without* a pile of `spec.md`/`plan.md`/`tasks.md`
+files (the fragment-Spec trap; the SSoT stays code + the domain model):
+
+- the **objective Issue** carries the **spec** (WHAT — user stories + EARS acceptance criteria) and its
+  **plan** (HOW — architecture/data-model/API-contracts, admitted at the design phase);
+- each **task sub-issue** is one **atomic task** off that plan — one independently-completable unit (one
+  endpoint/function, not a whole domain), with `depends_on` order, disjoint `owns` (the `[P]`
+  parallel-safe marker), and its entry files. `github_sync split-check` warns if a task's `owns` spans
+  multiple territories or a dep is still open (too coarse — split it, docs/11 §4b).
+
+The two levels are kept distinct so a phone view — and a web or local session picking work — never
+confuses "the goal" with "a unit of work":
 
 - `orgforge:kind:objective` — the **big-picture Issue** (a projection of an org objective). It is a
   *parent / roll-up*, not something an agent claims and works directly.

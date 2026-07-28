@@ -31,6 +31,13 @@ Commands (all shell out to `gh`, which the host authenticates — the organ does
   ready   --repo R [--kind task|objective|any]
                                            list Issues ready to work (no open dependency, unclaimed);
                                            default lists TASKS only (objectives are parents, not work)
+  branch  --repo R --issue N [--create] [--base B]
+                                           print the DETERMINISTIC feature branch for a task Issue —
+                                           `feat/issue-N-<slug>` off `develop` (docs/11 §4c). --create
+                                           also `git checkout -b` it. Same Issue ⇒ same branch (repro).
+  split-check --repo R --issue N           SHAPE check: warn (exit 10) if a task Issue is too coarse —
+                                           `owns:` spans multiple territories, or a `depends_on:` is
+                                           still open (docs/11 §4b). Shape only; sense is the skeptic's.
 
 Two-level hierarchy (the org's structure projected onto GitHub):
   objective Issue  — orgforge:kind:objective — the RFP/objective (a projection of an org objective)
@@ -305,6 +312,111 @@ def cmd_log(a):
     return 0
 
 
+def _slug(text, maxlen=32):
+    """A deterministic, git-ref-safe slug from an Issue title. Same title ⇒ same slug (reproducible
+    branch names, docs/11 §0). Keeps ASCII words; if the title is mostly non-ASCII (e.g. a Japanese
+    task title, output_language: ja), the ASCII part may be empty — then fall back to a short hash of
+    the full title, so the branch is still unique and stable (feat/issue-N-<hash>) rather than collapsing
+    to nothing. git refs allow non-ASCII, but a stable ASCII/hash slug is safer across tools."""
+    import re
+    s = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+    s = s[:maxlen].strip("-")
+    if len(s) >= 3:
+        return s
+    # too little ASCII to be meaningful (non-Latin title) — deterministic short hash of the full title
+    import hashlib
+    return "t" + hashlib.sha256(text.encode("utf-8")).hexdigest()[:8]
+
+
+def cmd_branch(a):
+    """Print (and optionally create) the DETERMINISTIC feature branch for a task Issue:
+    `feat/issue-<N>-<slug-of-title>` off `develop` (the org's branch policy, docs/11 §4c). The name is
+    a pure function of (issue number, title), so two makers / a replay derive the SAME branch — the
+    reproducibility rule that governs Issue creation, applied to branches. With --create it also runs
+    `git checkout -b <name> develop` in the current repo (R0: borrow git; we build no ref store)."""
+    labels, err = issue_labels(a.repo, a.issue)  # also validates the Issue exists
+    code, out = gh(["issue", "view", str(a.issue), "--repo", a.repo, "--json", "title"])
+    if code != 0:
+        print(f"gh error: {out}", file=sys.stderr)
+        return 2
+    try:
+        title = json.loads(out).get("title", "")
+    except Exception:
+        title = ""
+    name = f"feat/issue-{a.issue}-{_slug(title)}"
+    print(name)
+    if getattr(a, "create", False):
+        base = getattr(a, "base", None) or "develop"
+        import subprocess
+        try:
+            p = subprocess.run(["git", "checkout", "-b", name, base],
+                               capture_output=True, text=True, timeout=30)
+            if p.returncode != 0:
+                # branch may already exist (idempotent) — try to switch to it
+                p2 = subprocess.run(["git", "checkout", name], capture_output=True, text=True, timeout=30)
+                if p2.returncode != 0:
+                    print(f"git error creating/switching branch: {(p.stderr or '')+(p2.stderr or '')}",
+                          file=sys.stderr)
+                    return 2
+                print(f"branch {name} already existed — switched to it (idempotent).", file=sys.stderr)
+            else:
+                print(f"created and switched to {name} off {base}.", file=sys.stderr)
+        except Exception as e:
+            print(f"git not available: {e}", file=sys.stderr)
+            return 2
+    return 0
+
+
+def cmd_split_check(a):
+    """SHAPE check on a task Issue's granularity (docs/11 §4b): warn (do not block) if the Issue looks
+    too COARSE for a no-context maker — its `owns:` spans multiple disjoint territories (should be one
+    atomic unit), or a `depends_on:` names an Issue that is still OPEN (the single-unit assertion fails:
+    a fresh maker can't take it green until that sibling lands). This checks SHAPE, never SENSE — is the
+    split *good* stays with the skeptic (docs/12 §6). Exit 0 clean · 10 = re-split candidate · 2 error."""
+    code, out = gh(["issue", "view", str(a.issue), "--repo", a.repo, "--json", "body,title"])
+    if code != 0:
+        print(f"gh error: {out}", file=sys.stderr)
+        return 2
+    try:
+        body = json.loads(out).get("body") or ""
+    except Exception as e:
+        print(f"parse: {e}", file=sys.stderr)
+        return 2
+    warnings = []
+    # (a) owns spanning multiple territories — pull the `owns:` line and count distinct top-level paths
+    for line in body.splitlines():
+        low = line.lower()
+        if "owns" in low and (":" in line):
+            territory = line.split(":", 1)[1]
+            # split on commas / 'and' / semicolons; count distinct top-level dirs (before the first '/')
+            import re
+            parts = [p.strip() for p in re.split(r"[,;、]| and ", territory) if p.strip()
+                     and not p.strip().startswith("<")]   # ignore the unfilled placeholder
+            tops = {p.split("/")[0].strip("` ") for p in parts}
+            if len(tops) > 1:
+                warnings.append(f"`owns:` spans {len(tops)} distinct territories {sorted(tops)} — a task "
+                                f"should own ONE atomic unit; consider splitting one Issue per territory.")
+            break
+    # (b) depends_on referencing an OPEN Issue — the single-unit assertion (docs/11 §4b) fails
+    for line in body.splitlines():
+        if line.lower().lstrip().startswith(("depends_on", "depends on", "- **depends_on")):
+            for tok in line.split(":", 1)[-1].split(","):
+                num = "".join(ch for ch in tok if ch.isdigit())
+                if num:
+                    c, o = gh(["issue", "view", num, "--repo", a.repo, "--json", "state"])
+                    if c == 0 and json.loads(o).get("state") == "OPEN":
+                        warnings.append(f"depends_on #{num} is still OPEN — a fresh maker can't take this "
+                                        f"green until it lands (single-unit assertion fails, docs/11 §4b).")
+    if warnings:
+        print(f"RE-SPLIT CANDIDATE — issue #{a.issue} may be too coarse for a no-context maker:")
+        for w in warnings:
+            print(f"  · {w}")
+        print("(shape warning only — whether the split is GOOD stays with the skeptic, docs/12 §6.)")
+        return 10
+    print(f"issue #{a.issue}: shape OK (one territory, deps landed).")
+    return 0
+
+
 def cmd_ready(a):
     # list open Issues labeled orgforge:ready, unclaimed, with no open dependency
     code, out = gh(["issue", "list", "--repo", a.repo, "--label", "orgforge:ready",
@@ -382,9 +494,17 @@ def main(argv):
     q.add_argument("--phase", help="the SDLC phase, if this milestone is a phase transition")
     q.add_argument("--event-id", dest="event_id",
                    help="the ledger event's id — keys the idempotent dedup so a replay logs once")
+    q = sub.add_parser("branch")
+    q.add_argument("--repo", required=True); q.add_argument("--issue", required=True, type=int)
+    q.add_argument("--create", action="store_true",
+                   help="also `git checkout -b <name> <base>` in the current repo (idempotent)")
+    q.add_argument("--base", help="the branch to fork from (default: develop, docs/11 §4c)")
+    q = sub.add_parser("split-check")
+    q.add_argument("--repo", required=True); q.add_argument("--issue", required=True, type=int)
     a = p.parse_args(argv[1:])
     return {"claim": cmd_claim, "release": cmd_release, "create": cmd_create,
-            "stage": cmd_stage, "ready": cmd_ready, "log": cmd_log}[a.cmd](a)
+            "stage": cmd_stage, "ready": cmd_ready, "log": cmd_log,
+            "branch": cmd_branch, "split-check": cmd_split_check}[a.cmd](a)
 
 
 if __name__ == "__main__":

@@ -123,6 +123,59 @@ def test_log_is_idempotent_when_event_already_logged(monkeypatch):
 
 
 # ── ready: tasks by default, objectives excluded ─────────────────────────────
+def test_branch_name_is_deterministic_and_off_develop(monkeypatch):
+    fake = FakeGh(replies={"issue view": (0, '{"title": "Add login endpoint"}')})
+    monkeypatch.setattr(GS, "gh", fake)
+    import io, contextlib
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = GS.cmd_branch(_ns(repo="o/r", issue=42, create=False, base=None))
+    assert rc == 0
+    assert buf.getvalue().strip() == "feat/issue-42-add-login-endpoint"
+
+
+def test_branch_japanese_title_falls_back_to_stable_hash(monkeypatch):
+    # a Japanese task title (output_language: ja) must NOT collapse to an empty/meaningless slug
+    fake = FakeGh(replies={"issue view": (0, '{"title": "領域A: 認証 + プロジェクト"}')})
+    monkeypatch.setattr(GS, "gh", fake)
+    import io, contextlib
+    out = []
+    for _ in range(2):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            GS.cmd_branch(_ns(repo="o/r", issue=6, create=False, base=None))
+        out.append(buf.getvalue().strip())
+    assert out[0] == out[1], "same Issue must yield the same branch (reproducible)"
+    assert out[0].startswith("feat/issue-6-t") and len(out[0]) > len("feat/issue-6-"), out[0]
+
+
+def test_slug_helper_distinct_titles_differ():
+    assert GS._slug("領域A: 認証") != GS._slug("領域B: 支出")
+    assert GS._slug("Add login") == GS._slug("Add login")
+
+
+def test_split_check_flags_owns_spanning_territories(monkeypatch):
+    body = "## Seam\\n- **owns:** `app/auth/`, `app/billing/`\\n"
+    fake = FakeGh(replies={"issue view": (0, '{"body": "' + body + '", "title": "big"}')})
+    monkeypatch.setattr(GS, "gh", fake)
+    import io, contextlib
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = GS.cmd_split_check(_ns(repo="o/r", issue=9))
+    assert rc == 10 and "territories" in buf.getvalue(), buf.getvalue()
+
+
+def test_split_check_clean_on_single_territory(monkeypatch):
+    body = "## Seam\\n- **owns:** `app/packages/auth/`\\n"
+    fake = FakeGh(replies={"issue view": (0, '{"body": "' + body + '", "title": "ok"}')})
+    monkeypatch.setattr(GS, "gh", fake)
+    import io, contextlib
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = GS.cmd_split_check(_ns(repo="o/r", issue=9))
+    assert rc == 0 and "shape OK" in buf.getvalue(), buf.getvalue()
+
+
 def test_ready_lists_tasks_and_excludes_objectives(monkeypatch):
     listing = ('[{"number": 1, "title": "t", "labels": [{"name": "orgforge:kind:task"}], "body": ""},'
                ' {"number": 2, "title": "o", "labels": [{"name": "orgforge:kind:objective"}], "body": ""}]')

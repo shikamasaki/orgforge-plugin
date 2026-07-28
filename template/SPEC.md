@@ -27,11 +27,18 @@
 ## Deliverable
 `<one line: what is being built>` — owner role: `<role id>` · contract_ref: `<objective/contract id>` · est: `<S/M/L>`
 
+> **This is a TASK spec — one atomic, independently-completable unit** (docs/11 §4b), not a whole domain.
+> The objective Issue holds the *spec* (WHAT + EARS) and the *plan* (HOW — architecture/data-model); this
+> task sub-issue is one *task* off that plan. **Single-unit assertion:** a fresh maker can take this green
+> without another open Issue landing first (every `depends_on` below is already merged to `develop`). If
+> it needs a sibling still in flight, it is too coarse — split it.
+
 ## Working context (where a fresh maker starts)
 > The #1 thing a third party — a different agent, a fresh session with none of the originating context —
 > needs to *begin*. `owns:` (below) names the territory; this names the door, the key, and the ignition.
 > Without it a stranger stalls before writing a line.
-- **repo / branch:** `<clone URL · base branch · the branch to open for this work>`
+- **repo / feature branch:** `<clone URL · open `feat/issue-<N>-<slug>` off `develop` (the org's branch
+  policy, docs/11 §4c; `github_sync branch --issue <N>` prints the exact name)>`
 - **setup + run:** `<the exact one-command setup and the run/test command, AND the dir to run them in —
   e.g. `cd app && npm ci` then `npm test`. Not "install deps" — the literal command a stranger pastes.>`
 - **entry files:** `<the 1–3 files to open first (the seam of `owns`), not the whole tree>`
@@ -39,8 +46,14 @@
 ## Intent (why — the purpose this serves)
 `<the goal this deliverable advances, grounded in the org's telos — not a metric. Trace it to the RFP.>`
 
-## MUST — acceptance criteria (the bar the gate checks; each must be verifiable)
-- [ ] `<a checkable behaviour — "invite link is idempotent", not "auth works">`
+## MUST — acceptance criteria in EARS (testable, not prose)
+> Write each criterion in **EARS** (Easy Approach to Requirements Syntax) so it is testable and
+> AI-parseable — one of five patterns, not "auth works" (docs/11 §4b):
+> · *Ubiquitous:* "The system SHALL …" · *Event:* "**WHEN** … **THE system SHALL** …" ·
+> *State:* "**WHILE** … **THE system SHALL** …" · *Unwanted:* "**IF** … **THEN THE system SHALL** …" ·
+> *Optional:* "**WHERE** <feature> **THE system SHALL** …".
+- [ ] `<WHEN a user submits the invite link twice THE system SHALL create exactly one membership>`
+- [ ] `<IF an 11th member joins THEN THE system SHALL reject with a cap error>`
 - [ ] `<…>`
 
 ## Entities / data-model contract (if any)
@@ -85,9 +98,9 @@
   nearby_deaths). e.g. "PayPay recipient-prefill URLは存在しない — API決済は構造的に不可、金額コピー導線で行く">`
 
 ## Hand-back (how completion is submitted)
-`<the artifact and where — e.g. "PR against `main`; close the Issue with the DoD command's green output
-pasted + the CI-green link". The Issue is the work surface; a spec that never says how to put the work
-back leaves a stranger inventing a hand-back.>`
+`<a PR against `develop` (NOT `main`) per the org's branch policy (docs/11 §4c): the task's feature
+branch → PR → `develop`; close the Issue with the DoD command's green output pasted + the develop-CI
+link. "Done for review" = merged to `develop` and integration-green there — not a PR against `main`.>`
 
 ---
 _SDLC phases (docs/11): requirements → design → implement → test → deploy → operate. This spec is the

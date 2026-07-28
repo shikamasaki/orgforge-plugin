@@ -73,10 +73,15 @@ event_classes:
   # The existing test→deploy gate (result_deployed requires survives) and design→implement conformance
   # (conformance_reviewed) are the two hardest phase boundaries, already enforced below; these two
   # events extend the identical mechanism to the earlier boundaries.
-  phase_started:        { deliverable, phase: requirements|design|implement|test|deploy|operate, role,
+  phase_started:        { deliverable, phase: requirements|design|implement|test|integrate|deploy|operate, role,
                           requires_prior: "phase_admitted{deliverable==deliverable, phase==prior(phase), verdict==pass} (∅ for requirements)" }
-  phase_admitted:       { deliverable, phase: requirements|design|implement|test|deploy|operate,
+  phase_admitted:       { deliverable, phase: requirements|design|implement|test|integrate|deploy|operate,
                           verdict: pass|rework|reject, evidence_ref, admitter }
+  # integrate phase (docs/11 §4c): the fanned-out siblings merged to `develop` and pass the COMBINED
+  # suite together. Green CI on develop is its machine form; result_deployed should require it (the
+  # develop→main promotion). Owned by the supervising manager (A3 extended to cross-deliverable).
+  integration_admitted: { integration_branch, deliverables: [ref], combined_ci_ref, verdict: pass|fail,
+                          admitter }
   # A result may only deploy AFTER the skeptic refuted-and-failed (verdict: survives) for it.
   # requires_prior makes the skeptic load-bearing: without a `survives` for this candidate_id,
   # a result_deployed event is INVALID (the deploy path cannot skip adversarial review).

@@ -57,7 +57,7 @@ from _organ import read_events, LedgerCorruption   # noqa: E402
 # ADMITTED (phase_admitted{verdict==pass}) for the same deliverable. This is the same requires_prior
 # idiom as result_deployed, generalized from admission-gating to phase-gating so that the PROCESS is
 # reproducible: same spec ⇒ the same phases run in the same order for every founder and every run.
-PHASE_ORDER = ["requirements", "design", "implement", "test", "deploy", "operate"]
+PHASE_ORDER = ["requirements", "design", "implement", "test", "integrate", "deploy", "operate"]
 
 
 def _prior_phase(phase):

@@ -56,9 +56,35 @@ repositories the company builds clone-and-run the same for anyone.
   fold into docs/05 as operating instruments (error budget bounds deploy velocity; DORA four keys
   navigate to the moving bottleneck).
 
+### SDD canonical form + branch model + integration phase (post-0.8.0 fold)
+Deep-dived Spec-Driven Development (GitHub Spec Kit / AWS Kiro) and folded the canonical form in,
+mapped onto the Issue hierarchy (no fragment `spec/plan/tasks` files — SSoT stays code + domain model):
+- **SDD 3 layers → Issue hierarchy** (docs/11 §4b): objective Issue = **spec** (WHAT) + **plan** (HOW);
+  task sub-issue = one **atomic task** (dep order, disjoint `owns` = the `[P]` parallel marker, entry
+  files). Acceptance criteria now in **EARS** (WHEN/WHILE/IF/WHERE…SHALL).
+- **Branch model + integration phase** (docs/11 §4c): feature branch per task (`feat/issue-N-slug` off
+  `develop`) → merge to **`develop`** → a new **`integrate` phase** (the 7th) where the fanned-out
+  siblings build+test **together** (green CI on `develop` = `integration_admitted`) → deploy is
+  `develop`→`main`. The ledger now enforces `deploy` requires `integrate` (fan-out must fan back in).
+  Owned by the supervising manager's A3, extended to cross-deliverable.
+- **New github_sync commands:** `branch` (deterministic feature-branch name, Japanese-title safe) and
+  `split-check` (shape warning if a task's `owns` spans territories or a dep is still open).
+- **SPEC strengthened** for the third-party/no-context maker: Working context (repo/branch/setup-run/
+  entry files), a runnable DoD command, a worked input→output example, actionable `depends_on`, a
+  single-unit assertion, prior-deaths, and a Hand-back that targets `develop`.
+
+### SSoT corrected — code + domain model, not the ledger
+The ledger was wrongly called the SSoT. Corrected repo-wide: **SSoT = code + the domain model**
+(conventions + org spec); the ledger is the **audit / requires_prior-enforcement / crash-safe-resume
+record** (it holds the *receipt* of a decision, not the decision — which co-commits to code/conventions).
+The GitHub Issue is the **main, terminal-independent work surface** (spec + work-log); a local ledger
+is terminal-bound. `conventions` elevated to "the domain model". SPEC is the Issue structure, never a
+`docs/spec/*.md` file (the fragment-Spec trap).
+
 ### Tests
-- 130 passing (was 114): phase-gate, ledger idempotency, spec-declared caps, `repro_lint`, and the
-  O10 founding-coverage tooth all have regression coverage.
+- 144 passing (was 114): phase-gate (incl. integrate), ledger idempotency, spec-declared caps,
+  `repro_lint` (incl. monorepo-CI), the O10 founding-coverage tooth, `github_sync` two-level Issues,
+  work-log idempotency, deterministic branch naming, and `split-check` all have regression coverage.
 
 ## 0.6.0
 

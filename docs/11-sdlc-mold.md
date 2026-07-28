@@ -65,7 +65,7 @@ Two clarifications the repo's own lessons force:
 
 ---
 
-## 1. The six phases and what each admits
+## 1. The seven phases and what each admits
 
 Each phase produces an artifact the next phase depends on, and each transition is a **gate**: the
 next phase may not start until the prior phase's artifact carries an admission verdict in the ledger.
@@ -77,8 +77,9 @@ The gate is the generalization of docs/03's `output_to: gate → skeptic` and do
 | **requirements** | a stated intent + acceptance criteria (what "done" and "valuable" mean) | `requirements_signed_off` — the intent is grounded in the purpose (Organ 1), not in volume |
 | **design** | an approach + the seams it will touch (`owns:` sets, interfaces) | `design_reviewed` — conforms to the requirement (docs/09 A3 conformance, applied one phase up) |
 | **implement** | the deliverable | the maker's own `judge` (docs/03 §3.1.1 — *not* admission) |
-| **test** | evidence the deliverable meets the acceptance criteria | `admission_decided{admit}` by the **gate**, then `refutation_attempted{survives}` by the **skeptic** (docs/03) — this is the existing maker→gate→skeptic chain, sitting exactly at the test→deploy boundary |
-| **deploy** | the change, live | `result_deployed` — requires the prior `survives` (today's schema) **and** a healthy reliability budget (docs/05 §reliability-budget); CI/CD is the spine (§3) |
+| **test** | evidence the deliverable meets the acceptance criteria (its own unit tests green) | `admission_decided{admit}` by the **gate**, then `refutation_attempted{survives}` by the **skeptic** (docs/03) — the existing maker→gate→skeptic chain, per-unit |
+| **integrate** | the unit merged into the integration branch (`develop`) and passing the *combined* suite alongside its siblings | `integration_admitted` — the fanned-out siblings build and test **together** green on `develop` (§6). This is where fan-out fans back in; green CI on `develop` is its machine form |
+| **deploy** | the change, live (`develop` → `main`) | `result_deployed` — requires the prior `survives` (today's schema) **and** a healthy reliability budget (docs/05 §reliability-budget); CI/CD is the spine (§3) |
 | **operate** | monitoring, corrective fixes, the realized-outcome record | `outcome_recorded` (docs/05 OUTCOME-DELTA) feeds back to requirements — the loop closes |
 
 The important observation: **the repo already implements the two hardest gates.** The
@@ -191,6 +192,70 @@ clean-clone re-run the expensive second. This is what makes two makers, handed t
 repositories that are *equally reproducible* — the Level-2 counterpart to the Level-1 phase gate.
 Without it, the repo's dev experience is a free maker choice and diverges; with it, "clone → one
 command → the same running, tested system" holds for everyone.
+
+---
+
+## 4b. The spec / plan / tasks layering — SDD, mapped onto the Issue hierarchy
+
+The canonical Spec-Driven Development form (GitHub Spec Kit, AWS Kiro; docs/sources) splits the front of
+the lifecycle into **three artifacts**, each a checkpoint before the next: **spec** (WHAT — user stories
++ acceptance criteria), **plan** (HOW — architecture, data model, API contracts, libraries), **tasks**
+(the WHAT broken into *atomic, independently-completable units* with dependency order, a parallel marker,
+and exact file paths). orgforge adopts this layering — but it does **not** create `spec.md`/`plan.md`/
+`tasks.md` *files* (that is the fragment-Spec trap docs/12 §6 forbids; the SSoT is code + the domain
+model, not a pile of task files). Instead the three layers **map onto the GitHub Issue hierarchy** the
+org already has (docs, web-harness):
+
+| SDD layer | orgforge home | contents |
+|---|---|---|
+| **spec** (WHAT) | the **objective Issue** (`kind:objective`) | user stories + acceptance criteria in **EARS** (below); tech-stack-agnostic |
+| **plan** (HOW) | the objective's **design** (its body / a design comment), admitted at the `design` phase | architecture, data model, API/seam contracts, library choices |
+| **tasks** (atomic units) | the **task sub-issues** (`kind:task`), one per atomic unit | each an independently-completable unit (one endpoint/function, not a whole domain), with `depends_on` (order), a boundary (`owns` disjoint from siblings = the `[P]` parallel-safe marker), and its entry files (the exact paths) — the SPEC structure |
+
+**Acceptance criteria use EARS** (Easy Approach to Requirements Syntax) so a MUST is testable and
+AI-parseable, not prose: *Ubiquitous* ("the system SHALL log every auth attempt"), *Event* ("**WHEN** a
+user submits login **THE system SHALL** validate credentials"), *State* ("**WHILE** a sync runs **THE
+system SHALL** show progress"), *Unwanted* ("**IF** validation fails 3× **THEN THE system SHALL** lock
+the account"), *Optional* ("**WHERE** MFA is enabled **THE system SHALL** require a TOTP"). The SPEC's
+MUST list (template/SPEC.md) is written in these five patterns.
+
+The upshot for granularity (the "split finer" concern): **a task sub-issue is ONE atomic unit**, not a
+domain. The discriminator is the `owns` set — split at every seam where sibling `owns` sets are disjoint
+and `depends_on` is a pinned one-directional contract (`[P]`-parallel-safe); keep single-threaded only
+what needs reciprocal back-and-forth (docs/03 §6.2 — over-splitting coupled work is 17× worse, docs/12
+§6). A lint flags an Issue whose acceptance criteria span multiple disjoint `owns` territories as a
+re-split candidate (a *shape* check, not a quality judgment).
+
+---
+
+## 4c. The integration seam — feature → develop → main, and where fan-out fans back in
+
+docs/03 fans work **out** into parallel task sub-issues; the theory it rests on (Lawrence & Lorsch, via
+docs/03 §2) warns that **whatever you separate, you must pay to reintegrate**. The `integrate` phase
+(§1) is that payment — the point the parallel deliverables come back together and are tested *as a
+whole*, before any of them deploys. It is realized on git branches (R0: borrow git/GitHub, build no
+runtime):
+
+- **feature branch per task.** Each task sub-issue opens `feat/issue-<N>-<slug>` off `develop`. The
+  branch name is deterministic (`github_sync branch --issue N`), so it is reproducible the way Issue
+  creation is (docs/11 §0). A task's work happens on its own branch — siblings never collide.
+- **`develop` is the integration branch.** A task's per-unit `test` passing (its own suite green) admits
+  it to merge into `develop` — **not** into `main`. `main` is release-only.
+- **the `integrate` phase gate = green CI on `develop`.** Once siblings have merged, the combined suite
+  must build and pass **together** on `develop`. That green run is `integration_admitted` (the same
+  `requires_prior` idiom: `result_deployed` may not fire without it). Green CI on `develop` is the
+  machine form of the integrate gate, exactly as green CI on `main` is the machine form of deploy (§3).
+  This is the state a human reviews against: the work is *merged into `develop` and testable there* —
+  not a pile of per-task PRs against `main` that were never assembled.
+- **who owns it.** No new "integrator" rank (docs/09 §1 forbids minting PM ranks). The **supervising
+  manager's A3 accountability** (docs/09 — "verify subordinate work against its contract") is *extended*
+  from per-child conformance to the **cross-deliverable integration test on `develop`**: the manager
+  who fanned the work out owns bringing it back together and proving it works assembled.
+- **deploy is `develop` → `main`.** Only an integrated, green `develop` promotes to `main` (deploy, §3),
+  keeping the trunk always-shippable (docs/11 §0) with the integration buffer in front of it.
+
+So the hand-back a task submits is a **PR against `develop`** (not `main`), and "done for review" means
+"merged to `develop`, integration-green" — the reviewer reads a develop that actually runs.
 
 ---
 
