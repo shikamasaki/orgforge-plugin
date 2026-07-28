@@ -14,6 +14,17 @@ Org name: **${1:-(derive from the directory name)}** · output language: **${2:-
 minted. The order is: `/org-init` → `/org-found` (design, CEO approves) → `/org-decompose` (task Issues)
 → `/org-work` (build).
 
+## 0. どこに org を作るのか — 実行前に必ず確認する
+
+このコマンドは**実行時のカレントディレクトリ**に org を作る。セッションが目的のリポジトリにいないと、
+関係ないリポジトリ（プラグイン自身の開発ツリーなど）を org 化してしまう。実際に起きた事故なので、
+書き込む前に場所を出して確認する:
+
+!`echo "  ここに org を作ります: $(pwd)"; echo "  git remote        : $(git remote get-url origin 2>/dev/null || echo '(なし)')"; if [ -f organization.yaml ] || [ -d .orgforge ]; then echo "  既存の org        : あり（再実行＝修復モード。既存ファイルは上書きしない）"; else echo "  既存の org        : なし（新規作成）"; fi`
+
+**上のパスが目的のリポジトリでなければ、ここで止める。** 続けて書き込むと、他所のツリーに
+`.orgforge/` とテンプレ7ファイルと `develop` ブランチができる。CEO に場所を確認してもらうこと。
+
 ## 1. Where the org's state lives
 
 Two directories, both under the org root (this directory unless the CEO says otherwise):
@@ -84,11 +95,12 @@ or every hand-back PR targets the wrong base:
 Pre-create the label vocabulary so the first `create`/`claim` doesn't race on label creation, and so the
 CEO sees a coherent set in the GitHub UI from the start (skip with no repo).
 
-The repo is read **from `.envrc`**, not from the shell: step 3 just *wrote* that file, and this session's
-shell has not sourced it (direnv loads on the next `cd`). Reading the live env var here would find it
-unset on a first run and skip label creation entirely — while printing a reassuring "ledger-only".
+The repo comes from **discovery** (step 3), not from the shell environment: this session may never have
+exported anything, and that must not be read as "no backlog repo" — printing a reassuring "ledger-only"
+while silently skipping label creation is exactly the failure mode discovery exists to remove. The
+first `create` would then race on label creation.
 
-!`REPO="$(sed -n 's/^export ORG_GITHUB_REPO="\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' .envrc 2>/dev/null | tail -1)"; REPO="${REPO:-${ORG_GITHUB_REPO:-}}"; if [ -n "$REPO" ]; then fail=0; for spec in ready:1d76db in-progress:fbca04 blocked:b60205 needs-human:d93f0b done:0e8a16 kind:objective:0e8a16 kind:task:bfd4f2 mandate:fbca04 self:c5def5; do name="orgforge:${spec%:*}"; color="${spec##*:}"; if gh label create "$name" --repo "$REPO" --color "$color" --force >/dev/null 2>&1; then echo "  $name"; else echo "  FAILED $name"; fail=$((fail+1)); fi; done; if [ "$fail" -eq 0 ]; then echo "labels ensured on $REPO"; else echo "WARNING: $fail label(s) FAILED on $REPO — fix gh auth / repo access BEFORE /org-decompose, or the first create races on label creation"; fi; else echo "no ORG_GITHUB_REPO — ledger-only org, skipping labels (set it in .envrc to enable the cross-environment backlog)"; fi`
+!`REPO="$(python3 "${CLAUDE_PLUGIN_ROOT}/tools/discover.py" repo 2>/dev/null)"; if [ -n "$REPO" ]; then fail=0; for spec in ready:1d76db in-progress:fbca04 blocked:b60205 needs-human:d93f0b done:0e8a16 kind:objective:0e8a16 kind:task:bfd4f2 mandate:fbca04 self:c5def5; do name="orgforge:${spec%:*}"; color="${spec##*:}"; if gh label create "$name" --repo "$REPO" --color "$color" --force >/dev/null 2>&1; then echo "  $name"; else echo "  FAILED $name"; fail=$((fail+1)); fi; done; if [ "$fail" -eq 0 ]; then echo "labels ensured on $REPO"; else echo "WARNING: $fail label(s) FAILED on $REPO — fix gh auth / repo access BEFORE /org-decompose, or the first create races on label creation"; fi; else echo "no GitHub remote discoverable — ledger-only org, skipping labels. Add a remote (gh repo create --source=.) to enable the cross-environment backlog."; fi`
 
 ## 6. Verify the org spec lints, and the guardrails actually bite
 

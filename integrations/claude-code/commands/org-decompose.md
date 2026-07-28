@@ -9,14 +9,17 @@ becomes one or more **atomic task Issues**, written in the SPEC structure, hung 
 Issue. This is the step between `/org-found` (which designs and stops) and `/org-work` (which executes);
 without it the design never becomes workable units, and the must-haves sit unowned.
 
-Ledger root: `${ORG_LEDGER_ROOT}` · GitHub repo: `${ORG_GITHUB_REPO}` (both required — this command
-projects onto Issues; a ledger-only org has no backlog window to write into). Check that up front, not
-one failing `create` at a time — with `ORG_GITHUB_REPO` empty every Issue creation fails at `gh` *after*
-you have drafted full SPEC bodies for the whole manifest:
+This command projects onto GitHub Issues, so it needs an org to write into and a backlog repo to write
+to. Both are **discovered** from the working directory (`tools/discover.py`) — no environment setup.
+Check them up front, not one failing `create` at a time: with no repo, every Issue creation fails at
+`gh` *after* you have drafted full SPEC bodies for the whole manifest.
 
-!`envrc(){ sed -n "s/^export $1=\"\{0,1\}\([^\"]*\)\"\{0,1\}\$/\1/p" .envrc 2>/dev/null | tail -1; }; LR="${ORG_LEDGER_ROOT:-$(envrc ORG_LEDGER_ROOT)}"; GR="${ORG_GITHUB_REPO:-$(envrc ORG_GITHUB_REPO)}"; missing=""; [ -n "$LR" ] || missing="$missing ORG_LEDGER_ROOT"; [ -n "$GR" ] || missing="$missing ORG_GITHUB_REPO"; if [ -n "$missing" ]; then echo "STOP — unset and not in .envrc:$missing. Run /org-init first."; else echo "preconditions OK — ledger: $LR · backlog repo: $GR"; [ -n "${ORG_GITHUB_REPO:-}" ] || echo "NOTE: read from .envrc, not the live shell — export these (or direnv allow) before running the printed commands."; fi`
+!`D="${CLAUDE_PLUGIN_ROOT}/tools/discover.py"; LR="$(python3 "$D" ledger 2>/dev/null)"; GR="$(python3 "$D" repo 2>/dev/null)"; missing=""; [ -n "$LR" ] || missing="$missing ORG(ledger)"; [ -n "$GR" ] || missing="$missing GitHub-remote"; if [ -n "$missing" ]; then echo "STOP —$missing not discoverable from $(pwd). Run /org-init here first (and add a git remote if the backlog is missing)."; else echo "preconditions OK — ledger: $LR · backlog repo: $GR"; fi`
 
 If that prints **STOP**, stop and tell the CEO. Do not proceed to draft specs against an unset repo.
+
+**このコマンドは実行時のカレントディレクトリの org に対して働く。** 上の行が別の org を指しているなら、
+セッションが目的のリポジトリにいない — そのまま進めると他所の org に Issue を切る。止めて場所を直すこと。
 
 > **出力言語:** `constitution.yaml` の `output_language`（既定 `en`）を読み、Issue 本文・spec・人間向け
 > テキストはその言語で書く（コード・ledger のイベント名・パス・`coverage_row:` トレーラの値は英語の
