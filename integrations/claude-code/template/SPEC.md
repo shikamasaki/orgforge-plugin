@@ -1,14 +1,23 @@
-# SPEC — the per-deliverable specification a manager delegates DOWN
+# SPEC — the structure of a task Issue (the per-deliverable spec)
 
-> This is the **spec template** orgforge is spec-driven *around*. A manager writing a `spec_delegated`
-> event (docs/09 §spec-driven) fills this out for the deliverable it is delegating, so the intent is
-> **explicit and checkable** — the subordinate builds to it, and the gate/skeptic verify *against* it
-> (not against a vibe). The spec is the SSoT for "what this deliverable must be"; the code is a
-> projection of it. Reproducibility (docs/11 §0) starts here: two makers handed the *same* spec
-> converge on the same contract, even if the code differs.
+> This is the **structure a task Issue is written in** — orgforge's spec-driven task template. A
+> manager delegating a deliverable fills these sections **directly into the deliverable's GitHub task
+> Issue body** (`github_sync create --kind task`), so the intent is **explicit and checkable**: the
+> subordinate builds to it, and the gate/skeptic verify *against* it (not against a vibe).
+> Reproducibility (docs/11 §0) starts here — two makers handed the *same* filled-in spec converge on
+> the same contract, even if the code differs.
 >
-> Copy this file per deliverable (e.g. `docs/spec/<deliverable>.md`), fill every section, reference it
-> by `spec_ref` in the `spec_delegated` event, and project it into the deliverable's task Issue.
+> **This is NOT a separate SSoT file.** The SSoT is the **ledger + the org spec** (organization.yaml /
+> constitution.yaml) — never a pile of per-task Spec files (the fragment-Spec trap: task-scoped specs
+> lying around never form a coherent context and rot; the user's AI-DLC lesson, docs/12 §3.3). So the
+> task spec lives **in the Issue**, and the ledger only *points* at it: `spec_delegated`'s `spec_ref`
+> is the **Issue number/URL**, not a `docs/spec/*.md` path. The Issue is the task's working detail
+> under the SSoT; the ledger records that a spec was delegated and where it lives. Do **not** create a
+> `docs/spec/` file — write these sections into the Issue.
+>
+> This file is a *template* (the section skeleton), the way `.github/ISSUE_TEMPLATE` is a form — copy
+> the headings into a new task Issue and fill them. It is not itself a spec, and it is not committed
+> per-deliverable anywhere.
 >
 > **記入言語 / fill-in language:** write the *content* in the org's `output_language`
 > (`constitution.yaml`; e.g. `ja` → 日本語で記入). The section headings below may stay as-is; only the

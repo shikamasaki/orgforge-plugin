@@ -187,6 +187,9 @@ event_classes:
   # the spec conforms to the intent it holds (down-front A3). token_budget is how granularity is
   # controlled: a subordinate spawns within its budget (~1 agent per ~50k tokens, measured), so the
   # budget — not a depth/width knob — sets how deep/wide the sub-tree grows (docs/09 §granularity).
+  # spec_ref is the TASK ISSUE (its #/URL) — the spec lives in the Issue body (template/SPEC.md is the
+  # Issue structure), NOT a docs/spec/*.md file. The SSoT is the ledger + org spec; the task spec is
+  # working detail in the Issue, and this event just points at it (no fragment-Spec files, docs/12 §3.3).
   spec_delegated:       { supervisor, subordinate, spec_ref, contract_ref, intent_basis_ref,
                           token_budget, confirmed: bool }                        # spec-driven + budget
   conformance_reviewed: { supervisor, subordinate, reviewed_ref, delegated_intent_ref,
