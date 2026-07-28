@@ -71,8 +71,9 @@ irreversible patterns draw down a budget.
 
 | Command | What it does |
 |---|---|
-| `/org-init [org-name] [ja\|en]` | **Step 1 — set up.** Create the ledger/doctrine/conventions roots, install the org spec files, write `.envrc` (incl. `ORG_GITHUB_REPO`), ensure `develop` + the backlog labels, then lint the spec and probe that the guardrails actually bite. Idempotent; designs nothing. |
+| `/org-init [org-name] [ja\|en]` | **Step 1 — set up.** Create the ledger/doctrine/conventions roots, install the org spec files, ensure `develop` + the backlog labels, then lint the spec and probe that the guardrails actually bite. **No environment setup** — the org is discovered from the working directory (`tools/discover.py`), so nothing is exported and several repos can run from one shell. Idempotent; designs nothing. |
 | `/org-found <RFP or brief>` | **Step 2 — design.** Draft the org from a brief and write the five **fixed-name** founding artifacts (docs/11 §0a): `RFP.md`, `FEATURE-INVENTORY.md`, **`ARCHITECTURE.md` (the 全体設計書)**, `coverage-manifest.md`, `organization.yaml` — then stop and report up for scope approval. Design only. |
+| `/org-adopt [残りの要求]` | **既存リポジトリへの後付け.** `/org-found` の途中導入版: 実在するコードから `ARCHITECTURE.md` と `organization.yaml` を*読み取って*書き、**未実装分だけ**を manifest に載せ（実装済みを載せると動くものを作り直す Issue が生える）、機械バーの現状を `repro_lint baseline` で既知の負債として記録する。コミットのある repo で `/org-found` の代わりに使う。 |
 | `/org-decompose [objective-id]` | **Step 3 — decompose.** Turn the approved `coverage-manifest.md` + `ARCHITECTURE.md` into **atomic SPEC task Issues**, one per independently-completable unit, each a native sub-issue of its objective and each carrying the full spec (so any environment can pick it up). Gated by `coverage-check`: exits non-zero if a must-have never became an Issue. |
 | `/org-start [role] [tick] [work] [discover]` | Bring the org to its **running state**: register this session's recurring cycles via the scheduler. Idempotent. The SessionStart hook prompts it for you. |
 | `/org` `[role]` | The **status board** — "how's my org?" in one GREEN/AMBER/RED answer (done / in progress with next steps / what needs you), in your language. Read-only. |
@@ -168,7 +169,8 @@ reader catches must be made unmergeable by machine instead. Run **by the gate** 
 implement/test/deploy phase gates:
 
 ```
-python3 tools/repro_lint.py check <repo_dir> [--phase implement|test|deploy] [--json]
+python3 tools/repro_lint.py check    <repo_dir> [--phase implement|test|deploy] [--json] [--baseline PATH]
+python3 tools/repro_lint.py baseline <repo_dir>   # 採用時の失敗を「既知の負債」として記録
 ```
 
 Exit `0` = all artifacts required *for that phase* are present · `10` = one or more missing (the gate

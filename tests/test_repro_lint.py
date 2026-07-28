@@ -248,3 +248,76 @@ def test_single_os_ci_is_held_at_deploy(tmp_path):
     assert code == 10 and "multi-os-ci" in out, out
     # not required earlier — it is a deploy-phase bar
     assert run(repo, "--phase", "test")[0] == 0
+
+
+# ── baseline / drain-then-ratchet（既存リポジトリの途中導入, docs/11 §4e） ──
+# 既存コードは §4e のバーを構造上ほぼ満たさない（バーが存在する前に書かれたため）。初日から全部
+# error にすると赤の壁ができ、予測どおり「抑制コメントで黙らせる」文化が育つ = バーを無効化する形で
+# バーを満たす。baseline は採用時点の失敗を既知の負債として記録し、以後は「新たな失敗」だけを止める。
+def _legacy_repo(root):
+    """機械バーを一切持たない、途中まで作られた既存リポジトリ。"""
+    (root / "package.json").write_text('{"dependencies":{"react":"18.0.0"}}', encoding="utf-8")
+    (root / "package-lock.json").write_text("{}", encoding="utf-8")
+    (root / "README.md").write_text("# L\n## Setup\nnpm install\n## Test\nnpm test\n", encoding="utf-8")
+    (root / "app.test.ts").write_text("test('x',()=>{})", encoding="utf-8")
+    return root
+
+
+def _baseline(repo):
+    r = subprocess.run([sys.executable, str(TOOL), "baseline", str(repo)],
+                       capture_output=True, text=True)
+    return r.returncode, r.stdout + r.stderr
+
+
+def test_legacy_repo_is_held_before_adoption(tmp_path):
+    code, out = run(_legacy_repo(tmp_path), "--phase", "implement")
+    assert code == 10 and "toolchain-pin" in out
+
+
+def test_baseline_makes_existing_failures_non_blocking(tmp_path):
+    """採用直後に作業を止めないこと。既知の負債は報告されるがブロックしない。"""
+    _legacy_repo(tmp_path)
+    bc, bout = _baseline(tmp_path)
+    assert bc == 0 and "toolchain-pin" in bout
+    code, out = run(tmp_path, "--phase", "implement")
+    assert code == 0, out
+    assert "既知の負債" in out
+
+
+def test_a_new_failure_is_still_blocked_after_baseline(tmp_path):
+    """baseline は免罪符ではない — baseline に無い失敗（=この変更で壊した）は止める。"""
+    _legacy_repo(tmp_path)
+    _baseline(tmp_path)
+    (tmp_path / "app.test.ts").unlink()          # 採用時は green だった項目を壊す
+    code, out = run(tmp_path, "--phase", "test")
+    assert code == 10 and "tests-present" in out
+
+
+def test_repaid_debt_is_reported_so_the_ratchet_can_tighten(tmp_path):
+    _legacy_repo(tmp_path)
+    _baseline(tmp_path)
+    (tmp_path / ".nvmrc").write_text("20\n", encoding="utf-8")   # 負債を1つ返済
+    code, out = run(tmp_path, "--phase", "implement")
+    assert code == 0
+    assert "返済済み" in out and "toolchain-pin" in out
+
+
+def test_retightened_baseline_blocks_a_regression_of_repaid_debt(tmp_path):
+    """返済 → 締め直し → 再び壊す = ブロック。これがラチェットの本体。"""
+    _legacy_repo(tmp_path)
+    _baseline(tmp_path)
+    (tmp_path / ".nvmrc").write_text("20\n", encoding="utf-8")
+    _baseline(tmp_path)                                          # 締め直す
+    (tmp_path / ".nvmrc").unlink()                               # 再び壊す
+    code, out = run(tmp_path, "--phase", "implement")
+    assert code == 10 and "toolchain-pin" in out
+
+
+def test_baseline_warns_when_it_would_absorb_a_new_failure(tmp_path):
+    """「壊した」を「許容する」に書き換える操作は、黙って通してはならない。"""
+    _legacy_repo(tmp_path)
+    _baseline(tmp_path)
+    (tmp_path / "app.test.ts").unlink()
+    code, out = _baseline(tmp_path)
+    assert code == 0
+    assert "新たに負債として追加" in out and "tests-present" in out

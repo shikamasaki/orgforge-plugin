@@ -527,6 +527,28 @@ CHECKS = [
 ]
 
 
+BASELINE_FILE = ".orgforge/repro-baseline.json"
+
+
+def _load_baseline(repo, path=None):
+    """The accepted-debt set: artifacts already failing when the org adopted this repo.
+
+    An existing codebase adopted mid-life fails most of the §4e bar by construction — it was written
+    before the bar existed. Turning every check into a hard error on day one produces a wall of red
+    and, predictably, a culture of suppression comments: the bar gets satisfied by disabling it. The
+    baseline is the "drain, then ratchet" discipline (docs/11 §4e) made mechanical — record today's
+    failures as KNOWN DEBT, then fail only on *new* failures, so the repo can never get worse while
+    the debt is paid down."""
+    p = path or os.path.join(repo, BASELINE_FILE)
+    if not os.path.exists(p):
+        return None
+    try:
+        with open(p, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
 def cmd_check(a):
     if not os.path.isdir(a.repo):
         print(f"repro_lint: {a.repo} is not a directory", file=sys.stderr)
@@ -536,30 +558,88 @@ def cmd_check(a):
         print(f"repro_lint: --phase must be one of {PHASES}", file=sys.stderr)
         return 2
     required_through = PHASES.index(phase)
+    baseline = _load_baseline(a.repo, getattr(a, "baseline", None))
+    accepted = set((baseline or {}).get("accepted_debt", []))
     results = []
-    failed = []
+    failed = []          # genuinely blocking: required, failing, and NOT accepted debt
+    debt_still_open = []  # failing but accepted at adoption — reported, not blocking
+    debt_repaid = []      # in the baseline but passing now — the ratchet should tighten
     for name, fn, req_phase in CHECKS:
         required = PHASES.index(req_phase) <= required_through
         ok, detail = fn(a.repo)
-        results.append({"artifact": name, "required": required, "ok": ok, "detail": detail})
-        if required and not ok:
-            failed.append(name)
+        results.append({"artifact": name, "required": required, "ok": ok, "detail": detail,
+                        "accepted_debt": name in accepted})
+        if ok and name in accepted:
+            debt_repaid.append(name)
+        elif required and not ok:
+            (debt_still_open if name in accepted else failed).append(name)
     if a.json:
         print(json.dumps({"repo": a.repo, "phase": phase, "passed": not failed,
-                          "failed": failed, "checks": results}, ensure_ascii=False, indent=2))
+                          "failed": failed, "accepted_debt_open": debt_still_open,
+                          "debt_repaid": debt_repaid, "checks": results},
+                         ensure_ascii=False, indent=2))
     else:
-        print(f"reproducibility check — {a.repo} (phase: {phase}, docs/11 §4a)")
+        print(f"reproducibility check — {a.repo} (phase: {phase}, docs/11 §4a/§4e)")
         for r in results:
-            mark = "✓" if r["ok"] else ("✗" if r["required"] else "–")
+            if r["ok"]:
+                mark = "✓"
+            elif r["accepted_debt"] and r["required"]:
+                mark = "▲"        # known debt: failing, but accepted at adoption
+            elif r["required"]:
+                mark = "✗"
+            else:
+                mark = "–"
             tag = "" if r["required"] else "  (not required at this phase)"
+            if r["accepted_debt"] and not r["ok"]:
+                tag += "  ← 既知の負債（採用時に記録済み）"
             print(f"  {mark} {r['artifact']}: {r['detail']}{tag}")
+        if debt_repaid:
+            print(f"\n返済済み: {', '.join(debt_repaid)} — baseline から外して締め直すこと "
+                  f"(`repro_lint baseline <repo>` を再実行) — 直した項目が再び緩まないようにする。")
+        if debt_still_open:
+            print(f"\n残る既知の負債 ({len(debt_still_open)}): {', '.join(debt_still_open)} — "
+                  f"ブロックはしないが、これは期限のない免除ではない。返済すること。")
         if failed:
-            print(f"\nHELD: {len(failed)} required reproducibility artifact(s) missing "
-                  f"for the {phase} gate: {', '.join(failed)}. The repo a stranger clones would not "
-                  f"come up the same. (docs/11 §4a)")
+            print(f"\nHELD: {len(failed)} required artifact(s) missing for the {phase} gate: "
+                  f"{', '.join(failed)}. これらは baseline に無い＝この変更で新たに悪化した、"
+                  f"または最初から満たすべきもの。(docs/11 §4a)")
         else:
-            print(f"\nOK: reproducibility artifacts for the {phase} gate are present.")
+            print(f"\nOK: {phase} ゲートに必要な成果物は揃っている"
+                  + ("（既知の負債を除く）。" if debt_still_open else "。"))
     return 10 if failed else 0
+
+
+def cmd_baseline(a):
+    """Record today's failures as accepted debt — the adoption snapshot for an existing repo.
+
+    Run once when an org adopts a codebase it did not write (`/org-adopt`). Everything failing at that
+    moment becomes known debt; everything passing becomes a floor that may not regress. Re-run after
+    repaying debt to tighten the ratchet — never to silence a NEW failure, which is the one way this
+    mechanism can be abused: it would convert 'we broke it' into 'we accept it'."""
+    if not os.path.isdir(a.repo):
+        print(f"repro_lint: {a.repo} is not a directory", file=sys.stderr)
+        return 2
+    failing = [name for name, fn, _ in CHECKS if not fn(a.repo)[0]]
+    prior = _load_baseline(a.repo) or {}
+    prior_debt = set(prior.get("accepted_debt", []))
+    new_debt = [n for n in failing if n not in prior_debt]
+    repaid = sorted(prior_debt - set(failing))
+    out = os.path.join(a.repo, BASELINE_FILE)
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    with open(out, "w", encoding="utf-8") as f:
+        json.dump({"accepted_debt": sorted(failing),
+                   "note": "採用時点で失敗していた項目＝既知の負債。新たな失敗はブロックされる。"
+                           "返済したら再実行して締め直すこと（docs/11 §4e drain-then-ratchet）。"},
+                  f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    print(f"baseline を記録: {out}")
+    print(f"  既知の負債 {len(failing)}件: {', '.join(failing) or '(なし — 最初から全項目green)'}")
+    if repaid:
+        print(f"  返済されて外れた: {', '.join(repaid)} — 以降これらは再び失敗するとブロックされる")
+    if prior and new_debt:
+        print(f"  ⚠ 新たに負債として追加: {', '.join(new_debt)} — これは「壊した」を「許容する」に"
+              f"書き換える操作。意図的でなければ baseline ではなく修正で対応すること。")
+    return 0
 
 
 def main(argv):
@@ -570,8 +650,11 @@ def main(argv):
     q.add_argument("repo")
     q.add_argument("--phase", choices=PHASES, help="hold the repo to this phase's bar (default: deploy)")
     q.add_argument("--json", action="store_true")
+    q.add_argument("--baseline", help=f"path to the accepted-debt file (default: {BASELINE_FILE})")
+    q = sub.add_parser("baseline")
+    q.add_argument("repo")
     a = p.parse_args(argv[1:])
-    return {"check": cmd_check}[a.cmd](a)
+    return {"check": cmd_check, "baseline": cmd_baseline}[a.cmd](a)
 
 
 if __name__ == "__main__":
