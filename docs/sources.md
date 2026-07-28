@@ -435,6 +435,44 @@ industrialize under upstream guardrails), all bounded by "autonomy is bounded by
 
 ---
 
+### Fleet / multi-agent engineering — the industry's fan-out practice (docs/07, docs/03, gate/skeptic)
+
+The "fleet engineering" cluster (2025–2026 vendor practice) — running many coding agents in parallel
+under production discipline. It converges on the *same* design as orgforge's control skeleton, and
+supplied four refinements folded in (labeled where):
+
+- **Anthropic, *How we built our multi-agent research system*** (engineering blog, 2025-06) — [S]
+  first-hand. A lead orchestrator fans out 3–5 subagents; **a delegated task needs a clear objective,
+  an output format, tool/source guidance, and a crisp boundary**, or subagents duplicate and drift
+  (folded into template/SPEC.md's seam contract). **Evaluate with one pass / one prompt / one verdict
+  against end-state**, start from ~20 cases (folded into the gate's admission scoring). Multi-agent
+  costs ~15× a chat's tokens (single agent ~4×) because each subagent holds its own window — worth it
+  only for high-value, parallelizable,超-context work; **not** for interdependent work like coding
+  (reinforces docs/12's single-agent default, docs/03's decomposition-by-independence).
+- **Cognition, *Don't Build Multi-Agents*** (blog, 2025-06, Walden Yan) — the strongest skeptic. Two
+  principles: **share the full decision *trace*, not just individual data**, and **every action embeds
+  an implicit decision — un-shared decisions collide** (the "bird and background don't match" failure).
+  Prefer a single-threaded agent until parallel value is proven; long tasks need history *compression*,
+  which is hard but load-bearing. Folded into docs/07 §2.2 (need-to-know shares *why* across a seam, via
+  the seam contract + settled conventions) and §2.4 (the ledger is the external memory; a role must be
+  resumable from it, not from an un-ledgered transcript).
+- **GitHub, *Run multiple agents at once with /fleet*** (blog, 2026-04); **Docker, *A virtual agent
+  team / Ralph-loop*** (blog, 2026-05); **Cursor 2.0 changelog** (2025-10, up to 8 agents, git-worktree
+  isolation); **LangSmith Fleet** (2026-03) — vendor实装 of the same patterns orgforge already carries:
+  orchestrator+subagents (Organ 2 / the O8 no-doctrine-capture tooth), generation-vs-evaluation split
+  (maker→gate→skeptic), worktree isolation (the seam gate + owns-collision), PR-but-human-merges
+  (constitution's charter tier). Cited as convergent industry evidence, not new mechanism.
+- **Cobus Greyling, *Fleet Engineering*** (Substack, 2026-06); **amux, *Agentic Engineering*** (2026) —
+  the governance framing ("run many agents with production rigor, org-wide") — the same discipline
+  orgforge's constitution + ledger + doctrine formalize.
+
+*Relation to orgforge:* fleet engineering is the **execution-layer** pattern (how to parallelize one
+build); orgforge is the **organization layer** that contains it (decide what to build → SDLC → CI/CD →
+operate → grow). The fleet is one `/org-work` cycle's fan-out; the four refinements above sharpen that
+cycle.
+
+---
+
 *Preprint note:* arXiv IDs in the 2601–2606 range are 2026 preprints; treat **[S]** arXiv items as
 evidence that a claim/term exists and is discussed, not as peer-reviewed settled results. The
 load-bearing primary anchors are the classical-theory citations, the Anthropic/Thoughtworks

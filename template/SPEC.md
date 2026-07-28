@@ -30,9 +30,17 @@
 ```
 
 ## Seam contract (what this deliverable OUTPUTS that other deliverables integrate to)
-- **provides:** `<the interface/data the downstream consumes>`
+> The four things a delegated task needs so parallel makers don't duplicate or collide (Anthropic
+> multi-agent research; docs/sources): a clear **objective**, an **output format**, **tool/source
+> guidance**, and a **crisp boundary**. Intent+MUST give the objective; fill the rest here.
+- **provides (output format):** `<the interface/data the downstream consumes, in a NAMED shape — a
+  function signature, a JSON schema, a table — so an integrator wires to it without guessing>`
 - **depends_on:** `<upstream deliverables/specs this needs first>`
 - **owns:** `<the files/territory this deliverable writes — for concurrent-write safety>`
+- **boundary (NOT mine):** `<the adjacent work this deliverable must NOT touch — the sibling that owns
+  it. Explicit boundaries are what stop two parallel makers from building the same thing differently.>`
+- **tools/sources:** `<the specific tools, APIs, or references this maker should use — not "figure it
+  out", so siblings don't each re-derive the same search or pick divergent libraries>`
 
 ## Verification (how the gate/skeptic confirm the MUSTs — nulls/placebos/forward tests)
 - `<the concrete test/evidence that proves each MUST — e.g. "an 11th join is rejected at the cap">`

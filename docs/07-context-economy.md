@@ -117,6 +117,22 @@ scope creep is how need-to-know quietly becomes share-everything). "On a cadence
 host-realized: a scheduled run of the responsible department (the host's scheduler firing
 it), declared as intent — this repo ships no scheduler (docs/08 §4).
 
+**Need-to-know narrows *what*, not *why* — the decision trace still has to cross the seam.**
+A real failure mode of parallel makers (Cognition, *Don't Build Multi-Agents*): when a pack carries
+only the *current data* of an adjacent contract and drops the *decisions* that produced it, the
+downstream maker silently re-derives a conflicting assumption — the two halves integrate and clash
+(the classic "the bird and the background don't match"). Every action embeds an implicit decision, and
+un-shared decisions collide. So the pack's "live state of adjacent contracts" item is not a data
+snapshot — it is the **decision trace at the seam**: the *committed choices* the upstream deliverable
+made that the downstream must honor (the settled conventions, docs/06; the `spec_delegated` boundary,
+docs/09; the seam contract's fixed hypotheses). This does **not** widen need-to-know — the field still
+sees only *its* adjacent seams, not the whole org's history — but across a seam it shares *why*, not
+just *what*. The mechanism the repo already has for this is the **seam contract + settled conventions**:
+a convention is exactly "a decision, made once, that peers must not silently re-decide" (docs/06 §6.5).
+Where a maker would otherwise infer an adjacent decision, the pack must carry that decision explicitly,
+or the two makers diverge. (This is the same amplifier lesson, THEORY §1b: an un-articulated decision
+is a gap an AI fills unbidden — across a fan-out it fills it *differently* in each maker.)
+
 ### 2.3 Contract interfaces (how departments collaborate)
 
 Departments talk through the **seams their contracts declare**, and a handoff carries the
@@ -142,6 +158,22 @@ file-writing step, when the host launches it on its schedule, deciding what fits
 gets summarized-and-linked before the files land in the working dir (docs/08 §2/§4). The
 registrar is a host-run department applying the budget as it writes, not a runtime
 gatekeeper intercepting reads.
+
+**The long-run corollary: a 24/7 role's own history is a context cost, and must be compressed by
+design.** A pack budget bounds what a role is *handed*; but an org that runs unattended around the
+clock (THEORY §0) accumulates its *own* working history — hundreds of cycles of decisions and
+tool-calls — until it approaches the context window and the role loses the plot mid-run (Cognition,
+*Don't Build Multi-Agents*: history compression is "very difficult" but load-bearing for long tasks;
+Anthropic: checkpoint the completed phases to external memory so a role survives the window). orgforge
+already has the substrate for this — it does **not** keep history in a role's context: the **ledger is
+the external memory**, and a role reconstructs only the *distilled* state it needs from ledger views
+(the progress checkpoints of docs/10, the `open_experiments`/`nearby_deaths` views, resumed via
+`/org-resume`). So the compression is structural, not a bolt-on summarizer: a role's working context is
+*rebuilt each cycle from the ledger's derived views*, never grown as an ever-longer transcript. The
+design rule this fixes as a requirement: **a role must be resumable from the ledger alone** — if a
+role's correctness depends on an un-ledgered running transcript, that transcript is an un-audited SSoT
+(docs/01 R−1) and a context-window time bomb; distill the load-bearing decisions into the ledger (a
+convention, a progress checkpoint, an outcome) as a by-product of the work, not a deferred summary.
 
 ---
 
