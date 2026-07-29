@@ -43,12 +43,19 @@ keep the CEO's decisions minimal. Concretely:
    `[NEEDS CLARIFICATION: 何が不明か]` と明示する** — エージェントが推測で実装するのが最大の
    失敗モードであり、これが残っていれば下の lint が落とす。
 
-   書いたら**必ず検査する**（必須節の欠落・EARS違反・§5.2.7 の禁止語・未解決マーカー・TBD）:
+   書いたら**必ず検査する**（必須節の欠落・EARS違反・§5.2.7 の禁止語・未解決マーカー・TBD）。
+   **ファイルを書いた後に、あなた自身が Bash で実行すること**:
 
-   !`python3 "${CLAUDE_PLUGIN_ROOT}/tools/req_lint.py" check REQUIREMENTS.md`
+   ```
+   python3 "${CLAUDE_PLUGIN_ROOT}/tools/req_lint.py" check REQUIREMENTS.md
+   ```
 
-   落ちたら直す。**検査を通らない要求記述で先に進まないこと** — 曖昧なまま設計に入ると、
-   その曖昧さは実装まで伝播して、そこで初めて表面化する。
+   > これを `!` の自動実行にしてはならない。`!` ブロックはあなたが作業を始める**前**に一斉に
+   > 展開されるので、まだ書いていないファイルを検査しようとして必ず失敗する（実地で判明）。
+   > 「書く→検査する」という順序が要る手順は、あなたが順番に実行する。
+
+   落ちたら直して**再実行する**。**検査を通らない要求記述で先に進まないこと** — 曖昧なまま
+   設計に入ると、その曖昧さは実装まで伝播して、そこで初めて表面化する。
 
 2. **FEATURE INVENTORY → `FEATURE-INVENTORY.md`.** Enumerate what the brief actually requires, grouped
    and prioritized
@@ -98,7 +105,19 @@ keep the CEO's decisions minimal. Concretely:
    still carries, and would check O6/O6c/MV cross-references against the *template's* role names rather
    than the ones you just wrote.
 
-   !`set -- organization.yaml; for f in constitution.yaml moves.yaml ledger-schema.yaml sensors.yaml; do if [ -f "$f" ]; then set -- "$@" "$f"; else set -- "$@" "${CLAUDE_PLUGIN_ROOT}/template/$f"; fi; done; echo "linting: $*"; python3 "${CLAUDE_PLUGIN_ROOT}/tools/org_lint.py" "$@"`
+   **`organization.yaml` を書いた後に、あなた自身が Bash で実行すること**（`!` の自動実行では
+   まだ存在しないファイルを検査してしまう）:
+
+   ```
+   set -- organization.yaml
+   for f in constitution.yaml moves.yaml ledger-schema.yaml sensors.yaml; do
+     if [ -f "$f" ]; then set -- "$@" "$f"; else set -- "$@" "${CLAUDE_PLUGIN_ROOT}/template/$f"; fi
+   done
+   python3 "${CLAUDE_PLUGIN_ROOT}/tools/org_lint.py" "$@"
+   ```
+
+   > `set --` の位置パラメータを使うこと。`A="$A $f"` と文字列に組み立てて `$A` で渡すと、
+   > **zsh は単語分割しない**ので全体が1引数として渡り、引数不足で usage が出る（実地で判明）。
 
    Fix anything the lint fails; a chart that does not lint is not founded. If O10 fires, a
    deliverable is missing its standard, owned twice, or self-checked — fix the contract, not the

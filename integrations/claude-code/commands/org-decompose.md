@@ -104,7 +104,7 @@ The sections that carry the environment-independence (do not skimp on these):
 - **Verification** — the exact DoD command whose green output means done (the same command the gate runs).
 - **Out of scope** — including prior deaths, so a fresh maker does not re-derive a known dead end:
 
-!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/ledger.py" view "${ORG_LEDGER_ROOT}" nearby_deaths`
+!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/ledger.py" view nearby_deaths 2>/dev/null || echo "（まだ死が記録されていない — 初回 founding では正常）"`
 
 Two trailers at the bottom of every body, for machine traceability:
 
@@ -151,7 +151,12 @@ This is the check that makes decomposition trustworthy: `/org-found`'s O10 prove
 owning *contract*; this proves every must-have reached at least one *task Issue*. A must-have that never
 became an Issue is silently unbuilt, and nothing downstream would ever notice.
 
-!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/github_sync.py" coverage-check --repo "$ORG_GITHUB_REPO" --manifest coverage-manifest.md`
+**task Issue を作り終えた後に、あなた自身が Bash で実行すること**（`!` の自動実行では
+Issue がまだ1件も無い時点で走り、必ず全件 GAP になる）:
+
+```
+python3 "${CLAUDE_PLUGIN_ROOT}/tools/github_sync.py" coverage-check --manifest coverage-manifest.md
+```
 
 **Exit 10 = a gap.** Decompose the listed must-haves and re-run until it exits 0. Do not report the
 decomposition complete while a GAP line is printed — an uncovered must-have is the one failure this whole

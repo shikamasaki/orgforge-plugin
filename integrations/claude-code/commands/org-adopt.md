@@ -61,7 +61,12 @@ allowed-tools: Bash(python3 *), Bash(echo *), Bash(git *), Bash(ls *), Bash(find
 （重なると並行作業で衝突する）。既存の分割が既に互いに素でないなら、それ自体が発見であり、
 `ARCHITECTURE.md` の負債として記録する。
 
-!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/org_lint.py" organization.yaml constitution.yaml moves.yaml ledger-schema.yaml sensors.yaml 2>&1 | tail -12`
+**`organization.yaml` を書いた後に、あなた自身が Bash で実行すること**（`!` の自動実行では
+まだ存在しないファイルを検査してしまう）:
+
+```
+python3 "${CLAUDE_PLUGIN_ROOT}/tools/org_lint.py" organization.yaml constitution.yaml moves.yaml ledger-schema.yaml sensors.yaml
+```
 
 lint が通るまで直す。通らない chart は導入されていない。
 

@@ -3,6 +3,38 @@
 All notable changes to orgforge-plugin. This project follows a pragmatic semver:
 minor = new mechanisms/features, patch = fixes, major = breaking articulation changes.
 
+## 0.9.4
+
+**`!` ブロックは「エージェントが作業する前」に一斉展開される — 書いた後に走る検査を `!` に
+置いてはならない。** 設計上の欠陥で、3コマンドが該当した。
+
+`/org-found REQUIREMENTS.md` が次で落ちた:
+
+```
+req_lint: REQUIREMENTS.md がない。/org-found が REQUIREMENTS.md を書いたか確認すること
+```
+
+ファイルは実在していた。`!` ブロックはコマンドが**展開される時点**で実行されるので、
+「REQUIREMENTS.md を書く → 検査する」という順序が原理的に成立しない。検査は必ず
+「まだ書かれていないファイル」に対して走る。
+
+該当箇所（すべて「書いた後に走るべき検査」）:
+
+- `/org-found` の `req_lint`（REQUIREMENTS.md を書いた後）
+- `/org-found` の `org_lint`（organization.yaml を書いた後）
+- `/org-adopt` の `org_lint`（同上）
+- `/org-decompose` の `coverage-check`（task Issue を作った後 — `!` だと Issue 0件の
+  時点で走り、必ず全件 GAP になる）
+
+いずれも `!` を外し、**エージェント自身が Bash で実行する**手順に変えた（コードブロックで
+提示し、なぜ `!` にできないかも書き添えた）。
+
+あわせて `/org-decompose` の `nearby_deaths` が `${ORG_LEDGER_ROOT}` に依存していたのを
+discovery に変更（0.9.0 でツール側は対応済みだったが、コマンド側が env を渡していた）。
+
+**判定基準:** `!` に置いてよいのは**前提の確認**（場所・発見結果・既存ファイルの状態）だけ。
+そのコマンドの作業結果に依存する検査は、エージェントが順に実行する。
+
 ## 0.9.3
 
 **zsh が変数を単語分割しないため、0.9.2 の修正が別の形で壊れていた。**
