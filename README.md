@@ -263,7 +263,7 @@ neutral core, one folder per harness. See [integrations/README.md](integrations/
 
 ## Status & honesty
 
-v0.12. This is a **framing + template**, distilled from published organizational theory and the
+v0.22. This is a **framing + template**, distilled from published organizational theory and the
 current agent-engineering literature. The parts (principal-agent theory, harness/loop engineering,
 runtime substrates like AIOS, automated agent design like ADAS/DGM) already exist; the contribution
 here is **the top-down organizational decomposition that places them** — and, per the research in
@@ -278,9 +278,21 @@ useful work on an existing harness end-to-end, with nothing bespoke in the loop 
 demonstrated once ([demos/S1-founding-rehearsal.md](demos/S1-founding-rehearsal.md), artifacts in
 [examples/founding-rehearsal/](examples/founding-rehearsal/)): three departments ran as separate
 agents, the maker/checker separation held structurally, and the adversarial checker caught a real bug
-the maker and gate both missed.** That answers the load-bearing "has it ever run?" question. What
-remains: an automated projection layer (which instruction-file conventions to target — done by hand
-in the rehearsal), the Tier-B host-environment controls for asset-touching orgs, the multi-cycle
+the maker and gate both missed.** That answers the load-bearing "has it ever run?" question.
+
+**S2 以降 — 継続運用は 0.12〜0.22 で回した。** 1つの PWA（割り勘・立替精算）を RFP から
+18 Issue に分解し、maker / gate / skeptic で回し続けている。そこで出たのは「機能が足りない」
+ではなく、**統制が効いているつもりで効いていない**という一群の欠陥だった: 実装済みの
+自己承認拒否が payload のキー違いで素通りし、deploy ゲートが `null == null` の一致で
+丸ごと無効になり、「学習が使われている」と報告する検出器が同じ失敗を3回した org を clean と
+判定していた。いずれも実データで再現し、テストで固定して塞いである（[CHANGELOG](CHANGELOG.md)）。
+
+同時に、統制が働いた実例も出ている: gate が3周にわたって reject を出し、テストが全部 green の
+まま残っていた実バグ（合計は正しいが内訳が不公平な端数配分）と、その性質を検証していない
+テストの穴を捕まえた。**人間の diff レビューを廃止した前提で、機械の層が実際に不良を止めた。**
+
+What remains: an automated projection layer (which instruction-file conventions to target — done by
+hand in the rehearsal), the Tier-B host-environment controls for asset-touching orgs, the multi-cycle
 elastic lifecycle at scale, and the client/delivery/company-layer surfaces (docs/01 §7). The fuller
 autonomy story is still ahead; the design is no longer unrun.
 

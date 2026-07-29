@@ -3,6 +3,343 @@
 All notable changes to orgforge-plugin. This project follows a pragmatic semver:
 minor = new mechanisms/features, patch = fixes, major = breaking articulation changes.
 
+> **0.12.0〜0.22.0 について。** この区間は、実際に org を回して（タテカエという PWA を
+> 18 Issue に分解して作らせて）出てきた指摘を、そのまま直し続けた記録である。直した約20件を
+> 並べると、ほぼ全部が同じ形をしていた:
+>
+> ```
+> ドキュメントが「こうせよ」と述べる
+>   → 守らせる機構が無い / payload のキーが揃わないと無効 / 実行手段が無い
+>   → 成功して返る（無言）
+>   → 守られない
+>   → 検出器も board も「問題なし」と報告する（誤った安心）
+> ```
+>
+> 最後の一段が一番効く。単に守られないだけなら気づけるが、`learning repeats` が clean と言い、
+> `complete` が admit 済みでも「まだ」と言い、`log` が成功を返す。**信号が壊れているので、
+> 壊れていることが分からない。** これは #7 の split() で捕まえた欠陥（性質が壊れる場所を
+> テストが検証していない）と同じ構造で、プラグイン自身の統制層に同じものがあった。
+>
+> 対策として一貫して選んだのは「無言の素通しをやめる」こと — 拒否するか、少なくとも
+> 「効いていない」と言う。0.16.0 の相関キー必須化、0.16.0 の `unknown` 報告、0.18.0 の
+> reject 追跡、0.21.0 の冪等キー修正は、すべてこの一点である。
+
+## 0.22.0
+
+**リファクタ。呼び出し方は変えず、中を分ける。** `org_cycle.py` が1440行・11サブコマンド、
+`github_sync.py` が1176行・12サブコマンドまで肥大していた。実際、1440行のファイルを見ながら
+`_new_public_surfaces`（0.20.0）の設計を2回外している — 全体が見えていなかった。
+
+```
+org_cycle.py    1440行 → 149行 + tools/orgcycle/{_core,cycle,judge,ship,inspect}.py
+github_sync.py  1176行 → 197行 + tools/ghsync/{_core,backlog,record,branch,coverage}.py
+tests/          1834行 → conftest.py + test_{ledger,orgcycle,status,organs}.py
+```
+
+`python3 tools/org_cycle.py begin ...` のまま。ドキュメントも実地の手順も無変更。
+
+### 分割が2回、同じ穴を持ち込んだ
+
+`HERE`（ツールのパス基点）。`tools/orgcycle/` に移した瞬間、`_gh_sync` が `github_sync.py` を
+見失い、`_branch_for` が slug 無しのブランチ名を返して、**`show` の実装行と `integrate --plan` の
+変更一覧が黙って空になった**。エラーは出ない — 組み立て系のツールは「見つからない」を静かに
+素通りするため。実地で `show` を叩いていなければ気づいていない。
+
+`github_sync` 側にも同じ形が2箇所あり、そちらは `record.py` が `ledger.py` を見失う。つまり
+**0.21.0 で塞いだばかりの「判断が Issue にだけ残る」片側落ちが、分割によって再発する**ところ
+だった。移す前に潰した。パスの基点は分割で最初に壊れる場所である。
+
+`build.sh` が `tools/*.py` しか同期せず、サブパッケージがバンドルに入らない穴も同時に出た
+（プラグインとして入れた瞬間に ImportError）。
+
+### テストの検出力を実測した
+
+`HERE` を壊れた形に戻すミューテーションで、`test_core_HERE_points_at_tools` と
+`test_bundle_includes_subpackages` が落ちることを確認。テストがあることと、テストが壊れた実装を
+検出できることは別。
+
+288 passed。
+
+---
+
+## 0.21.0
+
+**二重管理をやめる。** 実地の方針: 「外だしできるものは外だししたほうがいい。二重管理はまじで
+やめたほうがいい。GitHub Issue に全てのログが残るほうが、ユーザーにとっても見やすいし、
+SaaS みたいな考えで保守性も高い」。
+
+### 判断の記録を2回打たせるのをやめた
+
+`decide` が Issue に書き、人が `ledger append` を別に打つ設計だった。**実地で片側落ちが3回**:
+#8 の refutation が台帳に0件 / #11 の1回目の reject が台帳に無い / `progress_recorded` が0件。
+actor は `--by` で既に渡っているので、分ける理由が無かった。
+
+順序は **台帳が先、Issue が後**。統制（自己承認拒否・順序違反）は台帳が持っているので、Issue に
+書いてから拒否されると「Issue には admit と書いてあるが台帳には無い」という食い違いが**外に**
+残る。拒否されるなら、外から見える記録を作る前に止める（exit 4）。
+
+### 冪等キーが統制の裏口だった（この検証で発見）
+
+`(class, natural_key)` だけを見ていたため、**キーさえ一致すれば actor が違っても no-op** になり、
+`DISTINCT_ACTOR` も `REQUIRES_PRIOR` も評価すらされなかった。gate の判定と同じキー
+`admission_decided-11` を maker が使うと、自己承認が exit 0 で通る。
+
+- 冪等 no-op は「同じ actor の再実行」に限る。別 actor が同じキーを使ったら拒否
+- `decide` のキーを `{event}-{issue}-{digest}` に。`{event}-{issue}` だと**2周目の判定が
+  1周目と衝突して no-op** になり、同じ穴を踏む
+
+冪等性は再実行を守る仕組みであって、統制を迂回する経路ではない。
+
+### 検証中の事故
+
+プローブ掃除の一括削除で、#11 の gate 判定3件を誤って消した。台帳に理由と digest が残っていた
+ので Issue に復元した。「台帳は派生」という方針とは逆向きに台帳が救いになった形で、二重に
+持つこと自体の価値も同時に示している。**外出しの方向は変えないが、台帳は「統制と復旧のための
+派生」として維持する。**
+
+---
+
+## 0.20.0
+
+**実地の指摘: 「verify が rework の履歴を渡さない」。** 264行のプロンプトに「この Issue は既に
+2回 reject されている」が入っておらず、gate は毎回**初回判定として扱っていた**。3周目の #7 で
+「前回見落とした点を今回どう確認したか」を明示させたら質が上がった、という観察がある。
+
+`show` が既に判定履歴を持っていたので、`verify` がそれを埋め込む。回数は**台帳と Issue の
+多い方**を採る — 台帳だけだと「2回目」と言ってしまい（1回目が台帳に無い）、過少に伝えると
+gate が「ほぼ初回」として扱う。
+
+### `integrate --plan` — 衝突の予告
+
+#7 の統合後に10件失敗し、切り分けに時間を使った（8件が worktree 走査の偽陽性）。何を統合するか・
+**並行 worktree が同じファイルを触っていないか**を先に見せる。
+
+### `asset_touched` — 本番資産への変更を残す口
+
+`exposure_budget_checked` はローカルのファイル操作しか数えない。実際に危険なのは本番 DB への
+DDL や権限変更で、実地ではマイグレーション2本と `revoke` が入ったのに台帳に何も残らず、
+**「あの revoke は誰の権限で入ったのか」が辿れなかった**。`--authority` がその欄。
+
+### `public_surface_declared` — 何を外に晒したか
+
+`domain_model` は「領域規則を決めたか」を問うが「何を外に晒したか」は誰も見ていなかった。
+**認可ホールは「関数を1つ足した」ところから生まれる**（実地の `join_group`）。complete が
+新しい公開面を検出したら、申告するまで止まる。
+
+検出の設計で2回外した: テストヘルパを拾いすぎて肝心の1件が10件に埋もれ、SECURITY DEFINER を
+ファイル単位で見ていたため定義が後ろの関数が29位に沈んだ。**拾いすぎは、見落としと同じくらい
+悪い。**
+
+---
+
+## 0.19.0
+
+実務で「無くて困った」ものを実装した。
+
+### `org_cycle show --issue N`
+
+`gh issue view` と台帳の grep と `status.py` を別々に叩く必要があった。#7 が3周したとき
+「どの周のどの判定を見ているのか」が分からなくなる。実装コミット・worktree・判定履歴
+（訂正済み / backfill の印つき）・いま何待ちか・次の一手を一望する。
+
+### `correction` を第一級イベントに
+
+台帳は追記型なので過去を消せない。自由記述の注記では**機械が読めず**、実地では検証プローブ
+4件が実判定として集計され、board が現実と食い違った。`kind: probe|mistake` は集計から除外し、
+`backfill`（後から書いた実判定）と `superseded`（時系列の解決が扱う）は除外しない。
+
+### board に判定理由を出す
+
+件数だけでは CEO に何も伝わらない。理由は台帳に無く Issue コメント側にある（設計どおり）ので、
+board が Issue から引く。
+
+### `begin` / `plan` の着手前チェック
+
+依存が rework 中か、人間の作業待ちが残っていないか。**止めない — 見せる**。判断は人の仕事だが、
+材料が無ければ判断のしようがない。
+
+### seam contract の参照渡し
+
+0.12.1 で「ガードが本文を見るのは正しい」と書いたが、**保証できないのはガードが読まなければの
+話**だった。読めば保証できる。264行を毎回貼る必要が無くなり maker の context が空く。読む範囲は
+org のルート配下と一時ディレクトリ、512KB まで。
+
+---
+
+## 0.18.0
+
+**判定は最新が有効。** `status.py` が集合で持っていたため、reject が後から来ても admit が
+消えなかった。実地の #11 で `admit(216) → reject(218)` の順に記録されたのに board が RED を
+出し続けた。追記型の台帳では「一度でも admit があった」と「いま admit されている」は別物。
+
+reject されたまま放置されているものも board に出す（RED ではなく AMBER — 差し戻しは正常な
+過程だが、rework が止まっていることには気づける必要がある）。
+
+`verify` の雛形にあった未定義の `$P` を絶対パスにした。**貼っても動かない雛形は打たれないか、
+打ち間違えられる** — 台帳側の記録が落ちた一因。
+
+---
+
+## 0.17.0
+
+**0.16.0 の修正が実地では効いていなかった。** `deliverable` で書いた自己 admit が通っていた
+（seq 208）:
+
+```
+cycle_started(seq 74) : candidate_id="cand-0677...", pack_manifest_id="issue-7"
+admission_decided     : deliverable="7", issue=7
+                        → 共有する識別子が1つも無く、_same_work が相関できない
+```
+
+**テストが実地の形を再現していなかった** — `cycle_started` に `issue` を入れて書いていたので
+直接の共有 ID があり、穴が見えなかった。テストが本番と違う形を作れば「壊れる場所で検証して
+いない」ことになる。#7 で学んだのと同じ失敗を、テスト側でやっていた。
+
+直し方: 人に同じキーを書かせず、**台帳にある対応関係を辿る**。`pack_manifest_id: "issue-7"` /
+`contract_ref` が橋になるので、union-find で推移的に解決する。どう繋がったかを出す —
+「同じ仕事だ」と言われた側が納得も反論もできないメッセージは、拒否の理由になっていない。
+
+未検証だった統制（skeptic の自己反証拒否・`report_up`/`conformance_reviewed` の順序・
+alignment/resource/reconcile）を実測し、テストに固定した。**使っていない機能は壊れていても
+分からない。**
+
+---
+
+## 0.16.0
+
+**無言の素通しをやめる。** 実装済みの統制が、payload のキーが揃わないと黙って無効になっていた。
+
+```python
+if key is None:
+    return None    # nothing to correlate on; the payload-shape check is elsewhere
+```
+
+この "elsewhere" は存在しなかった。実地の台帳で maker が自分の #7 を admit でき（seq 204）、
+存在しない deliverable 999 を deploy できた（seq 205）。
+
+- 識別子を束ねて相関する（`candidate_id` / `claim_id` / `deliverable` / `issue`）
+- **相関キーが1つも無い判定は拒否する。** 相関できない判定は「検証を通った判定」ではない
+- `result_deployed` が `claim_id == candidate_id` だけを見ていたため、実地の refutation 2件と
+  相関できず `null == null` が一致し、**deploy ゲートが丸ごと無効**だった
+
+### 検出器が「学習が使われている」と嘘をついていた
+
+`learning.py repeats` が `payload.cause` しか読まず、`rework_requested` は対象ですらなかった。
+**同じ失敗を3回した org に対して clean と報告していた。** `reason` / `why` も読み、死因が1件も
+読めないときは `clean` ではなく `unknown` と言う — 「繰り返していない」と「見えていない」は
+別で、混同すると誤った安心になる。嘘をつく検出器は無いより悪い。
+
+一致は文字列で見るという限界も明示する。実地の2件は「端数の偏り」「テスト硬化」と別の言葉で
+書かれていたが根は同じだった。
+
+---
+
+## 0.15.0
+
+### `log` が台帳に何も書いていなかった
+
+Issue に7回の作業記録がある一方、`progress_recorded` は **0件**。`work_in_progress` ビューが
+空になるため `/org-resume` が中断から復帰できない状態だった。
+
+### 学びの蓄積口がサイクルに繋がっていなかった
+
+`doctrine/` も `conventions/` も空。真因は道具の不整合で、`propose` は `retrieved_at` /
+`review_by` を省略できるのに `admit` はそれを必須にする — **素直に使うと admit で必ず詰まる**。
+`complete --learned` が provenance を埋めて propose し、admit は gate の仕事。
+tatekae の実知見5件を投入して、skeptic の brain に3件・persistence_schema に1件が実際に届くことを
+確認した。
+
+### 予算 cap が日常の後片付けだけを止めていた
+
+1日5回発火して5件とも実害ゼロ（worktree / node_modules / scratchpad）。**cap が測るのは
+irreversibility であって活動量ではない**ので、再生成できる対象は重み 0 にした。`src/` も `/` も
+親への遡上も重いまま。
+
+`gc`（worktree の片付け）、`record`（済んだ判定の backfill）、`begin` が `attention_allocated` を
+打つ、も同時に入れた。
+
+---
+
+## 0.14.0
+
+**実測が示したのは「検査のある場所だけが厚くなる」という一つの形。** 同じ Issue の中で
+`decide` 経由の判定は 3,506〜5,894字、検査の無い `log` は 276〜473字だった。
+
+- マイルストーンの `log` は `--command` / `--result` を必須にし、「通った」の言い換えを拒否する。
+  途中の刻み（`progress_recorded`）は検査しない — 軽く刻めることも同じくらい大事
+- **PR を作る手段が無かった。** `/org-work` §4 は「feature ブランチ → PR → develop」と書いて
+  いたのに、実地では PR ゼロ件・`git merge` で直接統合・統合済み Issue が OPEN のまま。
+  `handback` が push → PR（body に `Closes #N`）→ Issue へ log
+- `begin` の log に branch / worktree / parent / candidate_id を自動で入れる。人が書いた276字には
+  ブランチ名も worktree のパスも無かったが、**org_cycle は両方知っていた**
+
+---
+
+## 0.13.0
+
+**統合直前の穴。** 台帳を数えたら `refutation_attempted` が **0件**。Issue にはコメントがあった
+ので、二重記録の片側だけが落ちていた。`requires_prior` は `result_deployed` にしか掛かっておらず、
+統合はその手前なので何も止めなかった。
+
+- `_refutation_for()` を admission と同じ強度で実装
+- `org_cycle integrate` — 前提照合 → マージ → 統合後テスト → `integration_admitted` → Issue へ log。
+  前提が欠けたら exit 4 で止め、マージ手順に入らない
+- `status.py` が「admit 済みだが skeptic の記録が無い」を **RED** で出す。tatekae で #8 が実際に
+  RED として表面化した
+- **`repro_lint` が一度も走っていなかった** — パス解決ができず gate が `--risk` に「未実行」と
+  書いていた。誰も diff を読まない前提で機械的拒否層が丸ごと効いていない状態。`verify` が
+  絶対パスを埋める
+- `--risk` が書き得になっていたので、台帳に `risk_accepted` を運ばせ board に出す。skeptic には
+  gate が書いた Known risk を抜き出して「まずここを潰せ」と渡す
+- `--domain-model-none` のとき、増えた公開型/エクスポートを列挙して問い返す（判定はしない）
+- `complete` が worktree を片付ける（未コミットなら残して警告）
+
+---
+
+## 0.12.1
+
+- `complete` の「gate の admission がまだ」が**嘘だった** — 362行目は台帳を一切見ておらず、
+  `rc==0` なら常に同じ文言を出していた。実際に照合するようにし、`deliverable` と
+  `payload.issue` の両方で引く。見つからない時は「近い記録: seq N に admission_decided が
+  あるが deliverable=... で一致しない」と示す
+- seam contract をファイルで渡すと spawn が HELD される件は、ガードではなく `verify` の案内側を
+  直した（0.19.0 でガード側を直し、参照渡しを許すようにした）
+
+---
+
+## 0.12.0
+
+### 案5: worktree 分離の強制（切迫していた方）
+
+実地の報告: 「並列 fan out で #7 のコミットが `feat/issue-8-settle` に載る事故が起きました。
+同一ツリーで並列 maker を走らせる限り再発します。**『毎回正しく判断する』前提の設計は破れる**、
+という実例になりました」。
+
+`git checkout` はツリー全体を切り替えるので、注意深さの問題ではなく構造の問題として再発する。
+`begin` が `.orgforge/wt/issue-<N>/` を自動で用意する。**判断ではなく物理で分ける** —
+forced invariant であって forced delegation ではない。
+
+### 案2: `verify` — 配管だけを引き受け、判定は委ねる
+
+実地の報告: 「検証手順をプロンプトに書き下ろす作業が一番重い。毎回書き直しで、私の書き方で
+gate の厳しさが変わる。18 Issue なら18回書き、そのたびに基準がブレます」。
+
+`org_cycle verify --issue N --role gate|skeptic` が組み立てるのは**材料だけ**:
+handoff の seam contract・**`agents/<role>.md` の憲章（＝検証チェックリスト）**・Issue の
+SPEC/MUST・`decide` の雛形。skeptic には gate が既に見たことを引き渡す（渡さないと同じ
+ミューテーションを繰り返す）。
+
+**verdict / why / risk / どのミューテーションを試すかは持たない。ツールが verdict を決めた
+瞬間に gate は形骸化する。** テストで固定した。
+
+### ついでに直した実バグ
+
+- `handoff.py` は root 省略時の discovery が**未実装**で TypeError で落ちていた。ヘルパは
+  「省略時は自動発見」と謳っていたので、6引数の手打ちは仕様ではなく、ただ壊れていた
+- `_agents_dir` がバンドル配置（`agents/` が `tools/` の兄弟）で憲章を見失っていた
+
+---
+
 ## 0.11.0
 
 **配管を自動化する（docs/11 §0d）。** 実地の指摘: 「なんか手で作業しているように見える」。
