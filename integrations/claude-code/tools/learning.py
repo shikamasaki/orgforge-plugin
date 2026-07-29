@@ -157,11 +157,24 @@ def cmd_repeats(a):
             "cause": hits[0]["cause"], "occurrences": len(hits),
             "candidate_ids": [h["candidate_id"] for h in hits]})
     worst = max(repeated.items(), key=lambda kv: len(kv[1]))
-    print(f"REPEATED DEATH: cause {worst[1][0]['cause']!r} recurred {len(worst[1])} times "
+    cause = worst[1][0]["cause"]
+    print(f"REPEATED DEATH: cause {cause!r} recurred {len(worst[1])} times "
           f"(candidates {[h['candidate_id'] for h in worst[1]]}) — the org re-made a mistake it had "
           f"already recorded. Accumulated learning was NOT fed forward; strengthen the death into "
           f"doctrine and inject it before the next attempt (docs/06). This is the org's core purpose "
           f"failing — escalate.", file=sys.stderr)
+    # 「doctrine に強化せよ」と散文で言うだけでは強化されない。実地では検出も蓄積も配布も
+    # 動かないまま同じ失敗を3回繰り返した。**打つべきコマンドを出す** — 経路が無い指示は、
+    # 指示ではなく願望になる。何を doctrine にするか（文言・対象役割）は人が決める。
+    here = os.path.dirname(os.path.abspath(__file__))
+    droot = os.path.join(os.path.dirname(a.root.rstrip("/")), "doctrine")
+    print(f"\nNEXT: この死因を doctrine に上げること（配布は handoff.py が役割ごとに行う）:\n"
+          f'  python3 "{os.path.join(here, "doctrine.py")}" propose "{droot}" <role> \\\n'
+          f'      --claim "{str(cause)[:80]}" --source "repeated-death" --confidence 0.9 \\\n'
+          f'      --retrieved-at $(date -u +%Y-%m-%d) --review-by $(date -u -v+180d +%Y-%m-%d) \\\n'
+          f'      --affects <この失敗が効く役割をカンマ区切りで>\n'
+          f'  そのうえで gate が admit する: doctrine.py admit "{droot}" <role> <claim-id> --by gate\n'
+          f"  admit されるまで次のサイクルには渡らない。", file=sys.stderr)
     return ESCALATE
 
 
