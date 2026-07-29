@@ -125,7 +125,7 @@ Tell the CEO, briefly: where the ledger lives, the output language, whether the 
 (and to what repo) or the org is ledger-only, whether `develop` exists, and the lint/probe result.
 
 Then the next step: **`/org-found "<the RFP, or a path to the brief>"`** — which writes the five fixed
-founding artifacts (`RFP.md`, `FEATURE-INVENTORY.md`, `ARCHITECTURE.md` = the 全体設計書,
+founding artifacts (`REQUIREMENTS.md`, `FEATURE-INVENTORY.md`, `ARCHITECTURE.md` = the 全体設計書,
 `coverage-manifest.md`, `organization.yaml`; docs/11 §0a) and stops for approval.
 
 ## Discipline

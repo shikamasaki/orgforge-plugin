@@ -174,7 +174,7 @@ The plugin is the *engine*; your organization is `organization.yaml` + `constitu
 /org-decompose                        # 3. decompose:  the manifest → atomic SPEC task Issues, coverage-gated
 ```
 
-**Step 2 writes four files under fixed names** ([docs/11](docs/11-sdlc-mold.md) §0a) — `RFP.md`,
+**Step 2 writes four files under fixed names** ([docs/11](docs/11-sdlc-mold.md) §0a) — `REQUIREMENTS.md`,
 `FEATURE-INVENTORY.md`, **`ARCHITECTURE.md` (the 全体設計書)**, `coverage-manifest.md`, plus
 `organization.yaml`. The names are fixed because step 3 reads them *by name*; a renamed artifact is one
 no command can find. `/org-found` is *design only* — you approve the scope. It is the moment the abstract

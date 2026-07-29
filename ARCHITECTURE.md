@@ -194,7 +194,7 @@ An org **is** a set of neutral source files (all templated in `template/`):
    `.envrc`, backlog labels, `develop`, guard probe). `/org-found` produces a feature inventory
    (must/should/nice + an explicit exclude list), an architecture with seam contracts (inverse-Conway,
    per `FOUNDER.md`), a coverage manifest, and a concrete linted `organization.yaml` — written under
-   **fixed filenames** (`RFP.md`, `FEATURE-INVENTORY.md`, `ARCHITECTURE.md` = the 全体設計書,
+   **fixed filenames** (`REQUIREMENTS.md`, `FEATURE-INVENTORY.md`, `ARCHITECTURE.md` = the 全体設計書,
    `coverage-manifest.md`; docs/11 §0a, so downstream commands address them by name) — then **stops and
    reports up** for your scope approval. Founding is design. After you approve, `/org-decompose` carves
    the manifest into atomic SPEC task Issues under their objectives, ending on a coverage gate that fails

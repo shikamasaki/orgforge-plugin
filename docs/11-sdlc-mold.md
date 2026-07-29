@@ -79,7 +79,7 @@ So founding writes **exactly these four files, at the org root, under these exac
 
 | File | SDD/lifecycle role | What it holds |
 |---|---|---|
-| `RFP.md` | the received brief | the RFP verbatim (or the brief restated), + the one-sentence purpose. The immutable input the rest traces to. |
+| `REQUIREMENTS.md` | the received brief | the RFP verbatim (or the brief restated), + the one-sentence purpose. The immutable input the rest traces to. |
 | `FEATURE-INVENTORY.md` | the 洗い出し | every capability the RFP requires, grouped must / should / nice, + the explicit EXCLUDE list |
 | `ARCHITECTURE.md` | **the 全体設計書** — the whole-system design, distinct from any per-task spec | layers/components + the **seam contracts** between them, each in the normalized shape `{deliverable, standard, checker, depends_on}` |
 | `coverage-manifest.md` | the RFP→contract coverage map | one row per must-have: `{rfp_capability, owning_role, deliverable, acceptance}` |
@@ -103,6 +103,61 @@ Three consequences that make this load-bearing rather than cosmetic:
 
 `ARCHITECTURE.md` (the org's own repo has one too, describing orgforge) is the whole-system design *of the
 product the org builds*, written into the product/org root — not a copy of this repo's file.
+
+---
+
+## 0b. 要求記述の書式は規格に準拠する — 名前だけでなく中身も固定する
+
+§0a は founding 成果物の**ファイル名**を固定した。しかし**中身の書式**を規定しなかったため、
+founding のたびにエージェントが構成をその場で発明していた。同じ要求から別の構造の文書が出るなら、
+「同じ spec ⇒ 同じプロセス・同じ契約」という §0 の主張は、**要求記述の層で最初から破れている**。
+名前を固定して中身を放置するのは、器を揃えて中身を問わないのと同じ。
+
+### 準拠のレベル: ISO/IEC/IEEE 29148:2018 の tailored conformance
+
+同規格 §4.5.2 が正式に認める適合形態を宣言する。**SRS の全20条項（§9.6）は採らない** —
+`Memory constraints`・`Site adaptation requirements`・`Logical database requirements` は組込み・
+防衛・規制産業向けの条項で、小規模プロダクトでは空欄かボイラープレートにしかならない。
+**空欄の節が並ぶ文書は読まれなくなり、やがて更新されなくなる**。採るのは次の4条項:
+
+| 条項 | 内容 | 検査 |
+|---|---|---|
+| §5.2.4 | 構文規約（主語＋`shall`。`must` は要求と誤解されるので使わない） | 警告 |
+| §5.2.5 | 個々の要求の特性9つ（Verifiable / Singular / Unambiguous …） | 一部を機械化 |
+| §5.2.6 | 集合の特性5つ（TBD/TBS/TBR を残さない、矛盾・重複がない） | TBD を落とす |
+| §5.2.7 | **避けるべき語**（主観語・最上級・抜け穴・全称語・曖昧な接続） | **落とす** |
+
+§5.2.7 が本体である。「使いやすい」「可能であれば」「すべての場合」は、**人によって判定が変わる**
+か、**実装しない口実になる**か、**例外の有無が検証されていない**。AIエージェントに渡す文としては
+特に危険で、曖昧語は推測の余地としてそのまま実装に流れ込む。
+
+### 併せて採るもの
+
+- **EARS**（Alistair Mavin / Rolls-Royce。Airbus・NASA・Bosch・Intel・Siemens が採用）—
+  6パターンと ruleset「**トリガーは最大1つ**」。この制約が**要求の粒度を構文レベルで強制する**。
+  学習コストが実質ゼロで、効果が最も大きい。§5.2.5 の *Conforming* も同時に満たす
+- **Given-When-Then**（Cucumber 公式仕様の Gherkin から記法だけ借用）— 受入基準。
+  要求は EARS、その検証シナリオは GWT という役割分担
+- **`[NEEDS CLARIFICATION]` マーカー**（GitHub Spec Kit 由来）— **最重要**。
+  曖昧なまま推測で実装されるのを止める。未解決で残っていれば lint が落とす
+- **Non-Goals / Alternatives Considered**（Google Design Doc 由来）— スコープクリープを止める
+  最も安価な装置
+
+規定は `template/REQUIREMENTS.md`、検査は `tools/req_lint.py`。`/org-found` が両方を呼ぶ。
+
+### なぜ「RFP」をやめたか
+
+RFP (Request for Proposal) は**調達文書**である。発注者が**外部の競合ベンダー**に提案を求め、
+**比較評価して契約相手を選ぶ**ために発行する。中核は評価基準・配点・提案書式の指定・契約条項で、
+自社開発（実装主体が単一で、内部が可視で、常時交渉可能）ではこれらが**すべて無意味**になる。
+
+ここで書いているものの正確な対応物は 29148 の **StRS (Stakeholder Requirements Specification)**
+— 発注側の視点でニーズを記述し、まだ解に踏み込んでいない文書。ファイル名は `REQUIREMENTS.md`
+とする（規格の略語を背負わずに済み、誤解がない）。
+
+RFP から借りる価値があるのは**「評価基準を事前に文書化する」規律**だけで、それは自社開発では
+「**受入基準を実装前に確定する**」に翻訳される。本テンプレートでは §4（Acceptance）と
+§5（Success Criteria）がそれを担い、`coverage-manifest.md` がその契約への写像を担う。
 
 ---
 

@@ -72,7 +72,7 @@ irreversible patterns draw down a budget.
 | Command | What it does |
 |---|---|
 | `/org-init [org-name] [ja\|en]` | **Step 1 — set up.** Create the ledger/doctrine/conventions roots, install the org spec files, ensure `develop` + the backlog labels, then lint the spec and probe that the guardrails actually bite. **No environment setup** — the org is discovered from the working directory (`tools/discover.py`), so nothing is exported and several repos can run from one shell. Idempotent; designs nothing. |
-| `/org-found <RFP or brief>` | **Step 2 — design.** Draft the org from a brief and write the five **fixed-name** founding artifacts (docs/11 §0a): `RFP.md`, `FEATURE-INVENTORY.md`, **`ARCHITECTURE.md` (the 全体設計書)**, `coverage-manifest.md`, `organization.yaml` — then stop and report up for scope approval. Design only. |
+| `/org-found <RFP or brief>` | **Step 2 — design.** Draft the org from a brief and write the five **fixed-name** founding artifacts (docs/11 §0a): `REQUIREMENTS.md`, `FEATURE-INVENTORY.md`, **`ARCHITECTURE.md` (the 全体設計書)**, `coverage-manifest.md`, `organization.yaml` — then stop and report up for scope approval. Design only. |
 | `/org-adopt [残りの要求]` | **既存リポジトリへの後付け.** `/org-found` の途中導入版: 実在するコードから `ARCHITECTURE.md` と `organization.yaml` を*読み取って*書き、**未実装分だけ**を manifest に載せ（実装済みを載せると動くものを作り直す Issue が生える）、機械バーの現状を `repro_lint baseline` で既知の負債として記録する。コミットのある repo で `/org-found` の代わりに使う。 |
 | `/org-decompose [objective-id]` | **Step 3 — decompose.** Turn the approved `coverage-manifest.md` + `ARCHITECTURE.md` into **atomic SPEC task Issues**, one per independently-completable unit, each a native sub-issue of its objective and each carrying the full spec (so any environment can pick it up). Gated by `coverage-check`: exits non-zero if a must-have never became an Issue. |
 | `/org-start [role] [tick] [work] [discover]` | Bring the org to its **running state**: register this session's recurring cycles via the scheduler. Idempotent. The SessionStart hook prompts it for you. |
@@ -117,7 +117,7 @@ opening any orgforge org finds the design in the same place. A renamed artifact 
 
 | File | Role |
 |---|---|
-| `RFP.md` | the received brief, verbatim + the one-sentence purpose — the immutable input everything traces to |
+| `REQUIREMENTS.md` | the received brief, verbatim + the one-sentence purpose — the immutable input everything traces to |
 | `FEATURE-INVENTORY.md` | the 洗い出し: every required capability, grouped must / should / nice, + the explicit EXCLUDE list |
 | **`ARCHITECTURE.md`** | **the 全体設計書** — the whole-system design: layers/components + seam contracts `{deliverable, standard, checker, depends_on}` |
 | `coverage-manifest.md` | the RFP→contract coverage map: one row per must-have `{rfp_capability, owning_role, deliverable, acceptance}` |
@@ -169,6 +169,10 @@ reader catches must be made unmergeable by machine instead. Run **by the gate** 
 implement/test/deploy phase gates:
 
 ```
+python3 tools/req_lint.py   check <REQUIREMENTS.md> [--json] [--warn-only]
+                            # 要求記述の書式検査（29148 tailored + EARS、docs/11 §0b）
+                            # 必須節の欠落 / shall なし / 禁止語 / TBD / 未解決の
+                            # [NEEDS CLARIFICATION] を落とす
 python3 tools/repro_lint.py check    <repo_dir> [--phase implement|test|deploy] [--json] [--baseline PATH]
 python3 tools/repro_lint.py baseline <repo_dir>   # 採用時の失敗を「既知の負債」として記録
 ```

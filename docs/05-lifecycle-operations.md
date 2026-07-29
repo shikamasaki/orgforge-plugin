@@ -76,7 +76,7 @@ works inside it and cannot write it). A **founder process** — see `template/FO
    control skeleton (gate, skeptic, supervisor, registrar), which is active whenever
    anything is.
 
-Founding's four steps produce **four fixed-name artifacts** — `RFP.md`, `FEATURE-INVENTORY.md`,
+Founding's four steps produce **four fixed-name artifacts** — `REQUIREMENTS.md`, `FEATURE-INVENTORY.md`,
 `ARCHITECTURE.md` (the whole-system design from step 2), and `coverage-manifest.md` (step 3's
 RFP→contract map) — plus `organization.yaml`. The names are fixed by rule (docs/11 §0a) because the
 step *after* founding reads them by name.

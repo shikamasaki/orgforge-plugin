@@ -227,7 +227,7 @@ cron), and `tools/tick.py` detects a missed check so "the schedule stopped firin
 ([integrations/claude-code/SCHEDULER.md](integrations/claude-code/SCHEDULER.md)). Ships as a Claude
 Code **plugin** — hooks + subagents + commands. The **commands you use** are few, and the setup path is
 three of them in order: **`/org-init`** (set up the org's state, env, and labels), **`/org-found`**
-(draft the org from a brief into four fixed-name artifacts — `RFP.md`, `FEATURE-INVENTORY.md`,
+(draft the org from a brief into four fixed-name artifacts — `REQUIREMENTS.md`, `FEATURE-INVENTORY.md`,
 `ARCHITECTURE.md` = the 全体設計書, `coverage-manifest.md`), **`/org-decompose`** (carve those into
 atomic SPEC task Issues, coverage-gated, each self-contained enough to be picked up from any
 environment). Then **`/org-start`** (bring it to its running state), **`/org`** (the status

@@ -27,13 +27,28 @@ keep the CEO's decisions minimal. Concretely:
 > the org root, under exactly these names, because downstream commands (`/org-decompose`, `/org-init`)
 > address them **by name** rather than by search, and a stranger opening any orgforge org must find the
 > design in the same place:
-> `RFP.md` · `FEATURE-INVENTORY.md` · **`ARCHITECTURE.md` (= 全体設計書)** · `coverage-manifest.md` ·
+> `REQUIREMENTS.md` · `FEATURE-INVENTORY.md` · **`ARCHITECTURE.md` (= 全体設計書)** · `coverage-manifest.md` ·
 > `organization.yaml`. Do not invent a variant name (`design.md`, `architecture-overview.md`, `.yaml`
 > instead of `.md`); a renamed artifact is an unfindable one.
 
-1. **RECEIVE** the brief. Restate the purpose in one sentence — an outcome, not a metric. Write the
-   brief verbatim (or restated, if it came as prose) plus that purpose line to **`RFP.md`** — the
-   immutable input everything downstream traces back to.
+1. **RECEIVE → `REQUIREMENTS.md`（書式はテンプレートに従う。自分で構成を発明しない）**
+
+   受け取ったブリーフを **`${CLAUDE_PLUGIN_ROOT}/template/REQUIREMENTS.md` の骨格に整形して**書く。
+   構成をその場で考えてはならない — founding のたびに違う構造の文書が出ると、「同じ spec ⇒ 同じ
+   プロセス」という中核主張が要求記述の層で破れる（docs/11 §0b）。
+
+   準拠: **ISO/IEC/IEEE 29148:2018 tailored conformance**（§4.5.2 が認める適合形態）+ **EARS**。
+   要求は `FR-001` で採番し EARS の6パターンで書く。受入基準は Given-When-Then。成功基準は
+   `SC-001` で採番し**技術非依存・定量的**に。**曖昧な点は推測で埋めず
+   `[NEEDS CLARIFICATION: 何が不明か]` と明示する** — エージェントが推測で実装するのが最大の
+   失敗モードであり、これが残っていれば下の lint が落とす。
+
+   書いたら**必ず検査する**（必須節の欠落・EARS違反・§5.2.7 の禁止語・未解決マーカー・TBD）:
+
+   !`python3 "${CLAUDE_PLUGIN_ROOT}/tools/req_lint.py" check REQUIREMENTS.md`
+
+   落ちたら直す。**検査を通らない要求記述で先に進まないこと** — 曖昧なまま設計に入ると、
+   その曖昧さは実装まで伝播して、そこで初めて表面化する。
 
 2. **FEATURE INVENTORY → `FEATURE-INVENTORY.md`.** Enumerate what the brief actually requires, grouped
    and prioritized
@@ -98,7 +113,7 @@ keep the CEO's decisions minimal. Concretely:
    signs off, the next step is **`/org-decompose`**, which turns `coverage-manifest.md` +
    `ARCHITECTURE.md` into the atomic task Issues — tell the CEO that in your report.
 
-Write all five artifacts — `RFP.md`, `FEATURE-INVENTORY.md`, `ARCHITECTURE.md`, `coverage-manifest.md`,
+Write all five artifacts — `REQUIREMENTS.md`, `FEATURE-INVENTORY.md`, `ARCHITECTURE.md`, `coverage-manifest.md`,
 `organization.yaml` — as files under those exact names (docs/11 §0a) so they can be reviewed, edited,
 and addressed by name downstream. Do not touch real assets; this command only drafts the org.
 
@@ -122,7 +137,7 @@ department tasks that grows under it is the backlog window, regenerated — neve
 history, **task #1 is rejected at the ledger** with a message naming a predecessor that nobody was ever
 told to write. Founding is where those two phases genuinely happen, and where their evidence exists:
 
-- **requirements** — the artifact is `RFP.md` + `FEATURE-INVENTORY.md` (what must be built, with the
+- **requirements** — the artifact is `REQUIREMENTS.md` + `FEATURE-INVENTORY.md` (what must be built, with the
   must/should/nice line and the explicit EXCLUDE list).
 - **design** — the artifact is `ARCHITECTURE.md` + `coverage-manifest.md` + the linted
   `organization.yaml` (the whole-system design and its seam contracts, each must-have owned once).
@@ -133,7 +148,7 @@ been entered). The `deliverable` must be the SAME identifier `/org-work` will la
 Issue number if you minted one, otherwise the objective id — written consistently, since the chain keys
 on it:
 
-!`echo 'Per objective deliverable D, in this order: for PHASE in requirements design; do python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/ledger.py" append "'"${ORG_LEDGER_ROOT}"'" --actor supervisor --class phase_started --payload '"'"'{"deliverable":"<D>","phase":"<PHASE>","role":"supervisor"}'"'"'; python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/ledger.py" append "'"${ORG_LEDGER_ROOT}"'" --actor gate --class phase_admitted --payload '"'"'{"deliverable":"<D>","phase":"<PHASE>","verdict":"pass","admitter":"gate","evidence_ref":"<RFP.md+FEATURE-INVENTORY.md for requirements; ARCHITECTURE.md+coverage-manifest.md+organization.yaml for design>"}'"'"'; done'`
+!`echo 'Per objective deliverable D, in this order: for PHASE in requirements design; do python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/ledger.py" append "'"${ORG_LEDGER_ROOT}"'" --actor supervisor --class phase_started --payload '"'"'{"deliverable":"<D>","phase":"<PHASE>","role":"supervisor"}'"'"'; python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/ledger.py" append "'"${ORG_LEDGER_ROOT}"'" --actor gate --class phase_admitted --payload '"'"'{"deliverable":"<D>","phase":"<PHASE>","verdict":"pass","admitter":"gate","evidence_ref":"<REQUIREMENTS.md+FEATURE-INVENTORY.md for requirements; ARCHITECTURE.md+coverage-manifest.md+organization.yaml for design>"}'"'"'; done'`
 
 Note the **actors differ**: the supervisor enters the phase, the gate admits it. The ledger enforces
 that separation at write time for admissions (docs/11 §4f.1) — the same actor cannot both do the work

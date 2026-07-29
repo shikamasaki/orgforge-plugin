@@ -36,7 +36,7 @@ they are. Read them now:
   `{deliverable, standard, checker, depends_on}`. This is where each task's `provides` / `depends_on` /
   `owns` / boundary come from — do not re-derive them, *read* them.
 - **`organization.yaml`** — which role owns what (the machine-checkable side of the manifest).
-- **`RFP.md`** — for tracing intent when a manifest row is terse.
+- **`REQUIREMENTS.md`** — for tracing intent when a manifest row is terse.
 
 If `coverage-manifest.md` or `ARCHITECTURE.md` is missing, **STOP**: founding is incomplete, or it wrote
 variant filenames. Run `/org-found` (or rename the artifacts to the canonical names) — do not improvise a
