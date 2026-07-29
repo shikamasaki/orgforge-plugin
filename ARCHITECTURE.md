@@ -189,14 +189,14 @@ An org **is** a set of neutral source files (all templated in `template/`):
 1. **Hand-fill** — copy `template/organization.SKELETON.yaml`, fill the `<ANGLE_BRACKET>` domain-role
    slots. The control skeleton (supervisor / gate / skeptic / registrar) is kept intact; you supply the
    purpose, the domain roles, and their contracts.
-2. **`/org-init` → `/org-found <your RFP or brief>` → `/org-decompose`** — the org drafts itself and then
-   turns the draft into workable units. `/org-init` sets up the org's state (ledger root, spec files,
-   `.envrc`, backlog labels, `develop`, guard probe). `/org-found` produces a feature inventory
+2. **`/orgforge-plugin:org-init` → `/org-found <your RFP or brief>` → `/orgforge-plugin:org-decompose`** — the org drafts itself and then
+   turns the draft into workable units. `/orgforge-plugin:org-init` sets up the org's state (ledger root, spec files,
+   `.envrc`, backlog labels, `develop`, guard probe). `/orgforge-plugin:org-found` produces a feature inventory
    (must/should/nice + an explicit exclude list), an architecture with seam contracts (inverse-Conway,
    per `FOUNDER.md`), a coverage manifest, and a concrete linted `organization.yaml` — written under
    **fixed filenames** (`REQUIREMENTS.md`, `FEATURE-INVENTORY.md`, `ARCHITECTURE.md` = the 全体設計書,
    `coverage-manifest.md`; docs/11 §0a, so downstream commands address them by name) — then **stops and
-   reports up** for your scope approval. Founding is design. After you approve, `/org-decompose` carves
+   reports up** for your scope approval. Founding is design. After you approve, `/orgforge-plugin:org-decompose` carves
    the manifest into atomic SPEC task Issues under their objectives, ending on a coverage gate that fails
    if any must-have never became an Issue.
 
@@ -243,7 +243,7 @@ a health tick — all realized on the harness's own scheduler.
 |---|---|---|
 | **`/org-work <role>`** | the **PM loop** (acts) | `attention.py select` prioritizes the whole backlog on one footing (situated attention to the org ranking + problemistic-search boost), **floors an in-zone mandate** (zone of acceptance — a live instruction is never starved by low-priority self work), picks a prefix within the WIP limit → delegates the selected items **in parallel** (one `Task` each, only where the split is genuine per docs/03) → records `cycle_completed`. |
 | **`/org-discover <role>`** | the **discovery loop** (adds only) | surfaces aspiration gaps and raises them as `source: self` backlog items, scoped to the role's own domain, deduped, append-only. Fail-quiet when there is no gap. |
-| **`/org-tick`** | the **health tick** (read-only) | which checks are due / MISSED, machine sensors, ledger-chain integrity. Surfaces, never acts. |
+| **`/orgforge-plugin:org-tick`** | the **health tick** (read-only) | which checks are due / MISSED, machine sensors, ledger-chain integrity. Surfaces, never acts. |
 
 **Prioritization is grounded, not ad-hoc** (docs/09): the score is the Carnegie-School synthesis —
 situated attention (Ocasio: align to the org ranking), problemistic search (Cyert & March: boost what is
@@ -307,7 +307,7 @@ The chart is not fixed — it is elastic, and change flows through a controlled 
    (reversible activation), `add_layer` (charter tier — a human decides; it mints new authority),
    `refound` (charter tier — with required guards that the lint enforces: the doctrine remap covers every
    live claim, and the new structure passes lint), `sunset` (irreversible — prepared by the org, executed
-   by humans). **Mandate conflicts** resolve via `/org-mandate` → `reconcile.py mandate` against the
+   by humans). **Mandate conflicts** resolve via `/orgforge-plugin:org-mandate` → `reconcile.py mandate` against the
    human-authored `mandate_precedence` in the constitution: precedence applies, or both integrate, or it
    escalates.
 

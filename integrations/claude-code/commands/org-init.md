@@ -20,10 +20,15 @@ minted. The order is: `/org-init` → `/org-found` (design, CEO approves) → `/
 関係ないリポジトリ（プラグイン自身の開発ツリーなど）を org 化してしまう。実際に起きた事故なので、
 書き込む前に場所を出して確認する:
 
-!`echo "  ここに org を作ります: $(pwd)"; echo "  git remote        : $(git remote get-url origin 2>/dev/null || echo '(なし)')"; if [ -f organization.yaml ] || [ -d .orgforge ]; then echo "  既存の org        : あり（再実行＝修復モード。既存ファイルは上書きしない）"; else echo "  既存の org        : なし（新規作成）"; fi`
+!`echo "  ここに org を作ります: $(pwd)"; echo "  git remote        : $(git remote get-url origin 2>/dev/null || echo '(なし)')"; if [ -f organization.yaml ] || [ -d .orgforge ]; then echo "  既存の org        : あり（再実行＝修復モード。既存ファイルは上書きしない）"; else echo "  既存の org        : なし（新規作成）"; fi; if [ -f .claude-plugin/marketplace.json ] || [ -d integrations/claude-code/commands ]; then echo; echo "  ⛔ STOP — ここは orgforge プラグイン自身の開発ツリーです。"; echo "     org を作る場所ではありません。プロダクトのリポジトリに移動してください。"; echo "     （このガードは実際に2回起きた事故を止めるためのものです）"; fi`
 
 **上のパスが目的のリポジトリでなければ、ここで止める。** 続けて書き込むと、他所のツリーに
-`.orgforge/` とテンプレ7ファイルと `develop` ブランチができる。CEO に場所を確認してもらうこと。
+`.orgforge/` とテンプレ7ファイルと `develop` ブランチができ、GitHub にラベル9件が作られる。
+
+**⛔ STOP と出たら、以降のステップを一切実行しないこと。** これは表示ではなく指示である。
+プラグインの開発ツリーで `/org-init` を走らせる正当な理由はない — orgforge は*他の*リポジトリを
+org 化するための道具であって、自分自身を org 化するものではない。CEO が「ここでいい」と言った
+場合のみ続行し、それ以外は場所を確認してもらうこと。
 
 ## 1. Where the org's state lives
 

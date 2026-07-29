@@ -17,52 +17,93 @@ that the company builds and ships something reproducibly through that mold.
 
 ## 1. Install the plugin
 
-The plugin lives in `integrations/claude-code/` and is self-contained (its `build.sh` bundles the
-neutral `tools/`, `scripts/`, and `template/` into the plugin root). From a Claude Code session:
-
 ```
-/plugin marketplace add /path/to/orgforge-plugin      # a local clone works; or the git URL
-/plugin install orgforge-plugin@orgforge-plugin
+/plugin marketplace add <owner>/orgforge-plugin      # GitHub リポジトリを参照する
+/plugin install orgforge-plugin@orgforge-plugin      # scope は user を選ぶ（全プロジェクトで有効）
+/reload-plugins
 ```
 
-Or, for a headless run without installing, load it directly:
+**ローカルディレクトリ参照（`marketplace add /path/to/orgforge-plugin`）は使わないこと。**
+そのマシンでしか動かず、**未コミットの変更がそのまま動いてしまう** — 検証していないコードで
+org を動かすことになる。GitHub 参照なら、どのコミットで動いているかが `installed_plugins.json`
+に記録される。
+
+プラグインを直したときの手順（GitHub 参照にすると push が必須になる）:
 
 ```
-echo "your prompt" | ORG_LEDGER_ROOT=/tmp/myorg/ledger \
-  claude -p --plugin-dir integrations/claude-code --allowedTools "Bash,Write,Agent"
+integrations/claude-code/build.sh          # バンドルを neutral core から再生成
+integrations/claude-code/build.sh --check   # 同期を確認（CI ゲート）
+python3 -m pytest tests/ -q                 # テスト
+git commit && git push
+/plugin marketplace update orgforge-plugin  # セッション側で取り込む
+/plugin update orgforge-plugin@orgforge-plugin
 ```
 
-Verify the manifest first if you edited anything: `claude plugin validate integrations/claude-code --strict`.
-Regenerate the bundle after editing neutral source: `integrations/claude-code/build.sh`.
-
-## 2. Point it at an org state (the one required setting)
-
-The guardrails read the **ledger** — the org's tamper-evident audit/enforcement record (the SSoT is code + the domain model — conventions + the org spec). Without it, the hook
-allows everything and says so loudly on stderr (so a misconfiguration is visible, never silent).
+インストールせずヘッドレスで動かす場合:
 
 ```
-export ORG_LEDGER_ROOT=/path/to/your/org/ledger      # a directory; holds ledger.jsonl + HEAD
+echo "your prompt" | claude -p --plugin-dir integrations/claude-code \
+  --allowedTools "Bash,Write,Agent"
 ```
 
-That one variable turns the blast-radius cap on. Everything else below is optional tuning.
+マニフェストを触ったら `claude plugin validate integrations/claude-code --strict` で検証する。
 
-## 3. Optional settings (each has a safe default)
+## 2. セットアップは不要 — org は発見される
 
-| Env var | What it does | Default |
+**環境変数を設定する必要はない。** org はディスク上の場所（`organization.yaml` の隣の
+`.orgforge/`）であり、バックログのリポジトリは `git remote origin` が指す先。どちらも
+チェックアウトを見れば分かる事実なので、organ とガードレールのフックは**自分で見つける**
+（`tools/discover.py`）。
+
+これは利便性の話ではない。`/Users/someone/proj/.orgforge/ledger` のような絶対パスで
+アドレスされる org は**別のマシンで動かない**。Issue に仕様を全部書く意味は「どの環境でも
+拾える」ことにあるので、そこが壊れると設計全体が崩れる。さらに、**マシンごとに繰り返す
+セットアップ手順は必ず飛ばされる** — そして飛ばされたとき、ガードレールは ledger を
+見つけられず**黙って全部を許可する**。発見はその失敗モードを消す。
+
+副次的な効果として、**1つの環境で複数のリポジトリの org を同時に運用できる**。
+`cd` するだけで対象の org が切り替わり、監査記録も blast-radius の予算も混線しない。
+
+```
+cd ~/product-a && /orgforge-plugin:org        # product-a の org
+cd ~/product-b && /orgforge-plugin:org        # product-b の org（独立）
+```
+
+### 上書きが要る場合だけ環境変数を使う
+
+明示的な引数 > 環境変数 > 発見、の順で優先される。既定の経路はどれも要らないが、
+ledger を意図的にチェックアウトの外に置く場合や CI で固定する場合には使える。
+
+| 変数 | 用途 | 既定 |
 |---|---|---|
-| `ORG_DOCTRINE_ROOT` | dir of per-role `<role>.json` brains; the SessionStart hook injects the role's doctrine at launch | (none → no doctrine injected) |
-| `ORG_ROLE` | which role this session is — the key the doctrine injection and ledger events use | (none) |
-| `ORG_CONVENTIONS_ROOT` | dir of settled conventions, injected alongside doctrine | (none) |
-| `ORG_REQUIRE_SEAM` | `1` blocks an `Agent`/`Task` spawn that carries neither a seam contract (a `handoff.py` packet) nor an explicit `INDEPENDENT:` declaration — stops recursive splits from drifting | off |
-| `ORG_CAP_DESTRUCTIVE_OPS` | per-day cap on irreversible ops (rm/DROP/force; scope-weighted, `rm -rf`=3) | `50` |
-| `ORG_CAP_EXTERNAL_WRITES` / `ORG_CAP_INFRA_CHANGES` | per-day caps on outbound writes / infra applies | `30` / `20` |
-| `ORG_CAP_FILE_MUTATIONS` | per-day cap on overwriting existing files (reversible under VCS — high) | `500` |
-| `ORG_HOOK_FAIL_OPEN` | `1` allows on organ error instead of blocking — **dev only** | off (fail-safe) |
+| `ORG_LEDGER_ROOT` | ledger を別の場所に置く | 発見（`.orgforge/ledger`） |
+| `ORG_GITHUB_REPO` | バックログのリポジトリを固定する | 発見（`git remote origin`） |
+| `ORG_ROLE` | このセッションがどの役割か（doctrine 注入と resume のキー） | (なし) |
+| `ORG_DOCTRINE_ROOT` / `ORG_CONVENTIONS_ROOT` | 別の場所に置く | 発見（`.orgforge/…`） |
+| `ORG_HOOK_FAIL_OPEN` | organ がエラーのとき通す — **開発用のみ** | off（fail-safe） |
 
-The caps are **per-day budgets** (the window rolls daily) and meter **irreversibility, not activity**:
-reads, build tooling (`npm`, `pytest`, `git status`), unknown/unfamiliar commands, and new-file
-creation are **not** metered — only explicit destructive / external / infra actions draw down a budget.
-See [REFERENCE.md](REFERENCE.md) for the full variable, command, event, and troubleshooting reference.
+**blast-radius のキャップ・反復上限・seam ゲートは `constitution.yaml` の `enforcement:`
+ブロックで宣言する**（同じ org はどこにインストールしても同じ強度で効く）。`ORG_CAP_*` などの
+環境変数はその**開発用の上書き**であって、org の設定方法ではない。詳細は
+[REFERENCE.md](REFERENCE.md)。
+
+## 3. 最初にやること — 3つのコマンド
+
+```
+/orgforge-plugin:org-init タテカエ ja      # 1. セットアップ（設計はしない）
+/orgforge-plugin:org-found REQUIREMENTS.md # 2. 設計 → CEO 承認で停止
+/orgforge-plugin:org-decompose             # 3. アトミックな task Issue へ分解
+```
+
+> **コマンド名はプラグイン名で修飾する。** `/orgforge-plugin:org-init` ではなく
+> **`/orgforge-plugin:org-init`**。他のプラグインと名前が衝突しないための正式な形。
+>
+> **既存のリポジトリに後から導入する場合**は `/orgforge-plugin:org-found` ではなく
+> **`/orgforge-plugin:org-adopt`** を使う（実在するコードから設計を読み取り、未実装分だけを
+> manifest に載せ、機械バーの現状を baseline として記録する）。
+
+`/orgforge-plugin:org-init` は**実行時のカレントディレクトリ**に org を作る。プロダクトのリポジトリで
+実行すること — ステップ0が場所を表示し、プラグイン自身の開発ツリーなら停止する。
 
 ## 4. Sanity-check: a guardrail actually fires
 
@@ -70,14 +111,14 @@ Before founding a company you'll trust to fan out, confirm the teeth are live. W
 set and a low cap, a runaway is blocked at the tool boundary — one quick check, not the headline:
 
 ```
-export ORG_LEDGER_ROOT=/tmp/myorg/ledger; mkdir -p $ORG_LEDGER_ROOT
+mkdir -p /tmp/myorg/.orgforge/ledger && cd /tmp/myorg   # org として発見される最小構成
 export ORG_CAP_DESTRUCTIVE_OPS=2
 echo '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/x"}}' \
   | python3 integrations/common/org_hook.py; echo "exit=$?  (2 = blocked)"
 ```
 
 (For the full certification — including that the block fires for a *spawned subagent's* tool call —
-run `/org-verify-guards` once at founding. Caps, the iteration/cycle limits, and the seam gate are
+run `/orgforge-plugin:org-verify-guards` once at founding. Caps, the iteration/cycle limits, and the seam gate are
 declared in `constitution.yaml`'s `enforcement:` block; the `ORG_CAP_*` env vars above are **dev
 overrides** over that spec — see [REFERENCE.md](REFERENCE.md).)
 
@@ -94,7 +135,7 @@ python3 integrations/runner/run_department.py --harness claude --role <role> \
 
 ## 6. Start the metabolism — one command brings the org to its running state
 
-Once an org is defined (§7) and `ORG_LEDGER_ROOT` + `ORG_ROLE` are set, **run `/org-start`**:
+Once an org is defined (§7) and `ORG_LEDGER_ROOT` + `ORG_ROLE` are set, **run `/orgforge-plugin:org-start`**:
 
 ```
 /org-start [role] [tick-min] [work-min] [discover-hours]     # defaults: supervisor 15 60 6
@@ -110,17 +151,17 @@ this session is open**:
 ```
 
 The drive is delegated to Claude Code's built-in `/loop` (R0 — borrow the harness's loop, don't build
-one); the org keeps only the monitoring `/loop` can't give it (the missed-tick detector in `/org-tick`).
-You usually won't type `/org-start` yourself — on an org session the SessionStart hook prompts the model
-to run it. Check on the org any time with **`/org`**.
+one); the org keeps only the monitoring `/loop` can't give it (the missed-tick detector in `/orgforge-plugin:org-tick`).
+You usually won't type `/orgforge-plugin:org-start` yourself — on an org session the SessionStart hook prompts the model
+to run it. Check on the org any time with **`/orgforge-plugin:org`**.
 
 **Session-scoped:** these `/loop` cycles run while this Claude Code session is open and stop when it
 closes. For a genuinely 24/7 org with no session open, use an OS-level cron —
 `integrations/claude-code/scheduler-install.sh` (see [SCHEDULER.md](integrations/claude-code/SCHEDULER.md)) —
 a separate, explicit setup.
 
-**Check on it any time with `/org`** — one GREEN/AMBER/RED board: what it did, what's in progress, and
-whether it needs you. You don't read the ledger; `/org` tells you in plain language. Feed new work in
+**Check on it any time with `/orgforge-plugin:org`** — one GREEN/AMBER/RED board: what it did, what's in progress, and
+whether it needs you. You don't read the ledger; `/orgforge-plugin:org` tells you in plain language. Feed new work in
 with `/org-triage <a bug/issue/idea>` (or drop it on the backlog); the org works it on its own.
 
 ### The three cycles it runs
@@ -138,7 +179,7 @@ items on one footing.
 /org-tick              # read-only health: which checks are due / MISSED, sensors, chain integrity.
 ```
 
-`/org-work` uses `attention.py` to prioritize the whole backlog (situated attention to the org
+`/orgforge-plugin:org-work` uses `attention.py` to prioritize the whole backlog (situated attention to the org
 ranking + problemistic-search boost), **floors an in-zone mandate** so a live instruction is not
 starved by low-priority self work, and picks a prefix within the WIP limit. Delegation follows the
 decomposition doctrine (docs/03): split only genuinely independent work, never split coupled work,
@@ -146,7 +187,7 @@ each child carries a seam contract.
 
 ### Session-scoped vs. genuinely 24/7
 
-`/org-start` schedules the cycles **within this session** (Claude Code's `CronCreate` / `/schedule` are
+`/orgforge-plugin:org-start` schedules the cycles **within this session** (Claude Code's `CronCreate` / `/schedule` are
 session-only — they stop when the session closes). That is the right default for an attended or
 kept-open session. For an org that must run with **no session open**, install the cadence on the OS
 cron with `integrations/claude-code/scheduler-install.sh --role <role>` — see
@@ -177,12 +218,12 @@ The plugin is the *engine*; your organization is `organization.yaml` + `constitu
 **Step 2 writes four files under fixed names** ([docs/11](docs/11-sdlc-mold.md) §0a) — `REQUIREMENTS.md`,
 `FEATURE-INVENTORY.md`, **`ARCHITECTURE.md` (the 全体設計書)**, `coverage-manifest.md`, plus
 `organization.yaml`. The names are fixed because step 3 reads them *by name*; a renamed artifact is one
-no command can find. `/org-found` is *design only* — you approve the scope. It is the moment the abstract
+no command can find. `/orgforge-plugin:org-found` is *design only* — you approve the scope. It is the moment the abstract
 "org" becomes a **company**: a purpose stated as a business, a feature inventory with an explicit exclude
 list, and contracts the lint's O10 tooth checks for coverage (every deliverable is owned and
 independently checked — [docs/11](docs/11-sdlc-mold.md) §0, [docs/01](docs/01-requirements.md) J14/S9).
 
-**Step 3 is what makes the design workable from anywhere.** `/org-decompose` carves each must-have into
+**Step 3 is what makes the design workable from anywhere.** `/orgforge-plugin:org-decompose` carves each must-have into
 *atomic, independently-completable* task Issues (split wherever sibling `owns` sets are disjoint; keep
 reciprocally-coupled work together), fills the full `template/SPEC.md` structure into each Issue body —
 clone URL, the literal setup+test commands, entry files, MUSTs in EARS, the seam contract, the DoD
@@ -194,7 +235,7 @@ non-zero if any must-have never became an Issue — the design-to-backlog gap th
 ## 8. The company builds and ships — through the forced SDLC
 
 This is the headline. Once you approve the scope and the metabolism is running (§6), the PM loop
-(`/org-work`) pulls a backlog item and the company builds it — but it cannot skip a step. Every
+(`/orgforge-plugin:org-work`) pulls a backlog item and the company builds it — but it cannot skip a step. Every
 deliverable travels a **non-skippable phase chain**, enforced not by a prompt but by the ledger's
 phase-gate (the same `requires_prior` idiom that makes the skeptic load-bearing):
 

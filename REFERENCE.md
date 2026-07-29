@@ -9,8 +9,14 @@ fixes for the problems people actually hit.
 
 ## 1. Environment variables
 
-Set these in your harness config (`.claude/settings.json` → `"env"`, or the shell before a headless
-run). Only `ORG_LEDGER_ROOT` is required to turn the guardrails on; everything else has a safe default.
+**どれも設定する必要はない。** 0.9.0 以降、org は作業ディレクトリから**発見される**
+（`organization.yaml` の隣の `.orgforge/`、バックログは `git remote origin`。`tools/discover.py`）。
+以下はすべて**上書き**であり、優先順位は **明示的な引数 > 環境変数 > 発見**。
+
+> **なぜ発見が既定なのか。** 絶対パスで書かれた設定は別のマシンで壊れ、マシンごとに繰り返す
+> 手順は飛ばされる。そして飛ばされたとき、ガードレールは ledger を見つけられず**黙って全部を
+> 許可する** — 設定忘れの帰結が「無防備」になるのは、ガードレールが持ってはいけない失敗モード。
+> 発見はそれを消し、副次的に **1つの環境で複数リポジトリの org を混線なく運用できる**。
 
 > **Spec vs. dev override.** The enforcement knobs — the caps, the window, the iteration/cycle limits,
 > and the seam gate — are **declared in the org spec**, in `constitution.yaml`'s `enforcement:` block
@@ -24,7 +30,8 @@ run). Only `ORG_LEDGER_ROOT` is required to turn the guardrails on; everything e
 
 | Variable | What it does | Default |
 |---|---|---|
-| `ORG_LEDGER_ROOT` | Directory holding the org's ledger (`ledger.jsonl` + `HEAD`) — the shared record everything reads/writes. **Required** for the guardrails to gate; without it the hook allows everything and says so on stderr (visible, never silent). | *(unset → guardrails inert)* |
+| `ORG_LEDGER_ROOT` | ledger の場所（`ledger.jsonl` + `HEAD`）。**通常は不要** — 発見される。チェックアウトの外に ledger を置く場合や CI で固定する場合のみ設定する。 | *(発見: `<org root>/.orgforge/ledger`)* |
+| `ORG_GITHUB_REPO` | バックログの GitHub リポジトリ（`owner/name`）。**通常は不要** — `git remote origin` から解析される。 | *(発見: origin の URL)* |
 | `ORG_ROLE` | Which department/role this session is. Keys the doctrine injection, the work-in-progress resume, and the ledger events. | *(unset)* |
 | `ORG_DOCTRINE_ROOT` | Directory of per-role `<role>.json` doctrine stores; the SessionStart hook injects this role's doctrine at launch. | *(unset → no doctrine injected)* |
 | `ORG_CONVENTIONS_ROOT` | Directory of settled conventions, injected alongside doctrine. | *(unset)* |
@@ -73,13 +80,13 @@ irreversible patterns draw down a budget.
 |---|---|
 | `/org-init [org-name] [ja\|en]` | **Step 1 — set up.** Create the ledger/doctrine/conventions roots, install the org spec files, ensure `develop` + the backlog labels, then lint the spec and probe that the guardrails actually bite. **No environment setup** — the org is discovered from the working directory (`tools/discover.py`), so nothing is exported and several repos can run from one shell. Idempotent; designs nothing. |
 | `/org-found <RFP or brief>` | **Step 2 — design.** Draft the org from a brief and write the five **fixed-name** founding artifacts (docs/11 §0a): `REQUIREMENTS.md`, `FEATURE-INVENTORY.md`, **`ARCHITECTURE.md` (the 全体設計書)**, `coverage-manifest.md`, `organization.yaml` — then stop and report up for scope approval. Design only. |
-| `/org-adopt [残りの要求]` | **既存リポジトリへの後付け.** `/org-found` の途中導入版: 実在するコードから `ARCHITECTURE.md` と `organization.yaml` を*読み取って*書き、**未実装分だけ**を manifest に載せ（実装済みを載せると動くものを作り直す Issue が生える）、機械バーの現状を `repro_lint baseline` で既知の負債として記録する。コミットのある repo で `/org-found` の代わりに使う。 |
+| `/org-adopt [残りの要求]` | **既存リポジトリへの後付け.** `/orgforge-plugin:org-found` の途中導入版: 実在するコードから `ARCHITECTURE.md` と `organization.yaml` を*読み取って*書き、**未実装分だけ**を manifest に載せ（実装済みを載せると動くものを作り直す Issue が生える）、機械バーの現状を `repro_lint baseline` で既知の負債として記録する。コミットのある repo で `/orgforge-plugin:org-found` の代わりに使う。 |
 | `/org-decompose [objective-id]` | **Step 3 — decompose.** Turn the approved `coverage-manifest.md` + `ARCHITECTURE.md` into **atomic SPEC task Issues**, one per independently-completable unit, each a native sub-issue of its objective and each carrying the full spec (so any environment can pick it up). Gated by `coverage-check`: exits non-zero if a must-have never became an Issue. |
 | `/org-start [role] [tick] [work] [discover]` | Bring the org to its **running state**: register this session's recurring cycles via the scheduler. Idempotent. The SessionStart hook prompts it for you. |
-| `/org` `[role]` | The **status board** — "how's my org?" in one GREEN/AMBER/RED answer (done / in progress with next steps / what needs you), in your language. Read-only. |
-| `/org-triage <signal>` | The **front door**: turn an external bug/issue/feedback into a triaged backlog item (or reject it). Feeds `/org-work`. |
+| `/orgforge-plugin:org` `[role]` | The **status board** — "how's my org?" in one GREEN/AMBER/RED answer (done / in progress with next steps / what needs you), in your language. Read-only. |
+| `/org-triage <signal>` | The **front door**: turn an external bug/issue/feedback into a triaged backlog item (or reject it). Feeds `/orgforge-plugin:org-work`. |
 | `/org-mandate <subjectA,subjectB> <decision>` | Adjudicate a **mandate conflict** against the constitution's human-authored precedence: precedence applies, both integrate, or escalate. |
-| `/org-verify-guards` | Certify the guardrails block — including for a spawned subagent — before trusting the org to fan out unattended. Run once at founding. |
+| `/orgforge-plugin:org-verify-guards` | Certify the guardrails block — including for a spawned subagent — before trusting the org to fan out unattended. Run once at founding. |
 
 **The internal metabolism** (runs on cadence; you rarely type these):
 
@@ -87,7 +94,7 @@ irreversible patterns draw down a budget.
 |---|---|
 | `/org-work <role> [wip] [floor]` | The **PM loop**: check deaths + reuse, select by situated attention, delegate genuinely-independent slices in parallel, record progress/completion + reuse + settled conventions. Acts. |
 | `/org-discover <role> [aspiration]` | **Problemistic search**: raise `source: self` backlog items from aspiration gaps. Adds only; fail-quiet when there is no gap. |
-| `/org-tick` | Read-only **health tick**: due/MISSED checks, machine sensors, chain integrity, stall breakers, repeated-death + domain-model-growth checks. Surfaces, never acts. |
+| `/orgforge-plugin:org-tick` | Read-only **health tick**: due/MISSED checks, machine sensors, chain integrity, stall breakers, repeated-death + domain-model-growth checks. Surfaces, never acts. |
 | `/org-resume [role]` | Show a role's **work in progress** with checkpoints — the manual counterpart to the automatic resume injection. |
 
 Scheduling these on a cadence: see [integrations/claude-code/SCHEDULER.md](integrations/claude-code/SCHEDULER.md)
@@ -111,8 +118,8 @@ An org is these source files (templates in `template/`), validated by `tools/org
 
 ### The founding artifacts — FIXED filenames (docs/11 §0a)
 
-`/org-found` writes these four files at the org root under **exactly these names**. The names are part of
-the contract, not a convention: `/org-decompose` reads them **by name** as its input, and a stranger
+`/orgforge-plugin:org-found` writes these four files at the org root under **exactly these names**. The names are part of
+the contract, not a convention: `/orgforge-plugin:org-decompose` reads them **by name** as its input, and a stranger
 opening any orgforge org finds the design in the same place. A renamed artifact is an unfindable one.
 
 | File | Role |
@@ -208,10 +215,10 @@ unchanged** — the ledger stays authoritative; Issues are its regenerated windo
 lock, the native sub-issue is the hierarchy). Two levels:
 
 - **objective Issue** (`orgforge:kind:objective`) — the big-picture RFP/objective (parent). Created by
-  `/org-found` after CEO sign-off.
+  `/orgforge-plugin:org-found` after CEO sign-off.
 - **task Issue** (`orgforge:kind:task` + `orgforge:dept:<name>`) — a department's unit of work, linked
-  as a **native GitHub sub-issue** of its objective. Created by `/org-decompose` (RFP-derived, one per
-  atomic unit, carrying a `coverage_row:` trailer) or by `/org-discover` (self-raised, no trailer).
+  as a **native GitHub sub-issue** of its objective. Created by `/orgforge-plugin:org-decompose` (RFP-derived, one per
+  atomic unit, carrying a `coverage_row:` trailer) or by `/orgforge-plugin:org-discover` (self-raised, no trailer).
 
 ```
 github_sync.py create --repo R --kind objective --objective <id> --title T                # the parent
@@ -233,7 +240,7 @@ github_sync.py coverage-check --repo R [--manifest coverage-manifest.md]   # exi
 - **`log`** appends a **work-log comment** on each milestone (`cycle_started`, `progress_recorded`,
   `phase_admitted`, `cycle_completed`), so progress accrues on the Issue as it happens. **Idempotent**:
   the comment carries a hidden `<!-- orgforge:event:<id> -->` marker keyed to the ledger event id, so a
-  replay logs each milestone once (docs/11 §0). `/org-work` calls it at each of its three record points.
+  replay logs each milestone once (docs/11 §0). `/orgforge-plugin:org-work` calls it at each of its three record points.
   Since **human diff review is retired** (docs/11 §4f), the Issue is the org's audit record, so `log`
   takes the fields that make an entry reconstructable by someone who was never in the session:
   `--command` (verbatim, re-runnable), `--result` (**the real output, failures included** — a log of
@@ -249,12 +256,12 @@ github_sync.py coverage-check --repo R [--manifest coverage-manifest.md]   # exi
 - Labels: `orgforge:claimed:<agent>` · `orgforge:{ready,in-progress,blocked,needs-human,done}` ·
   `orgforge:kind:{objective,task}` · `orgforge:dept:<name>` · `orgforge:objective:<id>` ·
   `orgforge:{mandate,self}` · `orgforge:off-ranking`.
-- **`coverage-check`** is the **decomposition coverage gate** (docs/11 §0a). `/org-found`'s O10 lint
+- **`coverage-check`** is the **decomposition coverage gate** (docs/11 §0a). `/orgforge-plugin:org-found`'s O10 lint
   proves each must-have has exactly one owning *contract*; this proves each one reached at least one
   *task Issue*. It matches the manifest's `rfp_capability` against the `coverage_row:` trailer in each
   task Issue body — so a must-have that was designed but never decomposed (silently unbuilt, the hardest
   gap to see) exits 10. Task Issues with no trailer are reported as a note, not a failure: self-raised
-  `/org-discover` items legitimately have none.
+  `/orgforge-plugin:org-discover` items legitimately have none.
 - All three creation paths are **idempotent**: `create` no-ops when an open Issue with the same
   title+objective exists, so a re-run/replay never mints a duplicate. `ORG_GITHUB_REPO` unset ⇒ a
   ledger-only run (the projection is skipped silently).

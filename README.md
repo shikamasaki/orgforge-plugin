@@ -226,14 +226,16 @@ cadences are realized by the harness's own scheduler (Claude Code's `/schedule` 
 cron), and `tools/tick.py` detects a missed check so "the schedule stopped firing" is a paged fact
 ([integrations/claude-code/SCHEDULER.md](integrations/claude-code/SCHEDULER.md)). Ships as a Claude
 Code **plugin** — hooks + subagents + commands. The **commands you use** are few, and the setup path is
-three of them in order: **`/org-init`** (set up the org's state, env, and labels), **`/org-found`**
+three of them in order: **`/orgforge-plugin:org-init`** (set up the org's state, env, and labels), **`/orgforge-plugin:org-found`**
 (draft the org from a brief into four fixed-name artifacts — `REQUIREMENTS.md`, `FEATURE-INVENTORY.md`,
-`ARCHITECTURE.md` = the 全体設計書, `coverage-manifest.md`), **`/org-decompose`** (carve those into
+`ARCHITECTURE.md` = the 全体設計書, `coverage-manifest.md`), **`/orgforge-plugin:org-decompose`** (carve those into
 atomic SPEC task Issues, coverage-gated, each self-contained enough to be picked up from any
-environment). Then **`/org-start`** (bring it to its running state), **`/org`** (the status
-board — GREEN/AMBER/RED), and **`/org-triage`** (feed a signal into the backlog); `/org-mandate` and
-`/org-verify-guards` handle the occasional exception. The org's **own metabolism** — `/org-work`,
-`/org-discover`, `/org-tick` — runs on cadence and you rarely type it. Plus a Codex `.codex/` config;
+environment). **既にコードがあるリポジトリに後付けする場合**は `/org-found` ではなく
+**`/orgforge-plugin:org-adopt`**（実在するコードから設計を読み取り、未実装分だけを manifest に
+載せ、機械バーの現状を baseline として記録する）。 Then **`/orgforge-plugin:org-start`** (bring it to its running state), **`/orgforge-plugin:org`** (the status
+board — GREEN/AMBER/RED), and **`/orgforge-plugin:org-triage`** (feed a signal into the backlog); `/orgforge-plugin:org-mandate` and
+`/orgforge-plugin:org-verify-guards` handle the occasional exception. The org's **own metabolism** — `/orgforge-plugin:org-work`,
+`/orgforge-plugin:org-discover`, `/orgforge-plugin:org-tick` — runs on cadence and you rarely type it. Plus a Codex `.codex/` config;
 neutral core, one folder per harness. See [integrations/README.md](integrations/README.md).
 
 ## Status & honesty
