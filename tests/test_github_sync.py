@@ -8,6 +8,7 @@ import importlib.util
 import json
 import pathlib
 import sys
+import pytest
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 spec = importlib.util.spec_from_file_location("github_sync", REPO / "tools" / "github_sync.py")
@@ -398,6 +399,14 @@ class CommentGh(FakeGh):
             self.posted.append(args[args.index("--body") + 1])
             return 0, "ok"
         return 0, ""
+
+
+@pytest.fixture(autouse=True)
+def _isolated_ledger(tmp_path, monkeypatch):
+    """decide は台帳にも書くようになったので（0.21.0 で二重打ちをやめた）、
+    テストごとに使い捨ての台帳ルートを与える。実 org の台帳を汚さない。"""
+    monkeypatch.setenv("ORG_LEDGER_ROOT", str(tmp_path / "led"))
+    yield
 
 
 def _decide_ns(**kw):

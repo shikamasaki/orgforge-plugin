@@ -592,25 +592,54 @@ def cmd_decide(a):
     parts.append("\n_No human reviewed this change before merge (docs/11 §4f). This record is the "
                  "account of why it was allowed to._")
     body = "\n".join(parts) + f"\n\n{marker}"
+
+    # **台帳を先に通す。** 統制（自己承認拒否・順序違反）は台帳が持っているので、
+    # Issue に書いてから台帳が拒否すると「Issue には admit と書いてあるが台帳には無い」
+    # という最悪の食い違いが残る。拒否されるなら、外に見える記録を作る前に止める。
+    here = os.path.dirname(os.path.abspath(__file__))
+    payload = {"verdict": a.verdict, "deliverable": str(a.issue), "issue": a.issue,
+               "reasoning_sha256": digest}
+    if getattr(a, "phase", None):
+        payload["phase"] = a.phase
+    if getattr(a, "risk", None):
+        payload["risk_accepted"] = True
+    try:
+        r = subprocess.run([sys.executable, os.path.join(here, "ledger.py"), "append",
+                            "--actor", a.by, "--class", a.event,
+                            # 冪等キーは **判定の内容ごと**に一意。`{event}-{issue}` だと2周目の
+                            # 判定が1周目と衝突して no-op になり、しかも冪等チェックは統制より
+                            # 先に評価されるので、自己承認・順序違反が「既に記録済み」として
+                            # 素通りする（実地で確認）。digest は verdict/why/evidence から
+                            # 作られるので、同じ判定の再実行だけが正しく no-op になる。
+                            "--natural-key", f"{a.event}-{a.issue}-{digest[:12]}",
+                            "--payload", json.dumps(payload, ensure_ascii=False)],
+                           capture_output=True, text=True, timeout=30)
+        led_out = ((r.stdout or "") + (r.stderr or "")).strip()
+        led_ok = r.returncode == 0
+    except Exception as e:
+        led_out, led_ok = str(e), False
+
+    if not led_ok:
+        print(f"台帳が受け付けなかったので、Issue にも記録していない:\n  {led_out[:500]}",
+              file=sys.stderr)
+        if "rejected" in led_out:
+            print("\n  これは統制が働いた結果である（自己承認・順序違反など）。"
+                  "判定そのものを見直すこと。", file=sys.stderr)
+        return 4
+
     code, out = gh(["issue", "comment", str(a.issue), "--repo", a.repo, "--body", body])
     if code != 0:
         print(f"gh error posting decision comment: {out}", file=sys.stderr)
+        print(f"  注意: 台帳には既に記録済み（{a.event} #{a.issue}）。Issue 側だけが欠けている。\n"
+              f"  同じ引数で再実行すれば、台帳は冪等 no-op になり Issue だけが埋まる。",
+              file=sys.stderr)
         return 2
     print(f"recorded decision {a.event}={a.verdict} on issue #{a.issue}.")
     print(f"reasoning_sha256={digest}")
     # 説明ではなく、そのまま打てる形を出す。実地では受領証が書かれず（refutation は台帳0件）、
     # 相関キーの無い判定が素通りしていた。`issue` は相関キーでもあるので、これが欠けると
     # DISTINCT_ACTOR / requires_prior が対象を特定できず、統制そのものが効かない。
-    here = os.path.dirname(os.path.abspath(__file__))
-    payload = json.dumps({"verdict": a.verdict, "deliverable": str(a.issue), "issue": a.issue,
-                          "reasoning_sha256": digest}, ensure_ascii=False)
-    print(f"NEXT: 台帳の受領証をこのまま打つこと（Issue のコメントだけでは片側しか残らない）:\n"
-          f'  python3 "{os.path.join(here, "ledger.py")}" append --actor {a.by} '
-          f"--class {a.event} \\\n"
-          f"    --natural-key {a.event}-{a.issue} --payload '{payload}'\n"
-          f"  digest が無いとコメントの改竄が検出できず、`ledger verify` は chain intact と"
-          f"報告し続ける（docs/11 §4f.1）。`issue` は相関キーでもあり、欠けると自己承認・"
-          f"deploy の統制が対象を特定できない。")
+    print(f"台帳にも受領証を記録した（{a.event} #{a.issue}, digest {digest[:12]}…）。")
     return 0
 
 

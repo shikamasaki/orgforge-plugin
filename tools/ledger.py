@@ -499,13 +499,27 @@ def cmd_append(a):
     # spec+action. We no-op (exit 0) when (class, natural_key) already exists in history. The seq
     # counter is monotonic, so without this an identical logical event would land twice under two
     # ids — the non-idempotency the "idempotent under replay" note wrongly claimed we already had.
+    #
+    # **冪等 no-op は「同じ actor による同じ論理イベント」に限る。** 以前は (class, natural_key)
+    # だけを見ていたため、キーさえ一致すれば **actor が違っても no-op** になり、統制
+    # （DISTINCT_ACTOR / REQUIRES_PRIOR）は評価すらされなかった。実地では、gate の判定と
+    # 同じキー `admission_decided-11` を maker が使うと、自己承認が「既に記録済み」として
+    # exit 0 で通った。冪等性は再実行を守るための仕組みであって、統制を迂回する裏口ではない。
     nk = getattr(a, "natural_key", None)
     if nk:
         for e in hist:
-            if e["class"] == a.cls and e.get("payload", {}).get("_nk") == nk:
-                print(f"append: idempotent no-op — {a.cls} with natural key {a.natural_key!r} "
-                      f"already recorded at seq={e['seq']} id={e['id']} (docs/11 §0). Not re-appended.")
-                return 0
+            if e["class"] != a.cls or e.get("payload", {}).get("_nk") != nk:
+                continue
+            if e.get("actor") != a.actor:
+                print(f"append: {a.cls} rejected — natural key {nk!r} は既に "
+                      f"actor {e.get('actor')!r} が seq={e['seq']} で使っている。\n"
+                      f"  別の actor が同じキーで書くのは再実行ではない。冪等 no-op で通すと、"
+                      f"自己承認や順序違反が『既に記録済み』として統制を素通りする"
+                      f"（実地で確認）。判定ごとに一意なキーを使うこと。", file=sys.stderr)
+                return 3
+            print(f"append: idempotent no-op — {a.cls} with natural key {a.natural_key!r} "
+                  f"already recorded at seq={e['seq']} id={e['id']} (docs/11 §0). Not re-appended.")
+            return 0
         payload["_nk"] = a.natural_key   # stamp the key so a future retry can find this event
     seq = head["seq"] + 1
     # id is derived from (seq, class, canonical payload) so append is deterministic and

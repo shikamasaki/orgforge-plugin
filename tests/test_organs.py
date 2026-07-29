@@ -1354,12 +1354,18 @@ def test_deploy_without_any_survives_still_blocked(tmp_path):
     assert p.returncode != 0, "反証されていない成果物が deploy できた"
 
 
-def test_decide_prints_a_runnable_receipt_command():
-    """受領証は説明ではなく、そのまま打てる形で出す（実地では書かれず0件だった）。"""
+def test_decide_writes_the_receipt_itself():
+    """受領証は decide が自分で書く（0.21.0）。
+
+    以前は雛形を印字して人に打たせていたため、実地で3回片側落ちした
+    （#8 の refutation / #11 の1回目の reject / progress_recorded）。
+    actor は --by で渡っているので、分ける理由が無い。
+    """
     src = (TOOLS / "github_sync.py").read_text(encoding="utf-8")
-    seg = src[src.index("reasoning_sha256={digest}"):]
+    seg = src[src.index("def cmd_decide"):]
     assert "ledger.py" in seg and "--natural-key" in seg
-    assert '"issue": a.issue' in seg or '"issue": a.issue,' in seg
+    assert '"issue": a.issue' in seg
+    assert "NEXT: 台帳の受領証をこのまま打つこと" not in seg, "人に打たせる雛形が残っている"
 
 
 # ── 実地: 検出器が「学習が使われている」と嘘をついた ─────────────────────
@@ -1671,3 +1677,50 @@ def test_asset_touched_records_authority():
     src = (TOOLS / "org_cycle.py").read_text(encoding="utf-8")
     seg = src[src.index("def cmd_touched"):]
     assert "authority" in seg and "reversible" in seg and "rollback" in seg
+
+
+# ── 0.21.0: 二重管理をやめる / 冪等キーによる統制の迂回 ────────────────
+def test_idempotent_key_cannot_bypass_controls(tmp_path):
+    """冪等 no-op は「同じ actor の再実行」に限る。
+
+    (class, natural_key) だけを見ていたため、キーさえ一致すれば actor が違っても no-op に
+    なり、統制が評価すらされなかった。実地では gate と同じキーを maker が使うことで
+    自己承認が exit 0 で通った。冪等性は再実行を守る仕組みであって、統制の裏口ではない。
+    """
+    env = _led(tmp_path)
+    a = _append(env, "gate", "admission_decided", {"verdict": "reject", "issue": 5, "_x": 1})
+    assert a.returncode == 0
+    # 同じ actor の再実行 → no-op
+    b = subprocess.run([sys.executable, str(TOOLS / "ledger.py"), "append", "--actor", "gate",
+                        "--class", "admission_decided", "--natural-key", "k1",
+                        "--payload", json.dumps({"verdict": "reject", "issue": 5})],
+                       capture_output=True, text=True, env=env, timeout=60)
+    c = subprocess.run([sys.executable, str(TOOLS / "ledger.py"), "append", "--actor", "gate",
+                        "--class", "admission_decided", "--natural-key", "k1",
+                        "--payload", json.dumps({"verdict": "reject", "issue": 5})],
+                       capture_output=True, text=True, env=env, timeout=60)
+    assert c.returncode == 0 and "no-op" in c.stdout, c.stdout + c.stderr
+    # 別 actor が同じキー → 拒否
+    d = subprocess.run([sys.executable, str(TOOLS / "ledger.py"), "append", "--actor", "maker",
+                        "--class", "admission_decided", "--natural-key", "k1",
+                        "--payload", json.dumps({"verdict": "admit", "issue": 5})],
+                       capture_output=True, text=True, env=env, timeout=60)
+    assert d.returncode != 0, "別 actor が冪等キーで統制を迂回できた"
+    assert "再実行ではない" in d.stderr
+
+
+def test_decide_writes_ledger_before_issue():
+    """台帳を先に通す。拒否されるなら Issue に外向きの記録を作る前に止める。"""
+    src = (TOOLS / "github_sync.py").read_text(encoding="utf-8")
+    seg = src[src.index("def cmd_decide"):]
+    led = seg.index("ledger.py")
+    comment = seg.index('gh(["issue", "comment"')
+    assert led < comment, "Issue に書いてから台帳を叩いている（食い違いが外に残る）"
+    assert "台帳が受け付けなかったので、Issue にも記録していない" in seg
+
+
+def test_decide_key_is_unique_per_judgment():
+    """`{event}-{issue}` だと2周目の判定が1周目と衝突して no-op になる。"""
+    src = (TOOLS / "github_sync.py").read_text(encoding="utf-8")
+    seg = src[src.index("def cmd_decide"):]
+    assert 'f"{a.event}-{a.issue}-{digest[:12]}"' in seg

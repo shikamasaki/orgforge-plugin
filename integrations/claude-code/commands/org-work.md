@@ -309,6 +309,10 @@ each `phase_admitted`, the integrate verdict, and any consequential design/scope
 
 !`echo 'Per judgment: python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/github_sync.py" decide --repo "$ORG_GITHUB_REPO" --issue <N> --event admission_decided|refutation_attempted|phase_admitted|integration_admitted|design_decided|tradeoff_decided|rework_requested --verdict <admit|reject|pass|rework|survives|refuted> --why "<the REASONING: what was weighed, what decided it>" --by <role> [--phase <p>] [--evidence "<command output / CI run / repro_lint verdict>"] [--alternatives "<what was rejected and why>"] [--standard "<the bar applied>"] [--risk "<a known risk knowingly accepted>"] --event-id <ledger event id>'`
 
+`decide` は **Issue と台帳の両方に1コマンドで書く**（0.21.0）。以前は雛形を印字して人に
+`ledger append` を打たせており、実地で片側落ちが3回起きた。順序は台帳が先 — 統制が拒否する
+なら、Issue に外向きの記録を作る前に止まる（exit 4）。
+
 `decide` **rejects a `--why` that merely restates the verdict** — the degradation back into a rubber
 stamp is closed at the tool. Record the `--risk` honestly: a gate that admits despite a known hole must
 say so, or the hole becomes a surprise instead of a decision.
