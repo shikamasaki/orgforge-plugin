@@ -3,6 +3,58 @@
 All notable changes to orgforge-plugin. This project follows a pragmatic semver:
 minor = new mechanisms/features, patch = fixes, major = breaking articulation changes.
 
+## 0.10.1
+
+**タテカエ org の申し送り（改訂版）に全件対応。** A-1 は `/org-work` が起動せず、しかも
+**lint が GREEN を出す**という組み合わせで、報告のとおり最も重い。
+
+### A-1【重大】views の実装がスキーマの半分しかなかった
+
+`ledger.py` が13件をハードコードしていた一方、`ledger-schema.yaml` は26件を宣言していた。実害:
+
+- `/org-work` が `parts_inventory` を引けず、**コマンド全体が起動しなかった**
+- **gate の context_pack 3件と skeptic の 2件がすべて未実装**だった。`organization.yaml` が
+  「gate はこの3つを見て admit する」と宣言していても実行時に1つも引けない。SoD（maker≠checker）は
+  中核主張なのに、**checker が判断材料を取得できなかった**
+- それでも `org_lint` は pass した。CP 検査は「スキーマに定義があるか」しか見ず、
+  **「ツールが実装しているか」を見ていなかった**
+
+対処は報告の提案1のとおり: **`VIEW_FROM` を廃し、`ledger-schema.yaml` の `views:` を読む。**
+view を足すのに Python を触る必要がなくなり、**乖離が構造的に起きなくなった**。あわせて
+`org_lint` に **VW 検査**（スキーマの全ビューをツールが引けるか）を足した — 提案2の
+「lint が実装との乖離を検出できないのが本質的な穴」への対処で、安全網として残す。
+
+### B-2 フェーズ連鎖が objective と task で分断されていた
+
+founding は objective 単位で requirements/design を admit するが、`/org-work` は task Issue 番号を
+`deliverable` にする。別の文字列なので連鎖せず、指示どおり進めても task が弾かれた。
+
+task ごとに再 admit させるのは同じ設計を N 回 admit するセレモニーにしかならない。**設計は
+objective の単位で起きた**のだから、`phase_started` の payload に `parent` を書けば
+**親の admit を継承する**ようにした。親を持たない deliverable は従来どおり自分の admit だけを見る。
+
+### B-4 CEO 承認を台帳に記録する手順を追加
+
+「承認後に objective Issue を作れ」と指示しながら、承認そのものを記録する手段がなかった。
+founding は charter-tier（docs/05 §1）なのに、承認された事実がどこにも残らない。
+`proposal_adjudicated{proposal_id: founding, decision: approve, human}` を打つ手順を
+`/org-found` に追加した（既存スキーマのまま）。
+
+### あわせて: コマンドの env 依存を全廃
+
+`${ORG_LEDGER_ROOT}` を渡していた箇所（10コマンド・24箇所）を discovery に置き換えた。0.9.0 で
+ツール側は対応済みだったが、コマンド側が env を渡し続けていたので、設定が無い環境で壊れていた。
+
+そのうち2箇所は **`${ORG_CONVENTIONS_ROOT:-$ORG_LEDGER_ROOT}` というフォールバック**で、
+conventions を ledger ディレクトリに書き込む混入バグでもあった（監査記録に別種のデータが混ざる）。
+`conventions.py` / `doctrine.py` を discovery 対応にして、フォールバック自体を消した。
+
+### A-2 / A-3 / A-4 / B-1 / B-3
+
+0.10.0 で対応済み（`split-check` の `#N` 限定、SKELETON の必須キー追加、`on_candidate_arrival` の
+実例、`needs-human`、O2 メッセージ）。A-4 の cadence 表記は SKELETON のコメントで示している。
+
+テスト 213 → 218件。
 ## 0.10.0
 
 **人間にしか実行できない作業を Issue にする（docs/11 §0c）。** タテカエ org の founding〜decompose

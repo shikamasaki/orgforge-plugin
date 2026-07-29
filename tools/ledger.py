@@ -82,6 +82,34 @@ def _prior_phase(phase):
     return PHASE_ORDER[i - 1] if i > 0 else None
 
 
+def _phase_admitted_for(ev, hist, phase):
+    """この deliverable（またはその親）に対して `phase` が admit 済みか。
+
+    **なぜ親まで遡るのか。** founding は objective 単位で requirements/design を admit する
+    （設計はそこで起きるので当然）。一方 /org-work は task Issue 番号を deliverable にして
+    `phase_started{implement}` を打つ。両者は別の文字列なので、objective #1 で admit しても
+    task #7 には効かず、指示どおり進めても task #1 が弾かれた（実地で判明）。
+
+    task ごとに requirements/design を再度 admit させるのは、同じ設計を N 回 admit させる
+    セレモニーにしかならない。**設計は objective の単位で起きた**のだから、その admit を
+    子タスクが継承するのが正しい。継承は payload の `parent`（/org-decompose が書く）で辿る。
+
+    親を持たない deliverable は従来どおり自分の admit だけを見る — 挙動は変わらない。"""
+    target = ev["payload"].get("deliverable")
+    parent = ev["payload"].get("parent")          # /org-decompose が task に書く objective Issue 番号
+    for e in hist:
+        if e["class"] != "phase_admitted":
+            continue
+        if e["payload"].get("phase") != phase or e["payload"].get("verdict") != "pass":
+            continue
+        d = e["payload"].get("deliverable")
+        if _same_deliverable(d, target):
+            return True
+        if parent is not None and _same_deliverable(d, parent):
+            return True                            # 親 objective の admit を継承する
+    return False
+
+
 # ── event classes with a required-prior constraint (ledger-schema §event_classes) ──
 # result_deployed{candidate_id==C} is INVALID without a prior refutation_attempted with
 # claim_id==C and verdict==survives. This is the one write-time invariant the schema states
@@ -92,13 +120,7 @@ REQUIRES_PRIOR = {
     # is always allowed to start. Same shape as result_deployed — one predicate, more events.
     "phase_started": lambda ev, hist: (
         _prior_phase(ev["payload"].get("phase")) is None
-        or any(
-            e["class"] == "phase_admitted"
-            and _same_deliverable(e["payload"].get("deliverable"), ev["payload"].get("deliverable"))
-            and e["payload"].get("phase") == _prior_phase(ev["payload"].get("phase"))
-            and e["payload"].get("verdict") == "pass"
-            for e in hist
-        )
+        or _phase_admitted_for(ev, hist, _prior_phase(ev["payload"].get("phase")))
     ),
     # A phase may not be ADMITTED unless it was STARTED (docs/11 §2). Without this the mold is
     # decorative: `phase_admitted{integrate}` on an empty ledger makes `phase_started{deploy}` legal,
@@ -221,22 +243,61 @@ REQUIRES_PRIOR_WHY = {
                        "domain model (SSoT底上げ, docs/11 §4d) — state it or the append is rejected.",
 }
 
-# ── view -> the event classes it derives from (ledger-schema §views). "*" = all classes. ──
-VIEW_FROM = {
-    "live_findings": ["admission_decided", "result_deployed"],
-    "nearby_deaths": ["admission_decided", "refutation_attempted", "result_retired"],
-    "death_causes": ["admission_decided", "result_retired"],
-    "coverage_map": ["candidate_submitted"],
-    "parked_inventory": ["admission_decided"],
-    "doctrine_ttl_board": ["doctrine_diff_admitted"],
-    "watch_sources": ["intelligence_filed", "doctrine_diff_admitted"],
-    "sensor_readings": ["sensor_reading"],
-    "proposal_queue": ["proposal_filed", "proposal_adjudicated"],
-    "open_experiments": ["candidate_submitted", "cycle_completed"],
-    "work_in_progress": ["cycle_started", "progress_recorded", "cycle_completed"],
-    "ledger_census": ["*"],
-    "recent_ledger_census": ["*"],
-}
+# ── views は ledger-schema.yaml の `views:` を単一の情報源として読む ────────────────────────
+# 以前はここに13件をハードコードしていたが、スキーマは26件を宣言していた。乖離の実害:
+#   - `/org-work` が parts_inventory を引けず、コマンド全体が起動しなかった
+#   - **gate の context_pack 3件と skeptic の 2件がすべて未実装**だった。organization.yaml が
+#     「gate はこの3つを見て admit する」と宣言していても、実行時に1つも引けない。
+#     SoD（maker≠checker）は中核主張なのに、checker が判断材料を取得できなかった
+#   - それでも `org_lint` は pass した（CP 検査は「スキーマに定義があるか」しか見ず、
+#     「ツールが実装しているか」を見ていなかった）
+# スキーマを読めば、view を足すのに Python を触る必要がなくなり、乖離が構造的に起きない。
+_VIEW_FROM_CACHE = None
+
+
+def _schema_path():
+    """ledger-schema.yaml の場所。org のもの → プラグインのテンプレート、の順に探す。"""
+    here = os.path.dirname(os.path.abspath(__file__))
+    cands = []
+    try:
+        sys.path.insert(0, here)
+        import discover
+        root = discover.org_root()
+        if root:
+            cands.append(os.path.join(root, "ledger-schema.yaml"))
+    except Exception:
+        pass
+    cands.append(os.path.join(here, "..", "template", "ledger-schema.yaml"))
+    cands.append(os.path.join(here, "template", "ledger-schema.yaml"))
+    for c in cands:
+        if os.path.exists(c):
+            return c
+    return None
+
+
+def _view_from():
+    """{view_id: [derived-from classes]} をスキーマから読む。読めなければ空 dict。"""
+    global _VIEW_FROM_CACHE
+    if _VIEW_FROM_CACHE is not None:
+        return _VIEW_FROM_CACHE
+    out = {}
+    path = _schema_path()
+    if path:
+        try:
+            import yaml
+            with open(path, encoding="utf-8") as f:
+                doc = yaml.safe_load(f) or {}
+            for vid, spec in (doc.get("views") or {}).items():
+                frm = (spec or {}).get("from") if isinstance(spec, dict) else None
+                out[vid] = list(frm) if frm else ["*"]
+        except Exception:
+            pass
+    _VIEW_FROM_CACHE = out
+    return out
+
+
+# census 系は全クラスを数えるので、スキーマの `from` に関わらず "*" 扱いにする
+_ALL_CLASS_VIEWS = ("ledger_census", "recent_ledger_census")
 
 
 def _canonical(ev):
@@ -373,11 +434,12 @@ def cmd_verify(a):
 def cmd_view(a):
     """Project a derived view — a DETERMINISTIC function of the events it derives from
     (ledger-schema §views). Context packs may contain only views; this is how they're built."""
-    if a.view_id not in VIEW_FROM:
-        print(f"view: unknown view '{a.view_id}'. known: {', '.join(sorted(VIEW_FROM))}",
-              file=sys.stderr)
+    views = _view_from()
+    if a.view_id not in views:
+        known = ", ".join(sorted(views)) or "(ledger-schema.yaml が読めない)"
+        print(f"view: unknown view '{a.view_id}'. known: {known}", file=sys.stderr)
         return 2
-    classes = VIEW_FROM[a.view_id]
+    classes = ["*"] if a.view_id in _ALL_CLASS_VIEWS else views[a.view_id]
     events = [e for e in _read_events(a.root)
               if _in_window(e, a.since, a.until)
               and (classes == ["*"] or e["class"] in classes)]

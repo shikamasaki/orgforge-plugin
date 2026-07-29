@@ -8,11 +8,11 @@ Recover **work in progress** for role **${1:-(all roles)}** from the ledger — 
 context wipe. A half-done implementation lives in the ledger's `progress_recorded` checkpoints, not in
 the lost conversation, so this shows exactly where a cycle stopped and what its next step is.
 
-Ledger root: `${ORG_LEDGER_ROOT}` (must be set).
+Ledger root は**発見される**（`tools/discover.py`）— 環境変数の設定は不要。
 
 ## Work in progress (started, not yet completed)
 
-!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/ledger.py" view "${ORG_LEDGER_ROOT}" work_in_progress`
+!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/ledger.py" view work_in_progress`
 
 Based on the above, for the target role:
 - Each entry is a candidate that was **started but never completed**, with its latest checkpoint —

@@ -9,15 +9,15 @@ item so the org can work it unattended. The human's input is compressed to *hand
 triage does the rest. This is what makes orgforge a factory (work flows in from the world) rather than a
 workshop (a human types every task).
 
-Ledger root: `${ORG_LEDGER_ROOT}` (must be set).
+Ledger root は**発見される**（`tools/discover.py`）— 環境変数の設定は不要。
 
 ## 1. Read the signal and the current state
 
 Understand the incoming signal (**$1**). Then read what the org already knows, so triage doesn't
 duplicate open work or re-open a known death:
 
-!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/ledger.py" view "${ORG_LEDGER_ROOT}" open_experiments`
-!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/ledger.py" view "${ORG_LEDGER_ROOT}" death_causes`
+!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/ledger.py" view open_experiments`
+!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/ledger.py" view death_causes`
 
 ## 2. Triage — classify, then mint (or reject) a backlog item
 
@@ -32,7 +32,7 @@ Decide, from the signal:
 For an actionable, novel, in-scope signal, mint a backlog item as a **mandate** (a top-down instruction
 entering from outside), so attention.py floors it appropriately (zone of acceptance):
 
-!`echo 'Append the triaged item: python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/ledger.py" append "'"${ORG_LEDGER_ROOT}"'" --actor triage --class candidate_submitted --payload '"'"'{"maker":"<owning-role>","candidate_id":"<id>","contract_ref":"<objective>","source":"mandate","evidence":["<the signal ref>"]}'"'"''`
+!`echo 'Append the triaged item: python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/ledger.py" append --actor triage --class candidate_submitted --payload '"'"'{"maker":"<owning-role>","candidate_id":"<id>","contract_ref":"<objective>","source":"mandate","evidence":["<the signal ref>"]}'"'"''`
 
 ## 3. Report
 

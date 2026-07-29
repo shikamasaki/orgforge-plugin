@@ -6,28 +6,28 @@ allowed-tools: Bash(python3 *), PushNotification
 
 Run one operating tick of the articulated organization against its ledger.
 
-Ledger root: `${ORG_LEDGER_ROOT}` (must be set).
+Ledger root は**発見される**（`tools/discover.py`）— 環境変数の設定は不要。
 
 ## Plan the tick (which checks are due / suspended / MISSED)
 
-!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/tick.py" plan "${ORG_LEDGER_ROOT}" "${CLAUDE_PLUGIN_ROOT}/template/schedule.yaml" --now-min ${1:-$(( $(date -u +%s) / 60 ))} ${2}`
+!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/tick.py" plan "${CLAUDE_PLUGIN_ROOT}/template/schedule.yaml" --now-min ${1:-$(( $(date -u +%s) / 60 ))} ${2}`
 
 ## Evaluate the machine sensors over the ledger
 
-!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/sensors.py" eval "${ORG_LEDGER_ROOT}" "${CLAUDE_PLUGIN_ROOT}/template/sensors.yaml" --now $(date -u +%Y-%m-%dT%H:%M:%SZ)`
+!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/sensors.py" eval "${CLAUDE_PLUGIN_ROOT}/template/sensors.yaml" --now $(date -u +%Y-%m-%dT%H:%M:%SZ)`
 
 ## Verify the ledger chain (tamper evidence + the watchdog heartbeat)
 
-!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/ledger.py" verify "${ORG_LEDGER_ROOT}"`
+!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/ledger.py" verify`
 
 ## Check each in-progress candidate for a stall (circuit breaker)
 
 Read the work-in-progress board, then run the stall breaker on each in-flight candidate — a wedged
 cycle that stopped advancing must be tripped, not left to burn its slot:
 
-!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/ledger.py" view "${ORG_LEDGER_ROOT}" work_in_progress`
+!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/ledger.py" view work_in_progress`
 
-For each `candidate_id` above, run `guardrails.py stall "${ORG_LEDGER_ROOT}" --candidate-id <id>`. A
+For each `candidate_id` above, run `guardrails.py stall --candidate-id <id>`. A
 **TRIP** means the candidate is not progressing (identical next_step, or flat fraction) — flag it for a
 human and free its WIP slot; do not respawn the wedged cycle.
 
@@ -36,7 +36,7 @@ human and free its WIP slot; do not respawn the wedged cycle.
 The org exists to accumulate learning and lift output quality. A death cause that reappears means a
 recorded lesson was NOT fed forward — the core purpose failing. Surface it:
 
-!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/learning.py" repeats "${ORG_LEDGER_ROOT}"`
+!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/learning.py" repeats`
 
 A **REPEATED DEATH** means the org re-made a mistake it had recorded — strengthen that death into
 doctrine and inject it before the next attempt, so the lesson actually lands next time.
@@ -46,7 +46,7 @@ doctrine and inject it before the next attempt, so the lesson actually lands nex
 The SSoT/domain model must grow as the org runs (not stay a static founding artifact); a flat model
 over many cycles means the org is amplifying a fixed ambiguity, not compounding clarity.
 
-!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/conventions.py" growth "${ORG_CONVENTIONS_ROOT:-$ORG_LEDGER_ROOT}"`
+!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/conventions.py" growth`
 
 If the domain model is **EMPTY or flat** across many cycles, that is a signal — settle domain rules in
 the work cycle (co-commit), so inferability rises over time.

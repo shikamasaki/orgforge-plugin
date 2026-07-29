@@ -79,7 +79,7 @@ backlog at all):
 Append each as a backlog candidate, using the derived id as the natural key (a replay is a ledger-layer
 no-op):
 
-!`echo 'Per task: python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/ledger.py" append "'"${ORG_LEDGER_ROOT}"'" --actor supervisor --class candidate_submitted --natural-key "<cand-id>" --payload '"'"'{"maker":"<owning_role>","candidate_id":"<cand-id>","contract_ref":"<objective-id>","source":"mandate","evidence":["coverage-manifest.md:<rfp_capability>"]}'"'"''`
+!`echo 'Per task: python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/ledger.py" append --actor supervisor --class candidate_submitted --natural-key "<cand-id>" --payload '"'"'{"maker":"<owning_role>","candidate_id":"<cand-id>","contract_ref":"<objective-id>","source":"mandate","evidence":["coverage-manifest.md:<rfp_capability>"]}'"'"''`
 
 `source: mandate` — an RFP-derived task is top-down scope, unlike `/org-discover`'s self-raised items, so
 attention.py floors it correctly against self-items.

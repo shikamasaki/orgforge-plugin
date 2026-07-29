@@ -90,7 +90,10 @@ event_classes:
   # The existing test→integrate→deploy gate (result_deployed requires survives) and design→implement conformance
   # (conformance_reviewed) are the two hardest phase boundaries, already enforced below; these two
   # events extend the identical mechanism to the earlier boundaries.
-  phase_started:        { deliverable, phase: requirements|design|implement|test|integrate|deploy|operate, role,
+  # parent（任意）: task の deliverable に対する親 objective。founding は objective 単位で
+  # requirements/design を admit するので、task はここを辿って親の admit を継承する。
+  # 無ければ自分の admit だけを見る（従来どおり）。
+  phase_started:        { deliverable, parent, phase: requirements|design|implement|test|integrate|deploy|operate, role,
                           requires_prior: "phase_admitted{deliverable==deliverable, phase==prior(phase), verdict==pass} (∅ for requirements)" }
   phase_admitted:       { deliverable, phase: requirements|design|implement|test|integrate|deploy|operate,
                           verdict: pass|rework|reject, evidence_ref, admitter }

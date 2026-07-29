@@ -13,7 +13,7 @@ raise those as **self** backlog items. It only ADDS to the backlog; `/org-work` 
 > `source: mandate`). If a gap you find is really an undecomposed must-have, say so and route it to
 > `/org-decompose` rather than raising it as a self-item; otherwise the coverage gate can't see it.
 
-Ledger root: `${ORG_LEDGER_ROOT}` (must be set).
+Ledger root は**発見される**（`tools/discover.py`）— 環境変数の設定は不要。
 
 
 > **出力言語:** `constitution.yaml` の `output_language`（既定 `en`）を読み、Issue・spec・人間向けテキストはその言語で書く（コード・ledger のイベント名・パスは英語の正準形のまま）。
@@ -23,11 +23,11 @@ Ledger root: `${ORG_LEDGER_ROOT}` (must be set).
 Attention names two machine signals: a backlog that cannot serve the org's top objective (a coverage
 gap), and items whose latest outcome fell below aspiration. Read them:
 
-!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/attention.py" select "${ORG_LEDGER_ROOT}" --role "$1" --aspiration ${2:-0.5}`
+!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/attention.py" select --role "$1" --aspiration ${2:-0.5}`
 
 Also read the role's recent outcomes and any negative outcome deltas for this department:
 
-!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/ledger.py" census "${ORG_LEDGER_ROOT}"`
+!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/ledger.py" census`
 
 ## 2. Raise self-items — scoped to THIS role's domain, deduped against the open backlog
 
@@ -72,7 +72,7 @@ mandates on one footing. Pass the derived id BOTH as `candidate_id` (in the payl
 (the `(class, natural_key)` dedup already lives in ledger.py append) — the backlog stays reproducible
 under replay:
 
-!`echo 'For each self-item, append: python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/ledger.py" append "'"${ORG_LEDGER_ROOT}"'" --actor "'"$1"'" --class candidate_submitted --natural-key "<derived-cand-id>" --payload '"'"'{"maker":"'"$1"'","candidate_id":"<derived-cand-id>","contract_ref":"<objective>","source":"self","evidence":[<gap-refs>]}'"'"''`
+!`echo 'For each self-item, append: python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/ledger.py" append --actor "'"$1"'" --class candidate_submitted --natural-key "<derived-cand-id>" --payload '"'"'{"maker":"'"$1"'","candidate_id":"<derived-cand-id>","contract_ref":"<objective>","source":"self","evidence":[<gap-refs>]}'"'"''`
 
 ### 2c. Project each candidate onto GitHub as a task sub-issue — WITH THE FULL SPEC in the body
 

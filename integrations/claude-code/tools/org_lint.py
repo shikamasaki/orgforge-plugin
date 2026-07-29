@@ -756,6 +756,18 @@ def lint_org_against_schema(org, views, triggers, lint):
     # injected but not granted unenforces deny-by-default).
     universal = set((org.get("information_flow", {}) or {}).get("universal_pack_items",
                                                                  ["intent_block", "doctrine"]))
+
+    # VW — スキーマが定義したビューを、実際にツールが引けるか。
+    # これが無いと lint は「articulation は整合している」と GREEN を出しながら、実行時に
+    # context_pack が1つも引けないという状態を通してしまう。実地でそれが起きた:
+    # gate の context_pack 3件と skeptic の 2件がすべて未実装で、SoD の checker が
+    # 判断材料を取得できないのに lint は pass していた。**articulation と実装の乖離を
+    # 検出できないことが穴の本体**なので、ここで閉じる。
+    _unresolvable = _views_not_implemented(views)
+    for vid in _unresolvable:
+        lint.fail("VW", f"ledger-schema が定義するビュー '{vid}' を ledger.py が引けない — "
+                        f"これを context_pack に持つロールは実行時に判断材料を取得できない。"
+                        f"スキーマと実装の乖離であって、articulation の問題ではない")
     for r in org.get("roles", []):
         rid = r.get("id", "?")
         for item in r.get("context_pack", []) or []:
@@ -1014,6 +1026,23 @@ def lint_schedule(sched, ls, sn, lint):
         lint.fail("SCH", "schedule.yaml missing a missed_tick policy with "
                          "escalate_after_consecutive — without it a schedule the host "
                          "silently stopped firing would never be detected (docs/05 §5.6)")
+
+
+def _views_not_implemented(schema_views):
+    """スキーマの views のうち、ledger.py が引けないものを返す。
+
+    ledger.py はスキーマの `views:` を読むので通常は空になる。空でないなら、スキーマが壊れて
+    いるか ledger.py が読めていないかで、どちらも実行時に context_pack が引けない状態を意味する。"""
+    try:
+        here = os.path.dirname(os.path.abspath(__file__))
+        sys.path.insert(0, here)
+        import ledger
+        impl = set(ledger._view_from())
+    except Exception:
+        return []          # ledger.py を読めない環境では黙って飛ばす（lint 自体は落とさない）
+    if not impl:
+        return []          # スキーマが読めていない場合はここでは判定しない
+    return sorted(set(schema_views) - impl)
 
 
 def main(argv):

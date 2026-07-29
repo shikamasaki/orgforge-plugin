@@ -7,14 +7,14 @@ allowed-tools: Bash(python3 *), Bash(echo *), Task
 Drive one **work cycle** for role **$1** against its ledger — the PM loop that turns a backlog into
 delegated, recorded work. Read-only health is `/org-tick`; this command acts.
 
-Ledger root: `${ORG_LEDGER_ROOT}` (must be set).
+Ledger root は**発見される**（`tools/discover.py`）— 環境変数の設定は不要。
 
 **Output language:** read `output_language` from `constitution.yaml` (default `en`) and write **all
 human-facing text** — Issue titles/bodies, work-log comments, progress notes, escalations — in that
 language, so the CEO reads the org in their own language. Code, ledger event *classes*, and file paths
 stay canonical (English identifiers).
 
-!`echo "Org output language: $(python3 -c "import yaml,os; print((yaml.safe_load(open(os.environ.get('ORG_CONSTITUTION', os.path.join(os.path.dirname(os.environ['ORG_LEDGER_ROOT'].rstrip('/')),'constitution.yaml')))) or {}).get('output_language','en'))" 2>/dev/null || echo en)"`
+!`python3 -c "import sys,yaml; sys.path.insert(0,'${CLAUDE_PLUGIN_ROOT}/tools'); import discover; c=discover.constitution(); print('Org output language:', (yaml.safe_load(open(c)) or {}).get('output_language','en') if c else 'en')" 2>/dev/null || echo "Org output language: en"`
 
 ## 1. Select what to work on next (situated attention over the backlog)
 
@@ -22,7 +22,7 @@ The backlog is one queue holding both **mandate** (top-down) and **self** (self-
 attention.py prioritizes them on one footing, floors an in-zone mandate (zone of acceptance), and
 picks a prefix within the WIP limit.
 
-!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/attention.py" select "${ORG_LEDGER_ROOT}" --role "$1" --wip-limit ${2:-2} --mandate-floor ${3:-1.0}`
+!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/attention.py" select --role "$1" --wip-limit ${2:-2} --mandate-floor ${3:-1.0}`
 
 ## 1.5 Learn from prior deaths BEFORE delegating — do not repeat a known failure
 
@@ -31,8 +31,8 @@ already died near this work and what caused it, so a selected item that would re
 reshaped or dropped — not re-attempted blindly. This is how accumulated learning lifts output quality
 (the org's core purpose); skipping it is how the same mistake gets mass-produced.
 
-!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/ledger.py" view "${ORG_LEDGER_ROOT}" nearby_deaths`
-!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/ledger.py" view "${ORG_LEDGER_ROOT}" death_causes`
+!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/ledger.py" view nearby_deaths`
+!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/ledger.py" view death_causes`
 
 For each selected item, check it against the deaths above:
 - If it matches a **prior death** (same approach that already failed/was refuted/retired), do NOT
@@ -46,8 +46,8 @@ The factory compounds assets; a worker that re-authors from scratch what the org
 the multiplier and diverges from a working part (the divergence sensor only catches that *after* the
 fact). Before delegating an item that needs a component, check what already exists:
 
-!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/ledger.py" view "${ORG_LEDGER_ROOT}" reusable_modules`
-!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/ledger.py" view "${ORG_LEDGER_ROOT}" parts_inventory`
+!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/ledger.py" view reusable_modules`
+!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/ledger.py" view parts_inventory`
 
 For each selected item:
 - If a reusable module/part already covers part of it, the child's seam contract must say **"reuse
@@ -93,6 +93,16 @@ task, emit two events (they are the wiring that turns the forced mold from prose
   requirements admitted). So a maker cannot start implementing before design is admitted — the mold
   bites here, at the emit, not just in the doc.
 
+**`phase_started` の payload に `parent` を必ず入れること**（親 objective の Issue 番号）。
+founding は objective 単位で requirements/design を admit するが、ここで打つ `deliverable` は
+task Issue 番号なので、`parent` が無いと連鎖が繋がらず弾かれる（実地で判明）。`parent` があれば
+**親 objective の admit を継承する** — 同じ設計を task ごとに再 admit させるのはセレモニーであり、
+設計は objective の単位で起きたのだから、そこを継承するのが正しい。
+
+```
+--payload '{"deliverable":"<task Issue番号>","parent":"<objective Issue番号>","phase":"implement","role":"<role>"}'
+```
+
 **If this is rejected, do NOT self-emit the missing admissions.** That rejection means founding did not
 close the `requirements`/`design` phases for this deliverable — `/org-found`'s last step does that, with
 the *gate* as the admitting actor. Emitting them yourself would make the supervisor both the maker and
@@ -100,7 +110,7 @@ the sign-off, which is the exact collapse the mold exists to prevent (and the le
 admission with no matching `phase_started`, so the shortcut fails anyway). Go run that founding step, or
 say plainly that the deliverable is not ready to implement — do not route around the gate.
 
-!`echo 'At delegation, per task, fire the gate: python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/ledger.py" append "'"${ORG_LEDGER_ROOT}"'" --actor "'"$1"'" --class spec_delegated --payload '"'"'{supervisor,subordinate,spec_ref:<issue#>,contract_ref,intent_basis_ref}'"'"'. THEN --class phase_started --payload '"'"'{deliverable:<issue#>,phase:implement,role}'"'"'. The ledger REJECTS phase_started if design is not admitted — that rejection IS the gate. The gate agent appends phase_admitted as it clears each phase.'`
+!`echo 'At delegation, per task, fire the gate: python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/ledger.py" append --actor "'"$1"'" --class spec_delegated --payload '"'"'{supervisor,subordinate,spec_ref:<issue#>,contract_ref,intent_basis_ref}'"'"'. THEN --class phase_started --payload '"'"'{deliverable:<issue#>,phase:implement,role}'"'"'. The ledger REJECTS phase_started if design is not admitted — that rejection IS the gate. The gate agent appends phase_admitted as it clears each phase.'`
 
 ## 3. Record work as you go — so nothing is lost to a context wipe
 
@@ -129,7 +139,7 @@ points, keyed by `candidate_id`:
    proposed here and adopted by a checker (never self-adopted). If nothing was settled, say so in
    `domain_model.none_asserted` — but do not *silently* skip it; the ledger won't let you.
 
-!`echo 'Record the cycle (never fabricate completion): python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/ledger.py" append "'"${ORG_LEDGER_ROOT}"'" --actor "'"$1"'" --class cycle_completed --payload '"'"'{role,candidate_id,outputs,reused,domain_model:{updated:[<ref>]|none_asserted:<why>}}'"'"'. domain_model is REQUIRED (docs/11 §4d) — the append is rejected without it. If a domain rule was settled, FIRST: python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/conventions.py" adopt "'"${ORG_CONVENTIONS_ROOT:-$ORG_LEDGER_ROOT}"'" --scope <area> --choice "<the settled rule>" --owner "'"$1"'" --by checker, then reference its cid in domain_model.updated. Checkpoint BEFORE you risk stopping.'`
+!`echo 'Record the cycle (never fabricate completion): python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/ledger.py" append --actor "'"$1"'" --class cycle_completed --payload '"'"'{role,candidate_id,outputs,reused,domain_model:{updated:[<ref>]|none_asserted:<why>}}'"'"'. domain_model is REQUIRED (docs/11 §4d) — the append is rejected without it. If a domain rule was settled, FIRST: python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/conventions.py" adopt --scope <area> --choice "<the settled rule>" --owner "'"$1"'" --by checker, then reference its cid in domain_model.updated. Checkpoint BEFORE you risk stopping.'`
 
 ### 3a. The GitHub Issue is the MAIN work-log — so work isn't session- or terminal-bound
 
@@ -223,7 +233,7 @@ work never enters the backlog at all.
 
 then append with that id as BOTH `candidate_id` and `--natural-key` (idempotent under replay):
 
-!`echo 'python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/ledger.py" append "'"${ORG_LEDGER_ROOT}"'" --actor "'"$1"'" --class candidate_submitted --natural-key "<derived-cand-id>" --payload '"'"'{"maker":"'"$1"'","candidate_id":"<derived-cand-id>","contract_ref":"<objective>","source":"self","evidence":[<gap-refs>]}'"'"''`
+!`echo 'python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/ledger.py" append --actor "'"$1"'" --class candidate_submitted --natural-key "<derived-cand-id>" --payload '"'"'{"maker":"'"$1"'","candidate_id":"<derived-cand-id>","contract_ref":"<objective>","source":"self","evidence":[<gap-refs>]}'"'"''`
 
 ## Discipline — recording and delegation
 

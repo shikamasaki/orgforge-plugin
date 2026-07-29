@@ -189,6 +189,18 @@ def main(argv):
     q.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)"); q.add_argument("--now", required=True)
 
     a = p.parse_args(argv[1:])
+    # root は省略可能: 省略時は `.orgforge/conventions` を発見する（tools/discover.py）。
+    # ここは ledger とは別のストアで、以前は `${ORG_CONVENTIONS_ROOT:-$ORG_LEDGER_ROOT}` の
+    # ようなフォールバックで ledger に混入していた — 監査記録に別種のデータが混ざるので誤り。
+    if getattr(a, "root", None) is None:
+        import os as _os
+        sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+        import discover as _d
+        a.root = _d._sub_root("conventions")
+        if not a.root:
+            print("conventions の置き場が見つからない。org の中（.orgforge/ のあるディレクトリ）で "
+                  "実行するか、root を明示すること。", file=sys.stderr)
+            return 2
     return a.fn(a)
 
 

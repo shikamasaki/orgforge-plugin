@@ -822,3 +822,64 @@ def test_the_full_phase_chain_runs_when_each_phase_is_entered_and_admitted(tmp_p
                     "--class", "phase_started",
                     "--payload", '{"deliverable":"42","phase":"implement","role":"r"}')
     assert code == 0, out
+
+
+# ── views はスキーマを単一の情報源とする（docs/11 §0c の申し送り A-1）─────────
+# 以前は ledger.py に13件をハードコードしていたが、スキーマは26件を宣言していた。実害:
+# /org-work が parts_inventory を引けず起動せず、gate の context_pack 3件と skeptic の 2件が
+# すべて未実装で、SoD の checker が判断材料を取得できないのに org_lint は pass していた。
+def test_every_schema_view_is_resolvable(tmp_path):
+    """スキーマが定義するビューは、すべて ledger.py が引けること。"""
+    import yaml
+    schema = yaml.safe_load((TEMPLATE / "ledger-schema.yaml").read_text(encoding="utf-8"))
+    for vid in (schema.get("views") or {}):
+        code, out = run("ledger.py", "view", str(tmp_path), vid)
+        assert code == 0, f"view '{vid}' が引けない: {out}"
+
+
+def test_gate_and_skeptic_context_packs_are_resolvable(tmp_path):
+    """SoD の checker が判断材料を引けること — これが引けないなら maker≠checker は空文。"""
+    import yaml
+    org = yaml.safe_load((TEMPLATE / "organization.yaml").read_text(encoding="utf-8"))
+    universal = {"intent_block", "doctrine"}
+    for r in org["roles"]:
+        if r["id"] not in ("gate", "skeptic"):
+            continue
+        for v in r.get("context_pack", []):
+            if v in universal:
+                continue
+            code, out = run("ledger.py", "view", str(tmp_path), v)
+            assert code == 0, f"{r['id']} の context_pack '{v}' が引けない: {out}"
+
+
+def test_unknown_view_is_still_rejected(tmp_path):
+    code, out = run("ledger.py", "view", str(tmp_path), "no_such_view")
+    assert code == 2 and "unknown view" in out
+
+
+# ── phase の親継承（申し送り B-2）────────────────────────────────────────────
+# founding は objective 単位で requirements/design を admit するが、/org-work は task Issue 番号を
+# deliverable にする。別の文字列なので連鎖せず、指示どおり進めても task #1 が弾かれた。
+def test_task_inherits_phase_admission_from_its_parent_objective(tmp_path):
+    for phase in ("requirements", "design"):
+        seed(tmp_path, "sup", "phase_started", {"deliverable": "1", "phase": phase, "role": "sup"})
+        seed(tmp_path, "gate", "phase_admitted",
+             {"deliverable": "1", "phase": phase, "verdict": "pass",
+              "evidence_ref": "e", "admitter": "gate"})
+    code, out = run("ledger.py", "append", str(tmp_path), "--actor", "sup",
+                    "--class", "phase_started",
+                    "--payload", json.dumps({"deliverable": "7", "parent": "1",
+                                             "phase": "implement", "role": "eng"}))
+    assert code == 0, out
+
+
+def test_a_task_without_a_parent_is_still_gated(tmp_path):
+    """継承は親を明示した場合だけ。無関係な task が素通りしてはならない。"""
+    seed(tmp_path, "sup", "phase_started", {"deliverable": "1", "phase": "requirements", "role": "s"})
+    seed(tmp_path, "gate", "phase_admitted",
+         {"deliverable": "1", "phase": "requirements", "verdict": "pass",
+          "evidence_ref": "e", "admitter": "gate"})
+    code, out = run("ledger.py", "append", str(tmp_path), "--actor", "sup",
+                    "--class", "phase_started",
+                    "--payload", json.dumps({"deliverable": "9", "phase": "design", "role": "eng"}))
+    assert code == 3, out

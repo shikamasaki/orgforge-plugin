@@ -7,7 +7,7 @@ allowed-tools: Bash(python3 *)
 The org's status at a glance — the one place to answer *"is my org healthy, what did it do, does it need
 me?"* without reading the ledger.
 
-!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/status.py" status "${ORG_LEDGER_ROOT}" ${1:+--role "$1"}`
+!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/status.py" status ${1:+--role "$1"}`
 
 - **GREEN** — healthy; work draining, nothing escalating. Nothing for you to do.
 - **AMBER** — running, something to watch (work in progress, a mandate queued). No action required yet.

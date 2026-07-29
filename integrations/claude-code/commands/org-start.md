@@ -34,7 +34,7 @@ So a RED never waits for the next tick, arm a persistent **Monitor** that pushes
 you (silent while healthy — `status.py redline` prints a line only on RED):
 
 ```
-Monitor (persistent): while true; do python3 "${CLAUDE_PLUGIN_ROOT}/tools/status.py" redline "${ORG_LEDGER_ROOT}"; sleep 60; done
+Monitor (persistent): while true; do python3 "${CLAUDE_PLUGIN_ROOT}/tools/status.py" redline; sleep 60; done
 ```
 
 Each RED line becomes a push — a wedged cycle, a repeated death, a broken chain — so you learn it without

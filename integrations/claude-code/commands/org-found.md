@@ -170,6 +170,25 @@ Write all five artifacts — `REQUIREMENTS.md`, `FEATURE-INVENTORY.md`, `ARCHITE
 `organization.yaml` — as files under those exact names (docs/11 §0a) so they can be reviewed, edited,
 and addressed by name downstream. Do not touch real assets; this command only drafts the org.
 
+## CEO の承認を台帳に記録する — 口頭で終わらせない
+
+「承認後に objective Issue を作れ」と指示しても、**承認そのものを記録する手段がなかった**ため、
+承認された事実がどこにも残らなかった（実地で判明）。founding は charter-tier の決定であり、
+docs/05 §1 は「人間の承認が要る」と明記している。それが台帳に無いなら、後から「誰がいつ何を
+承認したのか」を辿れない。
+
+CEO の承認を受けたら、**Issue を作る前に**記録すること:
+
+```
+python3 "${CLAUDE_PLUGIN_ROOT}/tools/ledger.py" append --actor ceo \
+  --class proposal_adjudicated \
+  --payload '{"proposal_id":"founding","decision":"approve","human":"<CEO>"}'
+```
+
+承認されなかった点があれば `decision: amend` で、何を変えるよう指示されたかを payload に残す。
+**承認を受けていないなら、この先に進まないこと** — objective Issue を作るのは承認の投影であって、
+承認の代わりではない。
+
 ## Project the objectives onto GitHub (only if `ORG_GITHUB_REPO` is set)
 
 If this org is steered through GitHub Issues (the web harness, or a laptop-free workflow), project each
@@ -201,12 +220,12 @@ been entered). The `deliverable` must be the SAME identifier `/org-work` will la
 Issue number if you minted one, otherwise the objective id — written consistently, since the chain keys
 on it:
 
-!`echo 'Per objective deliverable D, in this order: for PHASE in requirements design; do python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/ledger.py" append "'"${ORG_LEDGER_ROOT}"'" --actor supervisor --class phase_started --payload '"'"'{"deliverable":"<D>","phase":"<PHASE>","role":"supervisor"}'"'"'; python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/ledger.py" append "'"${ORG_LEDGER_ROOT}"'" --actor gate --class phase_admitted --payload '"'"'{"deliverable":"<D>","phase":"<PHASE>","verdict":"pass","admitter":"gate","evidence_ref":"<REQUIREMENTS.md+FEATURE-INVENTORY.md for requirements; ARCHITECTURE.md+coverage-manifest.md+organization.yaml for design>"}'"'"'; done'`
+!`echo 'Per objective deliverable D, in this order: for PHASE in requirements design; do python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/ledger.py" append --actor supervisor --class phase_started --payload '"'"'{"deliverable":"<D>","phase":"<PHASE>","role":"supervisor"}'"'"'; python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/ledger.py" append --actor gate --class phase_admitted --payload '"'"'{"deliverable":"<D>","phase":"<PHASE>","verdict":"pass","admitter":"gate","evidence_ref":"<REQUIREMENTS.md+FEATURE-INVENTORY.md for requirements; ARCHITECTURE.md+coverage-manifest.md+organization.yaml for design>"}'"'"'; done'`
 
 Note the **actors differ**: the supervisor enters the phase, the gate admits it. The ledger enforces
 that separation at write time for admissions (docs/11 §4f.1) — the same actor cannot both do the work
 and sign it off. Record the admission's reasoning on the objective Issue too (`github_sync decide
 --event phase_admitted --verdict pass --why … --evidence "<the artifacts>"`), since no human reviews it.
 
-If `ORG_LEDGER_ROOT` is unset, say so plainly and stop: the org has no state to write into, and every
-later command will fail at the same wall.
+org が発見できない（`.orgforge/` も `organization.yaml` も無い）場合は、そう言って止まること。
+先に `/org-init` をこのディレクトリで実行する必要がある。
