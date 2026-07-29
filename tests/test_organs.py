@@ -1486,3 +1486,56 @@ def test_learning_prints_the_doctrine_command(tmp_path):
     out = p.stdout + p.stderr
     assert "doctrine.py" in out and "propose" in out, "蓄積の経路が示されていない"
     assert "admit" in out, "admit されるまで配られないことが伝わっていない"
+
+
+# ── 0.18.0: 判定は最新が有効（追記型の台帳で reject が後から来る）─────────
+def _status(led):
+    return subprocess.run([sys.executable, str(TOOLS / "status.py"), "status", str(led)],
+                          capture_output=True, text=True, timeout=60)
+
+
+def _write_ledger(tmp_path, name, rows):
+    led = tmp_path / name; led.mkdir(parents=True, exist_ok=True)
+    (led / "ledger.jsonl").write_text(
+        "\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+    return led
+
+
+def test_reject_after_admit_clears_the_admit(tmp_path):
+    """admit → reject の順なら reject が有効。「一度でも admit があった」で数えない。"""
+    led = _write_ledger(tmp_path, "s1", [
+        {"seq": 216, "class": "admission_decided",
+         "payload": {"issue": 11, "verdict": "admit"}},
+        {"seq": 218, "class": "admission_decided",
+         "payload": {"issue": 11, "verdict": "reject"}},
+    ])
+    out = _status(led).stdout
+    assert "skeptic の記録が無い" not in out, f"reject 後も admit 扱いのまま: {out}"
+    assert "rework 待ち" in out, f"reject されたまま放置されていることが見えない: {out}"
+
+
+def test_admit_after_reject_counts_as_admit(tmp_path):
+    """逆順（reject → admit）なら admit が有効。rework が通った正常系。"""
+    led = _write_ledger(tmp_path, "s2", [
+        {"seq": 1, "class": "admission_decided", "payload": {"issue": 11, "verdict": "reject"}},
+        {"seq": 2, "class": "admission_decided", "payload": {"issue": 11, "verdict": "admit"}},
+    ])
+    out = _status(led).stdout
+    assert "skeptic の記録が無い" in out, f"再 admit が admit として数えられていない: {out}"
+
+
+def test_risk_accepted_admit_not_counted_after_reject(tmp_path):
+    """後で reject された risk 付き admit を「残っている穴」に数えない。"""
+    led = _write_ledger(tmp_path, "s3", [
+        {"seq": 1, "class": "admission_decided",
+         "payload": {"issue": 5, "verdict": "admit", "risk_accepted": True}},
+        {"seq": 2, "class": "admission_decided", "payload": {"issue": 5, "verdict": "reject"}},
+    ])
+    out = _status(led).stdout
+    assert "リスク付き admit" not in out, out
+
+
+def test_verify_template_has_no_undefined_shell_var():
+    """雛形は貼ってそのまま動くこと。$P は未定義で、打てない雛形は打たれない。"""
+    src = (TOOLS / "org_cycle.py").read_text(encoding="utf-8")
+    assert "$P/tools" not in src, "未定義の $P が雛形に残っている"

@@ -390,7 +390,8 @@ def cmd_verify(a):
 
     out.append(f"\n## 記録（**判定はあなたが決める。この雛形は値を埋めていない**）\n")
     out.append("```")
-    out.append(f'python3 "$P/tools/github_sync.py" decide --issue {a.issue} --event {ev} \\')
+    out.append(f'python3 "{os.path.join(HERE, "github_sync.py")}" '
+               f'decide --issue {a.issue} --event {ev} \\')
     out.append(f'  --verdict <{verdicts}> --by {role} \\')
     out.append('  --why "<何を天秤にかけ、何が決め手になったか>" \\')
     out.append('  --evidence "<実際に走らせたコマンドと、その実出力>" \\')
@@ -401,7 +402,8 @@ def cmd_verify(a):
     out.append("# 出力される reasoning_sha256= を、次の ledger 受領証の payload に入れること")
     out.append(f"# deliverable は **Issue 番号 {a.issue}** のまま。関数名や機能名に書き換えないこと —")
     out.append("# 後続の照合が識別子の揺れで記録を見失う（実地で起きた）。呼び名は --why に書く。")
-    out.append(f'python3 "$P/tools/ledger.py" append --actor {role} --class {ev} \\')
+    out.append(f'python3 "{os.path.join(HERE, "ledger.py")}" '
+               f'append --actor {role} --class {ev} \\')
     out.append(f'  --payload \'{{"verdict":"<...>","deliverable":"{a.issue}",'
                f'"reasoning_sha256":"<...>","issue":{a.issue},'
                f'"risk_accepted":<true|false>}}\'')

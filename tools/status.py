@@ -118,23 +118,53 @@ def cmd_status(a):
     # リスク付き admit を board に出す。gate は --risk を書けば admit できるので、正直に書くほど
     # 通りやすいという構造になっている。**それ自体は正しい運用**（書かれない穴より遥かによい）
     # だが、書き得にしないために「何件溜まっているか」は見えている必要がある。
-    risky = [e for e in events if e["class"] == "admission_decided"
-             and (e.get("payload", {}) or {}).get("verdict") == "admit"
-             and (e.get("payload", {}) or {}).get("risk_accepted") is True]
+    # **同一 deliverable は最新の判定が有効。** 集合で持つと reject が後から来ても admit が
+    # 残り続け、rework 中の成果物を「admit 済み」と数える。実地では #11 が admit(216) →
+    # reject(218) の順で記録されたのに board が RED を出し続けた。台帳は追記型なので、
+    # 「一度でも admit があった」と「いま admit されている」は別物。
+    latest_admission = {}
+    for e in events:
+        if e["class"] != "admission_decided":
+            continue
+        pl = e.get("payload", {}) or {}
+        key = str(pl.get("issue") or pl.get("deliverable") or "")
+        if not key:
+            continue
+        prev = latest_admission.get(key)
+        if prev is None or (e.get("seq") or 0) >= prev[0]:
+            latest_admission[key] = ((e.get("seq") or 0), pl.get("verdict"))
+    admits = {k for k, (_, v) in latest_admission.items() if v == "admit"}
+
+    # risk 付き admit も、後で reject された分は数えない（同上）
+    risky = []
+    for e in events:
+        if e["class"] != "admission_decided":
+            continue
+        pl = e.get("payload", {}) or {}
+        if pl.get("verdict") != "admit" or pl.get("risk_accepted") is not True:
+            continue
+        key = str(pl.get("issue") or pl.get("deliverable") or "")
+        cur = latest_admission.get(key)
+        if cur and cur[0] == (e.get("seq") or 0):
+            risky.append(e)
     if risky:
         amber.append(f"リスク付き admit: {len(risky)} 件（承知の上で残した穴）")
 
     # 二重記録の乖離を検出する。判断は「台帳の受領証」と「Issue の理由」の両方に書く決まりだが、
     # 実地では skeptic が Issue にだけ書き、台帳に1件も無いまま統合されかけた。片側だけが
     # 落ちるのが実際の失敗形なので、落ちた側を数える。
-    admits = {str((e.get("payload", {}) or {}).get("issue") or
-                  (e.get("payload", {}) or {}).get("deliverable") or "")
-              for e in events if e["class"] == "admission_decided"
-              and (e.get("payload", {}) or {}).get("verdict") == "admit"}
     refutes = {str((e.get("payload", {}) or {}).get("issue") or
                    (e.get("payload", {}) or {}).get("claim_id") or
                    (e.get("payload", {}) or {}).get("deliverable") or "")
                for e in events if e["class"] == "refutation_attempted"}
+    # reject されたまま放置されているものは board に出す。RED（あなたを待っている）ではなく
+    # AMBER（回っているが見ておくこと）— 差し戻しは正常な過程であって障害ではない。
+    # ただし黙って消えると、rework が止まっていることに誰も気づかない。
+    rejected = sorted(k for k, (_, v) in latest_admission.items() if v == "reject")
+    if rejected:
+        amber.append(f"gate が reject して rework 待ち: "
+                     f"{', '.join('#' + x for x in rejected[:5])}")
+
     unrefuted = {a for a in admits if a and a not in refutes}
     if unrefuted:
         red.append(f"admit 済みだが skeptic の記録が無い: {len(unrefuted)} 件"
