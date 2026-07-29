@@ -180,8 +180,28 @@ python3 tools/org_cycle.py  begin    --role R --issue N [--agent A] [--phase imp
                             # 1サイクル分の配管を1コマンドで: claim → spec_delegated →
                             # phase_started → cycle_started → Issue へ log → stage。
                             # parent と candidate_id は Issue から自動解決（手打ち不要）
-python3 tools/org_cycle.py  complete --role R --issue N --outputs T
+                            # worktree（.orgforge/wt/issue-N/）も用意する — 並列 maker を
+                            # 同一ツリーで走らせると、あるIssueのコミットが別Issueのブランチに
+                            # 載る。--no-worktree で省けるが、並列なら使わないこと
+python3 tools/org_cycle.py  complete --role R --issue N --outputs T --command CMD --result OUT
                             (--domain-model-updated REF | --domain-model-none WHY)
+                            [--learned "次も効く学び"] [--affects R,R] [--files F]
+                            # --command/--result は必須（log が「通った」の言い換えを拒否する）
+                            # --learned は doctrine に propose される。admit は gate の仕事
+python3 tools/org_cycle.py  verify    --issue N --role gate|skeptic
+                            # 判定の材料を組み立てる: seam contract・agents/<role>.md の憲章
+                            # （＝検証チェックリスト）・Issue の SPEC/MUST・decide の雛形。
+                            # skeptic には gate が既に見たことを引き渡す。
+                            # **verdict / why / risk は埋めない** — 判定は役割が決める
+python3 tools/org_cycle.py  handback  --issue N [--summary S] [--result OUT]
+                            # push → develop 宛 PR（body に Closes #N）→ Issue へ log
+python3 tools/org_cycle.py  integrate --issue N [--test "npm test"]
+                            # gate の admit と skeptic の survives が**台帳に**無ければ止まる。
+                            # マージ → 統合後テスト → integration_admitted → Issue へ log
+python3 tools/org_cycle.py  gc        [--base develop] [--all]
+                            # 統合済みの worktree だけ片付ける（未統合・未コミットは残す）
+python3 tools/org_cycle.py  record    --issue N --event E --verdict V --by WHO --why TXT
+                            # 済んだ判定を遡って台帳に記録（backfilled 印が付く）
 python3 tools/org_cycle.py  plan     --role R --issue N   # 何も実行せずイベント列を印字
 python3 tools/req_lint.py   check <REQUIREMENTS.md> [--json] [--warn-only]
                             # 要求記述の書式検査（29148 tailored + EARS、docs/11 §0b）
@@ -189,6 +209,32 @@ python3 tools/req_lint.py   check <REQUIREMENTS.md> [--json] [--warn-only]
                             # [NEEDS CLARIFICATION] を落とす
 python3 tools/repro_lint.py check    <repo_dir> [--phase implement|test|deploy] [--json] [--baseline PATH]
 python3 tools/repro_lint.py baseline <repo_dir>   # 採用時の失敗を「既知の負債」として記録
+```
+
+### その他の organ ツール
+
+上の主要フロー以外にも組織の器官がある。参照する手段が無いと存在に気づけないので列挙する:
+
+```
+python3 tools/handoff.py    <child_role> --slice S --inputs I --outputs O [--owns W] [--forbid F]
+                            # seam contract（境界契約）＋ その役割にスコープした doctrine を生成。
+                            # subagent を spawn するときガードレールがこれを要求する。
+                            # ledger root は省略可（発見される）
+python3 tools/doctrine.py   propose <root> <role> --claim TXT --source S --confidence 0..1
+                                    --retrieved-at DATE --review-by DATE [--affects R,R]
+                            # retrieved-at / review-by が無いと gate が admit できない
+python3 tools/doctrine.py   admit <root> <role> <claim-id> --by gate
+python3 tools/doctrine.py   render|show|stale <root> [<role>]
+python3 tools/learning.py   repeats <root> [--recurrence N]
+                            # 同じ死因の再発を検出。死因は cause / reason / why / checklist_ref
+                            # のいずれかで書く。読めなければ clean ではなく unknown と報告する
+python3 tools/alignment.py  <root> ...   # 前提・埋没費用・フレームの検査
+python3 tools/resource.py   rank <root>  # 資源の優先順位づけ
+python3 tools/reconcile.py  <root> ...   # 台帳と外部状態の突き合わせ
+python3 tools/harness_probe.py           # ガードレールが実際にブロックするかの検査
+python3 tools/status.py     status [--role R]   # 健康ボード（GREEN/AMBER/RED）
+python3 tools/attention.py  select --role R [--aspiration N]  # バックログからの選択
+python3 tools/conventions.py ...         # 確立した内部先例（ドメインモデルの半分）
 ```
 
 Exit `0` = all artifacts required *for that phase* are present · `10` = one or more missing (the gate

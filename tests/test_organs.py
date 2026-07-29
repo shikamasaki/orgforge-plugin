@@ -1288,3 +1288,109 @@ def test_record_marks_backfilled():
     src = (TOOLS / "org_cycle.py").read_text(encoding="utf-8")
     seg = src[src.index("def cmd_record"):]
     assert '"backfilled": True' in seg, "backfill 印が無いと、後から足した記録が実時点と混ざる"
+
+
+# ── 実地: 相関キーが無いと統制が無言で無効になっていた（seq 204 / 205）───────
+def _led(tmp_path):
+    d = tmp_path / "l"; d.mkdir(exist_ok=True)
+    return dict(os.environ, ORG_LEDGER_ROOT=str(d))
+
+
+def _append(env, actor, cls, payload):
+    return subprocess.run(
+        [sys.executable, str(TOOLS / "ledger.py"), "append", "--actor", actor,
+         "--class", cls, "--payload", json.dumps(payload)],
+        capture_output=True, text=True, env=env, timeout=60)
+
+
+def test_judgment_without_correlation_key_is_rejected(tmp_path):
+    """相関キーの無い判定は拒否する。以前は素通りし、統制が効いていないことも見えなかった。"""
+    env = _led(tmp_path)
+    p = _append(env, "maker1", "admission_decided", {"verdict": "admit"})
+    assert p.returncode != 0, "対象を特定できない判定が通った"
+    assert "特定できない" in p.stderr
+
+
+def test_self_admission_is_caught_when_written_as_deliverable(tmp_path):
+    """deliverable/issue で書いても自己 admit を検出する（seq 204 の再現）。
+
+    強制側は candidate_id/claim_id しか見ておらず、人間側は deliverable/issue で書いていた。
+    識別子が2系統に分かれ、キーを変えた瞬間に統制が消えていた。
+    """
+    env = _led(tmp_path)
+    _append(env, "maker1", "cycle_started", {"role": "maker1", "candidate_id": "c1", "issue": 7})
+    p = _append(env, "maker1", "admission_decided",
+                {"verdict": "admit", "deliverable": "7", "issue": 7})
+    assert p.returncode != 0, "maker が自分の成果物を admit できた"
+    assert "already acted as" in p.stderr
+
+
+def test_deploy_gate_correlates_across_key_names(tmp_path):
+    """skeptic が deliverable で survives を書いても deploy が通る（正常系）。
+
+    `claim_id == candidate_id` だけを見ていたため、実地の refutation 2件と相関できず、
+    null == null が一致して deploy ゲートが丸ごと無効だった。
+    """
+    env = _led(tmp_path)
+    _append(env, "skeptic", "refutation_attempted",
+            {"verdict": "survives", "deliverable": "7", "issue": 7})
+    p = _append(env, "deployer", "result_deployed", {"deliverable": "7", "issue": 7})
+    assert p.returncode == 0, f"survives 済みの deploy が通らない: {p.stderr}"
+
+
+def test_deploy_without_any_survives_still_blocked(tmp_path):
+    """緩めたのは相関の取り方だけ。反証を経ていない deploy は依然として止まる。"""
+    env = _led(tmp_path)
+    p = _append(env, "gate", "result_deployed", {"deliverable": "999", "issue": 999})
+    assert p.returncode != 0, "反証されていない成果物が deploy できた"
+
+
+def test_decide_prints_a_runnable_receipt_command():
+    """受領証は説明ではなく、そのまま打てる形で出す（実地では書かれず0件だった）。"""
+    src = (TOOLS / "github_sync.py").read_text(encoding="utf-8")
+    seg = src[src.index("reasoning_sha256={digest}"):]
+    assert "ledger.py" in seg and "--natural-key" in seg
+    assert '"issue": a.issue' in seg or '"issue": a.issue,' in seg
+
+
+# ── 実地: 検出器が「学習が使われている」と嘘をついた ─────────────────────
+def test_learning_reads_reason_and_rework(tmp_path):
+    """rework_requested の `reason` を死因として読む（以前は対象ですらなかった）。"""
+    led = tmp_path / "l2"; led.mkdir()
+    rows = [{"seq": i, "class": "rework_requested",
+             "payload": {"issue": 7, "reason": "同じ死因"}} for i in (1, 2)]
+    (led / "ledger.jsonl").write_text(
+        "\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+    p = subprocess.run([sys.executable, str(TOOLS / "learning.py"), "repeats", str(led)],
+                       capture_output=True, text=True, timeout=60)
+    out = p.stdout + p.stderr
+    assert "clean" not in out, f"同じ死因が2回あるのに clean と報告した: {out}"
+
+
+def test_learning_says_unknown_not_clean_when_causes_unreadable(tmp_path):
+    """死因が読めないとき「繰り返していない」と言わない。
+
+    「繰り返していない」と「見えていない」は別。混同すると誤った安心になり、
+    検出器が無いより悪い（実地でこれが起きた）。
+    """
+    led = tmp_path / "l3"; led.mkdir()
+    rows = [{"seq": 1, "class": "rework_requested", "payload": {"issue": 7}},
+            {"seq": 2, "class": "rework_requested", "payload": {"issue": 7}}]
+    (led / "ledger.jsonl").write_text(
+        "\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+    p = subprocess.run([sys.executable, str(TOOLS / "learning.py"), "repeats", str(led)],
+                       capture_output=True, text=True, timeout=60)
+    out = p.stdout + p.stderr
+    assert "unknown" in out and "clean" not in out, out
+
+
+def test_learning_warns_that_matching_is_by_string(tmp_path):
+    """clean を「同じ失敗をしていない」証明として読ませない（文字列一致の限界を明示）。"""
+    led = tmp_path / "l4"; led.mkdir()
+    rows = [{"seq": 1, "class": "rework_requested", "payload": {"issue": 7, "reason": "端数の偏り"}},
+            {"seq": 2, "class": "rework_requested", "payload": {"issue": 7, "reason": "テスト硬化"}}]
+    (led / "ledger.jsonl").write_text(
+        "\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+    p = subprocess.run([sys.executable, str(TOOLS / "learning.py"), "repeats", str(led)],
+                       capture_output=True, text=True, timeout=60)
+    assert "文字列" in p.stdout + p.stderr

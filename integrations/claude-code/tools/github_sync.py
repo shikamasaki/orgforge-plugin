@@ -598,10 +598,19 @@ def cmd_decide(a):
         return 2
     print(f"recorded decision {a.event}={a.verdict} on issue #{a.issue}.")
     print(f"reasoning_sha256={digest}")
-    print(f"NEXT: put this digest in the ledger receipt so the account is tamper-EVIDENT — "
-          f"append {a.event} with `\"reasoning_sha256\": \"{digest}\"` and "
-          f"`\"issue\": {a.issue}` in the payload. Without it, an edited or deleted comment is "
-          f"undetectable and `ledger verify` still reports the chain intact (docs/11 §4f.1).")
+    # 説明ではなく、そのまま打てる形を出す。実地では受領証が書かれず（refutation は台帳0件）、
+    # 相関キーの無い判定が素通りしていた。`issue` は相関キーでもあるので、これが欠けると
+    # DISTINCT_ACTOR / requires_prior が対象を特定できず、統制そのものが効かない。
+    here = os.path.dirname(os.path.abspath(__file__))
+    payload = json.dumps({"verdict": a.verdict, "deliverable": str(a.issue), "issue": a.issue,
+                          "reasoning_sha256": digest}, ensure_ascii=False)
+    print(f"NEXT: 台帳の受領証をこのまま打つこと（Issue のコメントだけでは片側しか残らない）:\n"
+          f'  python3 "{os.path.join(here, "ledger.py")}" append --actor {a.by} '
+          f"--class {a.event} \\\n"
+          f"    --natural-key {a.event}-{a.issue} --payload '{payload}'\n"
+          f"  digest が無いとコメントの改竄が検出できず、`ledger verify` は chain intact と"
+          f"報告し続ける（docs/11 §4f.1）。`issue` は相関キーでもあり、欠けると自己承認・"
+          f"deploy の統制が対象を特定できない。")
     return 0
 
 

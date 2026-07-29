@@ -100,21 +100,57 @@ def cmd_repeats(a):
     death cause is distinct (no lesson was ignored)."""
     events = read_events(a.root)
     by_cause = {}
+    # 「死因」を運ぶフィールドは書き手によって揺れる。以前は `cause` しか読まず、
+    # rework_requested は対象ですらなかったため、**同じ失敗を3回した org に対して
+    # 「学習が使われている」と報告した**。検出器が読むキーは、実際に書かれるキーに合わせる。
+    _CAUSE_KEYS = ("cause", "hypothesized_cause", "reason", "why", "checklist_ref")
+    _DEATH_CLASSES = ("result_retired", "rework_requested", "refutation_attempted")
+
+    def _cause_of(e, p):
+        if e["class"] == "refutation_attempted" and p.get("verdict") != "refuted":
+            return None      # survives は死ではない
+        for k in _CAUSE_KEYS:
+            v = p.get(k)
+            if v and str(v).strip():
+                return v
+        return None
+
+    readable = 0
     for e in events:
         p = e.get("payload", {})
-        cause = None
-        if e["class"] == "result_retired":
-            cause = p.get("cause") or p.get("hypothesized_cause")
-        elif e["class"] == "refutation_attempted" and p.get("verdict") == "refuted":
-            cause = p.get("cause") or p.get("checklist_ref")
+        if e["class"] not in _DEATH_CLASSES:
+            continue
+        cause = _cause_of(e, p)
+        if cause:
+            readable += 1
         if cause:
             key = str(cause).strip().lower()
             by_cause.setdefault(key, []).append({"seq": e["seq"], "cause": cause,
                                                  "candidate_id": p.get("candidate_id")})
     repeated = {c: hits for c, hits in by_cause.items() if len(hits) >= a.recurrence}
+    deaths = sum(1 for e in events if e["class"] in _DEATH_CLASSES
+                 and not (e["class"] == "refutation_attempted"
+                          and e.get("payload", {}).get("verdict") != "refuted"))
     if not repeated:
+        if deaths and not readable:
+            # **読めるものが1件も無いのに clean と言わない。** 「繰り返していない」と
+            # 「見えていない」は別で、混同すると誤った安心になる — 検出器が嘘をつくのは、
+            # 検出器が無いより悪い（実地でまさにこれが起きた）。
+            print(f"unknown: {deaths} 件の差し戻し/反証があるが、死因を読み取れたものが0件。"
+                  f"繰り返しの有無は判定できていない。\n"
+                  f"  payload に {' / '.join(_CAUSE_KEYS)} のいずれかで死因を書くこと。"
+                  f"書かれていない限り、同じ失敗を何度繰り返してもこの検出器は気づけない。")
+            return OK
         print(f"clean: no death cause recurred >= {a.recurrence} times — accumulated learning is being "
-              f"used, no known mistake re-made. Silent.")
+              f"used, no known mistake re-made. Silent."
+              + (f" ({readable} 件の死因を読んだ)" if readable else ""))
+        if readable >= a.recurrence:
+            # 完全一致でしか繰り返しを見ない。実地では「端数の偏り」と「テスト硬化」という
+            # 別々の文言で記録された2件が、根は同じ（性質が壊れる場所を検証していない）だった。
+            # clean を「同じ失敗をしていない」証明として読ませないために、限界を明示する。
+            print(f"  注意: 一致は死因の**文字列**で見ている。同じ根の失敗が別の言葉で"
+                  f"書かれていれば、この検出器は素通りする。{readable} 件の死因を並べて"
+                  f"読み直す価値はある（`ledger.py view` / Issue のコメント）。")
         return OK
     for cause, hits in sorted(repeated.items(), key=lambda kv: -len(kv[1])):
         emit_event("repeated_death_detected", {

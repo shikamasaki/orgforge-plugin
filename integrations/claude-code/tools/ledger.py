@@ -60,6 +60,35 @@ from _organ import read_events, LedgerCorruption, resolve_root   # noqa: E402
 PHASE_ORDER = ["requirements", "design", "implement", "test", "integrate", "deploy", "operate"]
 
 
+
+# 同じ仕事を指す識別子は2系統に分かれていた: 人間側 / decide / org_cycle の照合は
+# `deliverable` / `issue`、強制ロジック（requires_prior / DISTINCT_ACTOR）は
+# `candidate_id` / `claim_id`。同じものを指しているのに片方しか見ないため、
+# **実地では自己 admit も、存在しない deliverable の deploy も素通りした**（seq 204/205）。
+# 束ねて、どちらで書かれていても相関が取れるようにする。
+_CORRELATION_KEYS = ("candidate_id", "claim_id", "deliverable", "issue")
+
+
+def _correlation_ids(payload):
+    """その payload が名指ししている「仕事」の識別子すべて（正規化済みの集合）。
+
+    どれか1つでも一致すれば同じ仕事とみなす。書き手がどのキーを使ったかに強制の有効性が
+    左右されてはいけない — 左右されると、キーを外した瞬間に統制が無言で消える。
+    """
+    out = set()
+    for k in _CORRELATION_KEYS:
+        v = payload.get(k)
+        if v is not None and str(v).strip() != "":
+            out.add(str(v).strip().lstrip("#"))
+    return out
+
+
+def _same_work(pa, pb):
+    """2つの payload が同じ仕事を指すか。共有する識別子が1つでもあれば True。"""
+    a, b = _correlation_ids(pa), _correlation_ids(pb)
+    return bool(a & b)
+
+
 def _same_deliverable(a, b):
     """Do two payloads name the same deliverable? Compared as NORMALIZED STRINGS, not by ==.
 
@@ -133,9 +162,12 @@ REQUIRES_PRIOR = {
         and e["payload"].get("phase") == ev["payload"].get("phase")
         for e in hist
     ),
+    # 識別子は束ねて見る（_same_work）。`claim_id == candidate_id` だけを見ていたため、
+    # deliverable/issue で書かれた実地の refutation 2件と相関できず、しかも
+    # None == None が一致してしまい **deploy ゲートが丸ごと無効**だった（seq 205 が通った）。
     "result_deployed": lambda ev, hist: any(
         e["class"] == "refutation_attempted"
-        and e["payload"].get("claim_id") == ev["payload"].get("candidate_id")
+        and _same_work(e["payload"], ev["payload"])
         and e["payload"].get("verdict") == "survives"
         for e in hist
     ),
@@ -204,18 +236,28 @@ def _distinct_actor_violation(ev, hist):
     if not rule:
         return None
     key_field, conflicting, why = rule
-    key = ev["payload"].get(key_field)
-    if key is None:
-        return None            # nothing to correlate on; the payload-shape check is elsewhere
+    ids = _correlation_ids(ev["payload"])
+    if not ids:
+        # 相関キーが1つも無い判定は **拒否する**。以前はここで素通りさせており（"the payload-shape
+        # check is elsewhere" と書いてあったが、その elsewhere は存在しなかった）、実地で maker が
+        # 自分の成果物を admit できた（seq 204）。相関できない判定は、検証できない判定であって、
+        # 「検証を通った判定」ではない。無言で通すのが最悪で、統制が効いていないことが誰にも
+        # 見えないまま、ハッシュ連鎖が偽造にお墨付きを与える。
+        return (f"{ev['class']} rejected — 判定の対象を特定できない: payload に "
+                f"{' / '.join(_CORRELATION_KEYS)} のいずれも無い。\n"
+                f"  相関キーが無いと maker と gate が同一 actor かを照合できず、この統制は"
+                f"無言で無効になる（{why}）\n"
+                f"  対象の Issue 番号か candidate_id を payload に入れて再実行すること。")
     actor = ev.get("actor")
     for e in hist:
         if e["class"] not in conflicting:
             continue
-        # the judged candidate may be named by either key (cycle_* use candidate_id; admission uses it too)
-        e_key = e["payload"].get(key_field) or e["payload"].get("candidate_id")
-        if str(e_key) == str(key) and e.get("actor") == actor:
+        # 識別子は束ねて照合する — 書き手が deliverable で書いても candidate_id で書いても
+        # 同じ仕事として相関する（片方しか見ないと、キーを変えた瞬間に統制が消える）。
+        if _same_work(e["payload"], ev["payload"]) and e.get("actor") == actor:
+            shared = ", ".join(sorted(_correlation_ids(e["payload"]) & ids))
             return (f"{ev['class']} rejected — actor {actor!r} already acted as {e['class']} for "
-                    f"{key_field}={key!r}: {why}")
+                    f"{shared}: {why}")
     return None
 
 # an honest per-class reason for a requires_prior rejection (the reject message uses this instead
