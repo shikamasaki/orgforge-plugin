@@ -119,7 +119,8 @@ def test_log_is_idempotent_when_event_already_logged(monkeypatch):
     fake = FakeGh(replies={"issue view": (0, existing)})
     monkeypatch.setattr(GS, "gh", fake)
     rc = GS.cmd_log(_ns(repo="o/r", issue=23, event="cycle_started",
-                        detail=None, phase=None, event_id="evABC"))
+                        detail=None, phase=None, event_id="evABC",
+                        command="npm test", result="Test Files 1 passed | Tests 54 passed (54)"))
     assert rc == 0
     assert not fake.calls_matching("issue comment"), "must NOT double-post the same milestone"
 
@@ -586,3 +587,36 @@ def test_split_check_ignores_digits_in_prose(monkeypatch):
     rc, out = _quiet(GS.cmd_split_check, _ns(repo="o/r", issue=9))
     assert rc == 0, out
     assert "#1" not in out
+
+
+# ── 実地: log に検査が無く、判定だけが厚くなった ─────────────────────────
+# 同じ Issue で decide 経由は 3,506〜5,894字、log は 276〜473字。検査のある側だけが厚い。
+def test_log_milestone_requires_command_and_result(monkeypatch):
+    """マイルストーンの log は --command / --result を要求する（decide と同じ思想）。"""
+    fake = FakeGh(replies={"issue view": (0, '{"comments": []}')})
+    monkeypatch.setattr(GS, "gh", fake)
+    rc = GS.cmd_log(_ns(repo="o/r", issue=7, event="cycle_completed",
+                        detail="実装した", phase=None, event_id="e1",
+                        command=None, result=None))
+    assert rc == 2, "--command 無しのマイルストーン log が通った"
+    assert not fake.calls_matching("issue comment")
+
+
+def test_log_rejects_result_that_only_says_it_worked(monkeypatch):
+    """--result が「通った」の言い換えなら弾く。実出力でなければ再構成できない。"""
+    fake = FakeGh(replies={"issue view": (0, '{"comments": []}')})
+    monkeypatch.setattr(GS, "gh", fake)
+    rc = GS.cmd_log(_ns(repo="o/r", issue=7, event="cycle_completed",
+                        detail="実装した", phase=None, event_id="e2",
+                        command="npm test", result="ok"))
+    assert rc == 2, "実出力でない --result が通った"
+
+
+def test_log_progress_stays_cheap(monkeypatch):
+    """途中の刻み（progress_recorded）には検査を掛けない — 軽く刻めることも大事。"""
+    fake = FakeGh(replies={"issue view": (0, '{"comments": []}')})
+    monkeypatch.setattr(GS, "gh", fake)
+    rc = GS.cmd_log(_ns(repo="o/r", issue=7, event="progress_recorded",
+                        detail="調査中", phase=None, event_id="e3",
+                        command=None, result=None))
+    assert rc == 0, "軽い刻みまで塞いだら、途中経過が書かれなくなる"

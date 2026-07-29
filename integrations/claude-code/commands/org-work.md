@@ -124,8 +124,30 @@ or a crash (docs/01 R−1: the org acts only on what is written).
 ```
 python3 "${CLAUDE_PLUGIN_ROOT}/tools/org_cycle.py" complete \
   --role $1 --issue <N> --agent <役割> --outputs "<何を作ったか>" \
+  --command "<DoD コマンド（verbatim）>" --result "<その実出力（失敗込み）>" [--files "<変更ファイル>"] \
   (--domain-model-updated "<確立したドメイン規則への参照>" | --domain-model-none "<確立しなかった理由>")
 ```
+
+`--command` / `--result` は**必須**。`log` 側が「通った」の言い換えを拒否する。`decide` が
+`--why` を検査するのと同じ理由で、ここも検査する — 実地では検査のある `decide` が3,500〜5,900字、
+検査の無い `log` が276〜473字になり、**同じ Issue の中で判定だけが監査可能**という非対称が出た。
+散文の指示を守るのは人だが、必須引数を守るのはツール。
+
+`--domain-model-none` を選ぶと、そのサイクルで増えた公開型・エクスポートを列挙して
+「これらは領域の語彙ではないか」と問い返す（判定はしない。素通りだけさせない）。
+完了時に `begin` が作った worktree も片付ける（未コミットの変更があれば残して警告する）。
+
+### 3a-2. PR を出す — `handback`
+
+```
+python3 "${CLAUDE_PLUGIN_ROOT}/tools/org_cycle.py" handback --issue <N> \
+  --summary "<何を作ったか>" --result "<DoD の実出力>" [--files "<変更ファイル>"]
+```
+
+feature ブランチを push し、`develop` を base に PR を作り、body に **`Closes #N`** を入れて
+Issue に紐付ける。実地では PR を作る手順がどこにも無く、結果として **PR がゼロ件**・`git merge`
+での直接統合・統合済み Issue が OPEN のまま、という状態になった。GitHub で運用する前提が
+成立していなかった。マージするかは判定しない — PR を作るところまでが配管。
 
 `domain_model` は**必須**（docs/11 §4d）。台帳が拒否するので省けない — ドメインモデルに何もして
 いないなら、その理由を書く（skeptic が反証できる主張になる）。
@@ -221,7 +243,18 @@ as a whole** before any of them deploys (docs/11 §4c — whatever you separate,
 As the supervising manager you own this integrate phase (your A3, extended to cross-deliverable):
 
 - Each child's per-unit `test` passing (its own suite green on its feature branch) admits it to **open a
-  PR against `develop`** — not `main`. Merge the green feature branches into `develop`.
+  PR against `develop`** — not `main`. PR は `org_cycle.py handback --issue <N>` が作る（手で
+  `gh pr create` を打たない。実地で PR がゼロ件になった）。
+- マージと統合後テストと記録は `org_cycle.py integrate --issue <N>`:
+
+```
+python3 "${CLAUDE_PLUGIN_ROOT}/tools/org_cycle.py" integrate --issue <N> [--test "npm test"]
+```
+
+  **gate の admit と skeptic の survives が台帳に無ければ止まる**（exit 4）。Issue にコメントが
+  あっても台帳に無ければ「記録されていない」— 実地では refutation_attempted が台帳に1件も無い
+  まま統合され、`integration_admitted` も記録されなかった。二重記録の片側だけが落ちるのが
+  実際の失敗形なので、ここは台帳を見る。マージするかどうかは判定しない（前提の照合だけ）。
 - Then run the **combined** suite on `develop`: the siblings must build and pass **together**, not just
   each alone. Green CI on `develop` is the integrate gate (`integration_admitted`) — the machine form.
 - Only an integrated, green `develop` is **"done"**: nobody reads the diff (docs/11 §4f), so the

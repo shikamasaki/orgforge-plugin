@@ -331,6 +331,41 @@ def _already_logged(repo, issue, marker):
         return False
 
 
+# マイルストーン: ここで「何をしたか」が残らないと、後から再構成する手段が無くなる。
+# 途中経過（progress_recorded）は軽く刻めてよいが、サイクルの節目は監査点なので実出力を要求する。
+_LOG_MILESTONES = ("cycle_started", "cycle_completed", "phase_admitted", "integration_admitted",
+                   "result_deployed", "handback_opened")
+
+
+def _log_defect(a):
+    """作業ログが再構成可能かを検査する。None なら合格。
+
+    `decide` は --why の空・言い換え・水増しを拒否するのに、`log` は --detail を一切検査して
+    いなかった。結果は実測に出ていて、同じ Issue の中で判定は3,506〜5,894字、作業ログは
+    276〜473字。**検査のある側だけが厚くなった。** 散文の指示を守るのは人だが、必須引数を
+    守るのはツールなので、同じ強制を掛ける。
+    """
+    if a.event not in _LOG_MILESTONES:
+        return None
+    if not getattr(a, "command", None):
+        return ("--command が要る（マイルストーンの log）。実際に走らせたコマンドを verbatim で。\n"
+                "  「テストを流した」ではなく `npm test` のように、他人が再実行できる形で書くこと。")
+    if not getattr(a, "result", None):
+        return ("--result が要る（マイルストーンの log）。そのコマンドが返した**実出力**を、\n"
+                "  失敗も含めて。成功だけの記録は作り話であり、失敗した試行こそ最も情報量が高い。")
+    res = str(a.result)
+    if len(res.encode("utf-8")) < 24:
+        return ("--result が短すぎて実出力とは言えない。"
+                "「通った」ではなく、返ってきたものを貼ること。")
+    words = re.findall(r"[^\W\d_]+", res.lower(), flags=re.UNICODE)
+    filler = {"ok", "okay", "done", "fine", "good", "green", "pass", "passed", "passes",
+              "success", "succeeded", "yes", "worked", "works", "完了", "成功"}
+    if words and not [w for w in words if w not in filler]:
+        return ("--result が「通った」の言い換えでしかない。実出力（テスト件数、エラー、"
+                "差分など）を貼ること。")
+    return None
+
+
 def cmd_log(a):
     """Append a WORK-LOG comment to a task Issue on a milestone event (cycle_started, progress_recorded,
     phase_admitted, cycle_completed, …). The ledger stays the SSoT — this comment is its projection onto
@@ -349,6 +384,16 @@ def cmd_log(a):
     # sha256, NOT hash(): Python salts hash() per process (PYTHONHASHSEED), so a CLI marker built from
     # hash() differs on every invocation and the dedup NEVER fires across runs — a retried cycle
     # double-posts while the docstring promises "logs once, never twice".
+    defect = _log_defect(a)
+    if defect:
+        print(f"作業ログが薄い: {defect}\n\n"
+              f"docs/11 §3b のバー: **Issue だけを読んだ他人が、何が作られ・何が試され・"
+              f"何が捨てられ・何を実行して何が返り・なぜマージされたかを再構成できること**。\n"
+              f"`decide` が --why を検査するのと同じ理由でここも検査する — 人間の diff レビューは"
+              f"廃止されており、この Issue が唯一の監査面だから。\n"
+              f"途中の軽い刻みなら --event progress_recorded を使うこと（検査は掛からない）。",
+              file=sys.stderr)
+        return 2
     marker_key = a.event_id or _stable_key(a.event, a.detail or "", a.phase or "")
     marker = f"<!-- orgforge:event:{marker_key} -->"
     if _already_logged(a.repo, a.issue, marker):

@@ -1165,3 +1165,33 @@ def test_worktree_cleanup_keeps_dirty_tree(tmp_path):
         assert not wt.is_dir(), f"クリーンな worktree が片付いていない: {msg2}"
     finally:
         os.chdir(cwd)
+
+
+def test_complete_requires_command_and_result():
+    """DoD の実出力を人の自由記述任せにしない（B）。"""
+    p = subprocess.run([sys.executable, str(TOOLS / "org_cycle.py"), "complete",
+                        "--role", "r", "--issue", "1", "--outputs", "x",
+                        "--domain-model-none", "理由"],
+                       capture_output=True, text=True, timeout=60)
+    assert p.returncode != 0
+    assert "--command" in p.stderr and "--result" in p.stderr
+
+
+def test_begin_log_carries_facts_the_tool_already_knows():
+    """begin の log に branch / worktree / parent / candidate_id が自動で入る（B）。
+
+    実地で人が書いた 276 字にはブランチ名も worktree のパスも無かったが、org_cycle は
+    両方知っていた。知っている事実を人に書かせない。
+    """
+    src = (TOOLS / "org_cycle.py").read_text(encoding="utf-8")
+    seg = src[src.index("def _steps_begin"):src.index("def _steps_complete")]
+    for token in ("worktree:", "branch:", "parent:", "candidate_id:", "--command", "--result"):
+        assert token in seg, f"begin の log に {token} が入っていない"
+
+
+def test_handback_puts_closes_in_pr_body():
+    """PR body の `Closes #N` が Issue ↔ PR ↔ コミットを繋ぎ、統合時に Issue を閉じる（C）。"""
+    src = (TOOLS / "org_cycle.py").read_text(encoding="utf-8")
+    seg = src[src.index("def cmd_handback"):]
+    assert 'f"Closes #{a.issue}"' in seg, "PR body に Closes が無い — Issue が OPEN のまま残る"
+    assert "gh pr create" in seg

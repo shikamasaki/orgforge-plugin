@@ -135,10 +135,28 @@ def _steps_begin(a, parent, cid):
                          "--payload", json.dumps({"role": agent, "candidate_id": cid,
                                                   "pack_manifest_id": f"issue-{a.issue}"},
                                                  ensure_ascii=False))),
+        # ツールが知っている事実は人に書かせない（B）。実地で私が書いた 276 字には、
+        # ブランチ名も worktree のパスも入っていなかったが、org_cycle は両方知っていた。
         (f"log cycle_started → #{a.issue}",
          lambda: _gh_sync("log", "--issue", str(a.issue), "--event", "cycle_started",
                           "--phase", phase, "--event-id", f"start-{cid}",
-                          "--detail", f"{agent} が着手（parent #{parent or '-'} を継承）")),
+                          "--detail",
+                          f"{agent} が着手（parent #{parent or '-'} を継承 / "
+                          f"candidate_id `{cid}` / phase `{phase}`）",
+                          "--command",
+                          f"python3 org_cycle.py begin --role {a.role} --issue {a.issue} "
+                          f"--agent {agent}",
+                          "--result",
+                          f"claim: {agent}\n"
+                          f"branch: {_branch_for(a.issue)}\n"
+                          f"worktree: "
+                          + ("(なし — --no-worktree)" if getattr(a, "no_worktree", False)
+                             else f".orgforge/wt/issue-{a.issue}/")
+                          + f"\nparent: #{parent or '-'}\ncandidate_id: {cid}",
+                          "--files", f".orgforge/wt/issue-{a.issue}/",
+                          "--next-step",
+                          f"仕様は #{a.issue} 本文。完了したら "
+                          f"`org_cycle.py complete --issue {a.issue} ...` → handback → verify")),
         (f"stage #{a.issue} → in-progress",
          lambda: _gh_sync("stage", "--issue", str(a.issue), "--stage", "in-progress")),
     ]
@@ -157,7 +175,13 @@ def _steps_complete(a, cid):
                                                   "domain_model": dm}, ensure_ascii=False))),
         (f"log cycle_completed → #{a.issue}",
          lambda: _gh_sync("log", "--issue", str(a.issue), "--event", "cycle_completed",
-                          "--event-id", f"done-{cid}", "--detail", a.outputs)),
+                          "--event-id", f"done-{cid}", "--detail", a.outputs,
+                          "--command", a.command or "(--command で DoD コマンドを渡すこと)",
+                          "--result", a.result or "(--result に実出力を貼ること)",
+                          *(["--files", a.files] if getattr(a, "files", None) else []),
+                          "--next-step",
+                          f"`org_cycle.py handback --issue {a.issue}` で PR → "
+                          f"verify（gate → skeptic）→ integrate")),
         (f"release claim on #{a.issue}",
          lambda: _gh_sync("release", "--issue", str(a.issue), "--agent", agent)),
     ]
@@ -609,6 +633,101 @@ def _branch_for(issue):
     return f"feat/issue-{issue}"
 
 
+
+def cmd_handback(a):
+    """C: feature ブランチを push し、develop 宛の PR を作り、Issue に紐付ける。
+
+    /org-work §4 は「各 child の feature ブランチ → PR → develop」と書いていたが、PR を作る
+    ツールが無かった。結果として実地では PR がゼロ件になり、`git merge` で直接統合され、
+    統合済みの Issue が OPEN のまま残った。**GitHub で運用する前提が成立していなかった。**
+
+    body に `Closes #N` を入れるので、develop へのマージで Issue が自動 close される。
+    マージするかどうかは判定しない — PR を作るところまでが配管。
+    """
+    branch = a.branch or _branch_for(a.issue)
+    base = a.base or "develop"
+
+    # 前提: gate の admit（PR は「見せる」ためのものなので skeptic 前でも作れてよい）
+    av, aseq, _ = _admission_for(a.issue)
+
+    title, body = _issue_body(a.issue)
+    if title is None:
+        title = f"Issue #{a.issue}"
+
+    code, out = _raw(["git", "rev-parse", "--verify", branch])
+    if code != 0:
+        print(f"ブランチ {branch} が無い。--branch で渡すか、先に begin すること。", file=sys.stderr)
+        return 3
+
+    # 既に PR があれば作り直さない（冪等）
+    code, out = _raw(["gh", "pr", "list", "--head", branch, "--json", "number,url", "--limit", "1"]
+                     + (["--repo", _repo()] if _repo() else []))
+    existing = None
+    if code == 0:
+        try:
+            arr = json.loads(out or "[]")
+            existing = arr[0] if arr else None
+        except Exception:
+            pass
+
+    pr_body = [
+        f"Closes #{a.issue}",
+        "",
+        f"## 何を作ったか",
+        a.summary or "(--summary で1行)",
+        "",
+        "## DoD の実出力",
+        "```",
+        (a.result or "(--result に実際の出力を貼ること)").strip(),
+        "```",
+        "",
+        f"## 判定",
+        (f"gate: `{av}`（ledger seq {aseq}）" if av else
+         "gate の admission はまだ。`org_cycle.py verify --issue %d --role gate`" % a.issue),
+        "",
+        f"仕様は #{a.issue} の本文。判断の理由は同 Issue のコメントに記録されている"
+        f"（人間の diff レビューは廃止 — docs/11 §4f）。",
+    ]
+
+    steps = [
+        (f"{branch} を push",
+         lambda: _raw(["git", "push", "-u", "origin", branch])),
+    ]
+    if existing:
+        print(f"既に PR がある: {existing.get('url')} — 作り直さない（push だけ更新）")
+    else:
+        steps.append(
+            (f"PR を作成（{branch} → {base}）",
+             lambda: _raw(["gh", "pr", "create", "--base", base, "--head", branch,
+                           "--title", f"{title} (#{a.issue})",
+                           "--body", "\n".join(pr_body)]
+                          + (["--repo", _repo()] if _repo() else []))))
+    rc = _execute(steps, f"handback #{a.issue} → {base}")
+    if rc != 0:
+        return rc
+
+    code, out = _raw(["gh", "pr", "list", "--head", branch, "--json", "url", "--limit", "1"]
+                     + (["--repo", _repo()] if _repo() else []))
+    url = ""
+    try:
+        arr = json.loads(out or "[]")
+        url = arr[0]["url"] if arr else ""
+    except Exception:
+        pass
+
+    # B: ツールが知っている事実は自動で入れる。人が書くのは summary だけ。
+    return _execute([
+        (f"log handback_opened → #{a.issue}",
+         lambda: _gh_sync("log", "--issue", str(a.issue), "--event", "handback_opened",
+                          "--event-id", f"handback-{a.issue}",
+                          "--detail", f"{branch} → {base} の PR を作成: {url or '(URL 未取得)'}",
+                          "--command", f"gh pr create --base {base} --head {branch}",
+                          "--result", (a.result or out or "PR created").strip()[:4000],
+                          "--files", a.files or branch,
+                          "--next-step", f"skeptic → `org_cycle.py integrate --issue {a.issue}`")),
+    ], f"record handback #{a.issue}")
+
+
 def cmd_plan(a):
     """何も実行せず、打つイベント列だけを印字する。"""
     parent = a.parent or resolve_parent(a.issue)
@@ -642,6 +761,14 @@ def main(argv):
     q.add_argument("--issue", required=True, type=int)
     q.add_argument("--role", required=True, choices=("gate", "skeptic"))
 
+    q = sub.add_parser("handback", help="feature ブランチを push → develop 宛 PR → Issue に紐付け")
+    q.add_argument("--issue", required=True, type=int)
+    q.add_argument("--branch", help="省略時は Issue から決定的に導出")
+    q.add_argument("--base", default="develop")
+    q.add_argument("--summary", help="何を作ったか（1行）")
+    q.add_argument("--result", help="DoD コマンドの実出力（PR body と log に入る）")
+    q.add_argument("--files", help="変更ファイル")
+
     q = sub.add_parser("integrate", help="develop への fan-in（前提照合 → マージ → 統合後テスト → 記録）")
     q.add_argument("--issue", required=True, type=int)
     q.add_argument("--role", default="integrator", help="統合を回す役割（記録の actor）")
@@ -656,6 +783,11 @@ def main(argv):
     q.add_argument("--issue", required=True, type=int)
     q.add_argument("--agent")
     q.add_argument("--outputs", required=True, help="何を作ったか（1行）")
+    q.add_argument("--command", required=True,
+                   help="DoD コマンド（verbatim。他人が再実行できる形で）")
+    q.add_argument("--result", required=True,
+                   help="そのコマンドの**実出力**（失敗込み。「通った」は不可 — log が拒否する）")
+    q.add_argument("--files", help="変更したファイル")
     q.add_argument("--domain-model-updated", dest="domain_model_updated",
                    help="このサイクルが確立したドメイン規則への参照")
     q.add_argument("--domain-model-none", dest="domain_model_none",
@@ -663,7 +795,7 @@ def main(argv):
     q.add_argument("--candidate-id", dest="candidate_id")
     a = p.parse_args(argv[1:])
     return {"begin": cmd_begin, "complete": cmd_complete, "plan": cmd_plan,
-            "verify": cmd_verify, "integrate": cmd_integrate}[a.cmd](a)
+            "verify": cmd_verify, "integrate": cmd_integrate, "handback": cmd_handback}[a.cmd](a)
 
 
 if __name__ == "__main__":
