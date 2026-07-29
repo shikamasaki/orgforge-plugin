@@ -115,6 +115,32 @@ def cmd_status(a):
 
     done = counts.get("cycle_completed", 0)
 
+    # リスク付き admit を board に出す。gate は --risk を書けば admit できるので、正直に書くほど
+    # 通りやすいという構造になっている。**それ自体は正しい運用**（書かれない穴より遥かによい）
+    # だが、書き得にしないために「何件溜まっているか」は見えている必要がある。
+    risky = [e for e in events if e["class"] == "admission_decided"
+             and (e.get("payload", {}) or {}).get("verdict") == "admit"
+             and (e.get("payload", {}) or {}).get("risk_accepted") is True]
+    if risky:
+        amber.append(f"リスク付き admit: {len(risky)} 件（承知の上で残した穴）")
+
+    # 二重記録の乖離を検出する。判断は「台帳の受領証」と「Issue の理由」の両方に書く決まりだが、
+    # 実地では skeptic が Issue にだけ書き、台帳に1件も無いまま統合されかけた。片側だけが
+    # 落ちるのが実際の失敗形なので、落ちた側を数える。
+    admits = {str((e.get("payload", {}) or {}).get("issue") or
+                  (e.get("payload", {}) or {}).get("deliverable") or "")
+              for e in events if e["class"] == "admission_decided"
+              and (e.get("payload", {}) or {}).get("verdict") == "admit"}
+    refutes = {str((e.get("payload", {}) or {}).get("issue") or
+                   (e.get("payload", {}) or {}).get("claim_id") or
+                   (e.get("payload", {}) or {}).get("deliverable") or "")
+               for e in events if e["class"] == "refutation_attempted"}
+    unrefuted = {a for a in admits if a and a not in refutes}
+    if unrefuted:
+        red.append(f"admit 済みだが skeptic の記録が無い: {len(unrefuted)} 件"
+                   f"（{', '.join('#' + x for x in sorted(unrefuted)[:5])}）— "
+                   f"反証を経ずに統合される手前")
+
     # 人間待ちの Issue は定義上 RED — 「あなたを待っている」ものが board の意味そのもの。
     # ledger には現れないので GitHub を見る（見られなければ黙って飛ばす。board は落とさない）。
     for line in _needs_human_issues():

@@ -319,6 +319,28 @@ def cmd_verify(a):
         out.append("\n## gate が既に見たこと\n(#%d に admission_decided の記録が無い。"
                    "gate の admit 前に skeptic を回そうとしていないか確認すること)" % a.issue)
 
+    if role == "gate":
+        # 6: ツールのパスが解決できず repro_lint が一度も走っていなかった。org_cycle は自分の
+        # 位置を知っているので絶対パスを埋める。機械的拒否層は、誰も diff を読まない以上
+        # 「走らなかった」が最も危ない失敗形。
+        out.append("\n## 機械バー（**このコマンドをそのまま実行すること。未実行は reject 事由**）\n")
+        out.append("```")
+        out.append(f'python3 "{os.path.join(HERE, "repro_lint.py")}" check . --phase implement')
+        out.append("```")
+        out.append("HOLD（exit 10）なら reject。パスが通らない場合はそう報告すること — "
+                   "「ツールが無いので未実行」は、機械バーが効いていないという最も重い所見。")
+    if role == "skeptic" and prior:
+        # 5: --risk を書けば admit できる構造なので、書き得にしない。gate が自分で書いた
+        # リスクは、skeptic が最初に潰しに行くべき的として明示する（配管: 抜き出して渡すだけ）。
+        risks = re.findall(r"\*\*Known risk accepted:\*\*\s*(.+?)(?:\n\n|\Z)", prior, re.S)
+        if risks:
+            out.append("\n## gate が自分で書いた残存リスク（**まずここを潰しに行くこと**）\n")
+            out.append(risks[-1].strip())
+            out.append("\n> gate はリスクを書けば admit できる。書き得にしないために、"
+                       "この記述が「承知の上の判断」なのか「実は落とし穴」なのかを確かめるのは "
+                       "skeptic の仕事。潰せたなら refuted、潰せず承知の範囲だと確認できたなら "
+                       "その旨を --risk に書いて survives。")
+
     out.append(f"\n## 記録（**判定はあなたが決める。この雛形は値を埋めていない**）\n")
     out.append("```")
     out.append(f'python3 "$P/tools/github_sync.py" decide --issue {a.issue} --event {ev} \\')
@@ -334,7 +356,12 @@ def cmd_verify(a):
     out.append("# 後続の照合が識別子の揺れで記録を見失う（実地で起きた）。呼び名は --why に書く。")
     out.append(f'python3 "$P/tools/ledger.py" append --actor {role} --class {ev} \\')
     out.append(f'  --payload \'{{"verdict":"<...>","deliverable":"{a.issue}",'
-               f'"reasoning_sha256":"<...>","issue":{a.issue}}}\'')
+               f'"reasoning_sha256":"<...>","issue":{a.issue},'
+               f'"risk_accepted":<true|false>}}\'')
+    out.append('# risk_accepted: --risk に穴を書いたうえで通すなら true。')
+    out.append('# リスクを書けば通せる構造なので、書き得にしないために台帳側で数えられる形にする')
+    out.append('# （Issue コメントだけだと集計できない）。'
+               + ('skeptic はその穴を潰しに行くこと。' if role == 'gate' else ''))
     out.append("```")
     print("\n".join(out))
     print(f"\n— この出力を {role} subagent の**プロンプト本文にそのまま貼る**こと"
@@ -347,8 +374,8 @@ def cmd_verify(a):
 
 
 
-def _admission_for(issue):
-    """#issue に対する admission_decided を台帳から探す。
+def _decision_for(issue, cls):
+    """#issue に対する `cls` の判定を台帳から探す。
 
     identity は Issue 番号だが、実地では deliverable に "settle()"（関数名）が入った記録が
     生まれた。**Issue 番号は payload の `issue` にも入っている**ので、片方だけ見て「無い」と
@@ -373,16 +400,79 @@ def _admission_for(issue):
             e = json.loads(line)
         except Exception:
             continue
-        if e.get("class") != "admission_decided":
+        if e.get("class") != cls:
             continue
         pl = e.get("payload", {}) or {}
-        d = str(pl.get("deliverable", "")).lstrip("#")
-        i = str(pl.get("issue", "")).lstrip("#")
-        if want in (d, i):
+        # claim_id は refutation_attempted の識別子（candidate_id を指す）
+        ids = [str(pl.get(k, "")).lstrip("#")
+               for k in ("deliverable", "issue", "claim_id") if pl.get(k) is not None]
+        if want in ids:
             hit = (pl.get("verdict"), e.get("seq"))
-        elif d or i:
-            near.append((e.get("seq"), d or "-", i or "-"))
+        elif any(ids):
+            near.append((e.get("seq"), ids[0], pl.get("verdict")))
     return (hit[0], hit[1], near) if hit else (None, None, near)
+
+
+def _admission_for(issue):
+    """gate の admission。詳細は _decision_for を見ること。"""
+    return _decision_for(issue, "admission_decided")
+
+
+def _refutation_for(issue):
+    """skeptic の反証試行。**admission と同じ強度で照合する** —
+
+    docs/11 / agents/gate.md は「skeptic の反証を生き延びたものだけが deploy 可」と定めており、
+    台帳の requires_prior は `result_deployed` にそれを課している。しかし統合はその手前にあり、
+    実地では refutation_attempted が台帳に1件も無いまま develop へ統合されかけた
+    （Issue にはコメントがあったので、二重記録の片側だけが落ちていた）。
+    最も抜けやすいのは統合の直前なので、そこで照合する。
+    """
+    return _decision_for(issue, "refutation_attempted")
+
+
+def _new_exports(issue, base="develop"):
+    """このサイクルで新規に生えた公開型 / エクスポートを列挙する。
+
+    3: domain_model は必須だが `--domain-model-none "理由"` で常に通るので、書く側が none を
+    選べば形骸化する。実地では「純粋関数の追加のみ」と書かれたサイクルが Balance / Transfer /
+    SettleResult という型＝ユビキタス言語を実際に作っていた。**判定はしない** — 素通りを
+    させないために、反証材料を目の前に置くだけ。潰すか説明するかは役割が決める。
+    """
+    br = _branch_for(issue)
+    code, out = _raw(["git", "diff", f"{base}...{br}", "--unified=0"])
+    if code != 0:
+        code, out = _raw(["git", "diff", base, "--unified=0"])
+        if code != 0:
+            return []
+    pat = re.compile(
+        r"^\+.*?\bexport\s+(?:default\s+)?"
+        r"(type|interface|enum|class|const|function)\s+([A-Za-z_][A-Za-z0-9_]*)")
+    seen, hits = set(), []
+    for line in out.split("\n"):
+        m = pat.match(line)
+        if m and m.group(2) not in seen:
+            seen.add(m.group(2))
+            hits.append((m.group(1), m.group(2)))
+    return hits
+
+
+def _cleanup_worktree(issue):
+    """4: begin が作った worktree を片付ける。18 Issue 回せば18個残り、次に同じ Issue を
+    触ったとき古いツリーを掴む。**未コミットの変更があれば消さない** — 消えて困るものが
+    あるかは、こちらが判断してよいことではない。"""
+    root = os.getcwd()
+    wt = os.path.join(root, ".orgforge", "wt", f"issue-{issue}")
+    if not os.path.isdir(wt):
+        return None
+    code, out = _raw(["git", "-C", wt, "status", "--porcelain"])
+    if code == 0 and out.strip():
+        return (f"worktree を残した: {wt}\n"
+                f"  未コミットの変更がある（{len(out.strip().split(chr(10)))} 件）。"
+                f"確認してから `git worktree remove` すること。")
+    code, out = _raw(["git", "worktree", "remove", wt])
+    if code != 0:
+        return f"worktree を消せなかった: {wt}（{out.strip()[:80]}）"
+    return f"worktree を片付けた: .orgforge/wt/issue-{issue}"
 
 
 def cmd_begin(a):
@@ -401,11 +491,34 @@ def cmd_complete(a):
               "述べない限り台帳が拒否する。何も確立しなかったなら、その理由を書くこと"
               "（skeptic が反証できる主張になる）。", file=sys.stderr)
         return 2
+    if a.domain_model_none:
+        # 素通りをさせない: 「規則を定めていない」と書いたサイクルが、実は語彙を作っていないか。
+        ex = _new_exports(a.issue)
+        if ex:
+            print(f"確認: none_asserted だが、このサイクルで {len(ex)} 個の公開シンボルが増えている:",
+                  file=sys.stderr)
+            for kind, name in ex[:12]:
+                print(f"    {kind} {name}", file=sys.stderr)
+            print("これらは領域の語彙（ユビキタス言語）ではないか。語彙なら "
+                  "--domain-model-updated で記録すること。\n"
+                  "語彙ではないと判断するなら、そのまま進めてよい — **判定はあなたの仕事**で、"
+                  "ここは素通りを防ぐための問い返しにすぎない。\n", file=sys.stderr)
+
     cid = a.candidate_id or _candidate_id(a.issue)
     rc = _execute(_steps_complete(a, cid), f"complete #{a.issue} ({a.role})")
     if rc == 0:
+        msg = _cleanup_worktree(a.issue)
+        if msg:
+            print(f"  {msg}")
         verdict, seq, near = _admission_for(a.issue)
-        if verdict == "admit":
+        rv, rseq, _ = _refutation_for(a.issue)
+        if verdict == "admit" and rv == "survives":
+            print(f"\nNEXT: gate admit（seq {seq}）· skeptic survives（seq {rseq}）。統合できる:\n"
+                  f"  python3 org_cycle.py integrate --issue {a.issue}")
+        elif verdict == "admit" and rv == "refuted":
+            print(f"\nNEXT: skeptic が refuted（seq {rseq}）。統合してはいけない —"
+                  f" 反証に対処してから再度 verify にかけること。")
+        elif verdict == "admit":
             print(f"\nNEXT: #{a.issue} は gate が admit 済み（seq {seq}）。次は skeptic:\n"
                   f"  python3 org_cycle.py verify --issue {a.issue} --role skeptic")
         elif verdict:
@@ -423,6 +536,77 @@ def cmd_complete(a):
                       f"deliverable={d!r} / issue={i!r} で #{a.issue} と一致しない。"
                       f"gate が Issue 番号以外の識別子で記録した可能性がある）", file=sys.stderr)
     return rc
+
+
+
+def cmd_integrate(a):
+    """develop への fan-in を回す。**マージするかどうかは判定しない** — 前提が揃っているかを
+    照合し、揃っていれば機械的な手順（マージ → 統合後テスト → 記録）を実行する。
+
+    fan-out が半分なら fan-in は残り半分で、そこが散文の手順書のままだと抜ける。実地では
+    #8 が「refutation が台帳に無いまま統合され、integration_admitted も記録されなかった」。
+    最も抜けやすいのは統合の直前なので、そこを配管にする。
+    """
+    av, aseq, _ = _admission_for(a.issue)
+    rv, rseq, _ = _refutation_for(a.issue)
+    problems = []
+    if av != "admit":
+        problems.append(f"gate の admit が無い（verdict={av or '記録なし'}）— "
+                        f"`org_cycle.py verify --issue {a.issue} --role gate`")
+    if rv != "survives":
+        problems.append(f"skeptic の survives が無い（verdict={rv or '記録なし'}）— "
+                        f"`org_cycle.py verify --issue {a.issue} --role skeptic`")
+    if problems and not a.force:
+        print(f"統合の前提が揃っていない（#{a.issue}）:", file=sys.stderr)
+        for x in problems:
+            print(f"  ✗ {x}", file=sys.stderr)
+        print("\ndocs/11 / agents/gate.md: skeptic の反証を生き延びたものだけが先に進める。\n"
+              "Issue にコメントがあっても台帳に無ければ「記録されていない」— 二重記録の"
+              "片側だけが落ちるのが実地の失敗形なので、ここは台帳を見る。\n"
+              "前提を承知で進めるなら --force（理由は --why に書くこと）。", file=sys.stderr)
+        return 4
+
+    branch = a.branch or _branch_for(a.issue)
+    base = a.base or "develop"
+    steps = [
+        (f"{base} に切り替え",
+         lambda: _raw(["git", "checkout", base])),
+        (f"{branch} を --no-ff でマージ",
+         lambda: _raw(["git", "merge", "--no-ff", branch,
+                       "-m", f"Merge {branch} into {base} (#{a.issue})"])),
+        (f"統合後の全体テスト: {a.test}",
+         lambda: _raw(a.test.split())),
+    ]
+    rc = _execute(steps, f"integrate #{a.issue} → {base}")
+    if rc != 0:
+        print(f"\n統合を止めた。{base} の状態を確認すること"
+              f"（マージ済みでテストが落ちたなら、戻すか直すかは判断）。", file=sys.stderr)
+        return rc
+
+    # ここまで来たら「combined suite が green」— それが integrate gate の機械的な形（docs/11 §4c）
+    rec = [
+        (f"integration_admitted を記録",
+         lambda: _ledger("append", "--actor", a.role, "--class", "integration_admitted",
+                         "--natural-key", f"integrate-{a.issue}",
+                         "--payload", json.dumps({"integration_branch": base,
+                                                  "deliverables": [str(a.issue)],
+                                                  "issue": a.issue,
+                                                  "combined_ci_ref": a.test,
+                                                  "verdict": "pass"}, ensure_ascii=False))),
+        (f"log → #{a.issue}",
+         lambda: _gh_sync("log", "--issue", str(a.issue), "--event", "integration_admitted",
+                          "--event-id", f"integrate-{a.issue}",
+                          "--detail", f"{branch} → {base} に統合、統合後 `{a.test}` green")),
+    ]
+    return _execute(rec, f"record integrate #{a.issue}")
+
+
+def _branch_for(issue):
+    """その Issue のブランチ名。github_sync が決定的に導出するので、それを借りる。"""
+    code, out = _gh_sync("branch", "--issue", str(issue))
+    if code == 0 and out.strip():
+        return out.strip().split("\n")[0]
+    return f"feat/issue-{issue}"
 
 
 def cmd_plan(a):
@@ -458,6 +642,15 @@ def main(argv):
     q.add_argument("--issue", required=True, type=int)
     q.add_argument("--role", required=True, choices=("gate", "skeptic"))
 
+    q = sub.add_parser("integrate", help="develop への fan-in（前提照合 → マージ → 統合後テスト → 記録）")
+    q.add_argument("--issue", required=True, type=int)
+    q.add_argument("--role", default="integrator", help="統合を回す役割（記録の actor）")
+    q.add_argument("--branch", help="省略時は Issue から決定的に導出")
+    q.add_argument("--base", default="develop")
+    q.add_argument("--test", default="npm test", help="統合後に走らせる全体テスト")
+    q.add_argument("--force", action="store_true",
+                   help="gate/skeptic の前提が無くても進める。**理由を記録すること**")
+
     q = sub.add_parser("complete")
     q.add_argument("--role", required=True)
     q.add_argument("--issue", required=True, type=int)
@@ -470,7 +663,7 @@ def main(argv):
     q.add_argument("--candidate-id", dest="candidate_id")
     a = p.parse_args(argv[1:])
     return {"begin": cmd_begin, "complete": cmd_complete, "plan": cmd_plan,
-            "verify": cmd_verify}[a.cmd](a)
+            "verify": cmd_verify, "integrate": cmd_integrate}[a.cmd](a)
 
 
 if __name__ == "__main__":

@@ -1045,3 +1045,123 @@ def test_verify_tells_you_to_paste_into_the_prompt_body():
     src = (TOOLS / "org_cycle.py").read_text(encoding="utf-8")
     assert "プロンプト本文" in src and "HELD" in src, \
         "verify の出力に『本文に貼る』案内が無い — ファイル渡しでガードに弾かれる"
+
+
+# ── 実地フィードバック: 統合直前が最も抜けやすい ─────────────────────────
+def _ledger_with(tmp_path, rows):
+    led = tmp_path / "ledger"; led.mkdir(exist_ok=True)
+    (led / "ledger.jsonl").write_text(
+        "\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+    return led
+
+
+def test_integrate_blocks_without_skeptic(tmp_path):
+    """gate が admit していても、skeptic の survives が無ければ統合させない。
+
+    実地で #8 が「refutation_attempted が台帳に1件も無いまま develop へ統合」された。
+    Issue にはコメントがあったので、二重記録の片側だけが落ちていた。
+    """
+    led = _ledger_with(tmp_path, [
+        {"seq": 1, "class": "admission_decided",
+         "payload": {"deliverable": "8", "issue": 8, "verdict": "admit"}},
+    ])
+    env = dict(os.environ, ORG_LEDGER_ROOT=str(led))
+    p = subprocess.run([sys.executable, str(TOOLS / "org_cycle.py"), "integrate", "--issue", "8"],
+                       capture_output=True, text=True, env=env, cwd=str(tmp_path), timeout=60)
+    assert p.returncode == 4, p.stdout + p.stderr
+    err = p.stdout + p.stderr
+    assert "skeptic" in err and "survives" in err
+    assert "git merge" not in err, "前提が揃わないのにマージ手順に入っている"
+
+
+def test_integrate_allows_when_both_recorded(tmp_path):
+    """admit + survives が揃えば、前提照合では止まらない（実行は git の世界に入る）。"""
+    led = _ledger_with(tmp_path, [
+        {"seq": 1, "class": "admission_decided",
+         "payload": {"deliverable": "8", "issue": 8, "verdict": "admit"}},
+        {"seq": 2, "class": "refutation_attempted",
+         "payload": {"claim_id": "8", "issue": 8, "verdict": "survives"}},
+    ])
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("org_cycle_i", TOOLS / "org_cycle.py")
+    m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+    os.environ["ORG_LEDGER_ROOT"] = str(led)
+    try:
+        assert m._admission_for(8)[0] == "admit"
+        assert m._refutation_for(8)[0] == "survives"
+    finally:
+        os.environ.pop("ORG_LEDGER_ROOT", None)
+
+
+def test_refuted_is_not_treated_as_survives(tmp_path):
+    """refuted を survives と混同したら、反証されたものが統合される。"""
+    led = _ledger_with(tmp_path, [
+        {"seq": 1, "class": "admission_decided",
+         "payload": {"issue": 9, "verdict": "admit"}},
+        {"seq": 2, "class": "refutation_attempted",
+         "payload": {"issue": 9, "verdict": "refuted"}},
+    ])
+    env = dict(os.environ, ORG_LEDGER_ROOT=str(led))
+    p = subprocess.run([sys.executable, str(TOOLS / "org_cycle.py"), "integrate", "--issue", "9"],
+                       capture_output=True, text=True, env=env, cwd=str(tmp_path), timeout=60)
+    assert p.returncode == 4, "refuted なのに統合の前提を満たしたと判定された"
+
+
+def test_status_flags_admit_without_refutation(tmp_path):
+    """board が「admit 済みだが skeptic の記録が無い」を RED で出す。"""
+    led = _ledger_with(tmp_path, [
+        {"seq": 1, "class": "admission_decided",
+         "payload": {"issue": 8, "verdict": "admit"}},
+    ])
+    p = subprocess.run([sys.executable, str(TOOLS / "status.py"), "status", str(led)],
+                       capture_output=True, text=True, timeout=60)
+    out = p.stdout + p.stderr
+    assert "skeptic の記録が無い" in out, out
+    assert out.startswith("RED"), out
+
+
+def test_status_counts_risk_accepted_admits(tmp_path):
+    """リスク付き admit が board に出る（書き得にしない）。"""
+    led = _ledger_with(tmp_path, [
+        {"seq": 1, "class": "admission_decided",
+         "payload": {"issue": 8, "verdict": "admit", "risk_accepted": True}},
+        {"seq": 2, "class": "refutation_attempted",
+         "payload": {"issue": 8, "verdict": "survives"}},
+    ])
+    p = subprocess.run([sys.executable, str(TOOLS / "status.py"), "status", str(led)],
+                       capture_output=True, text=True, timeout=60)
+    assert "リスク付き admit: 1 件" in p.stdout + p.stderr
+
+
+def test_verify_gate_embeds_absolute_repro_lint_path():
+    """repro_lint がパス解決できず一度も走っていなかった。絶対パスを埋める。"""
+    src = (TOOLS / "org_cycle.py").read_text(encoding="utf-8")
+    assert 'repro_lint.py' in src and 'HERE' in src, "repro_lint の絶対パス埋め込みが無い"
+
+
+def test_worktree_cleanup_keeps_dirty_tree(tmp_path):
+    """未コミットの変更がある worktree は消さない（消えて困るかは配管が決めることではない）。"""
+    import importlib.util
+    repo = tmp_path / "r"; repo.mkdir()
+    def g(*a, cwd=repo):
+        return subprocess.run(["git", *a], cwd=cwd, capture_output=True, text=True)
+    g("init", "-q", "-b", "main"); g("config", "user.email", "t@t"); g("config", "user.name", "t")
+    (repo / "s.txt").write_text("x"); g("add", "-A"); g("commit", "-qm", "s"); g("branch", "develop")
+    wt = repo / ".orgforge" / "wt" / "issue-5"
+    wt.parent.mkdir(parents=True, exist_ok=True)
+    g("worktree", "add", "-q", "-b", "feat/issue-5", str(wt), "develop")
+    (wt / "dirty.txt").write_text("uncommitted")
+
+    spec = importlib.util.spec_from_file_location("org_cycle_w", TOOLS / "org_cycle.py")
+    m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+    cwd = os.getcwd(); os.chdir(repo)
+    try:
+        msg = m._cleanup_worktree(5)
+        assert wt.is_dir(), "未コミットの変更ごと worktree を消した"
+        assert "残した" in msg, msg
+        # クリーンにすれば消える
+        (wt / "dirty.txt").unlink()
+        msg2 = m._cleanup_worktree(5)
+        assert not wt.is_dir(), f"クリーンな worktree が片付いていない: {msg2}"
+    finally:
+        os.chdir(cwd)
