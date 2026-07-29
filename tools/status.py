@@ -24,6 +24,40 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _organ import OK, read_events   # noqa: E402
 
 
+def _needs_human_issues():
+    """orgforge:needs-human ラベルの open Issue を「あなた待ち」として返す。
+
+    これが無いと board が嘘をつく: org が作れる作業だけを数えて GREEN と出すのに、実際は
+    人間の前提条件（アカウント作成・鍵の発行・ストア審査・ブランチ保護など）が未了で
+    着手できない、という状態が見えなかった。人間への依頼こそ忘れられると最も長く止まるので、
+    board の最上位に出す。
+
+    GitHub が見られない環境（ledger-only の org、gh 未認証、オフライン）では黙って空を返す —
+    board 自体は落とさない。"""
+    import subprocess
+    try:
+        here = os.path.dirname(os.path.abspath(__file__))
+        sys.path.insert(0, here)
+        import discover
+        repo = discover.backlog_repo()
+        if not repo:
+            return []
+        p = subprocess.run(["gh", "issue", "list", "--repo", repo, "--state", "open",
+                            "--label", "orgforge:needs-human", "--json", "number,title"],
+                           capture_output=True, text=True, timeout=15)
+        if p.returncode != 0:
+            return []
+        items = json.loads(p.stdout or "[]")
+    except Exception:
+        return []
+    out = []
+    for it in items[:5]:
+        out.append(f"あなたの作業待ち: #{it['number']} {it['title']}")
+    if len(items) > 5:
+        out.append(f"あなたの作業待ち: 他 {len(items) - 5} 件")
+    return out
+
+
 def cmd_status(a):
     try:
         events = read_events(a.root)
@@ -80,6 +114,11 @@ def cmd_status(a):
         amber.append(f"{open_mandates} mandate(s) submitted")
 
     done = counts.get("cycle_completed", 0)
+
+    # 人間待ちの Issue は定義上 RED — 「あなたを待っている」ものが board の意味そのもの。
+    # ledger には現れないので GitHub を見る（見られなければ黙って飛ばす。board は落とさない）。
+    for line in _needs_human_issues():
+        red.append(line)
 
     if red:
         light = "RED"

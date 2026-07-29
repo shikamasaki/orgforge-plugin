@@ -599,8 +599,9 @@ def cmd_split_check(a):
     # (b) depends_on referencing an OPEN Issue — the single-unit assertion (docs/11 §4b) fails
     for line in body.splitlines():
         if line.lower().lstrip().startswith(("depends_on", "depends on", "- **depends_on")):
-            for tok in line.split(":", 1)[-1].split(","):
-                num = "".join(ch for ch in tok if ch.isdigit())
+            # `#N` の形だけを依存とみなす。数字を全部拾うと散文が誤検出される —
+            # 「実装コードは1行も入らない」の「1」が #1 として解釈された（実地で判明）。
+            for num in re.findall(r"#(\d+)", line.split(":", 1)[-1]):
                 if num:
                     c, o = gh(["issue", "view", num, "--repo", a.repo, "--json", "state"])
                     if c == 0 and json.loads(o).get("state") == "OPEN":
@@ -787,6 +788,59 @@ def cmd_coverage_check(a):
     return rc
 
 
+def cmd_needs_human(a):
+    """CEO（人間）にしか実行できない前提条件を Issue として立てる（docs/11 §0c）。
+
+    **なぜ専用のコマンドが要るのか。** org は自分が作れる作業だけを Issue にし、人間に頼むものは
+    コマンドの散文に落としていた。実地の founding で3件（Supabase プロジェクト作成 / Google OAuth
+    クライアント登録 / GitHub のブランチ保護設定）がセッションの文章の中にしか存在せず、Issue にも
+    台帳にも残らなかった。結果:
+
+      - セッションが切れたら消える（/org-resume でも復元されない）
+      - `/org` が GREEN と出すのに、実際は人間待ちで着手できない Issue がある
+      - `ready` がブロック済みのタスクを maker に渡す（人間待ちを表現する手段がなかった）
+      - coverage-check は「Issue になったか」しか見ないので 66/66 と表示される
+
+    **人間への依頼こそ、忘れられると最も長く止まる。** `orgforge:needs-human` ラベルは
+    `/org-init` が作っていたのに、それを立てる手順がどのコマンドにも無く、使用実績は 0 件だった。
+    このコマンドがその穴を埋める。
+
+    立てた Issue は通常の task と同じ形なので、下流タスクの `--depends` で縛れる — 人間の作業が
+    終わって close されるまで、それに依存する task は `ready` に出てこない。"""
+    labels = ["orgforge:needs-human", "orgforge:kind:task"]
+    ensure = [("orgforge:needs-human", "d93f0b"), ("orgforge:kind:task", "bfd4f2")]
+    if a.objective:
+        lbl = f"orgforge:objective:{a.objective}"
+        labels.append(lbl); ensure.append((lbl, "5319e7"))
+    existing, state = _find_open_issue(a.repo, a.title, a.objective)
+    if existing is not None:
+        print(f"issue #{existing} already exists for {a.title!r} ({state}) — idempotent no-op.")
+        return 0
+    _ensure_labels(a.repo, ensure)
+    body = a.body or ""
+    body += ("\n\n---\n**これは CEO（人間）にしか実行できない作業です。** org は着手できません。\n"
+             "完了したらこの Issue を close してください — 下流のタスクが自動的に ready になります。")
+    if a.blocks:
+        blocked = ", ".join(f"#{b.strip().lstrip('#')}" for b in a.blocks.split(",") if b.strip())
+        body += f"\n\n**この作業が終わるまで着手できないもの:** {blocked}"
+    args = ["issue", "create", "--repo", a.repo, "--title", a.title, "--body", body]
+    for l in labels:
+        args += ["--label", l]
+    code, out = gh(args)
+    if code != 0:
+        print(f"gh error creating needs-human issue: {out}", file=sys.stderr)
+        return 2
+    print(out.strip())
+    n = _issue_number(out)
+    if n and a.parent:
+        ok, detail = _link_sub_issue(a.repo, int(str(a.parent).lstrip("#")), n)
+        print(detail if ok else f"WARN: {detail}", file=(sys.stdout if ok else sys.stderr))
+    if n:
+        print(f"\nNEXT: これに依存する task の body に `Depends on: #{n}` を書くこと。"
+              f"そうすれば人間の作業が終わるまで `ready` に出てこない。")
+    return 0
+
+
 def cmd_ready(a):
     # list open Issues labeled orgforge:ready, unclaimed, with no open dependency
     code, out = gh(["issue", "list", "--repo", a.repo, "--label", "orgforge:ready",
@@ -891,6 +945,13 @@ def main(argv):
     q.add_argument("--base", help="the branch to fork from (default: develop, docs/11 §4c)")
     q = sub.add_parser("split-check")
     q.add_argument("--repo", help="owner/name（省略時は git remote origin から自動発見）"); q.add_argument("--issue", required=True, type=int)
+    q = sub.add_parser("needs-human")
+    q.add_argument("--repo", help="owner/name（省略時は git remote origin から自動発見）")
+    q.add_argument("--title", required=True, help="人間がやる作業（一行）")
+    q.add_argument("--body", help="何を・どこで・何を返せばよいかの手順")
+    q.add_argument("--objective", help="関連する objective id")
+    q.add_argument("--parent", help="objective Issue 番号（native sub-issue として繋ぐ）")
+    q.add_argument("--blocks", help="この作業が終わるまで着手できない Issue 番号（カンマ区切り）")
     q = sub.add_parser("candidate-id")
     q.add_argument("--role", required=True, help="the maker/department that owns the item")
     q.add_argument("--contract", required=True, help="contract_ref — the objective this item serves")
@@ -917,7 +978,8 @@ def main(argv):
             "stage": cmd_stage, "ready": cmd_ready, "log": cmd_log,
             "branch": cmd_branch, "split-check": cmd_split_check,
             "coverage-check": cmd_coverage_check,
-            "candidate-id": cmd_candidate_id, "decide": cmd_decide}[a.cmd](a)
+            "candidate-id": cmd_candidate_id, "decide": cmd_decide,
+            "needs-human": cmd_needs_human}[a.cmd](a)
 
 
 if __name__ == "__main__":

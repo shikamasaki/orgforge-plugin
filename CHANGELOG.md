@@ -3,6 +3,50 @@
 All notable changes to orgforge-plugin. This project follows a pragmatic semver:
 minor = new mechanisms/features, patch = fixes, major = breaking articulation changes.
 
+## 0.10.0
+
+**人間にしか実行できない作業を Issue にする（docs/11 §0c）。** タテカエ org の founding〜decompose
+を通しで走らせたセッションからの申し送りに基づく。
+
+### 問題: org は自分が作れるものだけを Issue にしていた
+
+実地の founding で3件が**セッションの散文にしか存在しなかった** — Supabase プロジェクト作成、
+Google OAuth クライアント登録、GitHub のブランチ保護設定。いずれも org のツールでは完結しない
+作業で、Issue にも台帳にも残らなかった。結果:
+
+- セッションが切れれば消える（`/org-resume` は ledger を読むので復元されない）
+- `/org` が「66/66 被覆・GREEN」と出すのに、実際は人間待ちで着手できない
+- `ready` が人間待ちを依存として表現できず、ブロック済みの task を maker に渡す
+- `coverage-check` は「Issue になったか」しか見ないので前提が欠けても通る
+
+`orgforge:needs-human` ラベルは `/org-init` が作っていたのに、**それを立てる手順がどのコマンドにも
+無く、使用実績は 0 件**だった。仕組みだけあって使う道がなかった。
+
+とりわけブランチ保護は **§4e の機械的拒否層の一部**でありながら GitHub の管理設定なので
+コードでは実現できない。散文に消えると「機械が守るはず」の層に穴が開いたまま誰も気づかない。
+
+### 対処
+
+- **`github_sync needs-human`**（新規）— 人間タスクを Issue にする専用の口。`--blocks` で
+  下流を縛れ、`Depends on: #N` を書けば `ready` がブロック済み task を返さなくなる
+- **`/org-found` と `/org-decompose` に抽出手順を追加** — 抽出源は既存の
+  `REQUIREMENTS.md` の Open Questions / Assumptions（29148 の標準節。§0b でこれを必須にしたのは
+  ここに効かせるためでもある）。判定は「org のツールで完結するか」
+- **`/org` の board が needs-human を RED として最上位に出す** — 「あなたを待っている」ものこそ
+  board の意味であり、それが見えないなら board は嘘をついている。GitHub が見られない環境では
+  黙って飛ばす（board 自体は落とさない）
+
+### 同じ申し送りにあった細かい修正
+
+- **`split-check` が散文中の数字を依存と誤検出していた** — 「実装コードは1行も入らない」の「1」が
+  `#1` として解釈された。`#N` の形だけを依存とみなすよう修正
+- **`organization.SKELETON.yaml` が lint 必須項目を含んでいなかった** — そのまま埋めると初回
+  lint で 31 violations が出た。`gaming_defenses` / SoD の `authorization`・`recording` /
+  `structure.span` / layer の `departments:` キー / gate・skeptic の `loop` を、コメント付きの
+  空欄として追加。特に `departments:`（`roles:` ではない）は例が無いと必ず間違える
+- **`org_lint` O2 のメッセージが中間管理職の追加を勧めていた** — span 超過時の選択肢に
+  「span を宣言し直す」を先に並べた。契約を持たない coordinator を足すのは docs/03 §6.5 と緊張する
+
 ## 0.9.4
 
 **`!` ブロックは「エージェントが作業する前」に一斉展開される — 書いた後に走る検査を `!` に

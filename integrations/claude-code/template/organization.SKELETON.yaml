@@ -21,21 +21,38 @@ purpose: >
 objective_metric:
   name: <the measurable proxy for the purpose, e.g. "net-positive shipped results after cost">
   reward_agents_on_this: false          # non-negotiable
+  # O1 が要求する: 指標を「満たしたことにする」抜け道を先に塞ぐ。3種すべて埋めること。
+  gaming_defenses:
+    - placebo: <letter を満たすが intent を満たさない出力の例。これを成功に数えない>
+    - null_test: <分母が 0 の場合など、無意味な満点を除外する条件>
+    - forward_test: <同じ入力を2回流して同一結果になることの検証など、前向きの確認>
 
 # ── STRUCTURE (Organ 2) — the complete ideal chart, every dept the purpose will ever need ─────
 structure:
-  rfp: <ledger://genesis/rfp OR a path to your RFP/brief — the purpose's source document>
+  rfp: <REQUIREMENTS.md OR ledger://genesis/rfp — the purpose's source document>
+  # O2 が要求する: supervisor が実際に見られる直属数。既定は 6。
+  # 役割が増えて超えるなら、中間管理職を足すより先に「なぜこの数で見られるのか」を書いて
+  # ここを宣言し直すことを検討する（契約を持たない管理ロールを増やすのは docs/03 §6.5 と緊張する）。
+  span:
+    default_effective_span: <直属の数。既定 6。超えるなら理由をコメントで残す>
   layers:
     - name: supervisor
       regime: mechanistic
       role: supervisor                   # singleton control layer — keep
     - name: <your_exploration_or_delivery_layer>   # e.g. "delivery_front" — your domain makers
       regime: organic
+      # ロールの列挙キーは `departments:`（`roles:` ではない）。
+      # ここに書かれていないロールは O2b で「層に属さない」と落ちる。
+      departments: [<role_id>, <role_id>]
     - name: control_layer
       regime: mechanistic                # gate / skeptic / registrar — keep
+      departments: [gate, skeptic, registrar]
 
 # ── SEPARATION OF DUTIES (Organ 6) — the three incompatible duties must not concentrate ───────
 separation_of_duties:
+  # O6 が要求する3点セット。3つとも必須で、欠けると「不可分な職務が分離されていない」と落ちる。
+  authorization: gate                    # 誰が admit するか（実装しないロールであること）
+  recording: ledger                      # 記録の保持者（判定される側が書き換えられないこと）
   custody: ledger                        # the single protected audit record (write-controlled; SSoT = code + the domain model) — keep
   # maker != checker != skeptic; the lint enforces the skeptic is a DIFFERENT model_family.
   # Keep the gate/skeptic below; name YOUR makers as the ones they check.
@@ -96,6 +113,8 @@ roles:
       standard and a skeptic's refutation survived. Admits or rejects; makes nothing.
     context_pack: [intent_block, admission_standard, candidate_under_review, full_evidence_trail]
     functions: [judge]
+    loop: { cadence: on_candidate_arrival }   # CA が要求。ledger-schema の triggers にある名前のみ
+    output_to: [skeptic]                      # O6: admit した結果は必ず反証に回すこと
 
   - id: skeptic
     regime: mechanistic
@@ -107,6 +126,7 @@ roles:
       whom it checks, by charter.
     context_pack: [intent_block, claim_under_review, refutation_checklist, full_evidence_trail]
     functions: [review]
+    loop: { cadence: on_positive_result }
 
   # ---- YOUR domain roles: add one block per role (copy this template) --------------------------
   # - id: <role_id>

@@ -214,8 +214,13 @@ def check_layers_and_span(org, roles, lint):
         active = [x for x in reports if x in roles and is_active(roles[x])]
         if len(active) > span:
             lint.fail("O2", f"supervisor '{r['id']}' has {len(active)} active reports "
-                            f"> effective span {span} — widen span via context or file "
-                            f"a charter-tier add_layer proposal (docs/02 §3)")
+                            f"> effective span {span}. 選択肢は2つ: (a) この数を実際に見られる"
+                            f"理由があるなら structure.span.default_effective_span を "
+                            f"{len(active)} に宣言し、なぜ見られるのかをコメントで残す; "
+                            f"(b) 階層が本当に要るなら charter-tier の add_layer を出す。"
+                            f"(a) を先に検討すること — 契約を持たない中間管理ロールを足すのは "
+                            f"docs/03 §6.5（coordinator は deliverable を持たない）と緊張する "
+                            f"(docs/02 §3)")
 
 
 def collect_control_ids(org, roles, lint):

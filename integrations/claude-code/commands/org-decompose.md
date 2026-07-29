@@ -145,6 +145,39 @@ territories), depends on something still open, or has non-EARS acceptance:
 
 Fix what it flags by **re-splitting the Issue**, not by loosening the spec.
 
+## 4b. 人間にしか実行できない前提条件を Issue にする（docs/11 §0c）— 省略しないこと
+
+**org は自分が作れる作業だけを Issue にし、人間に頼むものを散文に落としてはならない。**
+起草中に「これは #N の範囲外」と気づいたものを含む。実地の founding で3件（Supabase プロジェクト作成 / Google OAuth クライアント登録 / GitHub の
+ブランチ保護設定）がセッションの文章の中にしか残らず、Issue にも台帳にも入らなかった。
+結果、`/org` は GREEN と表示するのに実際は着手できない、という乖離が起きた。
+
+**人間への依頼こそ、忘れられると最も長く止まる。** 必ず構造化すること。
+
+抽出源はすでに手元にある:
+
+- `REQUIREMENTS.md` の **Open Questions** 節 — 「実装前に決める」と自分で書いたもの
+- 同 **Assumptions** 節 — 「CEO が用意する」「アカウントが必要」と書いたもの
+- `ARCHITECTURE.md` の技術選択のうち、**外部サービスの登録・鍵の発行**が要るもの
+- 起草中に「これは自分にはできない」と気づいたすべて
+
+判定は単純: **org のツールで完結するか。** アカウント作成・課金・OAuth クライアント登録・
+ドメイン取得・ストア審査・GitHub の管理設定（ブランチ保護など）は、いずれも人間にしかできない。
+
+該当するものを1件ずつ Issue にする:
+
+```
+python3 "${CLAUDE_PLUGIN_ROOT}/tools/github_sync.py" needs-human \
+  --title "<人間がやる作業（一行）>" \
+  --body "<どこで・何をして・何を返せばよいか。手順まで書く>" \
+  --objective "<関連する objective id>" --parent <objective Issue 番号> \
+  --blocks "<この作業が終わるまで着手できない Issue 番号>"
+```
+
+`--blocks` を書いたら、**その下流 Issue の body に `Depends on: #<この Issue 番号>` を追記する**
+こと。そうして初めて `ready` が人間待ちを依存として解釈し、ブロックされた task を maker に
+渡さなくなる。
+
 ## 5. The coverage gate — prove no must-have was dropped
 
 This is the check that makes decomposition trustworthy: `/org-found`'s O10 proved every must-have has one

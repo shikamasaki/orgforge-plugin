@@ -124,10 +124,44 @@ keep the CEO's decisions minimal. Concretely:
    check. Cross-check the manifest against the chart: any must-have with no owning contract is a
    coverage GAP the founding must close before reporting up.
 
+## 人間にしか実行できない前提条件を Issue にする（docs/11 §0c）— 省略しないこと
+
+**org は自分が作れる作業だけを Issue にし、人間に頼むものを散文に落としてはならない。**
+実地の founding で3件（Supabase プロジェクト作成 / Google OAuth クライアント登録 / GitHub の
+ブランチ保護設定）がセッションの文章の中にしか残らず、Issue にも台帳にも入らなかった。
+結果、`/org` は GREEN と表示するのに実際は着手できない、という乖離が起きた。
+
+**人間への依頼こそ、忘れられると最も長く止まる。** 必ず構造化すること。
+
+抽出源はすでに手元にある:
+
+- `REQUIREMENTS.md` の **Open Questions** 節 — 「実装前に決める」と自分で書いたもの
+- 同 **Assumptions** 節 — 「CEO が用意する」「アカウントが必要」と書いたもの
+- `ARCHITECTURE.md` の技術選択のうち、**外部サービスの登録・鍵の発行**が要るもの
+- 起草中に「これは自分にはできない」と気づいたすべて
+
+判定は単純: **org のツールで完結するか。** アカウント作成・課金・OAuth クライアント登録・
+ドメイン取得・ストア審査・GitHub の管理設定（ブランチ保護など）は、いずれも人間にしかできない。
+
+該当するものを1件ずつ Issue にする:
+
+```
+python3 "${CLAUDE_PLUGIN_ROOT}/tools/github_sync.py" needs-human \
+  --title "<人間がやる作業（一行）>" \
+  --body "<どこで・何をして・何を返せばよいか。手順まで書く>" \
+  --objective "<関連する objective id>" --parent <objective Issue 番号> \
+  --blocks "<この作業が終わるまで着手できない Issue 番号>"
+```
+
+`--blocks` を書いたら、**その下流 Issue の body に `Depends on: #<この Issue 番号>` を追記する**
+こと。そうして初めて `ready` が人間待ちを依存として解釈し、ブロックされた task を maker に
+渡さなくなる。
+
 5. **REPORT UP for CEO review.** Summarize concisely: the must/should/nice counts, the layers +
    seams, the roles you defined, the **coverage manifest** (every must-have → its one owning role +
    acceptance, with any gaps called out), and the decisions that genuinely need the CEO's sign-off
-   (stack choice, the must-have line, anything irreversible). **STOP here** — do not build the
+   (stack choice, the must-have line, anything irreversible)、そして
+   **あなたが立てた needs-human Issue の一覧**（これが CEO の作業リストになる）。 **STOP here** — do not build the
    product, and do not mint task Issues. Founding is design; the scope is the CEO's call. Once the CEO
    signs off, the next step is **`/org-decompose`**, which turns `coverage-manifest.md` +
    `ARCHITECTURE.md` into the atomic task Issues — tell the CEO that in your report.

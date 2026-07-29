@@ -531,3 +531,58 @@ def test_decide_allows_a_rejection_without_evidence(monkeypatch):
         verdict="reject", evidence=None,
         why="MUST 2 has no test and the placebo output passes the letter of the criterion"))
     assert rc == 0 and len(fake.posted) == 1
+
+
+# ── 人間タスクの構造化（docs/11 §0c）────────────────────────────────────────
+# org は自分が作れる作業だけを Issue にし、人間に頼むものを散文に落としていた。実地の founding で
+# 3件（Supabase 作成 / OAuth クライアント登録 / ブランチ保護設定）がセッションの文章にしか残らず、
+# /org が GREEN と出すのに実際は着手できない、という乖離が起きた。
+def test_needs_human_creates_a_labeled_issue(monkeypatch):
+    fake = FakeGh(replies={"issue create": (0, "https://github.com/o/r/issues/25"),
+                           "issue list": (0, "[]")})
+    monkeypatch.setattr(GS, "gh", fake)
+    rc, out = _quiet(GS.cmd_needs_human, _ns(repo="o/r", title="Supabase を作る", body="手順…",
+                                             objective="obj1", parent=None, blocks=None))
+    assert rc == 0, out
+    create = fake.calls_matching("issue create")[0]
+    assert "orgforge:needs-human" in create
+    assert "orgforge:kind:task" in create
+
+
+def test_needs_human_body_says_the_org_cannot_do_it(monkeypatch):
+    """人間がこの Issue を見たとき、なぜ自分に回ってきたのかが分かること。"""
+    fake = FakeGh(replies={"issue create": (0, "https://github.com/o/r/issues/25"),
+                           "issue list": (0, "[]")})
+    monkeypatch.setattr(GS, "gh", fake)
+    _quiet(GS.cmd_needs_human, _ns(repo="o/r", title="T", body="B", objective=None,
+                                   parent=None, blocks="10,11"))
+    body = fake.calls_matching("issue create")[0][
+        fake.calls_matching("issue create")[0].index("--body") + 1]
+    assert "CEO（人間）にしか実行できない" in body
+    assert "#10" in body and "#11" in body     # 何をブロックしているかが見える
+
+
+def test_needs_human_is_idempotent(monkeypatch):
+    """再実行で二重に立てない（founding をやり直しても増えない）。"""
+    listing = ('[{"number": 25, "title": "T", "state": "OPEN", "labels": []}]')
+    fake = FakeGh(replies={"issue list": (0, listing)})
+    monkeypatch.setattr(GS, "gh", fake)
+    rc, out = _quiet(GS.cmd_needs_human, _ns(repo="o/r", title="T", body=None, objective=None,
+                                             parent=None, blocks=None))
+    assert rc == 0
+    assert not fake.calls_matching("issue create")
+
+
+def test_split_check_ignores_digits_in_prose(monkeypatch):
+    """`depends_on` 行の散文中の数字を依存と誤検出しない。
+
+    「実装コードは1行も入らない」の「1」が #1 として解釈され、存在しない依存が警告された
+    （実地で判明）。#N の形だけを依存とみなす。"""
+    body = json.dumps({"body": "## MUST\n- [ ] WHEN x THE system SHALL y\n"
+                               "- **owns:** `app/a/`\n"
+                               "- **depends_on:** なし。実装コードは1行も入らない\n", "title": "t"})
+    fake = FakeGh(replies={"issue view": (0, body)})
+    monkeypatch.setattr(GS, "gh", fake)
+    rc, out = _quiet(GS.cmd_split_check, _ns(repo="o/r", issue=9))
+    assert rc == 0, out
+    assert "#1" not in out
