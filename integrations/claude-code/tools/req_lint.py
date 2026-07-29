@@ -83,9 +83,13 @@ TBX = re.compile(r"\b(TBD|TBS|TBR)\b")
 MUST_KEYWORD = re.compile(r"\bmust\b", re.I)
 
 # EARS の6パターン（英語・日本語の両方を認める）
+# 日本語の shall 相当。「〜すること」だけでは足りない — 実際の要求文は「記録に残すこと」
+# 「対象に含めないこと」「リマインダーを送ること」のように、動詞の連体形＋「こと」で終わる。
+# 「すること」限定にすると、正しく書かれた要求の大半を違反として弾く（実地で判明）。
 EARS_PATTERNS = [
     (r"\bshall\b", "shall"),
-    (r"(すること|しなければならない|するものとする)", "shall(ja)"),
+    (r"こと(\s*\||\s*$|。)", "shall(ja: 〜こと)"),
+    (r"(しなければならない|するものとする|してはならない)", "shall(ja)"),
 ]
 EARS_TRIGGERS = [r"\bwhile\b", r"\bwhen\b", r"\bwhere\b", r"\bif\b",
                  r"(のとき|の場合|している間|ならば)"]
@@ -164,8 +168,13 @@ def _requirement_lines(text):
             continue
         if GWT.search(line) and not re.search(r"\bshall\b", line, re.I):
             continue                       # GWT シナリオ行
-        if REQ_ID.search(line) or (s.startswith("|")
-                                   and any(re.search(p, line, re.I) for p, _ in EARS_PATTERNS)):
+        # 要求 ID を「定義している」行か、「参照している」だけの行かを区別する。
+        # 制約表や EXCLUDE 表は根拠として (FR-021) のように参照するが、それ自体は要求文ではない。
+        # 定義行は必ず先頭セルが ID（`| FR-001 | …`）なので、そこで判定する。
+        cells = [c.strip() for c in s.strip("|").split("|")] if s.startswith("|") else []
+        defines = bool(cells) and bool(REQ_ID.match(cells[0].replace("**", "")))
+        if defines or (s.startswith("|") and not cells[0:1]
+                       and any(re.search(p, line, re.I) for p, _ in EARS_PATTERNS)):
             lines.append((i, line))
     return lines
 
