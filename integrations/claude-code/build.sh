@@ -39,6 +39,16 @@ done
 for f in "$REPO"/tools/*.py; do
   sync_one "$f" "$HERE/tools/$(basename "$f")" || rc=1
 done
+# サブパッケージ（tools/orgcycle/ など）も同期する。`tools/*.py` だけを見ていると
+# 分割したモジュールがバンドルに入らず、プラグインとして入れた瞬間に ImportError で死ぬ。
+for d in "$REPO"/tools/*/; do
+  [ -f "${d}__init__.py" ] || continue
+  name="$(basename "$d")"
+  mkdir -p "$HERE/tools/$name"
+  for f in "$d"*.py; do
+    sync_one "$f" "$HERE/tools/$name/$(basename "$f")" || rc=1
+  done
+done
 # the data files the org commands read (source of truth: template/): schedule/sensors/constitution
 # for /org-tick and /org-mandate; moves + ledger-schema + the SKELETON for /org-found's lint + draft;
 # SPEC.md for /org-decompose's Issue bodies; role-settings.yaml for /org-init's scaffold;

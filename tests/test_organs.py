@@ -23,6 +23,36 @@ import sys
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 TOOLS = REPO / "tools"
+
+
+# ── org_cycle は tools/orgcycle/ に分割された（0.22.0）─────────────────────
+# ソースを文字列で検査するテストは分割に弱い。**どのモジュールに居るかではなく、
+# 何が書かれているか**を見たいので、全モジュールを連結したものを対象にする。
+# 「振る舞いで検証できるもの」は振る舞いで見る（そちらが本筋）。
+def _cycle_src(*mods):
+    """orgcycle の（指定した / 全）モジュールのソースを連結して返す。"""
+    base = TOOLS / "orgcycle"
+    names = mods or ("_core", "cycle", "judge", "ship", "inspect")
+    out = []
+    for m in names:
+        f = base / f"{m}.py"
+        if f.is_file():
+            out.append(f.read_text(encoding="utf-8"))
+    return "\n".join(out)
+
+
+def _cycle_mod(name):
+    """orgcycle の1モジュールを import して返す（関数を直接呼ぶテスト用）。
+
+    パッケージとして import する — 単体ファイルとして読むと `from ._core import ...` の
+    相対 import が解決できない。
+    """
+    import importlib, sys as _s
+    if str(TOOLS) not in _s.path:
+        _s.path.insert(0, str(TOOLS))
+    return importlib.import_module(f"orgcycle.{name}")
+
+
 TEMPLATE = REPO / "template"
 
 
@@ -993,8 +1023,7 @@ def test_verify_finds_charter_in_bundled_layout():
     唯一の存在理由を失う。repo 直下の配置だけ見ていて実際に取りこぼした。
     """
     import importlib.util
-    spec = importlib.util.spec_from_file_location("org_cycle_c", TOOLS / "org_cycle.py")
-    m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+    m = _cycle_mod("judge")
     bundled = TOOLS.parent / "integrations" / "claude-code"
     if not (bundled / "agents").is_dir():
         return  # バンドル未生成の環境ではスキップ
@@ -1023,8 +1052,7 @@ def test_admission_lookup_tolerates_identifier_drift(tmp_path):
     (led / "ledger.jsonl").write_text(
         "\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
 
-    spec = importlib.util.spec_from_file_location("org_cycle_a", TOOLS / "org_cycle.py")
-    m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+    m = _cycle_mod("_core")
     os.environ["ORG_LEDGER_ROOT"] = str(led)
     try:
         v, seq, _ = m._admission_for(8)
@@ -1044,7 +1072,7 @@ def test_verify_allows_passing_by_file_reference():
     以前は本文限定だったので「本文に貼れ」と案内していた。264行を毎回貼ると maker の
     context を圧迫するので、ガード側がファイルを読んで検証するように変えた。
     """
-    src = (TOOLS / "org_cycle.py").read_text(encoding="utf-8")
+    src = _cycle_src()
     seg = src[src.index("def cmd_verify"):]
     assert "ファイルに落として" in seg and "参照させてもよい" in seg
     assert "HELD" not in seg, "ファイル渡しが弾かれる前提の案内が残っている"
@@ -1086,8 +1114,7 @@ def test_integrate_allows_when_both_recorded(tmp_path):
          "payload": {"claim_id": "8", "issue": 8, "verdict": "survives"}},
     ])
     import importlib.util
-    spec = importlib.util.spec_from_file_location("org_cycle_i", TOOLS / "org_cycle.py")
-    m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+    m = _cycle_mod("_core")
     os.environ["ORG_LEDGER_ROOT"] = str(led)
     try:
         assert m._admission_for(8)[0] == "admit"
@@ -1138,7 +1165,7 @@ def test_status_counts_risk_accepted_admits(tmp_path):
 
 def test_verify_gate_embeds_absolute_repro_lint_path():
     """repro_lint がパス解決できず一度も走っていなかった。絶対パスを埋める。"""
-    src = (TOOLS / "org_cycle.py").read_text(encoding="utf-8")
+    src = _cycle_src()
     assert 'repro_lint.py' in src and 'HERE' in src, "repro_lint の絶対パス埋め込みが無い"
 
 
@@ -1155,8 +1182,7 @@ def test_worktree_cleanup_keeps_dirty_tree(tmp_path):
     g("worktree", "add", "-q", "-b", "feat/issue-5", str(wt), "develop")
     (wt / "dirty.txt").write_text("uncommitted")
 
-    spec = importlib.util.spec_from_file_location("org_cycle_w", TOOLS / "org_cycle.py")
-    m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+    m = _cycle_mod("cycle")
     cwd = os.getcwd(); os.chdir(repo)
     try:
         msg = m._cleanup_worktree(5)
@@ -1186,7 +1212,7 @@ def test_begin_log_carries_facts_the_tool_already_knows():
     実地で人が書いた 276 字にはブランチ名も worktree のパスも無かったが、org_cycle は
     両方知っていた。知っている事実を人に書かせない。
     """
-    src = (TOOLS / "org_cycle.py").read_text(encoding="utf-8")
+    src = _cycle_src()
     seg = src[src.index("def _steps_begin"):src.index("def _steps_complete")]
     for token in ("worktree:", "branch:", "parent:", "candidate_id:", "--command", "--result"):
         assert token in seg, f"begin の log に {token} が入っていない"
@@ -1194,7 +1220,7 @@ def test_begin_log_carries_facts_the_tool_already_knows():
 
 def test_handback_puts_closes_in_pr_body():
     """PR body の `Closes #N` が Issue ↔ PR ↔ コミットを繋ぎ、統合時に Issue を閉じる（C）。"""
-    src = (TOOLS / "org_cycle.py").read_text(encoding="utf-8")
+    src = _cycle_src()
     seg = src[src.index("def cmd_handback"):]
     assert 'f"Closes #{a.issue}"' in seg, "PR body に Closes が無い — Issue が OPEN のまま残る"
     assert "gh pr create" in seg
@@ -1236,7 +1262,7 @@ def test_log_writes_progress_receipt_to_ledger(monkeypatch, tmp_path):
 
 def test_begin_records_attention_allocated():
     """6件着手して選択の記録が1件だけだった。選んだ結果を残すのは配管。"""
-    src = (TOOLS / "org_cycle.py").read_text(encoding="utf-8")
+    src = _cycle_src()
     seg = src[src.index("def _steps_begin"):src.index("def _steps_complete")]
     assert "attention_allocated" in seg
 
@@ -1255,7 +1281,7 @@ def test_doctrine_propose_warns_on_incomplete_provenance():
 
 def test_complete_proposes_learning_to_doctrine():
     """学びの蓄積口がサイクルに繋がっていること（propose まで。admit は gate）。"""
-    src = (TOOLS / "org_cycle.py").read_text(encoding="utf-8")
+    src = _cycle_src()
     seg = src[src.index("def cmd_complete"):src.index("def cmd_plan")]
     assert "doctrine.py" in seg and "propose" in seg
     assert "--retrieved-at" in seg and "--review-by" in seg, \
@@ -1275,8 +1301,7 @@ def test_gc_keeps_unmerged_and_dirty_worktrees(tmp_path):
     g("worktree", "add", "-q", "-b", "feat/issue-3", str(wt), "develop")
     (wt / "new.txt").write_text("work"); g("add", "-A", cwd=wt); g("commit", "-qm", "w", cwd=wt)
 
-    spec = importlib.util.spec_from_file_location("org_cycle_g", TOOLS / "org_cycle.py")
-    m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+    m = _cycle_mod("inspect")
     cwd = os.getcwd(); os.chdir(repo)
     try:
         m.cmd_gc(argparse.Namespace(base="develop", all=False))
@@ -1287,7 +1312,7 @@ def test_gc_keeps_unmerged_and_dirty_worktrees(tmp_path):
 
 def test_record_marks_backfilled():
     """遡って記録したものは、実時点の記録と区別できること。"""
-    src = (TOOLS / "org_cycle.py").read_text(encoding="utf-8")
+    src = _cycle_src()
     seg = src[src.index("def cmd_record"):]
     assert '"backfilled": True' in seg, "backfill 印が無いと、後から足した記録が実時点と混ざる"
 
@@ -1545,7 +1570,7 @@ def test_risk_accepted_admit_not_counted_after_reject(tmp_path):
 
 def test_verify_template_has_no_undefined_shell_var():
     """雛形は貼ってそのまま動くこと。$P は未定義で、打てない雛形は打たれない。"""
-    src = (TOOLS / "org_cycle.py").read_text(encoding="utf-8")
+    src = _cycle_src()
     assert "$P/tools" not in src, "未定義の $P が雛形に残っている"
 
 
@@ -1580,7 +1605,7 @@ def test_correction_backfill_is_not_voided(tmp_path):
 
 def test_show_lists_every_judgment_with_correction_marks():
     """1つの Issue の判定履歴を一望できる（何周目のどの判定かが分かる）。"""
-    src = (TOOLS / "org_cycle.py").read_text(encoding="utf-8")
+    src = _cycle_src()
     seg = src[src.index("def cmd_show"):]
     assert "訂正済み" in seg and "backfill" in seg
     assert "次:" in seg, "いま何待ちかが出ない"
@@ -1588,7 +1613,7 @@ def test_show_lists_every_judgment_with_correction_marks():
 
 def test_begin_warns_but_does_not_block_on_unready_deps():
     """事前チェックは見せるだけ。判断は人がする。"""
-    src = (TOOLS / "org_cycle.py").read_text(encoding="utf-8")
+    src = _cycle_src()
     seg = src[src.index("def _readiness"):src.index("def cmd_begin")]
     assert "needs-human" in seg and "rework" in seg
     body = src[src.index("def cmd_begin"):src.index("def _steps_complete")] \
@@ -1625,7 +1650,7 @@ def test_seam_guard_accepts_a_referenced_file(tmp_path):
 # ── 0.20.0: rework 履歴 / 統合の事前確認 / 本番資産 / 公開面 ─────────────
 def test_verify_passes_rework_history_to_gate():
     """gate に過去の判定を渡す。渡さないと毎回「初回判定」として扱う。"""
-    src = (TOOLS / "org_cycle.py").read_text(encoding="utf-8")
+    src = _cycle_src()
     seg = src[src.index("def cmd_verify"):]
     assert "判定履歴" in seg and "回目の判定です" in seg
     assert "再導出" in seg, "「前回の指摘が直ったか」だけを見る gate になってしまう"
@@ -1633,25 +1658,25 @@ def test_verify_passes_rework_history_to_gate():
 
 def test_round_count_uses_the_larger_of_ledger_and_issue():
     """二重記録の片側が落ちていても回数を過少に言わない。"""
-    src = (TOOLS / "org_cycle.py").read_text(encoding="utf-8")
+    src = _cycle_src()
     seg = src[src.index("def cmd_verify"):]
     assert "max(len(rounds), len(issue_rounds))" in seg
 
 
 def test_integrate_plan_executes_nothing_and_warns_on_overlap(tmp_path):
     """--plan は何も実行せず、並行 worktree との重複を予告する。"""
-    src = (TOOLS / "org_cycle.py").read_text(encoding="utf-8")
+    src = _cycle_src("ship")
     seg = src[src.index("def _integrate_preview"):src.index("def cmd_integrate")]
     assert "同じファイルを変更しています" in seg
     body = src[src.index("def cmd_integrate"):]
     assert 'if getattr(a, "plan", False):' in body
-    assert body.index('if getattr(a, "plan", False):') < body.index("git merge"), \
+    assert body.index('if getattr(a, "plan", False):') < body.index("git\", \"merge"), \
         "--plan がマージ手順より後にある（実行してしまう）"
 
 
 def test_surface_detection_ranks_security_definer_first():
     """SECURITY DEFINER は関数ごとに判定する。ファイル単位だと肝心の1件が沈む。"""
-    src = (TOOLS / "org_cycle.py").read_text(encoding="utf-8")
+    src = _cycle_src()
     seg = src[src.index("def _new_public_surfaces"):]
     assert "関数ごと" in seg, "ファイル単位のフラグに戻っている"
     assert "grant 済み" in seg
@@ -1659,14 +1684,14 @@ def test_surface_detection_ranks_security_definer_first():
 
 def test_surface_detection_skips_test_files():
     """テストヘルパを拾いすぎると、確認してほしい1件が埋もれる。"""
-    src = (TOOLS / "org_cycle.py").read_text(encoding="utf-8")
+    src = _cycle_src()
     seg = src[src.index("def _new_public_surfaces"):]
     assert "tests?" in seg and "spec" in seg
 
 
 def test_complete_blocks_until_surfaces_declared(tmp_path):
     """公開面が増えたら、申告するまで complete させない（認可ホールの入口）。"""
-    src = (TOOLS / "org_cycle.py").read_text(encoding="utf-8")
+    src = _cycle_src()
     seg = src[src.index("def cmd_complete"):src.index("def cmd_plan")]
     assert "--new-surface" in seg and "return 2" in seg
     assert "認可ホール" in seg
@@ -1674,7 +1699,7 @@ def test_complete_blocks_until_surfaces_declared(tmp_path):
 
 def test_asset_touched_records_authority():
     """本番資産の変更は「誰の権限で入れたか」ごと残す。"""
-    src = (TOOLS / "org_cycle.py").read_text(encoding="utf-8")
+    src = _cycle_src()
     seg = src[src.index("def cmd_touched"):]
     assert "authority" in seg and "reversible" in seg and "rollback" in seg
 
@@ -1724,3 +1749,43 @@ def test_decide_key_is_unique_per_judgment():
     src = (TOOLS / "github_sync.py").read_text(encoding="utf-8")
     seg = src[src.index("def cmd_decide"):]
     assert 'f"{a.event}-{a.issue}-{digest[:12]}"' in seg
+
+
+# ── 0.22.0: 分割で持ち込んだ穴を塞ぐ ────────────────────────────────────
+def test_core_HERE_points_at_tools_not_the_package():
+    """HERE は tools/ を指すこと。
+
+    分割時にここを直し忘れ、_gh_sync が github_sync.py を見失って _branch_for が
+    slug 無しのブランチ名を返した。組み立て系のツールは「見つからない」を静かに
+    素通りするので、show の実装行と integrate --plan の変更一覧が**黙って空**になった。
+    パスの基点は分割で最初に壊れる場所。
+    """
+    m = _cycle_mod("_core")
+    assert os.path.isfile(os.path.join(m.HERE, "github_sync.py")), \
+        f"HERE={m.HERE} から github_sync.py が見えない"
+    assert os.path.isfile(os.path.join(m.HERE, "ledger.py"))
+
+
+def test_bundle_includes_subpackages():
+    """build.sh が tools/ のサブパッケージも同期すること。
+
+    `tools/*.py` だけを見ていると、分割したモジュールがバンドルに入らず、
+    プラグインとして入れた瞬間に ImportError で死ぬ。
+    """
+    bundled = TOOLS.parent / "integrations" / "claude-code" / "tools"
+    if not bundled.is_dir():
+        return
+    for src in (TOOLS / "orgcycle").glob("*.py"):
+        dst = bundled / "orgcycle" / src.name
+        assert dst.is_file(), f"バンドルに {src.name} が無い（build.sh の同期漏れ）"
+        assert dst.read_text(encoding="utf-8") == src.read_text(encoding="utf-8"), \
+            f"{src.name} がバンドルと食い違っている"
+
+
+def test_every_subcommand_still_dispatches():
+    """分割後も全サブコマンドが起動すること（import の取りこぼし検出）。"""
+    for c in ("begin", "complete", "plan", "verify", "handback",
+              "integrate", "gc", "record", "show", "touched"):
+        p = subprocess.run([sys.executable, str(TOOLS / "org_cycle.py"), c, "--help"],
+                           capture_output=True, text=True, timeout=60)
+        assert p.returncode == 0, f"{c} が起動しない: {p.stderr[:200]}"
