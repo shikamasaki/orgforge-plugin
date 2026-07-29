@@ -98,7 +98,7 @@ keep the CEO's decisions minimal. Concretely:
    still carries, and would check O6/O6c/MV cross-references against the *template's* role names rather
    than the ones you just wrote.
 
-   !`pick() { [ -f "$1" ] && echo "$1" || echo "${CLAUDE_PLUGIN_ROOT}/template/$1"; }; echo "linting: organization.yaml $(pick constitution.yaml) $(pick moves.yaml) $(pick ledger-schema.yaml) $(pick sensors.yaml)"; python3 "${CLAUDE_PLUGIN_ROOT}/tools/org_lint.py" organization.yaml "$(pick constitution.yaml)" "$(pick moves.yaml)" "$(pick ledger-schema.yaml)" "$(pick sensors.yaml)"`
+   !`A=organization.yaml; for f in constitution.yaml moves.yaml ledger-schema.yaml sensors.yaml; do if [ -f "$f" ]; then A="$A $f"; else A="$A ${CLAUDE_PLUGIN_ROOT}/template/$f"; fi; done; echo "linting: $A"; python3 "${CLAUDE_PLUGIN_ROOT}/tools/org_lint.py" $A`
 
    Fix anything the lint fails; a chart that does not lint is not founded. If O10 fires, a
    deliverable is missing its standard, owned twice, or self-checked — fix the contract, not the

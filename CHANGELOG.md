@@ -3,6 +3,31 @@
 All notable changes to orgforge-plugin. This project follows a pragmatic semver:
 minor = new mechanisms/features, patch = fixes, major = breaking articulation changes.
 
+## 0.9.2
+
+**`/org-found` が引数を2つ以上受け取ると lint が壊れるバグを修正。**
+
+`!` ブロック内でシェル関数を定義し、その中で `$1` を使っていた:
+
+```
+pick() { [ -f "$1" ] && echo "$1" || echo "${CLAUDE_PLUGIN_ROOT}/template/$1"; }
+```
+
+**関数内の `$1` は、関数の引数ではなくコマンドの第1引数に先に展開される。**
+`/org-found REQUIREMENTS.md DECISIONS.md` と呼ぶと `pick constitution.yaml` が
+`DECISIONS.md` を返し、4ファイルすべてが同じ誤ったパスを指した:
+
+```
+[SC] constitution.yaml file not found: .../template/DECISIONS.md
+[SC] moves.yaml file not found:        .../template/DECISIONS.md
+[SC] ledger-schema.yaml file not found: .../template/DECISIONS.md
+[SC] sensors.yaml file not found:      .../template/DECISIONS.md
+```
+
+シェル関数を使わない形（`for` ループで組み立てる）に置き換えた。他のコマンドに同じ
+パターンが無いことも確認済み。**`!` ブロックの中でシェル関数を定義しないこと** —
+コマンド引数と衝突する。
+
 ## 0.9.1
 
 **ドキュメントを 0.9.0 の実態に合わせ、`/org-init` の誤爆を機械的に止める。** 機能追加はない
