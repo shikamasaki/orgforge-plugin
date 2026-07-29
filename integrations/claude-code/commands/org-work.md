@@ -157,6 +157,13 @@ python3 "${CLAUDE_PLUGIN_ROOT}/tools/org_cycle.py" complete \
   (--domain-model-updated "<確立したドメイン規則への参照>" | --domain-model-none "<確立しなかった理由>")
 ```
 
+**公開面が増えていたら申告するまで完了できない。** SECURITY DEFINER 関数・grant・RLS ポリシー・
+エンドポイント・export が新しく生えていれば列挙して止まる（危険な順に。テスト・型定義・
+スクリプトは除外し、worktree の未コミット分も見る）。`--new-surface "<面>: <誰が呼べるか /
+何ができるか>"` で申告するか、`--new-surface-none "<理由>"` で否定する。**認可ホールは
+「関数を1つ足した」ところから生まれる** — 実地の `join_group` がまさにそれで、SECURITY
+DEFINER を1つ増やしたことが誰にも機械的に見えていなかった。
+
 `--command` / `--result` は**必須**。`log` 側が「通った」の言い換えを拒否する。`decide` が
 `--why` を検査するのと同じ理由で、ここも検査する — 実地では検査のある `decide` が3,500〜5,900字、
 検査の無い `log` が276〜473字になり、**同じ Issue の中で判定だけが監査可能**という非対称が出た。
@@ -171,6 +178,19 @@ python3 "${CLAUDE_PLUGIN_ROOT}/tools/org_cycle.py" complete \
 仕事 — 自分の学びを自分で正典にはできない。実地では doctrine が空のまま **同じ失敗を3回**
 繰り返した（「性質のテストは壊れる場所で検証しないと無意味」）。docs/06 が「蓄積した失敗こそ
 最も価値ある context」と書いているのに、蓄積の口がサイクルに繋がっていなかった。
+
+### 3a-2b. 本番資産に触ったら残す — `touched`
+
+```
+python3 "${CLAUDE_PLUGIN_ROOT}/tools/org_cycle.py" touched \
+  --target "supabase:<project>" --op revoke --name "<対象>" \
+  --by <役割> --authority "<誰の権限で入れたか>" --issue <N> [--reversible --rollback "<戻し方>"]
+```
+
+`exposure_budget_checked` はローカルのファイル操作を数えるが、リモート DB への DDL や本番の
+権限変更は数えていない。**実際に危険なのは後者**で、取り消しにもコストがかかる。実地では
+本番 DB にマイグレーション2本と権限の revoke が入ったのに台帳には何も残らず、「あの revoke は
+誰の権限で入ったのか」を辿れない状態になった。`--authority` はそのための欄。
 
 ### 3a-3. 溜まったものを片付ける — `gc`
 
@@ -307,6 +327,11 @@ As the supervising manager you own this integrate phase (your A3, extended to cr
 ```
 python3 "${CLAUDE_PLUGIN_ROOT}/tools/org_cycle.py" integrate --issue <N> [--test "npm test"]
 ```
+
+  `--plan` を付けると**何も実行せず**、何を統合するか（変更ファイル・コミット数）と、
+  **並行する他の worktree が同じファイルを触っていないか**を先に見せる。実地では #7 の統合後に
+  10件失敗して切り分けに時間を使った（8件が worktree 走査の偽陽性）— 衝突は統合後に分かるより
+  前に分かるほうが安い。
 
   **gate の admit と skeptic の survives が台帳に無ければ止まる**（exit 4）。Issue にコメントが
   あっても台帳に無ければ「記録されていない」— 実地では refutation_attempted が台帳に1件も無い

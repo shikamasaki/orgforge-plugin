@@ -322,6 +322,46 @@ def _prior_gate(issue, repo=None):
     return hits[-1] if hits else None
 
 
+
+def _judgment_history(issue, cls=None):
+    """この Issue に対する過去の判定（訂正済みは除く）を古い順に。
+
+    gate は毎回これを渡されないと **初回判定として扱う**。3周目の #7 で「前回見落とした点を
+    今回どう確認したか」を明示させたら質が上がった、という実地の観察がある。過去の reject を
+    知らない gate は、同じ指摘を繰り返すか、直ったことの確認を飛ばすかのどちらかになる。
+    """
+    evs, voided = _events_for(issue)
+    out = []
+    for e in evs:
+        if e.get("seq") in voided:
+            continue
+        if e["class"] not in ("admission_decided", "refutation_attempted", "rework_requested"):
+            continue
+        if cls and e["class"] != cls:
+            continue
+        pl = e.get("payload", {}) or {}
+        out.append({"seq": e.get("seq"), "class": e["class"], "actor": e.get("actor"),
+                    "verdict": pl.get("verdict"),
+                    "why": (pl.get("why") or pl.get("reason") or pl.get("note") or "")})
+    return out
+
+
+def _issue_decision_comments(issue, event):
+    """Issue に書かれた判定の理由（台帳は digest だけを持つので、本文はこちらにある）。"""
+    args = ["gh", "issue", "view", str(issue), "--json", "comments"]
+    r = _repo()
+    if r:
+        args += ["--repo", r]
+    code, out = _raw(args)
+    if code != 0:
+        return []
+    try:
+        cs = json.loads(out).get("comments", [])
+    except Exception:
+        return []
+    return [c.get("body", "") for c in cs if event in (c.get("body") or "")]
+
+
 def cmd_verify(a):
     """gate / skeptic を起動するための材料を組み立てて印字する。判定はしない。"""
     role = a.role
@@ -337,6 +377,7 @@ def cmd_verify(a):
         return 3
     seam = _seam(role, a.issue, title)
     prior = _prior_gate(a.issue) if role == "skeptic" else None
+    history = _judgment_history(a.issue)
 
     ev = {"gate": "admission_decided", "skeptic": "refutation_attempted"}.get(role, "decided")
     verdicts = {"gate": "admit|reject|park", "skeptic": "survives|refuted"}[role]
@@ -346,6 +387,33 @@ def cmd_verify(a):
     out.append(seam or "(seam contract の生成に失敗 — handoff.py を確認)")
     out.append("\n## あなたの憲章（agents/%s.md — 検証基準はここが唯一の出所）\n" % role)
     out.append(charter)
+    rounds = [h for h in history if h["class"] == "admission_decided"]
+    # 台帳と Issue の**多い方**を採る。二重記録の片側が落ちるのが実地の失敗形なので、
+    # 台帳だけを数えると「2回目」と言ってしまう（実際は3回目）。回数を過少に伝えると、
+    # gate は「ほぼ初回」として扱ってしまい、この節を入れた意味が消える。
+    issue_rounds = _issue_decision_comments(a.issue, "admission_decided")
+    if history or issue_rounds:
+        n = max(len(rounds), len(issue_rounds)) + 1
+        out.append(f"\n## この Issue の判定履歴 — **{n} 回目の判定です**\n")
+        for h in history:
+            line = (f"- seq {h['seq']}: {h['class']} = `{h['verdict']}` by {h['actor']}")
+            out.append(line + (f"\n    {' '.join(str(h['why']).split())[:300]}" if h["why"] else ""))
+        # 台帳は digest しか持たないので、理由の本文は Issue から引く
+        bodies = issue_rounds
+        if bodies:
+            if len(bodies) > len(rounds):
+                out.append(f"\n（台帳には {len(rounds)} 件しか無いが、Issue には "
+                           f"{len(bodies)} 件ある — 二重記録の片側が落ちている）")
+            out.append("\n<details><summary>前回までの判定の全文（Issue のコメント）</summary>\n")
+            for b in bodies[-2:]:
+                out.append(b[:5000] + "\n\n---\n")
+            out.append("</details>")
+        out.append("\n> **前回の指摘が直ったかだけを見るのでは足りない。** 直っていることの確認に加え、"
+                   "MUST を1つずつ**再導出**すること — 前回の rework で新しく壊れた箇所は、"
+                   "前回の指摘リストには載っていない。実地では、指摘を直す過程で別の穴"
+                   "（警報を切る / 新しい公開面を足す）が生まれている。\n"
+                   "> 判定にあたっては「前回見落とした点を今回どう確認したか」を --why に書くこと。")
+
     out.append(f"\n## 検証対象の SPEC / MUST（Issue #{a.issue} 本文）\n")
     out.append(body or "(本文が空 — SPEC の無い Issue は、それ自体が reject 事由)")
     if prior:
@@ -616,6 +684,19 @@ def cmd_complete(a):
               "述べない限り台帳が拒否する。何も確立しなかったなら、その理由を書くこと"
               "（skeptic が反証できる主張になる）。", file=sys.stderr)
         return 2
+    surfaces = _new_public_surfaces(a.issue)
+    if surfaces and not (a.new_surface or a.new_surface_none):
+        print(f"⚠ この変更で新しく公開された面がある（#{a.issue}）:", file=sys.stderr)
+        for s in surfaces[:10]:
+            print(f"    {s['kind']}: {s['name']}"
+                  + (f"  ⟨{s['note']}⟩" if s["note"] else ""), file=sys.stderr)
+        print("  **認可ホールは「関数を1つ足した」ところから生まれる。**\n"
+              "  誰が呼べるのか / 呼ばれたら何ができるのかを確認したうえで、\n"
+              "  --new-surface \"<面>: <誰が呼べるか / 何ができるか>\" で申告すること。\n"
+              "  公開面ではないと判断するなら --new-surface-none \"<理由>\"。\n"
+              "  申告は gate に渡り、台帳にも残る。", file=sys.stderr)
+        return 2
+
     if a.domain_model_none:
         # 素通りをさせない: 「規則を定めていない」と書いたサイクルが、実は語彙を作っていないか。
         ex = _new_exports(a.issue)
@@ -630,6 +711,14 @@ def cmd_complete(a):
                   "ここは素通りを防ぐための問い返しにすぎない。\n", file=sys.stderr)
 
     cid = a.candidate_id or _candidate_id(a.issue)
+    if a.new_surface or a.new_surface_none:
+        _ledger("append", "--actor", a.agent or a.role, "--class", "public_surface_declared",
+                "--natural-key", f"surface-{a.issue}",
+                "--payload", json.dumps(
+                    {"role": a.agent or a.role, "issue": a.issue,
+                     "surfaces": [{"kind": "declared", "name": s, "exposure": "", "authz": ""}
+                                  for s in (a.new_surface or [])],
+                     "none_asserted": a.new_surface_none or ""}, ensure_ascii=False))
     rc = _execute(_steps_complete(a, cid), f"complete #{a.issue} ({a.role})")
     if rc == 0 and a.learned:
         # 3: doctrine の蓄積経路がサイクルに繋がっておらず、doctrine/ も conventions/ も空だった。
@@ -687,6 +776,69 @@ def cmd_complete(a):
 
 
 
+
+def _integrate_preview(issue, branch, base, test):
+    """統合前に「何を統合するか」を見せる。**衝突しそうな箇所の予告が主目的。**
+
+    実地では #7 の統合後に10件失敗し、切り分けに時間を使った（8件が worktree 走査の
+    偽陽性）。事前に分かれば早い。並行する他の worktree が同じファイルを触っていれば、
+    それも出す — #9/#10/#11 が並行し package.json を3つとも触っている状態では、
+    「後で分かる」より「先に見える」ほうが安い。
+    """
+    L = []
+    code, files = _raw(["git", "diff", "--name-only", f"{base}...{branch}"])
+    changed = [f for f in (files or "").split("\n") if f.strip()]
+    L.append(f"{branch} → {base}")
+    L.append(f"  変更: {len(changed)} files")
+    for f in changed[:12]:
+        L.append(f"    {f}")
+    if len(changed) > 12:
+        L.append(f"    … 他 {len(changed) - 12} 件")
+
+    code, ahead = _raw(["git", "log", "--oneline", f"{base}..{branch}"])
+    n = len([x for x in (ahead or "").split("\n") if x.strip()])
+    L.append(f"  コミット: {n} 件")
+
+    # 並行している他の worktree と同じファイルを触っていないか
+    wt_base = os.path.join(os.getcwd(), ".orgforge", "wt")
+    overlaps = {}
+    if os.path.isdir(wt_base):
+        for name in sorted(os.listdir(wt_base)):
+            if not name.startswith("issue-") or name == f"issue-{issue}":
+                continue
+            other = name[len("issue-"):]
+            ob = _branch_for(other)
+            c2, of = _raw(["git", "diff", "--name-only", f"{base}...{ob}"])
+            if c2 != 0:
+                continue
+            shared = sorted(set(changed) & {x for x in (of or "").split("\n") if x.strip()})
+            if shared:
+                overlaps[other] = shared
+    for other, shared in overlaps.items():
+        L.append(f"  ⚠ #{other} も同じファイルを変更しています: {', '.join(shared[:5])}")
+
+    # develop の現状（統合先が既に壊れていないか）
+    L.append(f"  統合後に走るもの: {test}")
+    return "\n".join(L), overlaps
+
+
+def _plan_integrate(a, branch, base):
+    body, overlaps = _integrate_preview(a.issue, branch, base, a.test)
+    print(body)
+    av, aseq, _ = _admission_for(a.issue)
+    rv, rseq, _ = _refutation_for(a.issue)
+    print(f"  gate: {av or '記録なし'}" + (f"（seq {aseq}）" if aseq else "")
+          + f" · skeptic: {rv or '記録なし'}" + (f"（seq {rseq}）" if rseq else ""))
+    if not (av == "admit" and rv == "survives"):
+        print("  → 前提が揃っていないので、このまま integrate しても止まる。")
+    elif overlaps:
+        print("  → 統合できるが、上の重複は先に見ておくこと"
+              "（衝突は統合後に分かるより前に分かるほうが安い）。")
+    else:
+        print("  → 統合できる。")
+    return 0
+
+
 def cmd_integrate(a):
     """develop への fan-in を回す。**マージするかどうかは判定しない** — 前提が揃っているかを
     照合し、揃っていれば機械的な手順（マージ → 統合後テスト → 記録）を実行する。
@@ -695,6 +847,8 @@ def cmd_integrate(a):
     #8 が「refutation が台帳に無いまま統合され、integration_admitted も記録されなかった」。
     最も抜けやすいのは統合の直前なので、そこを配管にする。
     """
+    if getattr(a, "plan", False):
+        return _plan_integrate(a, a.branch or _branch_for(a.issue), a.base or "develop")
     av, aseq, _ = _admission_for(a.issue)
     rv, rseq, _ = _refutation_for(a.issue)
     problems = []
@@ -1041,6 +1195,130 @@ def cmd_show(a):
     return 0
 
 
+
+def cmd_touched(a):
+    """本番資産への変更を台帳に残す。
+
+    exposure_budget_checked はローカルのファイル操作を数えるが、リモート DB への DDL や
+    本番の権限変更は数えていない。実際には後者のほうが危険で、しかも取り消しにコストが
+    かかる。実地では本番 DB にマイグレーション2本と権限の revoke が入ったのに台帳には
+    何も残らず、「あの revoke は誰の権限で入ったのか」が辿れない状態になった。
+    """
+    payload = {"target": a.target, "op": a.op, "name": a.name or "",
+               "reversible": bool(a.reversible), "authority": a.authority,
+               "issue": a.issue, "rollback": a.rollback or ""}
+    rc = _execute([
+        (f"asset_touched: {a.op} on {a.target}",
+         lambda: _ledger("append", "--actor", a.by, "--class", "asset_touched",
+                         "--natural-key", f"asset-{a.target}-{a.op}-{a.name or a.issue}",
+                         "--payload", json.dumps(payload, ensure_ascii=False))),
+    ], f"record asset_touched ({a.target})")
+    if rc == 0 and a.issue:
+        _gh_sync("log", "--issue", str(a.issue), "--event", "progress_recorded",
+                 "--detail", f"本番資産に変更: {a.op} {a.name or ''} on {a.target}"
+                             f"（{'戻せる' if a.reversible else '**戻せない**'} / 権限: {a.authority}）",
+                 "--command", f"{a.op} {a.name or ''}".strip(),
+                 "--result", a.rollback or "（rollback 手順は未記録）")
+    if not a.reversible:
+        print("  ⚠ reversible=false — 戻せないことを承知で入れた、という記録になった。", file=sys.stderr)
+    return rc
+
+
+# 外に晒される面のパターン。SQL / TS / Python の代表的な公開の形だけを見る。
+# 完全な検出は目的ではない — **見落としを人に問い返す**のが目的なので、拾いすぎるより
+# 「これは公開面ではないか」と聞ける程度で足りる。
+_SURFACE_PATTERNS = (
+    (r"create\s+(?:or\s+replace\s+)?function\s+([\w.]+)", "db_function"),
+    (r"grant\s+[\w\s,]+\s+on\s+[\w.]*\s*([\w.]+)\s+to\s+(\w+)", "grant"),
+    (r"create\s+policy\s+\"?([\w_]+)", "rls_policy"),
+    (r"^\+?\s*(?:export\s+)?(?:async\s+)?function\s+(\w+)", "export"),
+    (r"app\.(?:get|post|put|delete|patch)\(\s*[\"']([^\"']+)", "endpoint"),
+)
+
+
+def _new_public_surfaces(issue, base="develop"):
+    """このサイクルで新しく増えた公開面。**判定はしない — 問い返すだけ。**
+
+    認可ホールは「関数を1つ足した」ところから生まれる。実地の join_group がまさにそれで、
+    SECURITY DEFINER を1つ増やしたことが誰にも機械的に見えていなかった。
+    """
+    br = _branch_for(issue)
+    code, out = _raw(["git", "diff", f"{base}...{br}", "--unified=0"])
+    if code != 0:
+        return []
+    # **worktree の未コミット分も見る。** 実地では add_member_by_creator（SECURITY DEFINER）が
+    # 本番 DB には適用済みなのにコミットされておらず、`base...branch` の差分に出なかった。
+    # 「まだコミットしていないから公開面ではない」は成り立たない — 本番には既に在る。
+    wt = os.path.join(os.getcwd(), ".orgforge", "wt", f"issue-{issue}")
+    if os.path.isdir(wt):
+        c2, o2 = _raw(["git", "-C", wt, "diff", base, "--unified=0"])
+        if c2 == 0:
+            out += "\n" + o2
+        c3, untracked = _raw(["git", "-C", wt, "ls-files", "--others",
+                              "--exclude-standard"])
+        for rel in (untracked or "").split("\n"):
+            rel = rel.strip()
+            if not rel or not rel.endswith((".sql", ".ts", ".js", ".py")):
+                continue
+            try:
+                path = os.path.join(wt, rel)
+                if os.path.getsize(path) > 256 * 1024:
+                    continue
+                with open(path, encoding="utf-8", errors="replace") as f:
+                    body = f.read()
+                out += f"\n+++ b/{rel}\n" + "\n".join("+" + l for l in body.split("\n"))
+            except Exception:
+                continue
+    found, seen = [], set()
+    definer_ctx = False
+    skip = False
+    for line in out.split("\n"):
+        # どのファイルの差分かを追う。テスト・型定義・設定は公開面ではない —
+        # 拾いすぎると **肝心の1件が埋もれる**（実地で add_member_by_creator が
+        # テストヘルパ10件に埋もれた。それでは問い返しの意味が無い）。
+        if line.startswith("+++ "):
+            f = line[4:].strip().lstrip("b/")
+            skip = bool(re.search(r"(^|/)(tests?|__tests__|spec)/|\.(test|spec)\.|"
+                                  r"\.d\.ts$|(^|/)(scripts|tools)/", f, re.I))
+            definer_ctx = False
+            continue
+        if skip or not line.startswith("+"):
+            continue
+        low = line.lower()
+        if "security definer" in low:
+            definer_ctx = True
+        for pat, kind in _SURFACE_PATTERNS:
+            m = re.search(pat, low, re.I | re.M)
+            if not m:
+                continue
+            name = m.group(1) if m.groups() else m.group(0)
+            key = (kind, name)
+            if key in seen:
+                continue
+            seen.add(key)
+            found.append({"kind": kind, "name": name, "note": ""})
+
+    # SECURITY DEFINER は**関数ごと**に判定する。ファイル単位のフラグだと、定義が
+    # 後ろに来た関数（実地の add_member_by_creator）が印なしになって下位に沈み、
+    # まさに確認してほしい1件が埋もれる。
+    added = "\n".join(l for l in out.split("\n") if l.startswith("+"))
+    for s in found:
+        if s["kind"] != "db_function":
+            continue
+        m = re.search(re.escape(s["name"]) + r"[\s\S]{0,600}?security\s+definer",
+                      added, re.I)
+        if m:
+            s["note"] = "SECURITY DEFINER"
+        if re.search(r"grant\s+execute\s+on\s+function\s+" + re.escape(s["name"]),
+                     added, re.I):
+            s["note"] = (s["note"] + " / grant 済み").strip(" /")
+
+    # 危険な順に。SECURITY DEFINER と grant は呼び手の権限を超えるので最上位。
+    rank = {"db_function": 0, "grant": 1, "rls_policy": 2, "endpoint": 3, "export": 4}
+    found.sort(key=lambda s: (0 if s["note"] else 1, rank.get(s["kind"], 9)))
+    return found
+
+
 def cmd_plan(a):
     """何も実行せず、打つイベント列だけを印字する。"""
     # plan こそ「打つ前に見る」場所なので、着手前の確認はここにも出す。
@@ -1080,6 +1358,17 @@ def main(argv):
     q.add_argument("--issue", required=True, type=int)
     q.add_argument("--role", required=True, choices=("gate", "skeptic"))
 
+    q = sub.add_parser("touched", help="本番資産への変更を台帳に残す（DDL・権限・インフラ）")
+    q.add_argument("--target", required=True, help='何に対してか（例 supabase:<project>）')
+    q.add_argument("--op", required=True, help="apply_migration / revoke / grant / deploy …")
+    q.add_argument("--name", help="対象の名前（マイグレーション名・関数名など）")
+    q.add_argument("--by", required=True, help="誰が入れたか")
+    q.add_argument("--authority", required=True,
+                   help="誰の権限で入れたか（issue-N の一部 / CEO の明示指示 / 自己判断）")
+    q.add_argument("--issue", type=int, help="関連する Issue")
+    q.add_argument("--reversible", action="store_true", help="戻せるなら付ける")
+    q.add_argument("--rollback", help="戻し方（reversible なら書くこと）")
+
     q = sub.add_parser("show", help="1つの Issue の全体像（判定履歴・いま何待ちか）")
     q.add_argument("--issue", required=True, type=int)
 
@@ -1113,6 +1402,8 @@ def main(argv):
     q.add_argument("--test", default="npm test", help="統合後に走らせる全体テスト")
     q.add_argument("--force", action="store_true",
                    help="gate/skeptic の前提が無くても進める。**理由を記録すること**")
+    q.add_argument("--plan", action="store_true",
+                   help="何も実行せず、何を統合するか・衝突しそうな箇所を見せる")
 
     q = sub.add_parser("complete")
     q.add_argument("--role", required=True)
@@ -1124,6 +1415,10 @@ def main(argv):
     q.add_argument("--result", required=True,
                    help="そのコマンドの**実出力**（失敗込み。「通った」は不可 — log が拒否する）")
     q.add_argument("--files", help="変更したファイル")
+    q.add_argument("--new-surface", dest="new_surface", action="append",
+                   help="このサイクルで外に晒した面（誰が呼べるか / 何ができるか）。複数可")
+    q.add_argument("--new-surface-none", dest="new_surface_none",
+                   help="公開面を増やしていない理由（明示的な否定）")
     q.add_argument("--learned",
                    help="次のサイクルにも効く学び（doctrine に propose する。admit は gate）")
     q.add_argument("--affects", help="その学びが効く役割（カンマ区切り）")
@@ -1138,7 +1433,7 @@ def main(argv):
     q.add_argument("--candidate-id", dest="candidate_id")
     a = p.parse_args(argv[1:])
     return {"begin": cmd_begin, "complete": cmd_complete, "plan": cmd_plan,
-            "verify": cmd_verify, "integrate": cmd_integrate, "handback": cmd_handback, "gc": cmd_gc, "record": cmd_record, "show": cmd_show}[a.cmd](a)
+            "verify": cmd_verify, "integrate": cmd_integrate, "handback": cmd_handback, "gc": cmd_gc, "record": cmd_record, "show": cmd_show, "touched": cmd_touched}[a.cmd](a)
 
 
 if __name__ == "__main__":

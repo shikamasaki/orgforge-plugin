@@ -38,6 +38,25 @@ event_classes:
   # /clear). Stamped at each milestone of a cycle: how far (0..1 or a phase label), what was just done,
   # the concrete next step, and any blocker. work_in_progress reads the LATEST per candidate; /org-resume
   # replays it to continue exactly where the cycle stopped. This is the backlog's memory of "how far".
+  # asset_touched: **本番資産への変更**。exposure_budget_checked はローカルのファイル操作を
+  # 数えるが、リモート DB への DDL・本番の権限変更・インフラ操作は数えていない。実際には
+  # 後者のほうが危険で、しかも取り消しにコストがかかる。実地では本番 DB にマイグレーション
+  # 2本と権限の revoke が入ったのに、台帳には何も残らなかった — 「あの revoke は誰の権限で
+  # 入ったのか」が後から辿れない状態。
+  #   target     : 何に対してか（"supabase:<project>", "gcp:<project>/<service>" など）
+  #   op         : apply_migration / revoke / grant / drop / deploy / scale …
+  #   reversible : 戻せるか。false なら、戻せないことを承知で入れたという記録になる
+  #   authority  : 誰の権限で入れたか（issue-N の一部 / CEO の明示指示 / 自己判断）
+  asset_touched:        { target, op, name, reversible: bool, authority, issue,
+                          rollback }   # PRODUCTION-ASSET
+
+  # public_surface_declared: このサイクルで**外に晒した面**。cycle_completed の domain_model は
+  # 「領域規則を決めたか」を問うが、「何を外に晒したか」は誰も見ていなかった。認可ホールは
+  # 「関数を1つ足した」ところから生まれる（実地の join_group がまさにそれ）。
+  #   surfaces: [{kind: db_function|endpoint|export|env, name, exposure, authz}]
+  public_surface_declared: { role, issue, surfaces: [ {kind, name, exposure, authz} ],
+                             none_asserted }   # ATTACK-SURFACE
+
   # correction: 追記型の台帳では過去を消せないので、誤って書かれた／検証目的で書かれた
   # イベントを「無効」と宣言するのはこのイベントの仕事。自由記述の note では機械が読めず、
   # status / learning が除外できない（実地でプローブ4件が実判定として数えられ、board が

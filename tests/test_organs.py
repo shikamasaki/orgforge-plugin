@@ -1614,3 +1614,60 @@ def test_seam_guard_accepts_a_referenced_file(tmp_path):
             "Task", {"prompt": "いい感じにやって"}) is not None, "契約なしが通った"
     finally:
         os.chdir(cwd)
+
+
+# ── 0.20.0: rework 履歴 / 統合の事前確認 / 本番資産 / 公開面 ─────────────
+def test_verify_passes_rework_history_to_gate():
+    """gate に過去の判定を渡す。渡さないと毎回「初回判定」として扱う。"""
+    src = (TOOLS / "org_cycle.py").read_text(encoding="utf-8")
+    seg = src[src.index("def cmd_verify"):]
+    assert "判定履歴" in seg and "回目の判定です" in seg
+    assert "再導出" in seg, "「前回の指摘が直ったか」だけを見る gate になってしまう"
+
+
+def test_round_count_uses_the_larger_of_ledger_and_issue():
+    """二重記録の片側が落ちていても回数を過少に言わない。"""
+    src = (TOOLS / "org_cycle.py").read_text(encoding="utf-8")
+    seg = src[src.index("def cmd_verify"):]
+    assert "max(len(rounds), len(issue_rounds))" in seg
+
+
+def test_integrate_plan_executes_nothing_and_warns_on_overlap(tmp_path):
+    """--plan は何も実行せず、並行 worktree との重複を予告する。"""
+    src = (TOOLS / "org_cycle.py").read_text(encoding="utf-8")
+    seg = src[src.index("def _integrate_preview"):src.index("def cmd_integrate")]
+    assert "同じファイルを変更しています" in seg
+    body = src[src.index("def cmd_integrate"):]
+    assert 'if getattr(a, "plan", False):' in body
+    assert body.index('if getattr(a, "plan", False):') < body.index("git merge"), \
+        "--plan がマージ手順より後にある（実行してしまう）"
+
+
+def test_surface_detection_ranks_security_definer_first():
+    """SECURITY DEFINER は関数ごとに判定する。ファイル単位だと肝心の1件が沈む。"""
+    src = (TOOLS / "org_cycle.py").read_text(encoding="utf-8")
+    seg = src[src.index("def _new_public_surfaces"):]
+    assert "関数ごと" in seg, "ファイル単位のフラグに戻っている"
+    assert "grant 済み" in seg
+
+
+def test_surface_detection_skips_test_files():
+    """テストヘルパを拾いすぎると、確認してほしい1件が埋もれる。"""
+    src = (TOOLS / "org_cycle.py").read_text(encoding="utf-8")
+    seg = src[src.index("def _new_public_surfaces"):]
+    assert "tests?" in seg and "spec" in seg
+
+
+def test_complete_blocks_until_surfaces_declared(tmp_path):
+    """公開面が増えたら、申告するまで complete させない（認可ホールの入口）。"""
+    src = (TOOLS / "org_cycle.py").read_text(encoding="utf-8")
+    seg = src[src.index("def cmd_complete"):src.index("def cmd_plan")]
+    assert "--new-surface" in seg and "return 2" in seg
+    assert "認可ホール" in seg
+
+
+def test_asset_touched_records_authority():
+    """本番資産の変更は「誰の権限で入れたか」ごと残す。"""
+    src = (TOOLS / "org_cycle.py").read_text(encoding="utf-8")
+    seg = src[src.index("def cmd_touched"):]
+    assert "authority" in seg and "reversible" in seg and "rollback" in seg

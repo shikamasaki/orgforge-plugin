@@ -195,13 +195,21 @@ python3 tools/org_cycle.py  verify    --issue N --role gate|skeptic
                             # **verdict / why / risk は埋めない** — 判定は役割が決める
 python3 tools/org_cycle.py  handback  --issue N [--summary S] [--result OUT]
                             # push → develop 宛 PR（body に Closes #N）→ Issue へ log
-python3 tools/org_cycle.py  integrate --issue N [--test "npm test"]
+python3 tools/org_cycle.py  integrate --issue N [--test "npm test"] [--plan]
+                            # --plan: 何も実行せず「何を統合するか」を見せる。変更ファイル・
+                            # コミット数・**並行 worktree との重複**（衝突の予告）・前提の可否
                             # gate の admit と skeptic の survives が**台帳に**無ければ止まる。
                             # マージ → 統合後テスト → integration_admitted → Issue へ log
 python3 tools/org_cycle.py  gc        [--base develop] [--all]
                             # 統合済みの worktree だけ片付ける（未統合・未コミットは残す）
 python3 tools/org_cycle.py  record    --issue N --event E --verdict V --by WHO --why TXT
                             # 済んだ判定を遡って台帳に記録（backfilled 印が付く）
+python3 tools/org_cycle.py  touched   --target T --op OP --by WHO --authority WHY
+                            [--name N] [--issue N] [--reversible] [--rollback CMD]
+                            # 本番資産への変更（DDL・権限・インフラ）を台帳に残す。
+                            # exposure_budget_checked はローカルのファイル操作しか数えない
+                            # が、危険なのはむしろ本番側。--authority に「誰の権限で入れたか」
+                            # を書く — 後から「あの revoke は誰の判断か」を辿れるように
 python3 tools/org_cycle.py  show      --issue N
                             # 1つの Issue の全体像: 実装コミット・worktree・判定履歴
                             # （訂正済み / backfill の印つき）・いま何待ちか・次の一手。
