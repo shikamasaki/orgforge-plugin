@@ -1,19 +1,4 @@
-"""Regression net for the org organs (tools/*.py).
-
-Written BEFORE the shared-module refactor to FREEZE current behavior. Every exit code below was
-verified empirically against the tools this session; this suite must stay green through the
-extraction of tools/_organ.py. It exercises the tools exactly as the real host does — as
-SUBPROCESSES invoked by absolute path, keyed on exit code (the org_hook.py interface) plus a
-stable output substring. Import-and-call would bypass sys.exit and miss the CLI dispatch, so we
-never do that here.
-
-Conventions:
-- one tmp ledger root per test (append-only writes must not leak between tests),
-- seed only through `ledger.py append` (hand-writing JSONL breaks the hash chain), except the two
-  tamper tests that deliberately mutate the file on disk,
-- assert exit code AND a substring of stdout+stderr combined (organs print verdicts to stderr,
-  the allow path to stdout).
-"""
+"""その他の器官 — doctrine / handoff / reconcile / alignment / tick / sensors。"""
 import argparse
 import json
 import os
@@ -21,184 +6,9 @@ import pathlib
 import subprocess
 import sys
 
-REPO = pathlib.Path(__file__).resolve().parent.parent
-TOOLS = REPO / "tools"
-
-
-# ── org_cycle は tools/orgcycle/ に分割された（0.22.0）─────────────────────
-# ソースを文字列で検査するテストは分割に弱い。**どのモジュールに居るかではなく、
-# 何が書かれているか**を見たいので、全モジュールを連結したものを対象にする。
-# 「振る舞いで検証できるもの」は振る舞いで見る（そちらが本筋）。
-def _cycle_src(*mods):
-    """orgcycle の（指定した / 全）モジュールのソースを連結して返す。"""
-    base = TOOLS / "orgcycle"
-    names = mods or ("_core", "cycle", "judge", "ship", "inspect")
-    out = []
-    for m in names:
-        f = base / f"{m}.py"
-        if f.is_file():
-            out.append(f.read_text(encoding="utf-8"))
-    return "\n".join(out)
-
-
-def _cycle_mod(name):
-    """orgcycle の1モジュールを import して返す（関数を直接呼ぶテスト用）。
-
-    パッケージとして import する — 単体ファイルとして読むと `from ._core import ...` の
-    相対 import が解決できない。
-    """
-    import importlib, sys as _s
-    if str(TOOLS) not in _s.path:
-        _s.path.insert(0, str(TOOLS))
-    return importlib.import_module(f"orgcycle.{name}")
-
-
-TEMPLATE = REPO / "template"
-
-
-def run(tool, *args, cwd=None):
-    r = subprocess.run([sys.executable, str(TOOLS / tool), *args],
-                       capture_output=True, text=True, cwd=cwd)
-    return r.returncode, r.stdout + r.stderr
-
-
-def seed(root, actor, cls, payload, ts="2026-07-16T00:00:00Z"):
-    # cycle_completed requires a domain_model field (docs/11 §4d); default to none_asserted for tests
-    # that don't care about the domain-model gate, so they don't all have to spell it out.
-    if cls == "cycle_completed" and "domain_model" not in payload:
-        payload = {**payload, "domain_model": {"none_asserted": "test seed"}}
-    # phase_admitted now requires its own phase_started (docs/11 §2 — a phase cannot be admitted
-    # without having been entered). Seeding an admission therefore implies seeding its start, so a
-    # fixture that only cares about the *admitted* state doesn't have to spell both out.
-    if cls == "phase_admitted":
-        run("ledger.py", "append", str(root), "--actor", actor, "--class", "phase_started",
-            "--payload", json.dumps({"deliverable": payload.get("deliverable"),
-                                     "phase": payload.get("phase"), "role": actor}), "--ts", ts)
-    code, out = run("ledger.py", "append", str(root), "--actor", actor,
-                    "--class", cls, "--payload", json.dumps(payload), "--ts", ts)
-    assert code == 0, f"seed failed: {out}"
-
-
-# ── ledger.py ────────────────────────────────────────────────────────────────
-def test_ledger_chain_intact(tmp_path):
-    seed(tmp_path, "a", "heartbeat", {"component": "x", "invariants_hold": True})
-    code, out = run("ledger.py", "verify", str(tmp_path))
-    assert code == 0 and "chain intact" in out
-
-
-def test_work_in_progress_view_resolves_started_not_completed(tmp_path):
-    # the recovery source after a context wipe: a candidate STARTED with a progress checkpoint but not
-    # completed must appear with its latest next_step; a COMPLETED one must drop out.
-    seed(tmp_path, "eng", "cycle_started", {"role": "eng", "candidate_id": "X", "pack_manifest_id": "p"},
-         ts="2026-07-16T01:00:00Z")
-    seed(tmp_path, "eng", "progress_recorded",
-         {"role": "eng", "candidate_id": "X", "fraction": 0.6, "phase": "impl",
-          "done_so_far": "parser done", "next_step": "wire into CLI", "blocked_by": None, "artifacts": []},
-         ts="2026-07-16T02:00:00Z")
-    # a second candidate that WAS completed — must not appear in WIP
-    seed(tmp_path, "eng", "cycle_started", {"role": "eng", "candidate_id": "Y", "pack_manifest_id": "p"},
-         ts="2026-07-16T03:00:00Z")
-    seed(tmp_path, "eng", "cycle_completed", {"role": "eng", "candidate_id": "Y", "outputs": []},
-         ts="2026-07-16T04:00:00Z")
-    code, out = run("ledger.py", "view", str(tmp_path), "work_in_progress")
-    assert code == 0, out
-    data = json.loads(out)
-    ids = [w["candidate_id"] for w in data["in_progress"]]
-    assert ids == ["X"], f"expected only the unfinished X, got {ids}"
-    wx = data["in_progress"][0]
-    assert wx["progress"]["next_step"] == "wire into CLI"
-    assert abs(wx["progress"]["fraction"] - 0.6) < 1e-9
-
-
-def test_ledger_requires_prior_orphan_deploy(tmp_path):
-    code, out = run("ledger.py", "append", str(tmp_path), "--actor", "r",
-                    "--class", "result_deployed",
-                    "--payload", '{"candidate_id":"c1","net_effect_ref":"n"}',
-                    "--ts", "2026-07-16T00:00:00Z")
-    assert code == 3 and "requires a prior" in out
-
-
-def test_ledger_requires_prior_refuted_not_enough(tmp_path):
-    seed(tmp_path, "s", "refutation_attempted",
-         {"skeptic": "s", "claim_id": "c1", "verdict": "refuted", "checklist_ref": "x"})
-    code, out = run("ledger.py", "append", str(tmp_path), "--actor", "r",
-                    "--class", "result_deployed",
-                    "--payload", '{"candidate_id":"c1","net_effect_ref":"n"}',
-                    "--ts", "2026-07-16T01:00:00Z")
-    assert code == 3, out   # only verdict==survives satisfies requires_prior
-
-
-# ── SDLC phase gate (docs/11 §2) — the forced, non-skippable phase order, reproducibility's spine ──
-def test_phase_requirements_may_always_start(tmp_path):
-    # requirements has no predecessor, so it starts against an empty history
-    code, out = run("ledger.py", "append", str(tmp_path), "--actor", "r",
-                    "--class", "phase_started",
-                    "--payload", '{"deliverable":"D1","phase":"requirements","role":"r"}',
-                    "--ts", "2026-07-16T00:00:00Z")
-    assert code == 0, out
-
-
-def test_phase_design_blocked_without_requirements_admitted(tmp_path):
-    # design may not start until requirements is admitted — the non-skippable phase order
-    code, out = run("ledger.py", "append", str(tmp_path), "--actor", "r",
-                    "--class", "phase_started",
-                    "--payload", '{"deliverable":"D1","phase":"design","role":"r"}',
-                    "--ts", "2026-07-16T00:10:00Z")
-    assert code == 3 and "requires a prior" in out, out
-
-
-def test_phase_deploy_cannot_skip_test(tmp_path):
-    # with only requirements admitted, deploy must NOT start (it skips design/implement/test)
-    seed(tmp_path, "a", "phase_admitted",
-         {"deliverable": "D1", "phase": "requirements", "verdict": "pass",
-          "evidence_ref": "e", "admitter": "a"})
-    code, out = run("ledger.py", "append", str(tmp_path), "--actor", "r",
-                    "--class", "phase_started",
-                    "--payload", '{"deliverable":"D1","phase":"deploy","role":"r"}',
-                    "--ts", "2026-07-16T00:20:00Z")
-    assert code == 3, out   # prior(deploy)==test, which is not admitted
-
-
-def test_phase_design_starts_after_requirements_admitted(tmp_path):
-    seed(tmp_path, "a", "phase_admitted",
-         {"deliverable": "D1", "phase": "requirements", "verdict": "pass",
-          "evidence_ref": "e", "admitter": "a"})
-    code, out = run("ledger.py", "append", str(tmp_path), "--actor", "r",
-                    "--class", "phase_started",
-                    "--payload", '{"deliverable":"D1","phase":"design","role":"r"}',
-                    "--ts", "2026-07-16T00:30:00Z")
-    assert code == 0, out
-
-
-# ── idempotency (docs/11 §0) — a natural-keyed event counts once under replay/retry ──
-def test_append_natural_key_is_idempotent(tmp_path):
-    args = ("ledger.py", "append", str(tmp_path), "--actor", "h",
-            "--class", "exposure_budget_checked",
-            "--payload", '{"dimension":"file_mutations","allow":true}',
-            "--natural-key", "call-abc")
-    c1, _ = run(*args, "--ts", "2026-07-16T00:00:00Z")
-    c2, out2 = run(*args, "--ts", "2026-07-16T00:01:00Z")   # retry, same key, later ts
-    assert c1 == 0 and c2 == 0 and "idempotent no-op" in out2, out2
-    # exactly one event landed — the retry did not double-count
-    code, out = run("ledger.py", "view", str(tmp_path), "raw") if False else (0, "")
-    events = [l for l in (tmp_path / "ledger.jsonl").read_text().splitlines() if l.strip()]
-    assert len(events) == 1, f"expected 1 event, got {len(events)}"
-
-
-def test_append_different_natural_keys_both_land(tmp_path):
-    base = ("ledger.py", "append", str(tmp_path), "--actor", "h",
-            "--class", "exposure_budget_checked",
-            "--payload", '{"dimension":"file_mutations","allow":true}')
-    run(*base, "--natural-key", "call-1", "--ts", "2026-07-16T00:00:00Z")
-    run(*base, "--natural-key", "call-2", "--ts", "2026-07-16T00:01:00Z")
-    events = [l for l in (tmp_path / "ledger.jsonl").read_text().splitlines() if l.strip()]
-    assert len(events) == 2, f"distinct keys must both append; got {len(events)}"
-
-
-def test_ledger_actor_not_from_payload(tmp_path):
-    code, out = run("ledger.py", "append", str(tmp_path), "--actor", "m",
-                    "--class", "cycle_completed", "--payload", '{"actor":"evil","role":"m"}')
-    assert code == 2 and "must not carry its own 'actor'" in out
+from conftest import (REPO, TOOLS, TEMPLATE, run, seed, _cycle_src, _gh_src,
+                      _cycle_mod, _propose_full, _admitted_claim, _sched,
+                      _ledger_with, _led, _append, _status, _write_ledger)
 
 
 def test_report_up_requires_prior_conformance(tmp_path):
@@ -226,39 +36,6 @@ def test_report_up_requires_prior_conformance(tmp_path):
     assert code == 0, out
 
 
-def test_ledger_tamper_detected(tmp_path):
-    seed(tmp_path, "a", "candidate_submitted",
-         {"maker": "a", "candidate_id": "c1", "contract_ref": "r", "evidence": []})
-    seed(tmp_path, "a", "candidate_submitted",
-         {"maker": "a", "candidate_id": "c2", "contract_ref": "r", "evidence": []},
-         ts="2026-07-16T00:01:00Z")
-    log = tmp_path / "ledger.jsonl"
-    lines = [json.loads(x) for x in log.read_text().splitlines() if x.strip()]
-    lines[0]["payload"]["candidate_id"] = "TAMPERED"
-    log.write_text("\n".join(json.dumps(x, ensure_ascii=False) for x in lines) + "\n")
-    code, out = run("ledger.py", "verify", str(tmp_path))
-    assert code == 1 and ("hash mismatch" in out or "edited" in out)
-
-
-def test_ledger_seq_gap_detected(tmp_path):
-    seed(tmp_path, "a", "heartbeat", {"component": "x", "invariants_hold": True})
-    seed(tmp_path, "a", "heartbeat", {"component": "y", "invariants_hold": True},
-         ts="2026-07-16T00:01:00Z")
-    log = tmp_path / "ledger.jsonl"
-    lines = log.read_text().splitlines()
-    log.write_text(lines[1] + "\n")   # drop line 1 -> seq starts at 2
-    code, out = run("ledger.py", "verify", str(tmp_path))
-    assert code == 1 and ("seq" in out or "BROKEN" in out)
-
-
-def test_ledger_malformed_line_is_broken_not_crash(tmp_path):
-    # a non-JSON line IS tamper evidence; verify must report BROKEN + exit 1, never traceback
-    seed(tmp_path, "a", "heartbeat", {"component": "x", "invariants_hold": True})
-    (tmp_path / "ledger.jsonl").open("a").write("THIS-IS-NOT-JSON\n")
-    code, out = run("ledger.py", "verify", str(tmp_path))
-    assert code == 1 and "BROKEN" in out and "Traceback" not in out
-
-
 def test_guardrails_cap_tolerates_ts_less_event(tmp_path):
     # an event with no 'ts' (as emit_event writes) must not KeyError when a window is set
     (tmp_path / "ledger.jsonl").write_text(json.dumps(
@@ -269,30 +46,11 @@ def test_guardrails_cap_tolerates_ts_less_event(tmp_path):
     assert code == 0 and "Traceback" not in out
 
 
-def test_ledger_digest_deterministic(tmp_path):
-    seed(tmp_path, "a", "candidate_submitted",
-         {"maker": "a", "candidate_id": "c1", "contract_ref": "r", "evidence": []})
-    args = ("digest", str(tmp_path), "--window-since", "2026-07-16T00:00:00Z",
-            "--window-until", "2026-07-17T00:00:00Z")
-    _, out1 = run("ledger.py", *args)
-    _, out2 = run("ledger.py", *args)
-    assert out1 == out2 and out1.strip().startswith("{")
-
-
 # ── doctrine.py (anti-poisoning gate) ─────────────────────────────────────────
 def test_doctrine_no_anonymous(tmp_path):
     code, out = run("doctrine.py", "propose", str(tmp_path), "role",
                     "--claim", "x", "--confidence", "0.9")
     assert code == 2 and "anonymous doctrine" in out
-
-
-def _propose_full(tmp_path, role="role"):
-    code, out = run("doctrine.py", "propose", str(tmp_path), role, "--claim", "c",
-                    "--source", "s", "--confidence", "0.9",
-                    "--retrieved-at", "2026-07-16", "--review-by", "2027-01-16")
-    assert code == 0, out
-    code, show = run("doctrine.py", "show", str(tmp_path), role)
-    return json.loads(show)["claims"][0]["id"]
 
 
 def test_doctrine_maker_cannot_admit(tmp_path):
@@ -301,32 +59,11 @@ def test_doctrine_maker_cannot_admit(tmp_path):
     assert code == 2 and "may not admit its own doctrine" in out
 
 
-def test_doctrine_incomplete_provenance_blocked(tmp_path):
-    code, out = run("doctrine.py", "propose", str(tmp_path), "role", "--claim", "c",
-                    "--source", "s", "--confidence", "0.9", "--retrieved-at", "2026-07-16")
-    assert code == 0, out   # no review-by
-    _, show = run("doctrine.py", "show", str(tmp_path), "role")
-    cid = json.loads(show)["claims"][0]["id"]
-    code, out = run("doctrine.py", "admit", str(tmp_path), "role", cid, "--by", "gate")
-    assert code == 2 and ("incomplete" in out or "provenance" in out)
-
-
 def test_doctrine_gate_admits(tmp_path):
     cid = _propose_full(tmp_path)
     code, out = run("doctrine.py", "admit", str(tmp_path), "role", cid,
                     "--by", "gate", "--at", "2026-07-16")
     assert code == 0 and "admitted" in out
-
-
-def _admitted_claim(tmp_path, role, claim, affects):
-    """propose+admit one claim tagged for `affects`, return its id."""
-    run("doctrine.py", "propose", str(tmp_path), role, "--claim", claim,
-        "--source", "s", "--confidence", "0.9", "--retrieved-at", "2026-07-16",
-        "--review-by", "2027-01-16", "--affects", affects)
-    _, show = run("doctrine.py", "show", str(tmp_path), role)
-    cid = [c for c in json.loads(show)["claims"] if c["claim"] == claim][0]["id"]
-    run("doctrine.py", "admit", str(tmp_path), role, cid, "--by", "gate", "--at", "2026-07-16")
-    return cid
 
 
 def test_doctrine_remap_rename_preserves_brain(tmp_path):
@@ -364,18 +101,6 @@ def test_doctrine_remap_orphan_blocks_refound(tmp_path):
     assert code == 2 and "orphan" in out.lower()
 
 
-def test_doctrine_remap_allow_orphans_surfaces_not_drops(tmp_path):
-    # --allow-orphans routes orphans to UNROUTED (surfaced for a human), never dropped.
-    _admitted_claim(tmp_path, "api-worker", "idempotency keys on POST", "api-worker")
-    dst = tmp_path / "new"
-    code, out = run("doctrine.py", "remap", str(tmp_path),
-                    "--map", json.dumps({"api-worker": ["x-worker", "y-worker"]}),
-                    "--into", str(dst), "--allow-orphans")
-    assert code == 0, out
-    _, un = run("doctrine.py", "show", str(dst), "UNROUTED")
-    assert len(json.loads(un)["claims"]) == 1   # preserved, not lost
-
-
 # ── handoff.py (seam contract + scoped brain at delegation) ───────────────────
 def test_handoff_requires_a_seam_contract(tmp_path):
     # a manager cannot delegate without fixing the boundary — inputs/outputs are required,
@@ -409,6 +134,9 @@ def test_handoff_axis_is_local_advice_not_global(tmp_path):
 
 
 # ── guardrails.py ─────────────────────────────────────────────────────────────
+
+
+# ── guardrails.py ─────────────────────────────────────────────────────────────
 def test_guardrails_cap_holds(tmp_path):
     code, out = run("guardrails.py", "cap", str(tmp_path), "--dimension", "spend",
                     "--delta", "100", "--cap", "50", "--actor", "x")
@@ -419,6 +147,9 @@ def test_guardrails_cap_allows(tmp_path):
     code, out = run("guardrails.py", "cap", str(tmp_path), "--dimension", "spend",
                     "--delta", "10", "--cap", "50", "--actor", "x")
     assert code == 0 and "allow" in out and '"decision": "allow"' in out
+
+
+# ── SILENCE-CONSENT (docs/05 §2.1): reversible flows, irreversible holds ───────
 
 
 # ── SILENCE-CONSENT (docs/05 §2.1): reversible flows, irreversible holds ───────
@@ -435,6 +166,9 @@ def test_consent_irreversible_holds_for_ack(tmp_path):
 
 
 # ── STALE-REFERENCE --auto: derive trigger + bound roles from the ledger ───────
+
+
+# ── STALE-REFERENCE --auto: derive trigger + bound roles from the ledger ───────
 def test_staleref_auto_finds_role_stale_after_ranking_change(tmp_path):
     seed(tmp_path, "s", "cycle_completed", {"role": "fe", "tokens": {}, "outputs": []},
          ts="2026-07-17T10:00:00Z")
@@ -446,6 +180,9 @@ def test_staleref_auto_finds_role_stale_after_ranking_change(tmp_path):
     code, out = run("guardrails.py", "staleref", str(tmp_path), "--auto")
     # fe re-derived after the ranking change; be did not -> be is stale (nudge, under threshold)
     assert code == 0 and '"stale_roles": ["be"]' in out
+
+
+# ── DEPENDENCY-STALL reads depends_on edges (not just cycle timing) ────────────
 
 
 # ── DEPENDENCY-STALL reads depends_on edges (not just cycle timing) ────────────
@@ -465,16 +202,13 @@ def test_stall_reports_downstream_from_depends_on(tmp_path):
 
 
 # ── reconcile.py ──────────────────────────────────────────────────────────────
+
+
+# ── reconcile.py ──────────────────────────────────────────────────────────────
 def test_reconcile_mandate_precedence(tmp_path):
     code, out = run("reconcile.py", "mandate", str(tmp_path), "--subjects", "safety,growth",
                     "--decision", "ship", "--precedence", "safety>growth")
     assert code == 0 and "precedence_applies" in out
-
-
-def test_reconcile_mandate_integrate(tmp_path):
-    code, out = run("reconcile.py", "mandate", str(tmp_path), "--subjects", "safety,growth",
-                    "--decision", "ship", "--precedence", "safety>growth", "--satisfiable", "true")
-    assert code == 0 and "integrate" in out
 
 
 def test_reconcile_mandate_absent_escalates(tmp_path):
@@ -504,6 +238,9 @@ def test_reconcile_stall_escalates(tmp_path):
 
 
 # ── alignment.py ──────────────────────────────────────────────────────────────
+
+
+# ── alignment.py ──────────────────────────────────────────────────────────────
 def test_alignment_premise_broken(tmp_path):
     code, out = run("alignment.py", "premise", str(tmp_path), "--premise-id", "p",
                     "--asserted", "100", "--observed", "10")
@@ -527,8 +264,6 @@ def test_alignment_sunk_abandons(tmp_path):
 
 
 # ── tick.py (missed-detection boundary) ───────────────────────────────────────
-def _sched():
-    return str(TEMPLATE / "schedule.yaml")
 
 
 def test_tick_no_miss_when_fresh(tmp_path):
@@ -551,10 +286,16 @@ def test_tick_night_suspends_unsafe(tmp_path):
 
 
 # ── sensors.py ────────────────────────────────────────────────────────────────
+
+
+# ── sensors.py ────────────────────────────────────────────────────────────────
 def test_sensors_eval_defers_llm(tmp_path):
     code, out = run("sensors.py", "eval", str(tmp_path), str(TEMPLATE / "sensors.yaml"),
                     "--now", "2026-07-16T12:00:00Z")
     assert code == 0 and "deferred" in out and "red_tape_ratio" in out
+
+
+# ── the otherwise-uncovered _events sharers: attention / learning / resource / conventions ──
 
 
 # ── the otherwise-uncovered _events sharers: attention / learning / resource / conventions ──
@@ -694,15 +435,6 @@ def test_repeated_death_escalates(tmp_path):
     assert code == 10 and "REPEATED DEATH" in out
 
 
-def test_distinct_deaths_are_silent(tmp_path):
-    seed(tmp_path, "gate", "result_retired", {"candidate_id": "A", "cause": "cause one"},
-         ts="2026-07-16T01:00:00Z")
-    seed(tmp_path, "gate", "result_retired", {"candidate_id": "B", "cause": "cause two"},
-         ts="2026-07-16T02:00:00Z")
-    code, out = run("learning.py", "repeats", str(tmp_path))
-    assert code == 0 and "clean" in out
-
-
 def test_domain_model_growth_reports_scopes(tmp_path):
     # the SSoT/domain model must grow during operation; growth reports the settled-convention base.
     code, out = run("conventions.py", "growth", str(tmp_path))
@@ -724,35 +456,6 @@ def test_rollback_proven_with_undo(tmp_path):
     code, out = run("guardrails.py", "rollback", str(tmp_path), "--action-ref", "deploy-x",
                     "--undo", "git revert abc123")
     assert code == 0 and "proven" in out
-
-
-def test_status_board_green_when_work_drains(tmp_path):
-    seed(tmp_path, "m", "candidate_submitted",
-         {"candidate_id": "A", "maker": "m", "contract_ref": "c"}, ts="2026-07-16T01:00:00Z")
-    seed(tmp_path, "eng", "cycle_completed", {"candidate_id": "A", "role": "eng"},
-         ts="2026-07-16T02:00:00Z")
-    code, out = run("status.py", "status", str(tmp_path))
-    assert code == 0 and out.startswith("GREEN")
-
-
-def test_status_board_red_on_repeated_death(tmp_path):
-    seed(tmp_path, "x", "repeated_death_detected",
-         {"cause": "y", "occurrences": 2, "candidate_ids": ["A", "B"]}, ts="2026-07-16T01:00:00Z")
-    code, out = run("status.py", "status", str(tmp_path))
-    assert code == 0 and out.startswith("RED") and "needs you" in out
-
-
-def test_status_redline_silent_on_green(tmp_path):
-    seed(tmp_path, "e", "cycle_completed", {"candidate_id": "A", "role": "e"}, ts="2026-07-16T01:00:00Z")
-    code, out = run("status.py", "redline", str(tmp_path))
-    assert code == 0 and out.strip() == ""          # healthy → no line for the Monitor
-
-
-def test_status_redline_emits_on_red(tmp_path):
-    seed(tmp_path, "x", "repeated_death_detected",
-         {"cause": "null", "occurrences": 2, "candidate_ids": ["A", "B"]}, ts="2026-07-16T01:00:00Z")
-    code, out = run("status.py", "redline", str(tmp_path))
-    assert code == 0 and out.startswith("RED — org needs you")
 
 
 # ── runtime separation of duties (docs/03 §3.1, docs/11 §4f) ─────────────────
@@ -799,36 +502,6 @@ def test_the_gate_may_not_also_be_the_skeptic(tmp_path):
     assert code == 3, out
 
 
-def test_the_legitimate_maker_gate_skeptic_chain_still_passes(tmp_path):
-    """The tooth must block forgery WITHOUT blocking the normal three-actor path."""
-    root = tmp_path / "l"
-    seed(root, "maker-alice", "cycle_started",
-         {"role": "maker-alice", "candidate_id": "c1", "pack_manifest_id": "p"})
-    seed(root, "gate", "admission_decided",
-         {"gate": "gate", "candidate_id": "c1", "verdict": "admit", "standard_ref": "s",
-          "evidence": ["e"]})
-    code, out = run("ledger.py", "append", str(root), "--actor", "skeptic",
-                    "--class", "refutation_attempted",
-                    "--payload", json.dumps({"skeptic": "skeptic", "claim_id": "c1",
-                                             "verdict": "survives", "checklist_ref": "x"}))
-    assert code == 0, out
-    code, out = run("ledger.py", "verify", str(root))
-    assert code == 0 and "chain intact" in out
-
-
-# ── the phase mold must not teach its own bypass (docs/11 §2) ────────────────
-def test_phase_admitted_requires_its_own_phase_started(tmp_path):
-    """Without this, `phase_admitted{integrate}` on an empty ledger makes `phase_started{deploy}` legal
-    — deploy reached with requirements/design/implement/test never having happened. It is also the move
-    an operator reaches for when phase_started is rejected, so the gate would teach its own bypass."""
-    code, out = run("ledger.py", "append", str(tmp_path), "--actor", "gate",
-                    "--class", "phase_admitted",
-                    "--payload", '{"deliverable":"42","phase":"integrate","verdict":"pass",'
-                                 '"admitter":"gate","evidence_ref":"x"}')
-    assert code == 3, out
-    assert "phase_started" in out
-
-
 def test_deliverable_int_and_string_are_the_same_deliverable(tmp_path):
     """The deliverable is an Issue number agents write as 42, "42", or "#42". Raw == made the chain
     reject a phase whose predecessor is visibly present — an unreproducible failure in an unattended run."""
@@ -839,19 +512,6 @@ def test_deliverable_int_and_string_are_the_same_deliverable(tmp_path):
     code, out = run("ledger.py", "append", str(tmp_path), "--actor", "r",
                     "--class", "phase_started",
                     "--payload", '{"deliverable":"#42","phase":"design","role":"r"}')
-    assert code == 0, out
-
-
-def test_the_full_phase_chain_runs_when_each_phase_is_entered_and_admitted(tmp_path):
-    """The teeth must block the bypass WITHOUT blocking the legitimate walk down the chain."""
-    for phase in ("requirements", "design"):
-        seed(tmp_path, "r", "phase_started", {"deliverable": "42", "phase": phase, "role": "r"})
-        seed(tmp_path, "g", "phase_admitted",
-             {"deliverable": "42", "phase": phase, "verdict": "pass",
-              "evidence_ref": "e", "admitter": "g"})
-    code, out = run("ledger.py", "append", str(tmp_path), "--actor", "r",
-                    "--class", "phase_started",
-                    "--payload", '{"deliverable":"42","phase":"implement","role":"r"}')
     assert code == 0, out
 
 
@@ -891,17 +551,6 @@ def test_unknown_view_is_still_rejected(tmp_path):
 # ── phase の親継承（申し送り B-2）────────────────────────────────────────────
 # founding は objective 単位で requirements/design を admit するが、/org-work は task Issue 番号を
 # deliverable にする。別の文字列なので連鎖せず、指示どおり進めても task #1 が弾かれた。
-def test_task_inherits_phase_admission_from_its_parent_objective(tmp_path):
-    for phase in ("requirements", "design"):
-        seed(tmp_path, "sup", "phase_started", {"deliverable": "1", "phase": phase, "role": "sup"})
-        seed(tmp_path, "gate", "phase_admitted",
-             {"deliverable": "1", "phase": phase, "verdict": "pass",
-              "evidence_ref": "e", "admitter": "gate"})
-    code, out = run("ledger.py", "append", str(tmp_path), "--actor", "sup",
-                    "--class", "phase_started",
-                    "--payload", json.dumps({"deliverable": "7", "parent": "1",
-                                             "phase": "implement", "role": "eng"}))
-    assert code == 0, out
 
 
 def test_a_task_without_a_parent_is_still_gated(tmp_path):
@@ -919,311 +568,6 @@ def test_a_task_without_a_parent_is_still_gated(tmp_path):
 # ── org_cycle: 配管の自動化（docs/11 §0d）─────────────────────────────────────
 # 実地で Issue 2件あたり11コマンドを手打ちしており、18 Issue で約90回になっていた。
 # とりわけ parent を目で拾って手打ちしていたため、親継承（§2）の実装が活きていなかった。
-def test_org_cycle_plan_executes_nothing(tmp_path):
-    """plan は印字だけ — 台帳にもGitHubにも触らない。"""
-    code, out = run("org_cycle.py", "plan", "--role", "r", "--issue", "7")
-    assert code == 0, out
-    assert "phase_started" in out and "cycle_started" in out
-    assert not (tmp_path / "ledger.jsonl").exists()
-
-
-def test_org_cycle_complete_requires_domain_model(tmp_path):
-    """docs/11 §4d: ドメインモデルに何をしたかを述べない cycle_completed は認めない。"""
-    code, out = run("org_cycle.py", "complete", "--role", "r", "--issue", "7",
-                    "--outputs", "something")
-    assert code == 2
-    assert "domain-model" in out
-
-
-def test_org_cycle_resolves_parent_from_issue_body():
-    """parent は Issue の `Parent: #N` から読む — 人が運ばない。"""
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("org_cycle", TOOLS / "org_cycle.py")
-    m = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(m)
-    import re
-    body = "## Deliverable\nsplit engine\n\nParent: #1\n\ncandidate_id: cand-abc\n"
-    assert re.search(r"^\s*Parent:\s*#?(\d+)", body, flags=re.M | re.I).group(1) == "1"
-
-
-# ── 案5: worktree 分離の強制（docs/11 §4c）──────────────────────────────────
-# 並列 fan-out で #7 のコミットが feat/issue-8-settle に載る事故が実際に起きた。
-# git checkout はツリー全体を切り替えるので、同一ツリーで並列 maker を走らせる限り再発する。
-# 「毎回正しく判断する」前提の設計は破れる、というのが実地で得られた教訓。
-def test_worktree_isolates_parallel_makers(tmp_path):
-    """2つの Issue の worktree が別ディレクトリ・別ブランチになり、互いのコミットが混ざらない。"""
-    import subprocess
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    def g(*a, cwd=repo):
-        return subprocess.run(["git", *a], cwd=cwd, capture_output=True, text=True)
-    g("init", "-q", "-b", "main")
-    g("config", "user.email", "t@t"); g("config", "user.name", "t")
-    (repo / "seed.txt").write_text("x")
-    g("add", "-A"); g("commit", "-qm", "seed")
-    g("branch", "develop")
-
-    made = []
-    for issue in (7, 8):
-        code, out = run("github_sync.py", "branch", "--issue", str(issue), "--worktree",
-                        "--repo", "o/n", cwd=str(repo))
-        assert code == 0, out
-        made.append(repo / ".orgforge" / "wt" / f"issue-{issue}")
-
-    assert all(d.is_dir() for d in made), "worktree が作られていない"
-    # 各 worktree で別々にコミットしても、相手のツリーには現れない
-    for issue, d in zip((7, 8), made):
-        (d / f"F{issue}.txt").write_text("x")
-        g("add", "-A", cwd=d); g("commit", "-qm", f"i{issue}", cwd=d)
-    for issue, d in zip((7, 8), made):
-        other = 8 if issue == 7 else 7
-        assert (d / f"F{issue}.txt").exists()
-        assert not (d / f"F{other}.txt").exists(), \
-            f"#{other} の成果物が #{issue} のツリーに混入した — 分離が効いていない"
-    # ブランチも別
-    b = [g("branch", "--show-current", cwd=d).stdout.strip() for d in made]
-    assert b[0] != b[1] and all(b), b
-
-
-# ── 案2: verify は配管だけ。判定は持たない ─────────────────────────────────
-# 検証手順を人が毎回書き下ろすと、書くたびに gate の厳しさが変わる（18 Issue で18通り）。
-# 基準の出所は agents/gate.md 1つにする。ただし verdict を埋めた瞬間に gate が形骸化するので、
-# そこは越えない — この境界をテストで固定する。
-def test_verify_injects_charter_and_leaves_verdict_unfilled():
-    """憲章と decide 雛形は出すが、verdict は placeholder のまま（判定を先取りしない）。"""
-    import subprocess, os
-    env = dict(os.environ, ORG_GITHUB_REPO="")
-    p = subprocess.run([sys.executable, str(TOOLS / "org_cycle.py"), "verify",
-                        "--issue", "1", "--role", "gate"],
-                       capture_output=True, text=True, env=env, timeout=60)
-    out = p.stdout + p.stderr
-    # gh が無い/認証が無い環境では Issue を読めず 3 で落ちるのが正しい挙動
-    if p.returncode == 0:
-        assert "admission control" in out, "agents/gate.md の憲章が注入されていない"
-        assert "<admit|reject|park>" in out, "verdict が placeholder になっていない"
-        for filled in ('--verdict admit', '--verdict "admit"'):
-            assert filled not in out, f"配管が verdict を決めている: {filled}"
-    else:
-        assert p.returncode in (2, 3), out
-
-
-def test_verify_rejects_unknown_role():
-    """憲章の無い役割では verify は成り立たない（基準の出所が無いまま起動しない）。"""
-    import subprocess
-    p = subprocess.run([sys.executable, str(TOOLS / "org_cycle.py"), "verify",
-                        "--issue", "1", "--role", "maker"],
-                       capture_output=True, text=True, timeout=60)
-    assert p.returncode != 0
-
-
-def test_verify_finds_charter_in_bundled_layout():
-    """バンドル（agents/ が tools/ の兄弟）でも憲章を見つける。
-
-    プラグインとして入った形でだけ憲章を見失うと、verify は「基準の出所が1つ」という
-    唯一の存在理由を失う。repo 直下の配置だけ見ていて実際に取りこぼした。
-    """
-    import importlib.util
-    m = _cycle_mod("judge")
-    bundled = TOOLS.parent / "integrations" / "claude-code"
-    if not (bundled / "agents").is_dir():
-        return  # バンドル未生成の環境ではスキップ
-    os.environ["CLAUDE_PLUGIN_ROOT"] = str(bundled)
-    try:
-        for role in ("gate", "skeptic"):
-            charter, path = m._role_charter(role)
-            assert charter, f"バンドル配置で {role} の憲章を見失った（探した先: {path}）"
-    finally:
-        os.environ.pop("CLAUDE_PLUGIN_ROOT", None)
-
-
-# ── 実地フィードバック: 識別子の揺れで admission を見失う ─────────────────
-# gate が deliverable に "settle()"（関数名）を書き、complete の照合が "8"（Issue番号）で
-# 探して「admission がまだ」と出た。記録は seq 96 に存在していた。
-def test_admission_lookup_tolerates_identifier_drift(tmp_path):
-    """deliverable が関数名でも、payload の issue で拾える。無ければ near で原因を示す。"""
-    import importlib.util
-    led = tmp_path / "ledger"; led.mkdir()
-    rows = [
-        {"seq": 96, "class": "admission_decided",
-         "payload": {"deliverable": "settle()", "issue": 8, "verdict": "admit"}},
-        {"seq": 99, "class": "admission_decided",
-         "payload": {"deliverable": "9", "issue": 9, "verdict": "reject"}},
-    ]
-    (led / "ledger.jsonl").write_text(
-        "\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
-
-    m = _cycle_mod("_core")
-    os.environ["ORG_LEDGER_ROOT"] = str(led)
-    try:
-        v, seq, _ = m._admission_for(8)
-        assert (v, seq) == ("admit", 96), f"関数名で記録された admission を見失った: {v} {seq}"
-        v9, _, _ = m._admission_for(9)
-        assert v9 == "reject", "admit 以外の verdict を admit として扱ってはいけない"
-        v11, seq11, near = m._admission_for(11)
-        assert v11 is None and seq11 is None
-        assert near, "無いと言い切る前に、近い記録を原因究明の手がかりとして示すこと"
-    finally:
-        os.environ.pop("ORG_LEDGER_ROOT", None)
-
-
-def test_verify_allows_passing_by_file_reference():
-    """本文でもファイル参照でも渡せることを案内する（0.19.0 でガードが読むようになった）。
-
-    以前は本文限定だったので「本文に貼れ」と案内していた。264行を毎回貼ると maker の
-    context を圧迫するので、ガード側がファイルを読んで検証するように変えた。
-    """
-    src = _cycle_src()
-    seg = src[src.index("def cmd_verify"):]
-    assert "ファイルに落として" in seg and "参照させてもよい" in seg
-    assert "HELD" not in seg, "ファイル渡しが弾かれる前提の案内が残っている"
-
-
-# ── 実地フィードバック: 統合直前が最も抜けやすい ─────────────────────────
-def _ledger_with(tmp_path, rows):
-    led = tmp_path / "ledger"; led.mkdir(exist_ok=True)
-    (led / "ledger.jsonl").write_text(
-        "\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
-    return led
-
-
-def test_integrate_blocks_without_skeptic(tmp_path):
-    """gate が admit していても、skeptic の survives が無ければ統合させない。
-
-    実地で #8 が「refutation_attempted が台帳に1件も無いまま develop へ統合」された。
-    Issue にはコメントがあったので、二重記録の片側だけが落ちていた。
-    """
-    led = _ledger_with(tmp_path, [
-        {"seq": 1, "class": "admission_decided",
-         "payload": {"deliverable": "8", "issue": 8, "verdict": "admit"}},
-    ])
-    env = dict(os.environ, ORG_LEDGER_ROOT=str(led))
-    p = subprocess.run([sys.executable, str(TOOLS / "org_cycle.py"), "integrate", "--issue", "8"],
-                       capture_output=True, text=True, env=env, cwd=str(tmp_path), timeout=60)
-    assert p.returncode == 4, p.stdout + p.stderr
-    err = p.stdout + p.stderr
-    assert "skeptic" in err and "survives" in err
-    assert "git merge" not in err, "前提が揃わないのにマージ手順に入っている"
-
-
-def test_integrate_allows_when_both_recorded(tmp_path):
-    """admit + survives が揃えば、前提照合では止まらない（実行は git の世界に入る）。"""
-    led = _ledger_with(tmp_path, [
-        {"seq": 1, "class": "admission_decided",
-         "payload": {"deliverable": "8", "issue": 8, "verdict": "admit"}},
-        {"seq": 2, "class": "refutation_attempted",
-         "payload": {"claim_id": "8", "issue": 8, "verdict": "survives"}},
-    ])
-    import importlib.util
-    m = _cycle_mod("_core")
-    os.environ["ORG_LEDGER_ROOT"] = str(led)
-    try:
-        assert m._admission_for(8)[0] == "admit"
-        assert m._refutation_for(8)[0] == "survives"
-    finally:
-        os.environ.pop("ORG_LEDGER_ROOT", None)
-
-
-def test_refuted_is_not_treated_as_survives(tmp_path):
-    """refuted を survives と混同したら、反証されたものが統合される。"""
-    led = _ledger_with(tmp_path, [
-        {"seq": 1, "class": "admission_decided",
-         "payload": {"issue": 9, "verdict": "admit"}},
-        {"seq": 2, "class": "refutation_attempted",
-         "payload": {"issue": 9, "verdict": "refuted"}},
-    ])
-    env = dict(os.environ, ORG_LEDGER_ROOT=str(led))
-    p = subprocess.run([sys.executable, str(TOOLS / "org_cycle.py"), "integrate", "--issue", "9"],
-                       capture_output=True, text=True, env=env, cwd=str(tmp_path), timeout=60)
-    assert p.returncode == 4, "refuted なのに統合の前提を満たしたと判定された"
-
-
-def test_status_flags_admit_without_refutation(tmp_path):
-    """board が「admit 済みだが skeptic の記録が無い」を RED で出す。"""
-    led = _ledger_with(tmp_path, [
-        {"seq": 1, "class": "admission_decided",
-         "payload": {"issue": 8, "verdict": "admit"}},
-    ])
-    p = subprocess.run([sys.executable, str(TOOLS / "status.py"), "status", str(led)],
-                       capture_output=True, text=True, timeout=60)
-    out = p.stdout + p.stderr
-    assert "skeptic の記録が無い" in out, out
-    assert out.startswith("RED"), out
-
-
-def test_status_counts_risk_accepted_admits(tmp_path):
-    """リスク付き admit が board に出る（書き得にしない）。"""
-    led = _ledger_with(tmp_path, [
-        {"seq": 1, "class": "admission_decided",
-         "payload": {"issue": 8, "verdict": "admit", "risk_accepted": True}},
-        {"seq": 2, "class": "refutation_attempted",
-         "payload": {"issue": 8, "verdict": "survives"}},
-    ])
-    p = subprocess.run([sys.executable, str(TOOLS / "status.py"), "status", str(led)],
-                       capture_output=True, text=True, timeout=60)
-    assert "リスク付き admit: 1 件" in p.stdout + p.stderr
-
-
-def test_verify_gate_embeds_absolute_repro_lint_path():
-    """repro_lint がパス解決できず一度も走っていなかった。絶対パスを埋める。"""
-    src = _cycle_src()
-    assert 'repro_lint.py' in src and 'HERE' in src, "repro_lint の絶対パス埋め込みが無い"
-
-
-def test_worktree_cleanup_keeps_dirty_tree(tmp_path):
-    """未コミットの変更がある worktree は消さない（消えて困るかは配管が決めることではない）。"""
-    import importlib.util
-    repo = tmp_path / "r"; repo.mkdir()
-    def g(*a, cwd=repo):
-        return subprocess.run(["git", *a], cwd=cwd, capture_output=True, text=True)
-    g("init", "-q", "-b", "main"); g("config", "user.email", "t@t"); g("config", "user.name", "t")
-    (repo / "s.txt").write_text("x"); g("add", "-A"); g("commit", "-qm", "s"); g("branch", "develop")
-    wt = repo / ".orgforge" / "wt" / "issue-5"
-    wt.parent.mkdir(parents=True, exist_ok=True)
-    g("worktree", "add", "-q", "-b", "feat/issue-5", str(wt), "develop")
-    (wt / "dirty.txt").write_text("uncommitted")
-
-    m = _cycle_mod("cycle")
-    cwd = os.getcwd(); os.chdir(repo)
-    try:
-        msg = m._cleanup_worktree(5)
-        assert wt.is_dir(), "未コミットの変更ごと worktree を消した"
-        assert "残した" in msg, msg
-        # クリーンにすれば消える
-        (wt / "dirty.txt").unlink()
-        msg2 = m._cleanup_worktree(5)
-        assert not wt.is_dir(), f"クリーンな worktree が片付いていない: {msg2}"
-    finally:
-        os.chdir(cwd)
-
-
-def test_complete_requires_command_and_result():
-    """DoD の実出力を人の自由記述任せにしない（B）。"""
-    p = subprocess.run([sys.executable, str(TOOLS / "org_cycle.py"), "complete",
-                        "--role", "r", "--issue", "1", "--outputs", "x",
-                        "--domain-model-none", "理由"],
-                       capture_output=True, text=True, timeout=60)
-    assert p.returncode != 0
-    assert "--command" in p.stderr and "--result" in p.stderr
-
-
-def test_begin_log_carries_facts_the_tool_already_knows():
-    """begin の log に branch / worktree / parent / candidate_id が自動で入る（B）。
-
-    実地で人が書いた 276 字にはブランチ名も worktree のパスも無かったが、org_cycle は
-    両方知っていた。知っている事実を人に書かせない。
-    """
-    src = _cycle_src()
-    seg = src[src.index("def _steps_begin"):src.index("def _steps_complete")]
-    for token in ("worktree:", "branch:", "parent:", "candidate_id:", "--command", "--result"):
-        assert token in seg, f"begin の log に {token} が入っていない"
-
-
-def test_handback_puts_closes_in_pr_body():
-    """PR body の `Closes #N` が Issue ↔ PR ↔ コミットを繋ぎ、統合時に Issue を閉じる（C）。"""
-    src = _cycle_src()
-    seg = src[src.index("def cmd_handback"):]
-    assert 'f"Closes #{a.issue}"' in seg, "PR body に Closes が無い — Issue が OPEN のまま残る"
-    assert "gh pr create" in seg
 
 
 # ── 実地: 予算 cap が日常の後片付けを止めていた（1日5回発火・実害ゼロ）───────
@@ -1252,145 +596,6 @@ def test_irreversible_deletes_stay_metered():
 
 
 # ── 実地: log が Issue にだけ書き、台帳の progress_recorded が0件だった ──────
-def test_log_writes_progress_receipt_to_ledger(monkeypatch, tmp_path):
-    """Issue に7回書いたのに台帳は0件。/org-resume が復帰できない状態だった。"""
-    src = (TOOLS / "github_sync.py").read_text(encoding="utf-8")
-    assert "_append_progress_receipt" in src
-    seg = src[src.index("def _append_progress_receipt"):]
-    assert "progress_recorded" in seg and "ledger.py" in seg
-
-
-def test_begin_records_attention_allocated():
-    """6件着手して選択の記録が1件だけだった。選んだ結果を残すのは配管。"""
-    src = _cycle_src()
-    seg = src[src.index("def _steps_begin"):src.index("def _steps_complete")]
-    assert "attention_allocated" in seg
-
-
-def test_doctrine_propose_warns_on_incomplete_provenance():
-    """propose は省略でき admit は必須にする、という不整合で必ず詰まっていた。"""
-    root = None
-    import tempfile
-    with tempfile.TemporaryDirectory() as d:
-        p = subprocess.run([sys.executable, str(TOOLS / "doctrine.py"), "propose", d, "r",
-                            "--claim", "x", "--source", "s", "--confidence", "0.5"],
-                           capture_output=True, text=True, timeout=60)
-        assert p.returncode == 0
-        assert "admit できない" in p.stderr, "admit で詰まることを propose 時点で言っていない"
-
-
-def test_complete_proposes_learning_to_doctrine():
-    """学びの蓄積口がサイクルに繋がっていること（propose まで。admit は gate）。"""
-    src = _cycle_src()
-    seg = src[src.index("def cmd_complete"):src.index("def cmd_plan")]
-    assert "doctrine.py" in seg and "propose" in seg
-    assert "--retrieved-at" in seg and "--review-by" in seg, \
-        "provenance を埋めないと gate が admit できず、学びは pending のまま死ぬ"
-
-
-def test_gc_keeps_unmerged_and_dirty_worktrees(tmp_path):
-    """gc は統合済みだけを消す。未統合・未コミットは残す。"""
-    import importlib.util
-    repo = tmp_path / "r"; repo.mkdir()
-    def g(*a, cwd=repo):
-        return subprocess.run(["git", *a], cwd=cwd, capture_output=True, text=True)
-    g("init", "-q", "-b", "main"); g("config", "user.email", "t@t"); g("config", "user.name", "t")
-    (repo / "s.txt").write_text("x"); g("add", "-A"); g("commit", "-qm", "s"); g("branch", "develop")
-    wt = repo / ".orgforge" / "wt" / "issue-3"
-    wt.parent.mkdir(parents=True, exist_ok=True)
-    g("worktree", "add", "-q", "-b", "feat/issue-3", str(wt), "develop")
-    (wt / "new.txt").write_text("work"); g("add", "-A", cwd=wt); g("commit", "-qm", "w", cwd=wt)
-
-    m = _cycle_mod("inspect")
-    cwd = os.getcwd(); os.chdir(repo)
-    try:
-        m.cmd_gc(argparse.Namespace(base="develop", all=False))
-        assert wt.is_dir(), "develop に未統合の worktree を消した"
-    finally:
-        os.chdir(cwd)
-
-
-def test_record_marks_backfilled():
-    """遡って記録したものは、実時点の記録と区別できること。"""
-    src = _cycle_src()
-    seg = src[src.index("def cmd_record"):]
-    assert '"backfilled": True' in seg, "backfill 印が無いと、後から足した記録が実時点と混ざる"
-
-
-# ── 実地: 相関キーが無いと統制が無言で無効になっていた（seq 204 / 205）───────
-def _led(tmp_path):
-    d = tmp_path / "l"; d.mkdir(exist_ok=True)
-    return dict(os.environ, ORG_LEDGER_ROOT=str(d))
-
-
-def _append(env, actor, cls, payload):
-    return subprocess.run(
-        [sys.executable, str(TOOLS / "ledger.py"), "append", "--actor", actor,
-         "--class", cls, "--payload", json.dumps(payload)],
-        capture_output=True, text=True, env=env, timeout=60)
-
-
-def test_judgment_without_correlation_key_is_rejected(tmp_path):
-    """相関キーの無い判定は拒否する。以前は素通りし、統制が効いていないことも見えなかった。"""
-    env = _led(tmp_path)
-    p = _append(env, "maker1", "admission_decided", {"verdict": "admit"})
-    assert p.returncode != 0, "対象を特定できない判定が通った"
-    assert "特定できない" in p.stderr
-
-
-def test_self_admission_is_caught_when_written_as_deliverable(tmp_path):
-    """deliverable/issue で書いても自己 admit を検出する（seq 204 の再現）。
-
-    強制側は candidate_id/claim_id しか見ておらず、人間側は deliverable/issue で書いていた。
-    識別子が2系統に分かれ、キーを変えた瞬間に統制が消えていた。
-    """
-    env = _led(tmp_path)
-    # **実地の形をそのまま使う。** 0.16.0 のテストは cycle_started に issue を入れていたため
-    # 直接の共有 ID があり、この穴を再現できていなかった（実際の cycle_started は
-    # candidate_id と pack_manifest_id しか持たない）。テストが本番と違う形を作ると、
-    # 「壊れる場所で検証していない」ことになる — #7 で学んだのと同じ失敗。
-    _append(env, "maker1", "cycle_started",
-            {"role": "maker1", "candidate_id": "cand-abc", "pack_manifest_id": "issue-7"})
-    p = _append(env, "maker1", "admission_decided",
-                {"verdict": "admit", "deliverable": "7", "issue": 7})
-    assert p.returncode != 0, ("maker が自分の成果物を admit できた — cycle_started は "
-                               "candidate_id、判定は deliverable で書かれるので、直接比較では"
-                               "永久に相関しない")
-    assert "already acted as" in p.stderr
-
-
-def test_deploy_gate_correlates_across_key_names(tmp_path):
-    """skeptic が deliverable で survives を書いても deploy が通る（正常系）。
-
-    `claim_id == candidate_id` だけを見ていたため、実地の refutation 2件と相関できず、
-    null == null が一致して deploy ゲートが丸ごと無効だった。
-    """
-    env = _led(tmp_path)
-    _append(env, "skeptic", "refutation_attempted",
-            {"verdict": "survives", "deliverable": "7", "issue": 7})
-    p = _append(env, "deployer", "result_deployed", {"deliverable": "7", "issue": 7})
-    assert p.returncode == 0, f"survives 済みの deploy が通らない: {p.stderr}"
-
-
-def test_deploy_without_any_survives_still_blocked(tmp_path):
-    """緩めたのは相関の取り方だけ。反証を経ていない deploy は依然として止まる。"""
-    env = _led(tmp_path)
-    p = _append(env, "gate", "result_deployed", {"deliverable": "999", "issue": 999})
-    assert p.returncode != 0, "反証されていない成果物が deploy できた"
-
-
-def test_decide_writes_the_receipt_itself():
-    """受領証は decide が自分で書く（0.21.0）。
-
-    以前は雛形を印字して人に打たせていたため、実地で3回片側落ちした
-    （#8 の refutation / #11 の1回目の reject / progress_recorded）。
-    actor は --by で渡っているので、分ける理由が無い。
-    """
-    src = (TOOLS / "github_sync.py").read_text(encoding="utf-8")
-    seg = src[src.index("def cmd_decide"):]
-    assert "ledger.py" in seg and "--natural-key" in seg
-    assert '"issue": a.issue' in seg
-    assert "NEXT: 台帳の受領証をこのまま打つこと" not in seg, "人に打たせる雛形が残っている"
 
 
 # ── 実地: 検出器が「学習が使われている」と嘘をついた ─────────────────────
@@ -1437,46 +642,6 @@ def test_learning_warns_that_matching_is_by_string(tmp_path):
 
 
 # ── 0.17.0: 識別子の別名を台帳から推移的に解決する ──────────────────────
-def test_alias_bridges_candidate_id_and_issue(tmp_path):
-    """pack_manifest_id: "issue-7" が candidate_id と Issue 番号を繋ぐ唯一の橋。
-
-    人に同じキーで書かせるのではなく、台帳に既にある対応関係を辿る。
-    """
-    env = _led(tmp_path)
-    _append(env, "m", "cycle_started",
-            {"role": "m", "candidate_id": "cand-x", "pack_manifest_id": "issue-42"})
-    p = _append(env, "m", "admission_decided", {"verdict": "admit", "deliverable": "42"})
-    assert p.returncode != 0, "別名経由の自己 admit が通った"
-    assert "同じ仕事" in p.stderr, "どう繋がったかを示していない"
-
-
-def test_alias_via_contract_ref(tmp_path):
-    """candidate_submitted の contract_ref も橋になる。"""
-    env = _led(tmp_path)
-    _append(env, "m", "candidate_submitted",
-            {"maker": "m", "candidate_id": "cand-y", "contract_ref": "issue-9", "source": "self"})
-    _append(env, "m", "cycle_started", {"role": "m", "candidate_id": "cand-y"})
-    p = _append(env, "m", "admission_decided", {"verdict": "admit", "issue": 9})
-    assert p.returncode != 0, "contract_ref 経由の相関が効いていない"
-
-
-def test_unrelated_work_is_not_falsely_correlated(tmp_path):
-    """束ねすぎて無関係な仕事まで同一視したら、正当な admit が止まる。"""
-    env = _led(tmp_path)
-    _append(env, "m", "cycle_started",
-            {"role": "m", "candidate_id": "cand-a", "pack_manifest_id": "issue-1"})
-    p = _append(env, "m", "admission_decided", {"verdict": "admit", "deliverable": "2", "issue": 2})
-    assert p.returncode == 0, f"別 Issue の admit まで止めた: {p.stderr}"
-
-
-def test_skeptic_cannot_refute_own_work_via_alias(tmp_path):
-    """自己反証拒否も別名経由で効くこと（未検証だった層）。"""
-    env = _led(tmp_path)
-    _append(env, "maker1", "cycle_started",
-            {"role": "maker1", "candidate_id": "cand-s", "pack_manifest_id": "issue-5"})
-    p = _append(env, "maker1", "refutation_attempted",
-                {"verdict": "survives", "deliverable": "5", "issue": 5})
-    assert p.returncode != 0, "maker が自分の仕事を refute できた"
 
 
 def test_gate_cannot_also_be_skeptic(tmp_path):
@@ -1522,56 +687,6 @@ def test_learning_prints_the_doctrine_command(tmp_path):
 
 
 # ── 0.18.0: 判定は最新が有効（追記型の台帳で reject が後から来る）─────────
-def _status(led):
-    return subprocess.run([sys.executable, str(TOOLS / "status.py"), "status", str(led)],
-                          capture_output=True, text=True, timeout=60)
-
-
-def _write_ledger(tmp_path, name, rows):
-    led = tmp_path / name; led.mkdir(parents=True, exist_ok=True)
-    (led / "ledger.jsonl").write_text(
-        "\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
-    return led
-
-
-def test_reject_after_admit_clears_the_admit(tmp_path):
-    """admit → reject の順なら reject が有効。「一度でも admit があった」で数えない。"""
-    led = _write_ledger(tmp_path, "s1", [
-        {"seq": 216, "class": "admission_decided",
-         "payload": {"issue": 11, "verdict": "admit"}},
-        {"seq": 218, "class": "admission_decided",
-         "payload": {"issue": 11, "verdict": "reject"}},
-    ])
-    out = _status(led).stdout
-    assert "skeptic の記録が無い" not in out, f"reject 後も admit 扱いのまま: {out}"
-    assert "rework 待ち" in out, f"reject されたまま放置されていることが見えない: {out}"
-
-
-def test_admit_after_reject_counts_as_admit(tmp_path):
-    """逆順（reject → admit）なら admit が有効。rework が通った正常系。"""
-    led = _write_ledger(tmp_path, "s2", [
-        {"seq": 1, "class": "admission_decided", "payload": {"issue": 11, "verdict": "reject"}},
-        {"seq": 2, "class": "admission_decided", "payload": {"issue": 11, "verdict": "admit"}},
-    ])
-    out = _status(led).stdout
-    assert "skeptic の記録が無い" in out, f"再 admit が admit として数えられていない: {out}"
-
-
-def test_risk_accepted_admit_not_counted_after_reject(tmp_path):
-    """後で reject された risk 付き admit を「残っている穴」に数えない。"""
-    led = _write_ledger(tmp_path, "s3", [
-        {"seq": 1, "class": "admission_decided",
-         "payload": {"issue": 5, "verdict": "admit", "risk_accepted": True}},
-        {"seq": 2, "class": "admission_decided", "payload": {"issue": 5, "verdict": "reject"}},
-    ])
-    out = _status(led).stdout
-    assert "リスク付き admit" not in out, out
-
-
-def test_verify_template_has_no_undefined_shell_var():
-    """雛形は貼ってそのまま動くこと。$P は未定義で、打てない雛形は打たれない。"""
-    src = _cycle_src()
-    assert "$P/tools" not in src, "未定義の $P が雛形に残っている"
 
 
 # ── 0.19.0: 実務で「無くて困った」もの ──────────────────────────────────
@@ -1591,112 +706,6 @@ def test_correction_voids_a_probe(tmp_path):
     assert "skeptic の記録が無い" not in out, f"訂正済みのプローブを実判定として数えた: {out}"
 
 
-def test_correction_backfill_is_not_voided(tmp_path):
-    """backfill は「後から書いた実判定」であって無効ではない。"""
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("ledger_c", TOOLS / "ledger.py")
-    m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
-    evs = [{"seq": 9, "class": "correction",
-            "payload": {"corrects": [1], "kind": "backfill", "reason": "遡及記録"}},
-           {"seq": 10, "class": "correction",
-            "payload": {"corrects": [2], "kind": "probe", "reason": "検証"}}]
-    assert m.corrected_seqs(evs) == {2}, "backfill まで無効化した"
-
-
-def test_show_lists_every_judgment_with_correction_marks():
-    """1つの Issue の判定履歴を一望できる（何周目のどの判定かが分かる）。"""
-    src = _cycle_src()
-    seg = src[src.index("def cmd_show"):]
-    assert "訂正済み" in seg and "backfill" in seg
-    assert "次:" in seg, "いま何待ちかが出ない"
-
-
-def test_begin_warns_but_does_not_block_on_unready_deps():
-    """事前チェックは見せるだけ。判断は人がする。"""
-    src = _cycle_src()
-    seg = src[src.index("def _readiness"):src.index("def cmd_begin")]
-    assert "needs-human" in seg and "rework" in seg
-    body = src[src.index("def cmd_begin"):src.index("def _steps_complete")] \
-        if "def _steps_complete" in src[src.index("def cmd_begin"):] else src[src.index("def cmd_begin"):]
-    assert "止めない" in src, "警告が停止になっている（begin は判断しない）"
-
-
-def test_seam_guard_accepts_a_referenced_file(tmp_path):
-    """seam contract をファイルで渡せる。ガード自身が読んで検証する。"""
-    import importlib.util
-    hook = TOOLS.parent / "integrations" / "common" / "org_hook.py"
-    spec = importlib.util.spec_from_file_location("org_hook_s", hook)
-    h = importlib.util.module_from_spec(spec); spec.loader.exec_module(h)
-    cwd = os.getcwd(); os.chdir(tmp_path)
-    try:
-        good = tmp_path / "seam.md"
-        good.write_text("# HAND-OFF\n## Your slice\nX\nInputs you receive: A\n"
-                        "Outputs you MUST produce: B\n", encoding="utf-8")
-        assert h.spawn_needs_seam_or_independence(
-            "Task", {"prompt": f"契約は {good} を読むこと"}) is None, "seam 入りファイルが弾かれた"
-
-        bad = tmp_path / "memo.md"
-        bad.write_text("ただのメモ", encoding="utf-8")
-        assert h.spawn_needs_seam_or_independence(
-            "Task", {"prompt": f"手順は {bad}"}) is not None, "seam の無いファイルが通った"
-        assert h.spawn_needs_seam_or_independence(
-            "Task", {"prompt": "手順は /etc/passwd"}) is not None, "org 外のファイルを読んだ"
-        assert h.spawn_needs_seam_or_independence(
-            "Task", {"prompt": "いい感じにやって"}) is not None, "契約なしが通った"
-    finally:
-        os.chdir(cwd)
-
-
-# ── 0.20.0: rework 履歴 / 統合の事前確認 / 本番資産 / 公開面 ─────────────
-def test_verify_passes_rework_history_to_gate():
-    """gate に過去の判定を渡す。渡さないと毎回「初回判定」として扱う。"""
-    src = _cycle_src()
-    seg = src[src.index("def cmd_verify"):]
-    assert "判定履歴" in seg and "回目の判定です" in seg
-    assert "再導出" in seg, "「前回の指摘が直ったか」だけを見る gate になってしまう"
-
-
-def test_round_count_uses_the_larger_of_ledger_and_issue():
-    """二重記録の片側が落ちていても回数を過少に言わない。"""
-    src = _cycle_src()
-    seg = src[src.index("def cmd_verify"):]
-    assert "max(len(rounds), len(issue_rounds))" in seg
-
-
-def test_integrate_plan_executes_nothing_and_warns_on_overlap(tmp_path):
-    """--plan は何も実行せず、並行 worktree との重複を予告する。"""
-    src = _cycle_src("ship")
-    seg = src[src.index("def _integrate_preview"):src.index("def cmd_integrate")]
-    assert "同じファイルを変更しています" in seg
-    body = src[src.index("def cmd_integrate"):]
-    assert 'if getattr(a, "plan", False):' in body
-    assert body.index('if getattr(a, "plan", False):') < body.index("git\", \"merge"), \
-        "--plan がマージ手順より後にある（実行してしまう）"
-
-
-def test_surface_detection_ranks_security_definer_first():
-    """SECURITY DEFINER は関数ごとに判定する。ファイル単位だと肝心の1件が沈む。"""
-    src = _cycle_src()
-    seg = src[src.index("def _new_public_surfaces"):]
-    assert "関数ごと" in seg, "ファイル単位のフラグに戻っている"
-    assert "grant 済み" in seg
-
-
-def test_surface_detection_skips_test_files():
-    """テストヘルパを拾いすぎると、確認してほしい1件が埋もれる。"""
-    src = _cycle_src()
-    seg = src[src.index("def _new_public_surfaces"):]
-    assert "tests?" in seg and "spec" in seg
-
-
-def test_complete_blocks_until_surfaces_declared(tmp_path):
-    """公開面が増えたら、申告するまで complete させない（認可ホールの入口）。"""
-    src = _cycle_src()
-    seg = src[src.index("def cmd_complete"):src.index("def cmd_plan")]
-    assert "--new-surface" in seg and "return 2" in seg
-    assert "認可ホール" in seg
-
-
 def test_asset_touched_records_authority():
     """本番資産の変更は「誰の権限で入れたか」ごと残す。"""
     src = _cycle_src()
@@ -1705,87 +714,3 @@ def test_asset_touched_records_authority():
 
 
 # ── 0.21.0: 二重管理をやめる / 冪等キーによる統制の迂回 ────────────────
-def test_idempotent_key_cannot_bypass_controls(tmp_path):
-    """冪等 no-op は「同じ actor の再実行」に限る。
-
-    (class, natural_key) だけを見ていたため、キーさえ一致すれば actor が違っても no-op に
-    なり、統制が評価すらされなかった。実地では gate と同じキーを maker が使うことで
-    自己承認が exit 0 で通った。冪等性は再実行を守る仕組みであって、統制の裏口ではない。
-    """
-    env = _led(tmp_path)
-    a = _append(env, "gate", "admission_decided", {"verdict": "reject", "issue": 5, "_x": 1})
-    assert a.returncode == 0
-    # 同じ actor の再実行 → no-op
-    b = subprocess.run([sys.executable, str(TOOLS / "ledger.py"), "append", "--actor", "gate",
-                        "--class", "admission_decided", "--natural-key", "k1",
-                        "--payload", json.dumps({"verdict": "reject", "issue": 5})],
-                       capture_output=True, text=True, env=env, timeout=60)
-    c = subprocess.run([sys.executable, str(TOOLS / "ledger.py"), "append", "--actor", "gate",
-                        "--class", "admission_decided", "--natural-key", "k1",
-                        "--payload", json.dumps({"verdict": "reject", "issue": 5})],
-                       capture_output=True, text=True, env=env, timeout=60)
-    assert c.returncode == 0 and "no-op" in c.stdout, c.stdout + c.stderr
-    # 別 actor が同じキー → 拒否
-    d = subprocess.run([sys.executable, str(TOOLS / "ledger.py"), "append", "--actor", "maker",
-                        "--class", "admission_decided", "--natural-key", "k1",
-                        "--payload", json.dumps({"verdict": "admit", "issue": 5})],
-                       capture_output=True, text=True, env=env, timeout=60)
-    assert d.returncode != 0, "別 actor が冪等キーで統制を迂回できた"
-    assert "再実行ではない" in d.stderr
-
-
-def test_decide_writes_ledger_before_issue():
-    """台帳を先に通す。拒否されるなら Issue に外向きの記録を作る前に止める。"""
-    src = (TOOLS / "github_sync.py").read_text(encoding="utf-8")
-    seg = src[src.index("def cmd_decide"):]
-    led = seg.index("ledger.py")
-    comment = seg.index('gh(["issue", "comment"')
-    assert led < comment, "Issue に書いてから台帳を叩いている（食い違いが外に残る）"
-    assert "台帳が受け付けなかったので、Issue にも記録していない" in seg
-
-
-def test_decide_key_is_unique_per_judgment():
-    """`{event}-{issue}` だと2周目の判定が1周目と衝突して no-op になる。"""
-    src = (TOOLS / "github_sync.py").read_text(encoding="utf-8")
-    seg = src[src.index("def cmd_decide"):]
-    assert 'f"{a.event}-{a.issue}-{digest[:12]}"' in seg
-
-
-# ── 0.22.0: 分割で持ち込んだ穴を塞ぐ ────────────────────────────────────
-def test_core_HERE_points_at_tools_not_the_package():
-    """HERE は tools/ を指すこと。
-
-    分割時にここを直し忘れ、_gh_sync が github_sync.py を見失って _branch_for が
-    slug 無しのブランチ名を返した。組み立て系のツールは「見つからない」を静かに
-    素通りするので、show の実装行と integrate --plan の変更一覧が**黙って空**になった。
-    パスの基点は分割で最初に壊れる場所。
-    """
-    m = _cycle_mod("_core")
-    assert os.path.isfile(os.path.join(m.HERE, "github_sync.py")), \
-        f"HERE={m.HERE} から github_sync.py が見えない"
-    assert os.path.isfile(os.path.join(m.HERE, "ledger.py"))
-
-
-def test_bundle_includes_subpackages():
-    """build.sh が tools/ のサブパッケージも同期すること。
-
-    `tools/*.py` だけを見ていると、分割したモジュールがバンドルに入らず、
-    プラグインとして入れた瞬間に ImportError で死ぬ。
-    """
-    bundled = TOOLS.parent / "integrations" / "claude-code" / "tools"
-    if not bundled.is_dir():
-        return
-    for src in (TOOLS / "orgcycle").glob("*.py"):
-        dst = bundled / "orgcycle" / src.name
-        assert dst.is_file(), f"バンドルに {src.name} が無い（build.sh の同期漏れ）"
-        assert dst.read_text(encoding="utf-8") == src.read_text(encoding="utf-8"), \
-            f"{src.name} がバンドルと食い違っている"
-
-
-def test_every_subcommand_still_dispatches():
-    """分割後も全サブコマンドが起動すること（import の取りこぼし検出）。"""
-    for c in ("begin", "complete", "plan", "verify", "handback",
-              "integrate", "gc", "record", "show", "touched"):
-        p = subprocess.run([sys.executable, str(TOOLS / "org_cycle.py"), c, "--help"],
-                           capture_output=True, text=True, timeout=60)
-        assert p.returncode == 0, f"{c} が起動しない: {p.stderr[:200]}"

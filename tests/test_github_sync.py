@@ -11,9 +11,37 @@ import sys
 import pytest
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
-spec = importlib.util.spec_from_file_location("github_sync", REPO / "tools" / "github_sync.py")
-GS = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(GS)
+# github_sync は tools/ghsync/ に分割された（0.22.0）。テストは「どのモジュールに居るか」
+# ではなく振る舞いを見たいので、全モジュールの名前を1つの名前空間に集めたビューを使う。
+# `monkeypatch.setattr(GS, "gh", fake)` が全モジュールに効くよう、gh の差し替えは
+# 各モジュールにも伝播させる（下の _patch_gh_everywhere）。
+sys.path.insert(0, str(REPO / "tools"))
+import types as _types
+from ghsync import _core as _gh_core, backlog as _gh_backlog, record as _gh_record,     branch as _gh_branch, coverage as _gh_coverage
+
+_GH_MODS = (_gh_core, _gh_backlog, _gh_record, _gh_branch, _gh_coverage)
+
+
+class _Facade(_types.ModuleType):
+    """全 ghsync モジュールの統合ビュー。setattr は全モジュールに伝播する。"""
+
+    def __getattr__(self, name):
+        for m in _GH_MODS:
+            if hasattr(m, name):
+                return getattr(m, name)
+        raise AttributeError(name)
+
+    def __setattr__(self, name, value):
+        hit = False
+        for m in _GH_MODS:
+            if hasattr(m, name):
+                setattr(m, name, value)
+                hit = True
+        if not hit:
+            object.__setattr__(self, name, value)
+
+
+GS = _Facade("github_sync_facade")
 
 
 class FakeGh:
@@ -506,8 +534,9 @@ def test_stable_key_is_identical_across_processes():
     the 'logs once, never twice' guarantee would hold only within one process."""
     import subprocess as sp
     outs = {sp.run([sys.executable, "-c",
-                    "import sys;sys.path.insert(0,'tools');import github_sync as g;"
-                    "print(g._stable_key('progress_recorded','did a thing','implement'))"],
+                    "import sys;sys.path.insert(0,'tools');"
+                    "from ghsync._core import _stable_key;"
+                    "print(_stable_key('progress_recorded','did a thing','implement'))"],
                    capture_output=True, text=True, cwd=str(REPO)).stdout.strip() for _ in range(3)}
     assert len(outs) == 1 and outs != {""}, outs
 
