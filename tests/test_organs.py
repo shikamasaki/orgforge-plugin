@@ -913,3 +913,94 @@ def test_org_cycle_resolves_parent_from_issue_body():
     import re
     body = "## Deliverable\nsplit engine\n\nParent: #1\n\ncandidate_id: cand-abc\n"
     assert re.search(r"^\s*Parent:\s*#?(\d+)", body, flags=re.M | re.I).group(1) == "1"
+
+
+# ── 案5: worktree 分離の強制（docs/11 §4c）──────────────────────────────────
+# 並列 fan-out で #7 のコミットが feat/issue-8-settle に載る事故が実際に起きた。
+# git checkout はツリー全体を切り替えるので、同一ツリーで並列 maker を走らせる限り再発する。
+# 「毎回正しく判断する」前提の設計は破れる、というのが実地で得られた教訓。
+def test_worktree_isolates_parallel_makers(tmp_path):
+    """2つの Issue の worktree が別ディレクトリ・別ブランチになり、互いのコミットが混ざらない。"""
+    import subprocess
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    def g(*a, cwd=repo):
+        return subprocess.run(["git", *a], cwd=cwd, capture_output=True, text=True)
+    g("init", "-q", "-b", "main")
+    g("config", "user.email", "t@t"); g("config", "user.name", "t")
+    (repo / "seed.txt").write_text("x")
+    g("add", "-A"); g("commit", "-qm", "seed")
+    g("branch", "develop")
+
+    made = []
+    for issue in (7, 8):
+        code, out = run("github_sync.py", "branch", "--issue", str(issue), "--worktree",
+                        "--repo", "o/n", cwd=str(repo))
+        assert code == 0, out
+        made.append(repo / ".orgforge" / "wt" / f"issue-{issue}")
+
+    assert all(d.is_dir() for d in made), "worktree が作られていない"
+    # 各 worktree で別々にコミットしても、相手のツリーには現れない
+    for issue, d in zip((7, 8), made):
+        (d / f"F{issue}.txt").write_text("x")
+        g("add", "-A", cwd=d); g("commit", "-qm", f"i{issue}", cwd=d)
+    for issue, d in zip((7, 8), made):
+        other = 8 if issue == 7 else 7
+        assert (d / f"F{issue}.txt").exists()
+        assert not (d / f"F{other}.txt").exists(), \
+            f"#{other} の成果物が #{issue} のツリーに混入した — 分離が効いていない"
+    # ブランチも別
+    b = [g("branch", "--show-current", cwd=d).stdout.strip() for d in made]
+    assert b[0] != b[1] and all(b), b
+
+
+# ── 案2: verify は配管だけ。判定は持たない ─────────────────────────────────
+# 検証手順を人が毎回書き下ろすと、書くたびに gate の厳しさが変わる（18 Issue で18通り）。
+# 基準の出所は agents/gate.md 1つにする。ただし verdict を埋めた瞬間に gate が形骸化するので、
+# そこは越えない — この境界をテストで固定する。
+def test_verify_injects_charter_and_leaves_verdict_unfilled():
+    """憲章と decide 雛形は出すが、verdict は placeholder のまま（判定を先取りしない）。"""
+    import subprocess, os
+    env = dict(os.environ, ORG_GITHUB_REPO="")
+    p = subprocess.run([sys.executable, str(TOOLS / "org_cycle.py"), "verify",
+                        "--issue", "1", "--role", "gate"],
+                       capture_output=True, text=True, env=env, timeout=60)
+    out = p.stdout + p.stderr
+    # gh が無い/認証が無い環境では Issue を読めず 3 で落ちるのが正しい挙動
+    if p.returncode == 0:
+        assert "admission control" in out, "agents/gate.md の憲章が注入されていない"
+        assert "<admit|reject|park>" in out, "verdict が placeholder になっていない"
+        for filled in ('--verdict admit', '--verdict "admit"'):
+            assert filled not in out, f"配管が verdict を決めている: {filled}"
+    else:
+        assert p.returncode in (2, 3), out
+
+
+def test_verify_rejects_unknown_role():
+    """憲章の無い役割では verify は成り立たない（基準の出所が無いまま起動しない）。"""
+    import subprocess
+    p = subprocess.run([sys.executable, str(TOOLS / "org_cycle.py"), "verify",
+                        "--issue", "1", "--role", "maker"],
+                       capture_output=True, text=True, timeout=60)
+    assert p.returncode != 0
+
+
+def test_verify_finds_charter_in_bundled_layout():
+    """バンドル（agents/ が tools/ の兄弟）でも憲章を見つける。
+
+    プラグインとして入った形でだけ憲章を見失うと、verify は「基準の出所が1つ」という
+    唯一の存在理由を失う。repo 直下の配置だけ見ていて実際に取りこぼした。
+    """
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("org_cycle_c", TOOLS / "org_cycle.py")
+    m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+    bundled = TOOLS.parent / "integrations" / "claude-code"
+    if not (bundled / "agents").is_dir():
+        return  # バンドル未生成の環境ではスキップ
+    os.environ["CLAUDE_PLUGIN_ROOT"] = str(bundled)
+    try:
+        for role in ("gate", "skeptic"):
+            charter, path = m._role_charter(role)
+            assert charter, f"バンドル配置で {role} の憲章を見失った（探した先: {path}）"
+    finally:
+        os.environ.pop("CLAUDE_PLUGIN_ROOT", None)

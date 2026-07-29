@@ -60,7 +60,9 @@ def _scoped_claims(root, child_role):
     out = []
     # a claim lands in the child's brain if the child role is in its affected_roles, wherever
     # the claim currently lives in the store (search every role file).
-    for fn in sorted(os.listdir(root)) if os.path.isdir(root) else []:
+    # root が None/空でも落ちない — doctrine がまだ無い org は「claim ゼロ」が正しい状態であって、
+    # seam contract の生成が失敗してよい理由ではない。
+    for fn in sorted(os.listdir(root)) if root and os.path.isdir(root) else []:
         if not fn.endswith(".json"):
             continue
         data = json.load(open(os.path.join(root, fn), encoding="utf-8"))
@@ -92,6 +94,16 @@ def main(argv):
     p.add_argument("--now")
     p.add_argument("--out")
     a = p.parse_args(argv[1:])
+
+    # root 省略時はカレントから発見する（ヘルプはそう書いてあるのに未実装で TypeError で落ちていた）。
+    # doctrine は role ごとの claim store なので doctrine root を見る。
+    if not a.root:
+        try:
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            from discover import _sub_root
+            a.root = _sub_root("doctrine") or ""
+        except Exception:
+            a.root = ""
 
     claims = _scoped_claims(a.root, a.child_role)
 

@@ -92,12 +92,20 @@ python3 "${CLAUDE_PLUGIN_ROOT}/tools/org_cycle.py" begin \
   --role $1 --issue <task Issue番号> --agent <実際に作る役割>
 ```
 
-これが6ステップを正しい順序と actor で実行する。**`parent` は Issue から自動解決される** —
+これが7ステップを正しい順序と actor で実行する。**`parent` は Issue から自動解決される** —
 以前は人が「#7 の親は #1」と目で拾って手打ちしていたが、`create` が body に `Parent: #N` を
 書いているので拾える。手打ちである限り取り違えが起き、親継承（docs/11 §2）の実装が活きない。
 `candidate_id` も Issue のトレーラから読む。
 
 打つ前に確認したければ `begin` を `plan` に替える — **何も実行せず**イベント列だけ印字する。
+
+**`begin` は worktree も用意する（docs/11 §4c）。** `.orgforge/wt/issue-<N>/` に、その Issue 専用の
+作業ツリーを切る。並列 fan-out で複数の maker を同一ツリーに走らせると、**あるIssueのコミットが
+別Issueのブランチに載る** — 実際に起きた事故で、`git checkout` がツリー全体を切り替える以上、
+同一ツリーで並列に走らせる限り必ず再発する。「毎回正しく判断する」前提の設計は破れるので、
+物理的に分ける。maker には `.orgforge/wt/issue-<N>/` で作業させること。
+
+逐次で1件だけ回すときは `--no-worktree` で省ける。**並列で回すなら使わないこと。**
 
 **止まったら、そこから先は打たれていない。** 台帳が拒否したなら順序違反であり、前提を満たして
 から再実行すること。各イベントは natural-key で冪等なので、**再実行は安全**（済んだ分は no-op）。
@@ -164,6 +172,31 @@ record what actually happened:
 The bar: **a stranger reading only this Issue can reconstruct what was built, what was tried and
 abandoned, what was run, what came back, and why it merged** — without the ledger, without the
 transcript, without asking anyone. If they cannot, the log is too thin regardless of its volume.
+
+### 3b-2. gate / skeptic を呼ぶ材料も `org_cycle verify` が組み立てる
+
+`complete` の次は admission だが、**検証手順を毎回書き下ろしてはいけない**。書くたびに gate の
+厳しさが変わり、18 Issue なら18通りの基準になる。基準の出所は `agents/gate.md` ただ1つであるべきで、
+それが使われずに人が手順を書いている状態は、基準が無いのと同じ。
+
+```
+python3 "${CLAUDE_PLUGIN_ROOT}/tools/org_cycle.py" verify --issue <N> --role gate
+# gate が admit したら
+python3 "${CLAUDE_PLUGIN_ROOT}/tools/org_cycle.py" verify --issue <N> --role skeptic
+```
+
+出力をそのまま subagent に渡す。組み立てられるのは以下で、**すべて配管**:
+
+- `handoff.py` を内部で呼んだ **seam contract**（引数6個の手打ちが消える）
+- **`agents/<role>.md` の憲章**＝検証チェックリストの注入（← ここが肝。基準が1箇所に固定される）
+- Issue の **SPEC / MUST** の埋め込み（検証対象そのもの）
+- **`decide` の雛形**（値は埋めない — 埋めたら判定の自動化になる）
+- skeptic には **gate が既に見たこと**を自動で引き渡す。渡さないと gate と同じミューテーションを
+  繰り返して無駄になる（実地で確認）。運ぶだけで、その当否も次に何を試すかも配管は決めない。
+
+> **`verify` は判定ロジックを一切持たない。** verdict・why・risk・どのミューテーションを試すかは
+> gate / skeptic が決める。**ツールが verdict を決めた瞬間に gate は形骸化する**ので、そこは越えない
+> （docs/03 §6.5 — forced invariant は正しいが、forced judgment は判定の消滅）。
 
 ### 3c. Record every JUDGMENT with its reasoning — a verdict alone is a stamp
 

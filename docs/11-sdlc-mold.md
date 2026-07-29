@@ -227,8 +227,21 @@ GitHub の管理設定なのでコードでは実現できない。それが散�
 
 | | 例 | 誰が |
 |---|---|---|
-| **配管**（順序と actor が決まっている） | claim → spec_delegated → phase_started → cycle_started → log → stage | **ツール**（`org_cycle.py`） |
-| **判断**（役割の仕事） | 何を選ぶか / 誰に委ねるか / 分割するか / admit するか | **役割**（自動化しない） |
+| **配管**（順序と actor が決まっている） | claim → spec_delegated → phase_started → cycle_started → log → stage / Issue ごとの worktree を切る / seam contract の生成 / 憲章とSPECの注入 / gate の所見を skeptic へ運ぶ / `decide` の雛形 | **ツール**（`org_cycle.py`） |
+| **判断**（役割の仕事） | 何を選ぶか / 誰に委ねるか / 分割するか / admit するか / verdict・why・risk / どのミューテーションを試すか | **役割**（自動化しない） |
+
+**`verify` が verdict を埋めないのは、線引きの中でもとりわけ譲れない一点である。** ツールが
+verdict を決めた瞬間に gate は形骸化し、admission は「ツールが出した文字列を役割が転記する
+儀式」に落ちる。埋めてよいのは**材料**（憲章・SPEC・seam・gate の所見）までで、**結論**は
+役割が出す。逆に、材料を毎回人が書き下ろす状態も同じくらい悪い: 検証手順を人が書けば、
+書くたびに厳しさが変わり、18 Issue なら18通りの基準になる。基準の出所は `agents/<role>.md`
+ただ1つにし、変更はそこ1箇所で効くようにする。
+
+**worktree は「判断で守れない不変条件」の実例である。** 並列 fan-out で #7 のコミットが
+`feat/issue-8-settle` に載る事故が実際に起きた。`git checkout` はツリー全体を切り替えるので、
+同一ツリーで並列 maker を走らせる限り、注意深さの問題ではなく構造の問題として再発する。
+**「毎回正しく判断する」前提の設計は破れる** — だから `begin` が `.orgforge/wt/issue-<N>/` を
+物理的に分ける。これは forced invariant であって forced delegation ではない。
 
 これは docs/03 §6.5 の線引きをそのまま踏襲している — **forced delegation は設計エラー、
 forced invariant は正しい**。`org_cycle` が自動化したのは後者だけで、fan-out するかどうかも、

@@ -40,6 +40,15 @@ def _run(args, capture=True):
     return p.returncode, ((p.stdout or "") + (p.stderr or "")) if capture else ""
 
 
+def _raw(args):
+    """外部コマンドをそのまま実行。(code, out) — _run は python3 を前置するので gh には使えない。"""
+    try:
+        p = subprocess.run(args, capture_output=True, text=True, timeout=60)
+        return p.returncode, (p.stdout or "")
+    except Exception as e:
+        return 1, str(e)
+
+
 def _ledger(*args):
     return _run([os.path.join(HERE, "ledger.py")] + list(args))
 
@@ -101,6 +110,10 @@ def _steps_begin(a, parent, cid):
     return [
         (f"claim #{a.issue} as {agent}",
          lambda: _gh_sync("claim", "--issue", str(a.issue), "--agent", agent, *repo_args)),
+        *([(f"worktree .orgforge/wt/issue-{a.issue} を用意（並列 maker の物理分離）",
+            lambda: _gh_sync("branch", "--issue", str(a.issue), "--worktree",
+                             *(["--base", a.base] if getattr(a, "base", None) else [])))]
+          if not getattr(a, "no_worktree", False) else []),
         (f"spec_delegated (spec_ref=#{a.issue})",
          lambda: _ledger("append", "--actor", a.role, "--class", "spec_delegated",
                          "--natural-key", f"spec-{a.issue}",
@@ -175,6 +188,158 @@ def _execute(steps, label):
     return 0
 
 
+
+# ── verify（案2）: 配管だけを引き受ける ──────────────────────────────────────
+# ここが持ってよいのは「gate/skeptic を正しい材料つきで起動する」ことだけ。
+# verdict / why / risk / どのミューテーションを試すか は一切決めない。
+# ツールが判定した瞬間に gate は形骸化するので、その線は越えない。
+
+def _agents_dir():
+    """agents/*.md の場所。プラグインとして入っている場合と、この repo を直接使う場合の両方。"""
+    env = os.environ.get("CLAUDE_PLUGIN_ROOT")
+    here = os.path.dirname(os.path.abspath(__file__))     # .../tools
+    bases = ([env] if env else []) + [os.path.dirname(here)]
+    for base in bases:
+        # プラグインとして入った形（agents/ は tools/ の兄弟）と、この repo を直接使う形の両方。
+        # 片方しか見ないと、バンドル側で憲章を見失って verify が成り立たなくなる。
+        for d in (os.path.join(base, "agents"),
+                  os.path.join(base, "integrations", "claude-code", "agents")):
+            if os.path.isdir(d):
+                return d
+    return None
+
+
+def _role_charter(role):
+    """agents/<role>.md の本文（front-matter を落とす）。
+
+    **これが案2の肝。** 検証手順を毎回人が書き下ろすと、書くたびに gate の厳しさが変わる。
+    18 Issue なら18通りの基準になる。charter を注入すれば基準は1つに固定され、
+    しかも基準の変更は agents/<role>.md の1箇所で効く。
+    """
+    d = _agents_dir()
+    path = os.path.join(d, f"{role}.md") if d else None
+    if not path or not os.path.isfile(path):
+        return None, path
+    body = open(path, encoding="utf-8").read()
+    if body.startswith("---"):
+        end = body.find("\n---", 3)
+        if end != -1:
+            body = body[end + 4:]
+    return body.strip(), path
+
+
+def _issue_body(issue, repo=None):
+    """task Issue の title/body（= SPEC / MUST）。ここが検証対象の仕様そのもの。"""
+    args = ["gh", "issue", "view", str(issue), "--json", "title,body"]
+    r = repo or _repo()
+    if r:
+        args += ["--repo", r]
+    code, out = _raw(args)
+    if code != 0:
+        return None, None
+    try:
+        d = json.loads(out)
+        return d.get("title", ""), d.get("body", "")
+    except Exception:
+        return None, None
+
+
+def _seam(role, issue, title):
+    """handoff.py を内部で呼んで seam contract を作る。引数6個の手打ちをここで吸収する。"""
+    here = os.path.dirname(os.path.abspath(__file__))
+    slice_ = {
+        "gate": f"#{issue} 「{title}」の admission — MUST を1つずつ再導出する",
+        "skeptic": f"#{issue} 「{title}」の admit 済み成果物への反証",
+    }.get(role, f"#{issue} 「{title}」")
+    outputs = {
+        "gate": "admission_decided（verdict は自分で決める。admit には --evidence が要る）",
+        "skeptic": "refutation_attempted（verdict は自分で決める。survives には --evidence が要る）",
+    }.get(role, "決定と、その根拠")
+    code, out = _run([os.path.join(here, "handoff.py"), role,
+               "--slice", slice_,
+               "--inputs", f"task Issue #{issue} の SPEC / MUST と、maker の成果物",
+               "--outputs", outputs,
+               "--owns", "判定そのもの（この配管は verdict を決めない）",
+               "--forbid", "自分が作った成果物の admit／maker の手順の再追跡（結果を再導出すること）"])
+    return out if code == 0 else None
+
+
+def _prior_gate(issue, repo=None):
+    """skeptic に渡す「gate が既に見たこと」。
+
+    渡さないと skeptic は gate と同じミューテーションを繰り返して無駄になる（実地で確認済み）。
+    **これは配管であって判断ではない** — gate が何を書いたかをそのまま運ぶだけで、
+    その内容の当否も、次に何を試すべきかも、こちらは決めない。
+    """
+    args = ["gh", "issue", "view", str(issue), "--json", "comments"]
+    r = repo or _repo()
+    if r:
+        args += ["--repo", r]
+    code, out = _raw(args)
+    if code != 0:
+        return None
+    try:
+        cs = json.loads(out).get("comments", [])
+    except Exception:
+        return None
+    hits = [c.get("body", "") for c in cs if "admission_decided" in (c.get("body") or "")]
+    return hits[-1] if hits else None
+
+
+def cmd_verify(a):
+    """gate / skeptic を起動するための材料を組み立てて印字する。判定はしない。"""
+    role = a.role
+    charter, cpath = _role_charter(role)
+    if charter is None:
+        print(f"agents/{role}.md が見つからない（探した先: {cpath}）。\n"
+              f"charter を注入できないなら verify は成り立たない — 検証基準が毎回人の書き方に"
+              f"依存してしまう。プラグインの導入状態を確認すること。", file=sys.stderr)
+        return 2
+    title, body = _issue_body(a.issue)
+    if title is None:
+        print(f"Issue #{a.issue} を読めなかった（gh の認証 / repo 解決を確認）。", file=sys.stderr)
+        return 3
+    seam = _seam(role, a.issue, title)
+    prior = _prior_gate(a.issue) if role == "skeptic" else None
+
+    ev = {"gate": "admission_decided", "skeptic": "refutation_attempted"}.get(role, "decided")
+    verdicts = {"gate": "admit|reject|park", "skeptic": "survives|refuted"}[role]
+
+    out = []
+    out.append(f"===== {role} subagent への投入プロンプト（#{a.issue}: {title}）=====\n")
+    out.append(seam or "(seam contract の生成に失敗 — handoff.py を確認)")
+    out.append("\n## あなたの憲章（agents/%s.md — 検証基準はここが唯一の出所）\n" % role)
+    out.append(charter)
+    out.append(f"\n## 検証対象の SPEC / MUST（Issue #{a.issue} 本文）\n")
+    out.append(body or "(本文が空 — SPEC の無い Issue は、それ自体が reject 事由)")
+    if prior:
+        out.append("\n## gate が既に見たこと（重複を避けるため。追認する義務はない）\n")
+        out.append(prior)
+    elif role == "skeptic":
+        out.append("\n## gate が既に見たこと\n(#%d に admission_decided の記録が無い。"
+                   "gate の admit 前に skeptic を回そうとしていないか確認すること)" % a.issue)
+
+    out.append(f"\n## 記録（**判定はあなたが決める。この雛形は値を埋めていない**）\n")
+    out.append("```")
+    out.append(f'python3 "$P/tools/github_sync.py" decide --issue {a.issue} --event {ev} \\')
+    out.append(f'  --verdict <{verdicts}> --by {role} \\')
+    out.append('  --why "<何を天秤にかけ、何が決め手になったか>" \\')
+    out.append('  --evidence "<実際に走らせたコマンドと、その実出力>" \\')
+    if role == "gate":
+        out.append('  --alternatives "<採らなかった選択肢と、その理由>" \\')
+        out.append('  --standard "<適用した基準>" \\')
+    out.append('  --risk "<承知の上で残す穴 / 排除しきれなかった失敗モード>"')
+    out.append("# 出力される reasoning_sha256= を、次の ledger 受領証の payload に入れること")
+    out.append(f'python3 "$P/tools/ledger.py" append --actor {role} --class {ev} \\')
+    out.append(f'  --payload \'{{"verdict":"<...>","deliverable":"{a.issue}",'
+               f'"reasoning_sha256":"<...>","issue":{a.issue}}}\'')
+    out.append("```")
+    print("\n".join(out))
+    print(f"\n— この出力を {role} subagent にそのまま渡すこと。"
+          f"配管はここまで。verdict / why / risk は {role} が決める。", file=sys.stderr)
+    return 0
+
+
 def cmd_begin(a):
     parent = a.parent or resolve_parent(a.issue)
     cid = a.candidate_id or _candidate_id(a.issue)
@@ -223,6 +388,15 @@ def main(argv):
         q.add_argument("--parent", help="親 objective 番号（省略時は Issue から自動解決）")
         q.add_argument("--candidate-id", dest="candidate_id",
                        help="省略時は Issue の candidate_id トレーラから読む")
+        q.add_argument("--base", help="worktree を切る元（既定 develop）")
+        q.add_argument("--no-worktree", dest="no_worktree", action="store_true",
+                       help="worktree を作らない。**並列で回すなら使わないこと** — 同一ツリーで"
+                            "並列 maker を走らせると、あるIssueのコミットが別Issueのブランチに"
+                            "載る事故が起きる（実際に起きた）。単発の逐次作業のときだけ。")
+    q = sub.add_parser("verify", help="gate/skeptic を起動する材料を組み立てる（判定はしない）")
+    q.add_argument("--issue", required=True, type=int)
+    q.add_argument("--role", required=True, choices=("gate", "skeptic"))
+
     q = sub.add_parser("complete")
     q.add_argument("--role", required=True)
     q.add_argument("--issue", required=True, type=int)
@@ -234,7 +408,8 @@ def main(argv):
                    help="何も確立しなかった理由（明示的な否定。docs/11 §4d）")
     q.add_argument("--candidate-id", dest="candidate_id")
     a = p.parse_args(argv[1:])
-    return {"begin": cmd_begin, "complete": cmd_complete, "plan": cmd_plan}[a.cmd](a)
+    return {"begin": cmd_begin, "complete": cmd_complete, "plan": cmd_plan,
+            "verify": cmd_verify}[a.cmd](a)
 
 
 if __name__ == "__main__":

@@ -536,16 +536,29 @@ def cmd_branch(a):
     labels, err = issue_labels(a.repo, a.issue)  # also validates the Issue exists
     code, out = gh(["issue", "view", str(a.issue), "--repo", a.repo, "--json", "title"])
     if code != 0:
-        print(f"gh error: {out}", file=sys.stderr)
-        return 2
-    try:
-        title = json.loads(out).get("title", "")
-    except Exception:
+        # slug は名前を読みやすくするだけで、識別子は Issue 番号。GitHub に届かない
+        # （オフライン / 認証切れ / repo 未作成）ことを、作業場を用意できない理由にはしない —
+        # ここで止めると並列 maker が分離ツリーを持てず、同一ツリーに落ちて混線する。
+        if not (getattr(a, "worktree", False) or getattr(a, "create", False)):
+            print(f"gh error: {out}", file=sys.stderr)
+            return 2
+        print(f"警告: Issue のタイトルを取れなかったので slug を省く（{out.strip()[:80]}）",
+              file=sys.stderr)
         title = ""
-    name = f"feat/issue-{a.issue}-{_slug(title)}"
+    else:
+        try:
+            title = json.loads(out).get("title", "")
+        except Exception:
+            title = ""
+    slug = _slug(title)
+    name = f"feat/issue-{a.issue}-{slug}" if slug else f"feat/issue-{a.issue}"
     print(name)
+    base = getattr(a, "base", None) or "develop"
+    # --worktree は --create を含意する（worktree を作れば分離した作業場ができる）。
+    # 並列 fan-out ではこちらが正解 — checkout はツリーを切り替えるので必ず混ざる。
+    if getattr(a, "worktree", False):
+        return _make_worktree(name, base, a.issue)
     if getattr(a, "create", False):
-        base = getattr(a, "base", None) or "develop"
         import subprocess
         try:
             p = subprocess.run(["git", "checkout", "-b", name, base],
@@ -563,6 +576,46 @@ def cmd_branch(a):
         except Exception as e:
             print(f"git not available: {e}", file=sys.stderr)
             return 2
+    return 0
+
+
+def _make_worktree(name, base, issue):
+    """ブランチ専用の git worktree を作る — 並列 fan-out の唯一の安全な形。
+
+    **なぜ checkout では駄目なのか。** `git checkout` は*ツリーを切り替える*ので、同一ディレクトリで
+    2体の maker を並列に走らせると、片方のコミットがもう片方のブランチに載る。実地でそれが起きた
+    （#7 のコミットが `feat/issue-8-settle` に載った）。内容が分離されていたので復旧できたが、
+    **同一ツリーで並列に走らせる限り再発する**。
+
+    「毎回正しいブランチにいることを確認する」という運用でこれを防ぐのは、判断に依存する設計であり、
+    18 Issue を並列で回せば必ず破れる。worktree なら**物理的に別ディレクトリ**なので、混ざりようがない。
+
+    R0: git の worktree をそのまま借りる。ref ストアも並行制御も作らない。"""
+    import os
+    import subprocess
+    root = subprocess.run(["git", "rev-parse", "--show-toplevel"],
+                          capture_output=True, text=True, timeout=30)
+    if root.returncode != 0:
+        print("git リポジトリの外にいる。", file=sys.stderr)
+        return 2
+    wt = os.path.join(root.stdout.strip(), ".orgforge", "wt", f"issue-{issue}")
+    if os.path.isdir(wt):
+        print(f"worktree は既にある（冪等）: {wt}")
+        print(f"\ncd {wt}    # ここで作業すること。元のツリーには触らない")
+        return 0
+    os.makedirs(os.path.dirname(wt), exist_ok=True)
+    # ブランチが既にあれば繋ぐ、無ければ base から作る
+    p = subprocess.run(["git", "worktree", "add", "-b", name, wt, base],
+                       capture_output=True, text=True, timeout=60)
+    if p.returncode != 0:
+        p = subprocess.run(["git", "worktree", "add", wt, name],
+                           capture_output=True, text=True, timeout=60)
+    if p.returncode != 0:
+        print(f"worktree を作れない: {(p.stderr or '').strip()[:200]}", file=sys.stderr)
+        return 2
+    print(f"worktree: {wt}  (branch {name} off {base})")
+    print(f"\ncd {wt}    # ここで作業すること。元のツリーには触らない")
+    print("完了したら PR を出し、`git worktree remove` で片付ける。")
     return 0
 
 
@@ -941,7 +994,12 @@ def main(argv):
     q = sub.add_parser("branch")
     q.add_argument("--repo", help="owner/name（省略時は git remote origin から自動発見）"); q.add_argument("--issue", required=True, type=int)
     q.add_argument("--create", action="store_true",
-                   help="also `git checkout -b <name> <base>` in the current repo (idempotent)")
+                   help="also `git checkout -b <name> <base>` in the current repo (idempotent). "
+                        "並列で maker を走らせるなら --worktree を使うこと — checkout は"
+                        "ツリーを切り替えるので、並列だと必ずコミットが混ざる")
+    q.add_argument("--worktree", action="store_true",
+                   help="ブランチ専用の git worktree を `.orgforge/wt/issue-<N>/` に作る。"
+                        "並列 fan-out の唯一の安全な形")
     q.add_argument("--base", help="the branch to fork from (default: develop, docs/11 §4c)")
     q = sub.add_parser("split-check")
     q.add_argument("--repo", help="owner/name（省略時は git remote origin から自動発見）"); q.add_argument("--issue", required=True, type=int)
