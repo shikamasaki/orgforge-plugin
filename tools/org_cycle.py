@@ -330,14 +330,59 @@ def cmd_verify(a):
         out.append('  --standard "<適用した基準>" \\')
     out.append('  --risk "<承知の上で残す穴 / 排除しきれなかった失敗モード>"')
     out.append("# 出力される reasoning_sha256= を、次の ledger 受領証の payload に入れること")
+    out.append(f"# deliverable は **Issue 番号 {a.issue}** のまま。関数名や機能名に書き換えないこと —")
+    out.append("# 後続の照合が識別子の揺れで記録を見失う（実地で起きた）。呼び名は --why に書く。")
     out.append(f'python3 "$P/tools/ledger.py" append --actor {role} --class {ev} \\')
     out.append(f'  --payload \'{{"verdict":"<...>","deliverable":"{a.issue}",'
                f'"reasoning_sha256":"<...>","issue":{a.issue}}}\'')
     out.append("```")
     print("\n".join(out))
-    print(f"\n— この出力を {role} subagent にそのまま渡すこと。"
+    print(f"\n— この出力を {role} subagent の**プロンプト本文にそのまま貼る**こと"
+          f"（ファイルに落として「これを読め」と渡さない）。\n"
+          f"  seam ガードは spawn 時のプロンプト本文を検査するので、seam contract が"
+          f"ファイルの中にあると検出できず、spawn が HELD される。\n"
+          f"  ガードが本文を見るのは正しい — 参照先の中身は spawn 時点で保証できないため。\n"
           f"配管はここまで。verdict / why / risk は {role} が決める。", file=sys.stderr)
     return 0
+
+
+
+def _admission_for(issue):
+    """#issue に対する admission_decided を台帳から探す。
+
+    identity は Issue 番号だが、実地では deliverable に "settle()"（関数名）が入った記録が
+    生まれた。**Issue 番号は payload の `issue` にも入っている**ので、片方だけ見て「無い」と
+    言うのは、揃っている情報を取りこぼしているだけ。両方見る。
+
+    返り値: (verdict, seq, near) — near は「番号は合わないが近い記録」（原因の特定用）。
+    """
+    root = None
+    try:
+        sys.path.insert(0, HERE)
+        from discover import ledger_root
+        root = ledger_root()
+    except Exception:
+        pass
+    path = os.path.join(root, "ledger.jsonl") if root else None
+    if not path or not os.path.isfile(path):
+        return None, None, []
+    want = str(issue).lstrip("#")
+    hit, near = None, []
+    for line in open(path, encoding="utf-8"):
+        try:
+            e = json.loads(line)
+        except Exception:
+            continue
+        if e.get("class") != "admission_decided":
+            continue
+        pl = e.get("payload", {}) or {}
+        d = str(pl.get("deliverable", "")).lstrip("#")
+        i = str(pl.get("issue", "")).lstrip("#")
+        if want in (d, i):
+            hit = (pl.get("verdict"), e.get("seq"))
+        elif d or i:
+            near.append((e.get("seq"), d or "-", i or "-"))
+    return (hit[0], hit[1], near) if hit else (None, None, near)
 
 
 def cmd_begin(a):
@@ -359,8 +404,24 @@ def cmd_complete(a):
     cid = a.candidate_id or _candidate_id(a.issue)
     rc = _execute(_steps_complete(a, cid), f"complete #{a.issue} ({a.role})")
     if rc == 0:
-        print(f"\nNEXT: gate の admission がまだ。`/orgforge-plugin:org-work` の verify 手順か、"
-              f"gate subagent を呼ぶこと — maker は自分の仕事を admit できない（台帳が拒否する）。")
+        verdict, seq, near = _admission_for(a.issue)
+        if verdict == "admit":
+            print(f"\nNEXT: #{a.issue} は gate が admit 済み（seq {seq}）。次は skeptic:\n"
+                  f"  python3 org_cycle.py verify --issue {a.issue} --role skeptic")
+        elif verdict:
+            print(f"\nNEXT: gate の判定は `{verdict}`（seq {seq}）。admit ではないので、"
+                  f"指摘に対処してから再度 verify にかけること。")
+        else:
+            print(f"\nNEXT: gate の admission がまだ:\n"
+                  f"  python3 org_cycle.py verify --issue {a.issue} --role gate\n"
+                  f"maker は自分の仕事を admit できない（台帳が拒否する）。")
+            # 「無い」と言い切る前に、取り違えの可能性を示す。実地で deliverable に関数名が
+            # 入っていて、記録はあるのに「まだ」と出た。原因が即分かる形で出す。
+            if near:
+                s, d, i = near[-1]
+                print(f"（近い記録: seq {s} に admission_decided があるが "
+                      f"deliverable={d!r} / issue={i!r} で #{a.issue} と一致しない。"
+                      f"gate が Issue 番号以外の識別子で記録した可能性がある）", file=sys.stderr)
     return rc
 
 

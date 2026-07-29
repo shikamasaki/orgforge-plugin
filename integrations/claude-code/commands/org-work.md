@@ -185,7 +185,10 @@ python3 "${CLAUDE_PLUGIN_ROOT}/tools/org_cycle.py" verify --issue <N> --role gat
 python3 "${CLAUDE_PLUGIN_ROOT}/tools/org_cycle.py" verify --issue <N> --role skeptic
 ```
 
-出力をそのまま subagent に渡す。組み立てられるのは以下で、**すべて配管**:
+出力を **subagent のプロンプト本文にそのまま貼る**（ファイルに落として「これを読め」と渡さない —
+seam ガードは spawn 時のプロンプト本文を検査するので、seam contract がファイルの中にあると
+検出できず spawn が HELD される。ガードが本文を見るのは正しい: 参照先の中身は spawn 時点で
+保証できない）。組み立てられるのは以下で、**すべて配管**:
 
 - `handoff.py` を内部で呼んだ **seam contract**（引数6個の手打ちが消える）
 - **`agents/<role>.md` の憲章**＝検証チェックリストの注入（← ここが肝。基準が1箇所に固定される）

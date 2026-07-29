@@ -1004,3 +1004,44 @@ def test_verify_finds_charter_in_bundled_layout():
             assert charter, f"バンドル配置で {role} の憲章を見失った（探した先: {path}）"
     finally:
         os.environ.pop("CLAUDE_PLUGIN_ROOT", None)
+
+
+# ── 実地フィードバック: 識別子の揺れで admission を見失う ─────────────────
+# gate が deliverable に "settle()"（関数名）を書き、complete の照合が "8"（Issue番号）で
+# 探して「admission がまだ」と出た。記録は seq 96 に存在していた。
+def test_admission_lookup_tolerates_identifier_drift(tmp_path):
+    """deliverable が関数名でも、payload の issue で拾える。無ければ near で原因を示す。"""
+    import importlib.util
+    led = tmp_path / "ledger"; led.mkdir()
+    rows = [
+        {"seq": 96, "class": "admission_decided",
+         "payload": {"deliverable": "settle()", "issue": 8, "verdict": "admit"}},
+        {"seq": 99, "class": "admission_decided",
+         "payload": {"deliverable": "9", "issue": 9, "verdict": "reject"}},
+    ]
+    (led / "ledger.jsonl").write_text(
+        "\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+
+    spec = importlib.util.spec_from_file_location("org_cycle_a", TOOLS / "org_cycle.py")
+    m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+    os.environ["ORG_LEDGER_ROOT"] = str(led)
+    try:
+        v, seq, _ = m._admission_for(8)
+        assert (v, seq) == ("admit", 96), f"関数名で記録された admission を見失った: {v} {seq}"
+        v9, _, _ = m._admission_for(9)
+        assert v9 == "reject", "admit 以外の verdict を admit として扱ってはいけない"
+        v11, seq11, near = m._admission_for(11)
+        assert v11 is None and seq11 is None
+        assert near, "無いと言い切る前に、近い記録を原因究明の手がかりとして示すこと"
+    finally:
+        os.environ.pop("ORG_LEDGER_ROOT", None)
+
+
+def test_verify_tells_you_to_paste_into_the_prompt_body():
+    """seam ガードは spawn プロンプト本文を見るので、ファイル経由だと HELD される。
+
+    verify がその使い方を案内しないと、生成した seam contract がガードに届かない。
+    """
+    src = (TOOLS / "org_cycle.py").read_text(encoding="utf-8")
+    assert "プロンプト本文" in src and "HELD" in src, \
+        "verify の出力に『本文に貼る』案内が無い — ファイル渡しでガードに弾かれる"
