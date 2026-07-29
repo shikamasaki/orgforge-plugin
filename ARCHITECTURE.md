@@ -32,7 +32,7 @@ mold** the work travels through, and the guardrails that hold both.
 
 ```
         NEUTRAL CORE (harness-agnostic, the source of truth)
-        ├── tools/             14 organ tools — pure functions over the ledger
+        ├── tools/             20 organ tools — pure functions over the ledger
         ├── template/          the org's YAML/MD skeleton + role profiles
         └── integrations/common/   the two shared hooks (guardrail + doctrine injection)
                      │
@@ -80,7 +80,7 @@ A deliberate discipline governs writes — the **R0 emit/append split**:
 This is what keeps the organs pure and portable: they are functions over a file, and the *host* owns
 the side effects — exactly the R0 boundary.
 
-### 3. The organs — seven functions, fourteen tools
+### 3. The organs — seven functions, twenty tools
 
 The system is organized as seven **organs** (THEORY.md §133–409). Two of them (the harness and the
 loop) are deliberately delegated to the host; the rest are implemented as tools.
@@ -95,7 +95,7 @@ loop) are deliberately delegated to the host; the rest are implemented as tools.
 | **6 — Decision line / control** | maker/checker, authorization, custody, mandate precedence | `ledger.py` (custody); `org_lint` (SoD teeth); `reconcile.py mandate`; `guardrails.py` |
 | **7 — Growth / adaptation** | reshape without collapse | `resource.py` (rank/reclaim); `doctrine.py remap` (refound); `org_lint` (move guards) |
 
-The fourteen tools in `tools/`:
+The twenty tools in `tools/`:
 
 | Tool | Purpose | Key subcommands |
 |---|---|---|
@@ -113,7 +113,12 @@ The fourteen tools in `tools/`:
 | `conventions.py` | internal reusable precedent ("how we do X here") | `adopt` `conflict` `render` |
 | `handoff.py` | build a delegation packet: slice + seam contract + scoped doctrine | *(single command)* |
 | `repro_lint.py` | the **Level-2 reproducibility gate** — deterministic check that a repo the org *builds* clones-and-runs the same for anyone (docs/11 §4a) | `check <repo> [--phase]` |
-| `_organ.py` | shared substrate: ledger reader, event emitter, exit-code contract | *(library)* |
+| `github_sync.py` | the backlog↔GitHub-Issue projection: the work-lock, the SPEC task Issues, the judgment record (docs/11 §4f), the human-task front door (§0c) | `claim` `create` `needs-human` `log` `decide` `ready` `branch` `coverage-check` `split-check` `candidate-id` |
+| `org_cycle.py` | **1サイクル分の配管を1コマンドで** — claim/spec_delegated/phase_started/cycle_started/log/stage を正しい順序と actor で。`parent` と `candidate_id` は Issue から自動解決（docs/11 §0d） | `begin` `complete` `plan` |
+| `req_lint.py` | 要求記述の書式検査（ISO/IEC/IEEE 29148 tailored + EARS、docs/11 §0b） | `check <REQUIREMENTS.md>` |
+| `discover.py` | org をカレントディレクトリから発見する（ledger / repo / constitution）。**環境変数を不要にする層** | `ledger` `repo` `root` `env` |
+| `status.py` | the one health board — GREEN/AMBER/RED + 人間待ちの名指し | `status` `redline` |
+| `_organ.py` | shared substrate: ledger reader, event emitter, exit-code contract, root resolution | *(library)* |
 
 `repro_lint.py` is the enforcement half of **reproducibility as a first-class property** (docs/11 §0,
 docs/01 J14/S9): it runs at the SDLC implement/test/deploy gates and holds a repo that a stranger

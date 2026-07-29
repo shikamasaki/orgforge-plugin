@@ -176,6 +176,13 @@ reader catches must be made unmergeable by machine instead. Run **by the gate** 
 implement/test/deploy phase gates:
 
 ```
+python3 tools/org_cycle.py  begin    --role R --issue N [--agent A] [--phase implement]
+                            # 1サイクル分の配管を1コマンドで: claim → spec_delegated →
+                            # phase_started → cycle_started → Issue へ log → stage。
+                            # parent と candidate_id は Issue から自動解決（手打ち不要）
+python3 tools/org_cycle.py  complete --role R --issue N --outputs T
+                            (--domain-model-updated REF | --domain-model-none WHY)
+python3 tools/org_cycle.py  plan     --role R --issue N   # 何も実行せずイベント列を印字
 python3 tools/req_lint.py   check <REQUIREMENTS.md> [--json] [--warn-only]
                             # 要求記述の書式検査（29148 tailored + EARS、docs/11 §0b）
                             # 必須節の欠落 / shall なし / 禁止語 / TBD / 未解決の
@@ -234,6 +241,8 @@ github_sync.py decide --repo R --issue N --event <judgment> --verdict V --why "<
 github_sync.py ready  --repo R [--kind task|objective|any]   # tasks only by default (objectives are parents)
 github_sync.py branch --repo R --issue N [--create] [--base B]   # the deterministic feat/issue-N-<slug>
 github_sync.py split-check    --repo R --issue N   # exit 10: too coarse / dep open / acceptance not EARS
+github_sync.py needs-human --title T --body B [--objective O] [--parent N] [--blocks 10,11]
+                      # 人間にしか実行できない前提条件を Issue にする（docs/11 §0c）
 github_sync.py coverage-check --repo R [--manifest coverage-manifest.md]   # exit 10: a must-have has no Issue
 ```
 

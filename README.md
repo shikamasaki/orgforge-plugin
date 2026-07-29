@@ -234,7 +234,14 @@ environment). **既にコードがあるリポジトリに後付けする場合*
 **`/orgforge-plugin:org-adopt`**（実在するコードから設計を読み取り、未実装分だけを manifest に
 載せ、機械バーの現状を baseline として記録する）。 Then **`/orgforge-plugin:org-start`** (bring it to its running state), **`/orgforge-plugin:org`** (the status
 board — GREEN/AMBER/RED), and **`/orgforge-plugin:org-triage`** (feed a signal into the backlog); `/orgforge-plugin:org-mandate` and
-`/orgforge-plugin:org-verify-guards` handle the occasional exception. The org's **own metabolism** — `/orgforge-plugin:org-work`,
+`/orgforge-plugin:org-verify-guards` handle the occasional exception. **配管はツールが回す。** サイクルのイベント列（claim → spec_delegated → phase_started →
+cycle_started → log → stage）は順序と actor が決まっているので `org_cycle.py` が1コマンドで
+実行し、`parent` と `candidate_id` は Issue から自動解決する — 人が目で拾って手打ちする限り
+取り違えが起き、親継承の実装が活きないため。**自動化したのは配管だけで、何を選ぶか・誰に
+委ねるか・admit するかは自動化していない**（docs/03 §6.5 — forced delegation は設計エラー、
+forced invariant は正しい）。
+
+The org's **own metabolism** — `/orgforge-plugin:org-work`,
 `/orgforge-plugin:org-discover`, `/orgforge-plugin:org-tick` — runs on cadence and you rarely type it. Plus a Codex `.codex/` config;
 neutral core, one folder per harness. See [integrations/README.md](integrations/README.md).
 

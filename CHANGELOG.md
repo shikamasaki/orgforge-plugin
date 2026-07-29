@@ -3,6 +3,47 @@
 All notable changes to orgforge-plugin. This project follows a pragmatic semver:
 minor = new mechanisms/features, patch = fixes, major = breaking articulation changes.
 
+## 0.11.0
+
+**配管を自動化する（docs/11 §0d）。** 実地の指摘: 「なんか手で作業しているように見える」。
+そのとおりだった — `/org-work` は「こういうイベントを打て」という散文の指示で、実行するのは
+エージェントだった。**Issue 2件あたり11コマンド**、18 Issue なら約90回の手打ちで、1回の
+取り違えで台帳の整合が崩れる。
+
+とりわけ `parent` が問題だった。0.10.1 でフェーズ連鎖の親継承を実装したのに、**その値を人が
+Issue から目で拾って手打ち**していた。値が手打ちである限り取り違えが起き、継承の実装が活きない。
+
+### `tools/org_cycle.py`（新規）
+
+```
+org_cycle.py begin    --role R --issue N [--agent A]
+  → claim / spec_delegated / phase_started / cycle_started / Issue へ log / stage を
+    正しい順序と actor で一括実行。parent と candidate_id は Issue から自動解決
+org_cycle.py complete --role R --issue N --outputs T (--domain-model-updated|--domain-model-none)
+org_cycle.py plan     --role R --issue N     # 何も実行せずイベント列を印字
+```
+
+三つの性質:
+
+1. **自動解決** — `parent` は Issue の `Parent: #N`（`create` が書く）と sub-issue API から。
+   `candidate_id` は Issue のトレーラから。**人が値を運ばない**
+2. **止まったら止まったまま** — 途中失敗ならそこから先は打たない。部分適用を「成功」と
+   報告するのが最悪（台帳が壊れた状態を正常に見せる）
+3. **再実行が安全** — 各イベントは natural-key で冪等。「止まったら直して再実行」が成立する
+
+### 線引き: 配管は自動化する、判断は自動化しない
+
+自動化したのは**順序と actor が決まっている配管**だけ。**何を選ぶか・誰に委ねるか・分割するか・
+admit するかは自動化していない** — docs/03 §6.5 の「forced delegation は設計エラー、
+forced invariant は正しい」をそのまま踏襲する。
+
+### ドキュメント
+
+ARCHITECTURE のツール表が14件のままで、実際の20件と乖離していた（`github_sync` `status`
+`discover` `req_lint` `org_cycle` が未掲載）。README/REFERENCE にも `org_cycle` と
+`needs-human` を追加。
+
+テスト 218 → 221件。
 ## 0.10.1
 
 **タテカエ org の申し送り（改訂版）に全件対応。** A-1 は `/org-work` が起動せず、しかも

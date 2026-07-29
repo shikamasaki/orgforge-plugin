@@ -883,3 +883,33 @@ def test_a_task_without_a_parent_is_still_gated(tmp_path):
                     "--class", "phase_started",
                     "--payload", json.dumps({"deliverable": "9", "phase": "design", "role": "eng"}))
     assert code == 3, out
+
+
+# ── org_cycle: 配管の自動化（docs/11 §0d）─────────────────────────────────────
+# 実地で Issue 2件あたり11コマンドを手打ちしており、18 Issue で約90回になっていた。
+# とりわけ parent を目で拾って手打ちしていたため、親継承（§2）の実装が活きていなかった。
+def test_org_cycle_plan_executes_nothing(tmp_path):
+    """plan は印字だけ — 台帳にもGitHubにも触らない。"""
+    code, out = run("org_cycle.py", "plan", "--role", "r", "--issue", "7")
+    assert code == 0, out
+    assert "phase_started" in out and "cycle_started" in out
+    assert not (tmp_path / "ledger.jsonl").exists()
+
+
+def test_org_cycle_complete_requires_domain_model(tmp_path):
+    """docs/11 §4d: ドメインモデルに何をしたかを述べない cycle_completed は認めない。"""
+    code, out = run("org_cycle.py", "complete", "--role", "r", "--issue", "7",
+                    "--outputs", "something")
+    assert code == 2
+    assert "domain-model" in out
+
+
+def test_org_cycle_resolves_parent_from_issue_body():
+    """parent は Issue の `Parent: #N` から読む — 人が運ばない。"""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("org_cycle", TOOLS / "org_cycle.py")
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    import re
+    body = "## Deliverable\nsplit engine\n\nParent: #1\n\ncandidate_id: cand-abc\n"
+    assert re.search(r"^\s*Parent:\s*#?(\d+)", body, flags=re.M | re.I).group(1) == "1"

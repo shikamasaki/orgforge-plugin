@@ -78,68 +78,51 @@ Read the `selected[]` above. Then apply the **decomposition doctrine (docs/03)**
   from `github_sync branch --repo "$ORG_GITHUB_REPO" --issue <N>` (or `--create` to cut it). A task's
   work lands on its branch; it does NOT commit to `develop`/`main` directly.
 
-### 2b. Fire the SDLC phase gate — this is what makes the mold actually bite
+### 2b. 配管は `org_cycle` が回す — イベントを手で打たないこと
 
-The phase gate (docs/11 §2) is only real if the flow **emits the phase events** — the ledger's
-`requires_prior` predicate is dormant until a `phase_started` is appended. So at delegation, for each
-task, emit two events (they are the wiring that turns the forced mold from prose into an enforced gate):
+SDLC のフェーズゲート（docs/11 §2）は、**イベントが実際に打たれて初めて**効く。しかしその
+イベント列（claim → spec_delegated → phase_started → cycle_started → Issue へ log → stage）は
+**順序と actor が決まっている配管**であり、判断ではない。手で打つと Issue 2件あたり11コマンドになり、
+18 Issue で約90回、1回の取り違えで台帳の整合が崩れる（実地で判明）。
 
-- **`spec_delegated`** — you (the manager) push the intent DOWN as an explicit spec: `spec_ref` is the
-  **task Issue #/URL** (the spec lives in the Issue body, docs/11 §4b). This is the predecessor the
-  subordinate's later `conformance_reviewed` → `report_up` requires (docs/09) — without it that chain
-  hard-blocks.
-- **`phase_started{deliverable, phase: implement}`** — the ledger **rejects** this unless a prior
-  `phase_admitted{phase: design, verdict: pass}` exists for the deliverable (and design likewise needs
-  requirements admitted). So a maker cannot start implementing before design is admitted — the mold
-  bites here, at the emit, not just in the doc.
-
-**`phase_started` の payload に `parent` を必ず入れること**（親 objective の Issue 番号）。
-founding は objective 単位で requirements/design を admit するが、ここで打つ `deliverable` は
-task Issue 番号なので、`parent` が無いと連鎖が繋がらず弾かれる（実地で判明）。`parent` があれば
-**親 objective の admit を継承する** — 同じ設計を task ごとに再 admit させるのはセレモニーであり、
-設計は objective の単位で起きたのだから、そこを継承するのが正しい。
+**着手する Issue ごとに1コマンド打つ:**
 
 ```
---payload '{"deliverable":"<task Issue番号>","parent":"<objective Issue番号>","phase":"implement","role":"<role>"}'
+python3 "${CLAUDE_PLUGIN_ROOT}/tools/org_cycle.py" begin \
+  --role $1 --issue <task Issue番号> --agent <実際に作る役割>
 ```
 
-**If this is rejected, do NOT self-emit the missing admissions.** That rejection means founding did not
-close the `requirements`/`design` phases for this deliverable — `/org-found`'s last step does that, with
-the *gate* as the admitting actor. Emitting them yourself would make the supervisor both the maker and
-the sign-off, which is the exact collapse the mold exists to prevent (and the ledger now refuses an
-admission with no matching `phase_started`, so the shortcut fails anyway). Go run that founding step, or
-say plainly that the deliverable is not ready to implement — do not route around the gate.
+これが6ステップを正しい順序と actor で実行する。**`parent` は Issue から自動解決される** —
+以前は人が「#7 の親は #1」と目で拾って手打ちしていたが、`create` が body に `Parent: #N` を
+書いているので拾える。手打ちである限り取り違えが起き、親継承（docs/11 §2）の実装が活きない。
+`candidate_id` も Issue のトレーラから読む。
 
-!`echo 'At delegation, per task, fire the gate: python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/ledger.py" append --actor "'"$1"'" --class spec_delegated --payload '"'"'{supervisor,subordinate,spec_ref:<issue#>,contract_ref,intent_basis_ref}'"'"'. THEN --class phase_started --payload '"'"'{deliverable:<issue#>,phase:implement,role}'"'"'. The ledger REJECTS phase_started if design is not admitted — that rejection IS the gate. The gate agent appends phase_admitted as it clears each phase.'`
+打つ前に確認したければ `begin` を `plan` に替える — **何も実行せず**イベント列だけ印字する。
+
+**止まったら、そこから先は打たれていない。** 台帳が拒否したなら順序違反であり、前提を満たして
+から再実行すること。各イベントは natural-key で冪等なので、**再実行は安全**（済んだ分は no-op）。
+
+> **これは forced delegation ではない。** 自動化したのは「順序と actor が決まっている配管」だけで、
+> **何を選ぶか・誰に委ねるか・admit するかは自動化していない**（docs/03 §6.5 — forced delegation は
+> 設計エラー、forced invariant は正しい）。判断はあなたの仕事のまま。
 
 ## 3. Record work as you go — so nothing is lost to a context wipe
 
 The backlog is the org's memory. Work that lives only in this session's context is **gone** on `/clear`
-or a crash (docs/01 R−1: the org acts only on what is written). So a cycle records itself at three
-points, keyed by `candidate_id`:
+or a crash (docs/01 R−1: the org acts only on what is written).
 
-1. **On starting an item** — append `cycle_started {role, candidate_id, pack_manifest_id}`. This marks
-   the item in-flight and ties every later record to it.
-2. **At each milestone** (and before you might stop — end of a phase, hitting a blocker, low on budget)
-   — append `progress_recorded {role, candidate_id, fraction, phase, done_so_far, next_step, blocked_by,
-   artifacts}`. `next_step` is the load-bearing field: it is what a fresh session resumes from.
-3. **On finishing** — append `cycle_completed {role, candidate_id, outputs, reused, domain_model, ...}`.
-   The **`domain_model` field is REQUIRED** — the ledger rejects a `cycle_completed` without it (docs/11
-   §4d). It is the forced domain-model update: either `{updated: [<convention/artifact ref>]}` if this
-   cycle settled a domain rule, or `{none_asserted: "<why>"}` if it established none (a claim the skeptic
-   can refute). This is how SDD runs on a *rising* context base — you cannot record a cycle done without
-   stating what it did to the domain model. Also record `reused` (which parts you pulled from).
-4. **Grow the domain model IN THE SAME cycle (this is what the `domain_model` field forces)** — if this
-   work established or changed a domain rule, a boundary, or a naming/convention (ubiquitous language),
-   record it NOW: a settled decision must be persisted as an inferable artifact **co-committed with the
-   code** — an ADR/comment/domain-model file in the product repo if it constrains code, or a `conventions
-   adopt` if it is cross-cutting precedent — and referenced in `domain_model.updated`. The ledger receives
-   only the RECEIPT (`convention_adopted`), never the decision as its sole home (a decision that lives only
-   as a ledger event is hoarded where no future code-reader sees it, docs/12 §3.3, §6). A convention is
-   proposed here and adopted by a checker (never self-adopted). If nothing was settled, say so in
-   `domain_model.none_asserted` — but do not *silently* skip it; the ledger won't let you.
+**完了時も1コマンド:**
 
-!`echo 'Record the cycle (never fabricate completion): python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/ledger.py" append --actor "'"$1"'" --class cycle_completed --payload '"'"'{role,candidate_id,outputs,reused,domain_model:{updated:[<ref>]|none_asserted:<why>}}'"'"'. domain_model is REQUIRED (docs/11 §4d) — the append is rejected without it. If a domain rule was settled, FIRST: python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/conventions.py" adopt --scope <area> --choice "<the settled rule>" --owner "'"$1"'" --by checker, then reference its cid in domain_model.updated. Checkpoint BEFORE you risk stopping.'`
+```
+python3 "${CLAUDE_PLUGIN_ROOT}/tools/org_cycle.py" complete \
+  --role $1 --issue <N> --agent <役割> --outputs "<何を作ったか>" \
+  (--domain-model-updated "<確立したドメイン規則への参照>" | --domain-model-none "<確立しなかった理由>")
+```
+
+`domain_model` は**必須**（docs/11 §4d）。台帳が拒否するので省けない — ドメインモデルに何もして
+いないなら、その理由を書く（skeptic が反証できる主張になる）。
+
+**途中の進捗**（フェーズの終わり、ブロック、予算切れの前）は `github_sync log` で刻む:
 
 ### 3a. The GitHub Issue is the MAIN work-log — so work isn't session- or terminal-bound
 
