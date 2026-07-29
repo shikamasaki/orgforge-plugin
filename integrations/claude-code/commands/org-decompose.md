@@ -51,7 +51,15 @@ For each must-have row (filter to `$1`'s objective if an objective-id was given)
 Issues it becomes. The doctrine (docs/11 §4b, docs/03 §6.2):
 
 - **One task = one independently-completable unit** — one endpoint, one function, one screen, one
-  migration. Not a domain, not "the auth system".
+  migration. Not a domain, not "the auth system". INVEST の *Small* が同じことを述べており、
+  その根拠は見積精度ではない — *"Above this size, and it seems to be too hard to know what's in
+  the story's scope"*（Wake 2003）。**スコープの境界が認識できなくなる**のが分割すべき理由で、
+  実地の #11 はまさにそれで5回スコープが変わった。
+- **層やファイルで割らない。** UI で1つ、DB で1つ、という分け方は independent でも valuable
+  でもない（Humanizing Work が名指しする反パターン）。1つの単位は *"a valuable change in system
+  behavior such that you'll probably have to touch multiple architectural layers"* である —
+  **複数層に触るのは正常**。`owns` はその上で**衝突を避ける**ための制約であって、分割の
+  判断そのものではない。
 - **Split at every seam where sibling `owns` sets are disjoint.** Disjoint `owns` ⇒ the two units are
   `[P]` parallel-safe ⇒ they are separate Issues. Spec Kit の `[P]`（"different files, no
   dependencies"）と同じ判定である。

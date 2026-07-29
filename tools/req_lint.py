@@ -245,6 +245,42 @@ def check(path):
                       "message": "未解決の [NEEDS CLARIFICATION] が残っている。"
                                  "推測で実装させないため、実装前に必ず解消すること"})
 
+    # VOIDDEP — 動詞の目的語に対する依存が満たされていない（QUS の Complete、docs/sources）
+    #
+    # Lucassen et al. の形式化: `voidDep(µ1) ↔ depends(av1, av2) ∧ ∄µ2 ∈ U. do2 = do1`
+    # 「to read, update or delete an item one first needs to create it」— 更新や削除を定めて
+    # いるのに、その対象を**作る**要求がどこにも無ければ、要求集合に穴がある。
+    #
+    # これは orgforge が実地で踏んだ形の一般化でもある: #11 は「誰が入れるか」を定めて
+    # 「入った後に何ができるか」を定めていなかった。QUS は動詞-目的語の依存に限定しているが、
+    # 同じ述語が**能力の依存**にも当てはまる。
+    CREATE_V = ("作成", "登録", "追加", "生成", "create", "register", "add", "insert")
+    MUTATE_V = {"更新": "update", "変更": "update", "編集": "update", "削除": "delete",
+                "取消": "delete", "update": "update", "delete": "delete", "edit": "update",
+                "remove": "delete"}
+    created, mutated = set(), {}
+    for i, line in enumerate(body.split("\n"), 1):
+        # 目的語 = その行に出てくる `entity` / 「〜を」の直前の名詞。ここでは **バッククォート
+        # 付きの識別子**だけを見る — 散文から名詞を切り出すと誤検出が支配的になる。
+        objs = set(re.findall(r"`([A-Za-z_][\w.]{2,})`", line))
+        if not objs:
+            continue
+        low = line.lower()
+        if any(v in low for v in CREATE_V):
+            created |= objs
+        for jp, kind in MUTATE_V.items():
+            if jp in low:
+                for o in objs:
+                    mutated.setdefault(o, (i, kind))
+    for obj, (i, kind) in mutated.items():
+        if obj in created:
+            continue
+        # 作る要求が無い対象を更新/削除している
+        v.append({"code": "VOIDDEP", "severity": "warn", "line": i,
+                  "message": f"`{obj}` を {kind} する要求はあるが、**作る要求がどこにも無い**"
+                             f"（QUS の Complete: 更新・削除は作成に依存する）。"
+                             f"別の要求文書が扱うなら参照を、扱わないなら要求を書き足すこと"})
+
     # SC — 成功基準が採番されているか
     if not SC_ID.search(body):
         v.append({"code": "SC", "severity": "warn", "line": 0,

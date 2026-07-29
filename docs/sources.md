@@ -430,6 +430,22 @@ industrialize under upstream guardrails), all bounded by "autonomy is bounded by
   C underspecification / D constitution / E coverage gaps / F inconsistency）に粒度の検査は無く、
   Kiro は人間の承認ゲート（`spec-tasks-review`）だけである。人間の diff レビューを廃止した org
   （docs/11 §4f）ではその頼り先が無いので、orgforge は `split-check` に警告を置く（docs/11 §4b）。
+- **[S] 分割基準の系譜（2026-07 に一次資料で確認）** — **INVEST**（Bill Wake, 2003）の *Small* の
+  根拠は見積精度ではなく *"Above this size, and it seems to be too hard to know what's in the
+  story's scope"*（スコープの境界が認識できなくなること）。*Testable* は *"I understand what I
+  want well enough that I could write a test for it"* という自己申告基準で、**Perspective-Based
+  Reading**（Basili et al.）のテスター視点 Q1 *"Can you make up reasonable test cases for each
+  item?"* がそれを他者検証の手続きに変える。**QUS**（Lucassen et al., Requirements Engineering
+  2016）は `Complete` を形式化し — *"to read, update or delete an item one first needs to create
+  it"*、述語 `voidDep(µ1) ↔ depends(av1,av2) ∧ ∄µ2∈U. do2=do1` — これが req_lint の VOIDDEP。
+  **Humanizing Work** の垂直スライス定義 *"you'll probably have to touch multiple architectural
+  layers"* は、**層/ファイル単位の分割を明示的な反パターンとする**（docs/11 §4b）。
+  **SPIDR**（Cohn）の5軸（Spike/Path/Interface/Data/Rules）はいずれも実装場所ではなく
+  外部から観測できる振る舞いの分岐。**BMAD** の PRD Quality Rubric は *"bounds, not adjectives"*
+  / *"omissions could be silently assumed"* / *"NFR theater"* という語彙で要求の薄さを狙う
+  （ただし story 側のサイズは一切検査しない、という非対称がある）。
+  **「壊れ方が違えば別単位」を規範として明文化した先例は見つからなかった** — PBR が
+  「検証手段を起点に据える」点で最も近いが、あれは分割ではなく検査の規範である。
 - **[S] Osmani, "Software Factories, Light and Dark"** — the comprehension-debt failure mode (months of
   green tests while understanding erodes); move human judgment upstream. Anchors docs/12 §6's "don't
   measure by items-drained."

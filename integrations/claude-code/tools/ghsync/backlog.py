@@ -281,8 +281,10 @@ def cmd_split_check(a):
         if line.lower().lstrip().startswith(("depends_on", "depends on", "- **depends_on")):
             # `#N` の形だけを依存とみなす。数字を全部拾うと散文が誤検出される —
             # 「実装コードは1行も入らない」の「1」が #1 として解釈された（実地で判明）。
-            for num in re.findall(r"#(\d+)", line.split(":", 1)[-1]):
-                if num:
+            # 同じ依存が本文の複数行に出ると同じ警告が並ぶ（実地で3行出た）。
+            # 一度言えば足りる — 同じことを繰り返す警告は、読み飛ばされる側に回る。
+            for num in dict.fromkeys(re.findall(r"#(\d+)", line.split(":", 1)[-1])):
+                if num and not any(f"depends_on #{num} " in w for w in warnings):
                     c, o = gh(["issue", "view", num, "--repo", a.repo, "--json", "state"])
                     if c == 0 and json.loads(o).get("state") == "OPEN":
                         warnings.append(f"depends_on #{num} is still OPEN — a fresh maker can't take this "

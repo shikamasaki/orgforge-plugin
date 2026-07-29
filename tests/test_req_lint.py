@@ -169,3 +169,49 @@ def test_no_requirements_at_all_is_held(tmp_path):
     empty = "\n".join(l for l in VALID.split("\n") if "FR-0" not in l)
     code, out = run(tmp_path, empty)
     assert code == 10 and "要求文が1件もない" in out
+
+
+# ── 0.25.0: QUS の Complete（voidDep）— 作る要求が無い対象を更新/削除している ──
+def _vd_doc(tmp_path, frs):
+    p = tmp_path / "R.md"
+    p.write_text(
+        "# 要求記述\n\n## 1. 目的\nt\n\n## 2. 適用範囲\nt\n\n## 3. 用語\n- `x`: y\n\n"
+        "## 4. 機能要求\n\n| ID | 要求 | 根拠 |\n|---|---|---|\n" + frs +
+        "\n## 5. 非機能要求\n- 応答は1秒以内であること\n\n## 6. 制約\n- t\n\n"
+        "## 7. 成功基準\n- SC-001: 全テストが green であること\n", encoding="utf-8")
+    return p
+
+
+def _vd_run(p):
+    r = subprocess.run([sys.executable, str(TOOL), "check", str(p)],
+                       capture_output=True, text=True, timeout=60)
+    return r.stdout + r.stderr
+
+
+def test_voiddep_flags_update_without_create(tmp_path):
+    """更新の要求があるのに、その対象を作る要求がどこにも無い。
+
+    Lucassen et al. の QUS `Complete`: "to read, update or delete an item one first needs
+    to create it"。orgforge が実地で踏んだ形（「誰が入れるか」は定めたが「入った後に何が
+    できるか」を定めていない）の一般化でもある。
+    """
+    out = _vd_run(_vd_doc(
+        tmp_path,
+        "| FR-001 | WHEN 利用者が編集する THE system SHALL `invoice` を更新すること | r |\n"))
+    assert "VOIDDEP" in out and "invoice" in out
+
+
+def test_voiddep_silent_when_create_exists(tmp_path):
+    """作る要求があれば黙る（誤検出しない）。"""
+    out = _vd_run(_vd_doc(
+        tmp_path,
+        "| FR-001 | WHEN 利用者が編集する THE system SHALL `member` を更新すること | r |\n"
+        "| FR-002 | The system SHALL `member` を登録できること | r |\n"))
+    assert "VOIDDEP" not in out
+
+
+def test_voiddep_only_looks_at_backticked_identifiers(tmp_path):
+    """散文から名詞を切り出すと誤検出が支配的になるので、識別子だけを見る。"""
+    out = _vd_run(_vd_doc(
+        tmp_path, "| FR-001 | The system SHALL 古い記録を削除すること | r |\n"))
+    assert "VOIDDEP" not in out

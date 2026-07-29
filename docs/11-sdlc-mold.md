@@ -687,10 +687,24 @@ Spec Kit の `[P]` と同じ判定であり、**同じ限界を継承してい�
 Kiro の *"Implement X function" rather than "Support X feature"* は、同じことを別の言い方で
 述べている — 機能単位ではなく、**1つの壊れ方に対応する単位**に落とせ、ということである。
 
-**過大タスクの検出を Spec Kit も Kiro も持たない**（どちらも人間の承認ゲート頼り）。人間の
-diff レビューを廃止した org（§4f）では、その頼り先が無い。`github_sync split-check` が
-起票後に警告を出す — 壊れ方が複数か、認可の要求が境界だけを定めていないか、を見る。
-**止めない、警告する**: 何を守るべきかは人が決める。
+**過大タスクの検出は、調べた範囲のどのツール・手法も持っていない**（docs/sources）。
+Spec Kit の `analyze` に粒度の検査は無く、Kiro は人間の承認ゲートのみ。BMAD は同じ機能要求
+（Issue #1471「タスク数が閾値を超えたら分解エージェントを起動」）が**未解決のまま放置**され、
+学術側の AQUSA も Estimatable（サイズ過大）の自動化を「意味理解を要する」として明示的に
+諦めている。定量的な閾値を持つのは Devin の *"if a task would take you three hours or less"*
+だけで、それも事前 lint ではない。人間の diff レビューを廃止した org（§4f）では承認ゲートが
+無いので、`github_sync split-check` が起票後に警告を出す — 壊れ方が複数か、認可の要求が
+境界だけを定めていないか。**止めない、警告する**: 何を守るべきかは人が決める。
+
+**「同じファイルを触るか」を分割基準にすることは、既存の規範体系ではむしろ反パターンである。**
+Humanizing Work の垂直スライスの定義は *"a work item that delivers a valuable change in system
+behavior such that you'll probably have to touch multiple architectural layers"* — **複数層に
+触ることを肯定的に含む**。層ごとに割る（UI で1つ、DB で1つ）のは independent と valuable に
+反する失敗パターンとして名指しされている。Tessl の spec:code 1:1 写像は逆の極で、Fowler の
+分析はそれを「コンポーネント横断の合成を制限する」限界として指摘している。
+
+orgforge の `owns` 基準は**衝突の回避**（並列 maker が同じファイルを書かない）には正しいが、
+**分割の判断**としてはこれ1本では足りない。だから「壊れ方」の軸を足す。
 
 ### 分割の失敗は、しばしば要求の欠落として現れる
 

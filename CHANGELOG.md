@@ -24,6 +24,63 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 > 「効いていない」と言う。0.16.0 の相関キー必須化、0.16.0 の `unknown` 報告、0.18.0 の
 > reject 追跡、0.21.0 の冪等キー修正は、すべてこの一点である。
 
+## 0.25.0
+
+SDD 系ツール・従来手法の分割基準を**一次資料で調べ**（Spec Kit / Kiro に加え、INVEST /
+SPIDR / Humanizing Work / QUS / PBR / BMAD / Devin / Tessl / Cursor）、取り入れるべきものを実装した。
+出典と原文引用は docs/sources。
+
+### `req_lint` に VOIDDEP — 作る要求が無い対象を更新/削除している
+
+QUS（Lucassen et al., Requirements Engineering 2016）の `Complete` の形式化:
+
+> "to read, update or delete an item one first needs to create it"
+> `voidDep(µ1) ↔ depends(av1, av2) ∧ ∄µ2 ∈ U. do2 = do1`
+
+これは実地で踏んだ形（#11 が「誰が入れるか」を定めて「入った後に何ができるか」を定めて
+いなかった）の**一般化**でもある。バッククォート付きの識別子だけを見る — 散文から名詞を
+切り出すと誤検出が支配的になる。
+
+### 「層/ファイルで割らない」を doctrine に明記
+
+Humanizing Work の垂直スライスの定義は *"a work item that delivers a valuable change in system
+behavior such that you'll probably have to touch **multiple architectural layers**"* —
+**複数層に触ることを肯定的に含む**。層ごとに割るのは independent でも valuable でもない
+失敗パターンとして名指しされている。
+
+つまり **`owns`（同じファイルを触るか）を分割の判断基準にすることは、既存の規範体系では
+反パターン**である。`owns` は衝突の回避には正しいが、分割の判断そのものではない。
+
+### INVEST の *Small* の根拠を doctrine に引いた
+
+> "Above this size, and it seems to be too hard to know what's in the story's scope"（Wake 2003）
+
+根拠は見積精度ではなく**スコープの境界が認識できなくなること**。実地の #11 はまさにそれで
+5回スコープが変わった。
+
+### 調査で分かった業界の実態
+
+**過大タスクの検出は、調べた範囲のどのツール・手法も持っていない。** Spec Kit の `analyze` の
+Detection Passes に粒度の検査は無く、Kiro は人間の承認ゲートのみ。BMAD は同じ機能要求
+（Issue #1471）が**未解決のまま放置**され、学術側の AQUSA も Estimatable の自動化を
+「意味理解を要する」として明示的に諦めている。定量閾値を持つのは Devin の *"three hours or
+less"* だけで、事前 lint ではない。
+
+**「壊れ方が違えば別単位」を規範として明文化した先例も見つからなかった。** PBR が「検証手段を
+起点に据える」点で最も近いが、あれは分割ではなく検査の規範である。0.24.0 で足した軸は、
+既存手法の空白に置いたことになる。
+
+### 誤検出の確認
+
+0.24.0 の split-check を tatekae の全 Issue（#7〜#20）で回した。**追加した2種が出るのは14件中5件**
+（#11 #12 #14 #16 #18）で、内容を確認するといずれも妥当だった — #16 は精算の状態機械で
+MUST 15件中認可が1件、#18 は内側に触れているのが「あだ名」だけ（#11 の再現）。
+`depends_on` の重複警告（同じ依存が3行出ていた）も直した。
+
+303 passed。
+
+---
+
 ## 0.24.0
 
 タテカエ org からの要望書（`/org-decompose` の分割基準）に対応。**実測が明快だった**:
