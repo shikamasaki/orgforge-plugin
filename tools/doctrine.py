@@ -92,6 +92,17 @@ def cmd_propose(a):
     })
     _save(a.root, a.role, data)
     print(f"proposed pending claim {cid} for {a.role} (awaits gate admission)")
+    # propose は retrieved_at / review_by を省略できるのに admit はそれを必須にするので、
+    # 素直に使うと **admit の段階で必ず詰まる**。実地で doctrine が空のままだった一因なので、
+    # 詰まる前に、この場で言う（admit まで黙っていると、学びを差し出した側は理由を知れない）。
+    if not a.retrieved_at or not a.review_by:
+        missing = " と ".join(x for x, v in
+                              (("--retrieved-at", a.retrieved_at), ("--review-by", a.review_by))
+                              if not v)
+        print(f"注意: {missing} が無い。このままでは gate が admit できない"
+              f"（provenance が不完全な doctrine は正典にしない — docs/06 §3）。\n"
+              f"  再 propose するか、admit の前に埋めること。TTL の無い doctrine は"
+              f"「いつまで信じてよいか」を誰も知らないまま残り続ける。", file=sys.stderr)
     return 0
 
 

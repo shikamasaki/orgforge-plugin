@@ -108,6 +108,18 @@ def _steps_begin(a, parent, cid):
     agent = a.agent or a.role
     repo_args = []          # --repo は github_sync が discovery するので渡さない
     return [
+        # 6: 何を選んだかの記録は配管（選ぶこと自体は判断だが、選んだ結果を残すのは機械の仕事）。
+        # 実地では6件着手して attention_allocated が1件しか無く、選択の履歴が追えなかった。
+        (f"attention_allocated（#{a.issue} を選択）",
+         lambda: _ledger("append", "--actor", a.role, "--class", "attention_allocated",
+                         "--natural-key", f"attn-{a.issue}-{cid}",
+                         "--payload", json.dumps(
+                             {"role": a.role, "ranking_id": f"issue-{a.issue}",
+                              "selected": [{"candidate_id": cid, "objective": parent or "",
+                                            "source": "mandate"}],
+                              "deferred": [],
+                              "reason": a.why or f"#{a.issue} に着手（begin）"},
+                             ensure_ascii=False))),
         (f"claim #{a.issue} as {agent}",
          lambda: _gh_sync("claim", "--issue", str(a.issue), "--agent", agent, *repo_args)),
         *([(f"worktree .orgforge/wt/issue-{a.issue} を用意（並列 maker の物理分離）",
@@ -365,6 +377,17 @@ def cmd_verify(a):
                        "skeptic の仕事。潰せたなら refuted、潰せず承知の範囲だと確認できたなら "
                        "その旨を --risk に書いて survives。")
 
+    if role == "gate":
+        code, pend = _run([os.path.join(HERE, "doctrine.py"), "show", _sub("doctrine")])
+        if code == 0 and "pending" in (pend or "").lower():
+            out.append("\n## 未 admit の doctrine（maker が差し出した学び）\n")
+            out.append(pend.strip()[:2000])
+            out.append("\n> 次のサイクルに渡す価値があるものだけ admit すること:\n"
+                       f"> `python3 {os.path.join(HERE, 'doctrine.py')} admit "
+                       f"{_sub('doctrine')} <role> <claim-id> --by gate`\n"
+                       "> admit しなければ、この学びは次の Issue に渡らない。"
+                       "実地では同じ失敗を3回繰り返した。")
+
     out.append(f"\n## 記録（**判定はあなたが決める。この雛形は値を埋めていない**）\n")
     out.append("```")
     out.append(f'python3 "$P/tools/github_sync.py" decide --issue {a.issue} --event {ev} \\')
@@ -499,6 +522,33 @@ def _cleanup_worktree(issue):
     return f"worktree を片付けた: .orgforge/wt/issue-{issue}"
 
 
+
+def _today():
+    code, out = _raw(["date", "-u", "+%Y-%m-%d"])
+    return (out or "").strip() or "UNSET"
+
+
+def _plus_days(n):
+    """doctrine の TTL。既定は 180 日 — 「いつまで信じてよいか」の無い doctrine は、
+    古い前提のまま残って害になる（docs/06 §3）。"""
+    for fmt in (["date", "-u", "-v", f"+{n}d", "+%Y-%m-%d"],
+                ["date", "-u", "-d", f"+{n} days", "+%Y-%m-%d"]):
+        code, out = _raw(fmt)
+        if code == 0 and (out or "").strip():
+            return out.strip()
+    return "UNSET"
+
+
+def _sub(kind):
+    """doctrine / conventions のルート。discovery に任せる（環境変数の設定を要求しない）。"""
+    try:
+        sys.path.insert(0, HERE)
+        from discover import _sub_root
+        return _sub_root(kind) or os.path.join(os.getcwd(), ".orgforge", kind)
+    except Exception:
+        return os.path.join(os.getcwd(), ".orgforge", kind)
+
+
 def cmd_begin(a):
     parent = a.parent or resolve_parent(a.issue)
     cid = a.candidate_id or _candidate_id(a.issue)
@@ -530,6 +580,29 @@ def cmd_complete(a):
 
     cid = a.candidate_id or _candidate_id(a.issue)
     rc = _execute(_steps_complete(a, cid), f"complete #{a.issue} ({a.role})")
+    if rc == 0 and a.learned:
+        # 3: doctrine の蓄積経路がサイクルに繋がっておらず、doctrine/ も conventions/ も空だった。
+        # 実地では同じ失敗を3回繰り返した知見（「性質のテストは壊れる場所で検証しないと無意味」）が
+        # あり、doctrine に入っていれば止まったはず。docs/06 は「蓄積した失敗こそ最も価値ある
+        # context」と書いているのに、蓄積の口がどこにも開いていなかった。
+        # **propose まで。admit は gate の仕事**（自分の学びを自分で正典にできない）。
+        code, out = _run([os.path.join(HERE, "doctrine.py"), "propose",
+                          _sub("doctrine"), a.agent or a.role,
+                          "--claim", a.learned,
+                          "--source", f"issue-{a.issue}",
+                          "--confidence", str(a.confidence),
+                          # provenance を埋めないと gate が admit できず、学びは pending の
+                          # まま死ぬ。日付は配管が知っているので人に打たせない。
+                          "--retrieved-at", _today(),
+                          "--review-by", _plus_days(a.review_days),
+                          *(["--affects", a.affects] if a.affects else [])])
+        if code == 0:
+            print(f"  doctrine に propose した（admit は gate）: {out.strip()[:100]}")
+        else:
+            print(f"  doctrine への propose に失敗: {out.strip()[:120]}", file=sys.stderr)
+    elif rc == 0:
+        print(f"\n  ヒント: このサイクルで「次も効く学び」があれば --learned で残すこと。"
+              f"doctrine に入らない学びは次の Issue に渡らない（実地で同じ失敗を3回繰り返した）。")
     if rc == 0:
         msg = _cleanup_worktree(a.issue)
         if msg:
@@ -728,6 +801,107 @@ def cmd_handback(a):
     ], f"record handback #{a.issue}")
 
 
+
+def cmd_gc(a):
+    """5: 溜まった worktree を片付ける。**未コミットの変更があるものは残す。**
+
+    complete/integrate が片付けるようになったが、既に溜まったものと、予算 cap で消せず
+    残ったものは誰の仕事でもなかった。統合済みなのに残っていると、次に同じ Issue を
+    触ったとき古いツリーを掴む。
+    """
+    base = os.path.join(os.getcwd(), ".orgforge", "wt")
+    if not os.path.isdir(base):
+        print("worktree はありません。")
+        return 0
+    kept, removed = [], []
+    for name in sorted(os.listdir(base)):
+        if not name.startswith("issue-"):
+            continue
+        issue = name[len("issue-"):]
+        wt = os.path.join(base, name)
+        code, out = _raw(["git", "-C", wt, "status", "--porcelain"])
+        if code == 0 and out.strip():
+            kept.append((name, f"未コミットの変更 {len(out.strip().splitlines())} 件"))
+            continue
+        if not a.all:
+            # 既定は「統合済みだけ」を消す。まだ取り込まれていない仕事は消さない。
+            br = _branch_for(issue)
+            code, merged = _raw(["git", "branch", "--merged", a.base, "--list", br])
+            if code != 0 or not (merged or "").strip():
+                kept.append((name, f"{a.base} に未統合"))
+                continue
+        code, out = _raw(["git", "worktree", "remove", wt])
+        (removed if code == 0 else kept).append(
+            (name, "片付けた" if code == 0 else out.strip()[:60]))
+    # .orgforge/wt/ の外に作られた検証用 worktree（scratchpad 等）も git は把握している。
+    # 実地では skeptic が scratchpad に作った sk7 が、予算 cap で消せず残っていた。
+    # 「配管が作った場所」しか見ないと、こういう孤児が永久に残る。
+    code, out = _raw(["git", "worktree", "list", "--porcelain"])
+    if code == 0:
+        for block in (out or "").split("\n\n"):
+            m = re.search(r"^worktree (.+)$", block, re.M)
+            if not m:
+                continue
+            wt = m.group(1)
+            if wt == os.getcwd() or base in wt:
+                continue
+            if not any(k in wt for k in ("/scratchpad/", "/tmp/")):
+                continue      # 素性の分からない場所は触らない
+            name = os.path.basename(wt)
+            code2, st = _raw(["git", "-C", wt, "status", "--porcelain"])
+            if code2 == 0 and st.strip():
+                kept.append((name, f"未コミットの変更 {len(st.strip().splitlines())} 件（{wt}）"))
+                continue
+            if not os.path.isdir(wt):
+                code3, o3 = _raw(["git", "worktree", "prune"])
+                removed.append((name, "消えていたので prune"))
+                continue
+            code3, o3 = _raw(["git", "worktree", "remove", wt])
+            (removed if code3 == 0 else kept).append(
+                (name, f"片付けた（{wt}）" if code3 == 0 else o3.strip()[:60]))
+
+    for n, why in removed:
+        print(f"  ✓ {n} — {why}")
+    for n, why in kept:
+        print(f"  · {n} — 残した（{why}）")
+    print(f"\n{len(removed)} 個を片付け、{len(kept)} 個を残した。")
+    if kept:
+        print("残したものは中身を確認すること — 消えて困るかは、こちらが決めてよいことではない。")
+    return 0
+
+
+def cmd_record(a):
+    """2: 済んだ判定を遡って台帳に記録する。
+
+    #7/#8 の統合には判定がどこにも無く（integration_admitted が0件）、しかも「マージ後の
+    10件失敗のうち8件は worktree 走査の偽陽性で、#7 の欠陥はゼロ」という切り分けの判断が
+    記録から消えていた。**その切り分けこそ後から最も知りたい情報**なので、遡って残せる口を開ける。
+
+    追記型なので過去は書き換わらない — `backfilled: true` を付けて、後から足した記録だと
+    分かるようにする（実時点の記録と混ぜない）。
+    """
+    payload = {"verdict": a.verdict, "issue": a.issue, "deliverable": str(a.issue),
+               "backfilled": True, "why": a.why}
+    if a.event == "integration_admitted":
+        payload.update({"integration_branch": a.base, "deliverables": [str(a.issue)],
+                        "combined_ci_ref": a.command or "(記録なし)"})
+    if a.result:
+        payload["result"] = a.result[:4000]
+    steps = [
+        (f"{a.event}（backfill）を記録",
+         lambda: _ledger("append", "--actor", a.by, "--class", a.event,
+                         "--natural-key", f"backfill-{a.event}-{a.issue}",
+                         "--payload", json.dumps(payload, ensure_ascii=False))),
+        (f"log → #{a.issue}",
+         lambda: _gh_sync("log", "--issue", str(a.issue), "--event", a.event,
+                          "--event-id", f"backfill-{a.event}-{a.issue}",
+                          "--detail", f"[遡って記録] {a.why}",
+                          "--command", a.command or "(当時のコマンドは記録に残っていない)",
+                          "--result", a.result or a.why)),
+    ]
+    return _execute(steps, f"backfill {a.event} #{a.issue}")
+
+
 def cmd_plan(a):
     """何も実行せず、打つイベント列だけを印字する。"""
     parent = a.parent or resolve_parent(a.issue)
@@ -753,6 +927,7 @@ def main(argv):
         q.add_argument("--candidate-id", dest="candidate_id",
                        help="省略時は Issue の candidate_id トレーラから読む")
         q.add_argument("--base", help="worktree を切る元（既定 develop）")
+        q.add_argument("--why", help="なぜ今これを選んだか（attention_allocated の reason）")
         q.add_argument("--no-worktree", dest="no_worktree", action="store_true",
                        help="worktree を作らない。**並列で回すなら使わないこと** — 同一ツリーで"
                             "並列 maker を走らせると、あるIssueのコミットが別Issueのブランチに"
@@ -760,6 +935,20 @@ def main(argv):
     q = sub.add_parser("verify", help="gate/skeptic を起動する材料を組み立てる（判定はしない）")
     q.add_argument("--issue", required=True, type=int)
     q.add_argument("--role", required=True, choices=("gate", "skeptic"))
+
+    q = sub.add_parser("gc", help="溜まった worktree を片付ける（未コミットのものは残す）")
+    q.add_argument("--base", default="develop")
+    q.add_argument("--all", action="store_true", help="未統合のものも対象にする")
+
+    q = sub.add_parser("record", help="済んだ判定を遡って台帳に記録する（backfill 印が付く）")
+    q.add_argument("--issue", required=True, type=int)
+    q.add_argument("--event", required=True, help="integration_admitted / refutation_attempted など")
+    q.add_argument("--verdict", required=True)
+    q.add_argument("--by", required=True, help="誰の判定か")
+    q.add_argument("--why", required=True, help="何を見て、何が決め手になったか")
+    q.add_argument("--command", help="当時実行したコマンド")
+    q.add_argument("--result", help="その実出力")
+    q.add_argument("--base", default="develop")
 
     q = sub.add_parser("handback", help="feature ブランチを push → develop 宛 PR → Issue に紐付け")
     q.add_argument("--issue", required=True, type=int)
@@ -788,6 +977,13 @@ def main(argv):
     q.add_argument("--result", required=True,
                    help="そのコマンドの**実出力**（失敗込み。「通った」は不可 — log が拒否する）")
     q.add_argument("--files", help="変更したファイル")
+    q.add_argument("--learned",
+                   help="次のサイクルにも効く学び（doctrine に propose する。admit は gate）")
+    q.add_argument("--affects", help="その学びが効く役割（カンマ区切り）")
+    q.add_argument("--confidence", type=float, default=0.7,
+                   help="その学びへの確信度 0..1（既定 0.7）")
+    q.add_argument("--review-days", dest="review_days", type=int, default=180,
+                   help="その学びを再確認するまでの日数（既定 180）")
     q.add_argument("--domain-model-updated", dest="domain_model_updated",
                    help="このサイクルが確立したドメイン規則への参照")
     q.add_argument("--domain-model-none", dest="domain_model_none",
@@ -795,7 +991,7 @@ def main(argv):
     q.add_argument("--candidate-id", dest="candidate_id")
     a = p.parse_args(argv[1:])
     return {"begin": cmd_begin, "complete": cmd_complete, "plan": cmd_plan,
-            "verify": cmd_verify, "integrate": cmd_integrate, "handback": cmd_handback}[a.cmd](a)
+            "verify": cmd_verify, "integrate": cmd_integrate, "handback": cmd_handback, "gc": cmd_gc, "record": cmd_record}[a.cmd](a)
 
 
 if __name__ == "__main__":

@@ -72,6 +72,7 @@ Exit: 0 ok / 10 contended-or-blocked (escalate) / 2 usage or gh error.
 """
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -366,6 +367,48 @@ def _log_defect(a):
     return None
 
 
+def _append_progress_receipt(a):
+    """Issue に書いた作業ログの受領証を台帳にも残す。
+
+    `log` は Issue にコメントするだけで台帳に何も書いていなかった。結果、実地では Issue に
+    7回の作業記録があるのに `progress_recorded` は **0件**。これは #8 の refutation で
+    塞いだのと同型（二重記録の片側が落ちる）で、しかも影響が具体的:
+
+      · work_in_progress ビューは progress_recorded を読むので `/org-resume` が復帰できない
+      · board も進捗を見られない
+      · 台帳だけ見ると「作業記録を一度も残していない」ことになる
+
+    台帳が SSoT ではない（SSoT は code + ドメインモデル）が、**中断からの復帰と監査は台帳が
+    担う**ので、ここが空だと復帰機構が丸ごと動かない。
+
+    失敗しても log 自体は成功させる — コメントは既に投稿済みで、受領証が付かないことを理由に
+    「ログに失敗した」と報告すると、実際には残っている記録を人が二重投稿しにいく。
+    """
+    payload = {"role": getattr(a, "by", None) or "org", "candidate_id": a.event_id or "",
+               "phase": a.phase or "", "milestone": a.event,
+               "done_so_far": (a.detail or "")[:2000],
+               "next_step": getattr(a, "next_step", None) or "",
+               "blocker": getattr(a, "blocked_by", None) or "",
+               "issue": a.issue}
+    if getattr(a, "command", None):
+        payload["command"] = a.command
+    if getattr(a, "result", None):
+        payload["result"] = str(a.result)[:4000]
+    if getattr(a, "files", None):
+        payload["files"] = a.files
+    here = os.path.dirname(os.path.abspath(__file__))
+    try:
+        p = subprocess.run([sys.executable, os.path.join(here, "ledger.py"), "append",
+                            "--actor", payload["role"], "--class", "progress_recorded",
+                            "--natural-key", f"progress-{a.issue}-{a.event_id or a.event}",
+                            "--payload", json.dumps(payload, ensure_ascii=False)],
+                           capture_output=True, text=True, timeout=30)
+        return p.returncode == 0, (p.stdout or "") + (p.stderr or "")
+    except Exception as e:
+        return False, str(e)
+
+
+
 def cmd_log(a):
     """Append a WORK-LOG comment to a task Issue on a milestone event (cycle_started, progress_recorded,
     phase_admitted, cycle_completed, …). The ledger stays the SSoT — this comment is its projection onto
@@ -422,7 +465,13 @@ def cmd_log(a):
     if code != 0:
         print(f"gh error posting work-log comment: {out}", file=sys.stderr)
         return 2
-    print(f"logged {a.event} to issue #{a.issue}.")
+    ok, msg = _append_progress_receipt(a)
+    if ok:
+        print(f"logged {a.event} to issue #{a.issue}（台帳にも progress_recorded を記録）。")
+    else:
+        print(f"logged {a.event} to issue #{a.issue}.")
+        print(f"注意: 台帳の受領証を書けなかった（{msg.strip()[:120]}）。"
+              f"Issue には残っているが、`/org-resume` はこの進捗を見られない。", file=sys.stderr)
     return 0
 
 

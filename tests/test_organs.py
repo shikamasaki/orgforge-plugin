@@ -14,6 +14,7 @@ Conventions:
 - assert exit code AND a substring of stdout+stderr combined (organs print verdicts to stderr,
   the allow path to stdout).
 """
+import argparse
 import json
 import os
 import pathlib
@@ -1195,3 +1196,95 @@ def test_handback_puts_closes_in_pr_body():
     seg = src[src.index("def cmd_handback"):]
     assert 'f"Closes #{a.issue}"' in seg, "PR body に Closes が無い — Issue が OPEN のまま残る"
     assert "gh pr create" in seg
+
+
+# ── 実地: 予算 cap が日常の後片付けを止めていた（1日5回発火・実害ゼロ）───────
+def test_regenerable_cleanup_is_not_metered():
+    """cap は irreversibility を測る。作り直せる対象は「取り消せない影響」ではない。"""
+    import importlib.util
+    hook = TOOLS.parent / "integrations" / "common" / "org_hook.py"
+    spec = importlib.util.spec_from_file_location("org_hook_c", hook)
+    h = importlib.util.module_from_spec(spec); spec.loader.exec_module(h)
+    for cmd in ("rm -rf .orgforge/wt/issue-7", "rm -rf node_modules",
+                "rm -rf dist/", "rm -rf __pycache__"):
+        dim, w = h._asset_dimension("Bash", {"command": cmd})
+        assert w == 0, f"後片付けが課金されている: {cmd} -> {w}"
+
+
+def test_irreversible_deletes_stay_metered():
+    """緩めたのは再生成できるものだけ。実ソースも / も遡上も重いまま。"""
+    import importlib.util
+    hook = TOOLS.parent / "integrations" / "common" / "org_hook.py"
+    spec = importlib.util.spec_from_file_location("org_hook_i", hook)
+    h = importlib.util.module_from_spec(spec); spec.loader.exec_module(h)
+    for cmd in ("rm -rf src/", "rm -rf /", "rm -rf ~",
+                "rm -rf .orgforge/wt/../../", "DROP TABLE users"):
+        dim, w = h._asset_dimension("Bash", {"command": cmd})
+        assert w > 0, f"取り消せない操作が無料になった: {cmd}"
+
+
+# ── 実地: log が Issue にだけ書き、台帳の progress_recorded が0件だった ──────
+def test_log_writes_progress_receipt_to_ledger(monkeypatch, tmp_path):
+    """Issue に7回書いたのに台帳は0件。/org-resume が復帰できない状態だった。"""
+    src = (TOOLS / "github_sync.py").read_text(encoding="utf-8")
+    assert "_append_progress_receipt" in src
+    seg = src[src.index("def _append_progress_receipt"):]
+    assert "progress_recorded" in seg and "ledger.py" in seg
+
+
+def test_begin_records_attention_allocated():
+    """6件着手して選択の記録が1件だけだった。選んだ結果を残すのは配管。"""
+    src = (TOOLS / "org_cycle.py").read_text(encoding="utf-8")
+    seg = src[src.index("def _steps_begin"):src.index("def _steps_complete")]
+    assert "attention_allocated" in seg
+
+
+def test_doctrine_propose_warns_on_incomplete_provenance():
+    """propose は省略でき admit は必須にする、という不整合で必ず詰まっていた。"""
+    root = None
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        p = subprocess.run([sys.executable, str(TOOLS / "doctrine.py"), "propose", d, "r",
+                            "--claim", "x", "--source", "s", "--confidence", "0.5"],
+                           capture_output=True, text=True, timeout=60)
+        assert p.returncode == 0
+        assert "admit できない" in p.stderr, "admit で詰まることを propose 時点で言っていない"
+
+
+def test_complete_proposes_learning_to_doctrine():
+    """学びの蓄積口がサイクルに繋がっていること（propose まで。admit は gate）。"""
+    src = (TOOLS / "org_cycle.py").read_text(encoding="utf-8")
+    seg = src[src.index("def cmd_complete"):src.index("def cmd_plan")]
+    assert "doctrine.py" in seg and "propose" in seg
+    assert "--retrieved-at" in seg and "--review-by" in seg, \
+        "provenance を埋めないと gate が admit できず、学びは pending のまま死ぬ"
+
+
+def test_gc_keeps_unmerged_and_dirty_worktrees(tmp_path):
+    """gc は統合済みだけを消す。未統合・未コミットは残す。"""
+    import importlib.util
+    repo = tmp_path / "r"; repo.mkdir()
+    def g(*a, cwd=repo):
+        return subprocess.run(["git", *a], cwd=cwd, capture_output=True, text=True)
+    g("init", "-q", "-b", "main"); g("config", "user.email", "t@t"); g("config", "user.name", "t")
+    (repo / "s.txt").write_text("x"); g("add", "-A"); g("commit", "-qm", "s"); g("branch", "develop")
+    wt = repo / ".orgforge" / "wt" / "issue-3"
+    wt.parent.mkdir(parents=True, exist_ok=True)
+    g("worktree", "add", "-q", "-b", "feat/issue-3", str(wt), "develop")
+    (wt / "new.txt").write_text("work"); g("add", "-A", cwd=wt); g("commit", "-qm", "w", cwd=wt)
+
+    spec = importlib.util.spec_from_file_location("org_cycle_g", TOOLS / "org_cycle.py")
+    m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+    cwd = os.getcwd(); os.chdir(repo)
+    try:
+        m.cmd_gc(argparse.Namespace(base="develop", all=False))
+        assert wt.is_dir(), "develop に未統合の worktree を消した"
+    finally:
+        os.chdir(cwd)
+
+
+def test_record_marks_backfilled():
+    """遡って記録したものは、実時点の記録と区別できること。"""
+    src = (TOOLS / "org_cycle.py").read_text(encoding="utf-8")
+    seg = src[src.index("def cmd_record"):]
+    assert '"backfilled": True' in seg, "backfill 印が無いと、後から足した記録が実時点と混ざる"

@@ -137,6 +137,33 @@ python3 "${CLAUDE_PLUGIN_ROOT}/tools/org_cycle.py" complete \
 「これらは領域の語彙ではないか」と問い返す（判定はしない。素通りだけさせない）。
 完了時に `begin` が作った worktree も片付ける（未コミットの変更があれば残して警告する）。
 
+**次のサイクルにも効く学びは `--learned` で残す。** doctrine に propose され、gate が admit
+すれば次の Issue の担当者の brain に入る（`handoff.py` が役割ごとに配る）。admit は gate の
+仕事 — 自分の学びを自分で正典にはできない。実地では doctrine が空のまま **同じ失敗を3回**
+繰り返した（「性質のテストは壊れる場所で検証しないと無意味」）。docs/06 が「蓄積した失敗こそ
+最も価値ある context」と書いているのに、蓄積の口がサイクルに繋がっていなかった。
+
+### 3a-3. 溜まったものを片付ける — `gc`
+
+```
+python3 "${CLAUDE_PLUGIN_ROOT}/tools/org_cycle.py" gc
+```
+
+統合済みの worktree だけを消す。**未統合・未コミットのものは残す**（消えて困るかは配管が
+決めてよいことではない）。`.orgforge/wt/` の外（scratchpad 等）に作られた検証用 worktree も
+git が把握している限り拾う — 配管が作った場所しか見ないと孤児が永久に残る。
+
+### 3a-4. 済んだ判定を遡って記録する — `record`
+
+```
+python3 "${CLAUDE_PLUGIN_ROOT}/tools/org_cycle.py" record --issue <N> \
+  --event integration_admitted --verdict pass --by <役割> --why "<何を見て何が決め手か>"
+```
+
+台帳は追記型なので過去は書き換わらない。`backfilled: true` が付き、実時点の記録と区別できる。
+実地で「マージ後の10件失敗のうち8件は worktree 走査の偽陽性、#7 の欠陥はゼロ」という切り分けが
+どこにも残らなかった — **後から最も知りたいのはその切り分け**なので、遡れる口を開けてある。
+
 ### 3a-2. PR を出す — `handback`
 
 ```

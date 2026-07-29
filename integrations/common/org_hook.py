@@ -216,6 +216,29 @@ def _redirects_to_system_path(cmd):
     return False
 
 
+# 再生成できる作業成果物 — 消しても情報は失われない（作り直せる）。
+_REGENERABLE = (
+    ".orgforge/wt/",          # Issue ごとの worktree（begin が作り直せる）
+    "node_modules",           # 依存（install で戻る）
+    "/scratchpad/", ".pytest_cache", "__pycache__",
+    "dist/", "build/", ".next/", "coverage/", ".turbo/",
+)
+
+
+def _is_regenerable_target(cmd):
+    """削除対象が再生成可能なものだけかを見る。
+
+    「消したら戻らない」ものが1つでも混ざっていたら False — 緩めてよいのは、対象の全部が
+    作り直せるときだけ。判定を甘くすると cap の意味が消える。
+    """
+    if not any(m in cmd for m in _REGENERABLE):
+        return False
+    # ルート/ホーム直下や親への遡上が混ざっていたら緩めない
+    if re.search(r"(^|\s)(/|~|\$HOME)(\s|$)", cmd) or "/.." in cmd or " .. " in cmd:
+        return False
+    return True
+
+
 def _asset_dimension(tool_name, ti):
     """Classify a tool call into a blast-radius exposure dimension, PRICED BY REVERSIBILITY.
 
@@ -280,6 +303,14 @@ def _asset_dimension(tool_name, ti):
         or bool(re.search(r"\|\s*(bash|sh)\b", cmd))                              # pipe-to-shell
     )
     if destructive:
+        # 再生成できる対象は「取り消せない影響」ではない。cap が測るのは irreversibility であって
+        # 活動量ではないので、作り直せば元に戻るものを同じ重さで数えると、日常の後片付けだけが
+        # 止まる。実地で1日に5回発火し、5件とも実害ゼロ（worktree の削除・node_modules の
+        # symlink・scratchpad）で、止まった結果 worktree が5個溜まった。
+        # rm -rf / 級は catastrophic denylist が別途 hard-block するので、ここを緩めても
+        # 破滅的操作は素通りしない。
+        if _is_regenerable_target(cmd):
+            return ("destructive_ops", 0)
         # scope-weight the catastrophic recursive/glob deletes so ONE can trip the cap alone
         rm_recursive = _has_token(toks, "rm") and _has_token(toks, "-r", "-rf", "-fr", "-R")
         heavy = (rm_recursive
