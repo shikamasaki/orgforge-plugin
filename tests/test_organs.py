@@ -1318,10 +1318,17 @@ def test_self_admission_is_caught_when_written_as_deliverable(tmp_path):
     識別子が2系統に分かれ、キーを変えた瞬間に統制が消えていた。
     """
     env = _led(tmp_path)
-    _append(env, "maker1", "cycle_started", {"role": "maker1", "candidate_id": "c1", "issue": 7})
+    # **実地の形をそのまま使う。** 0.16.0 のテストは cycle_started に issue を入れていたため
+    # 直接の共有 ID があり、この穴を再現できていなかった（実際の cycle_started は
+    # candidate_id と pack_manifest_id しか持たない）。テストが本番と違う形を作ると、
+    # 「壊れる場所で検証していない」ことになる — #7 で学んだのと同じ失敗。
+    _append(env, "maker1", "cycle_started",
+            {"role": "maker1", "candidate_id": "cand-abc", "pack_manifest_id": "issue-7"})
     p = _append(env, "maker1", "admission_decided",
                 {"verdict": "admit", "deliverable": "7", "issue": 7})
-    assert p.returncode != 0, "maker が自分の成果物を admit できた"
+    assert p.returncode != 0, ("maker が自分の成果物を admit できた — cycle_started は "
+                               "candidate_id、判定は deliverable で書かれるので、直接比較では"
+                               "永久に相関しない")
     assert "already acted as" in p.stderr
 
 
@@ -1394,3 +1401,88 @@ def test_learning_warns_that_matching_is_by_string(tmp_path):
     p = subprocess.run([sys.executable, str(TOOLS / "learning.py"), "repeats", str(led)],
                        capture_output=True, text=True, timeout=60)
     assert "文字列" in p.stdout + p.stderr
+
+
+# ── 0.17.0: 識別子の別名を台帳から推移的に解決する ──────────────────────
+def test_alias_bridges_candidate_id_and_issue(tmp_path):
+    """pack_manifest_id: "issue-7" が candidate_id と Issue 番号を繋ぐ唯一の橋。
+
+    人に同じキーで書かせるのではなく、台帳に既にある対応関係を辿る。
+    """
+    env = _led(tmp_path)
+    _append(env, "m", "cycle_started",
+            {"role": "m", "candidate_id": "cand-x", "pack_manifest_id": "issue-42"})
+    p = _append(env, "m", "admission_decided", {"verdict": "admit", "deliverable": "42"})
+    assert p.returncode != 0, "別名経由の自己 admit が通った"
+    assert "同じ仕事" in p.stderr, "どう繋がったかを示していない"
+
+
+def test_alias_via_contract_ref(tmp_path):
+    """candidate_submitted の contract_ref も橋になる。"""
+    env = _led(tmp_path)
+    _append(env, "m", "candidate_submitted",
+            {"maker": "m", "candidate_id": "cand-y", "contract_ref": "issue-9", "source": "self"})
+    _append(env, "m", "cycle_started", {"role": "m", "candidate_id": "cand-y"})
+    p = _append(env, "m", "admission_decided", {"verdict": "admit", "issue": 9})
+    assert p.returncode != 0, "contract_ref 経由の相関が効いていない"
+
+
+def test_unrelated_work_is_not_falsely_correlated(tmp_path):
+    """束ねすぎて無関係な仕事まで同一視したら、正当な admit が止まる。"""
+    env = _led(tmp_path)
+    _append(env, "m", "cycle_started",
+            {"role": "m", "candidate_id": "cand-a", "pack_manifest_id": "issue-1"})
+    p = _append(env, "m", "admission_decided", {"verdict": "admit", "deliverable": "2", "issue": 2})
+    assert p.returncode == 0, f"別 Issue の admit まで止めた: {p.stderr}"
+
+
+def test_skeptic_cannot_refute_own_work_via_alias(tmp_path):
+    """自己反証拒否も別名経由で効くこと（未検証だった層）。"""
+    env = _led(tmp_path)
+    _append(env, "maker1", "cycle_started",
+            {"role": "maker1", "candidate_id": "cand-s", "pack_manifest_id": "issue-5"})
+    p = _append(env, "maker1", "refutation_attempted",
+                {"verdict": "survives", "deliverable": "5", "issue": 5})
+    assert p.returncode != 0, "maker が自分の仕事を refute できた"
+
+
+def test_gate_cannot_also_be_skeptic(tmp_path):
+    """admit した gate が同じ成果物を refute できない（skeptic ≠ gate）。"""
+    env = _led(tmp_path)
+    _append(env, "gate", "admission_decided", {"verdict": "admit", "deliverable": "5", "issue": 5})
+    p = _append(env, "gate", "refutation_attempted",
+                {"verdict": "survives", "deliverable": "5", "issue": 5})
+    assert p.returncode != 0, "gate が自分の admit を自分で refute できた"
+    q = _append(env, "skeptic", "refutation_attempted",
+                {"verdict": "survives", "deliverable": "5", "issue": 5})
+    assert q.returncode == 0, f"独立した skeptic まで止めた: {q.stderr}"
+
+
+def test_report_up_requires_conformance_review(tmp_path):
+    """一度も使っていなかった層。委譲→検証→報告の順序が強制されること。"""
+    env = _led(tmp_path)
+    p = _append(env, "sup", "conformance_reviewed",
+                {"supervisor": "sup", "subordinate": "sub", "verdict": "conforms"})
+    assert p.returncode != 0, "委譲していない仕事を conformance_reviewed できた"
+    q = _append(env, "sup", "report_up", {"supervisor": "sup"})
+    assert q.returncode != 0, "検証していない仕事を report_up できた"
+    _append(env, "sup", "spec_delegated",
+            {"supervisor": "sup", "subordinate": "sub", "spec_ref": "5",
+             "contract_ref": "5", "intent_basis_ref": "R.md"})
+    r = _append(env, "sup", "conformance_reviewed",
+                {"supervisor": "sup", "subordinate": "sub", "verdict": "conforms"})
+    assert r.returncode == 0, f"正しい順序が通らない: {r.stderr}"
+
+
+def test_learning_prints_the_doctrine_command(tmp_path):
+    """「doctrine に強化せよ」と言うだけでは強化されない。打つコマンドを出す。"""
+    led = tmp_path / "l5" / "ledger"; led.mkdir(parents=True)
+    rows = [{"seq": i, "class": "rework_requested",
+             "payload": {"issue": 7, "reason": "同じ死因"}} for i in (1, 2)]
+    (led / "ledger.jsonl").write_text(
+        "\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+    p = subprocess.run([sys.executable, str(TOOLS / "learning.py"), "repeats", str(led)],
+                       capture_output=True, text=True, timeout=60)
+    out = p.stdout + p.stderr
+    assert "doctrine.py" in out and "propose" in out, "蓄積の経路が示されていない"
+    assert "admit" in out, "admit されるまで配られないことが伝わっていない"

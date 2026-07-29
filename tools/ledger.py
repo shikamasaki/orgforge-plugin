@@ -47,6 +47,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -83,10 +84,71 @@ def _correlation_ids(payload):
     return out
 
 
-def _same_work(pa, pb):
-    """2つの payload が同じ仕事を指すか。共有する識別子が1つでもあれば True。"""
+# `pack_manifest_id: "issue-7"` / `contract_ref` は candidate_id と Issue 番号を繋ぐ唯一の橋。
+# 直接の共有 ID が無くても、この橋を辿れば同じ仕事だと分かる。
+_ALIAS_KEYS = ("pack_manifest_id", "contract_ref", "spec_ref")
+
+
+def _alias_ids(payload):
+    """`issue-7` のような別名から Issue 番号を取り出す。"""
+    out = set()
+    for k in _ALIAS_KEYS:
+        v = payload.get(k)
+        if v is None or str(v).strip() == "":
+            continue
+        s = str(v).strip()
+        out.add(s.lstrip("#"))
+        m = re.match(r"^(?:issue|task)[-_#]?(\d+)$", s, re.I)
+        if m:
+            out.add(m.group(1))
+    return out
+
+
+def _work_aliases(hist):
+    """台帳全体から「同じ仕事を指す識別子」の同値類を作る。
+
+    実地では cycle_started が candidate_id しか持たず、判定側は deliverable で書かれるため、
+    直接比較では永久に相関しなかった（seq 208 で maker が自分の #7 を admit できた）。
+    橋は台帳の中にある — `cycle_started{candidate_id, pack_manifest_id:"issue-7"}` と
+    `candidate_submitted{candidate_id, contract_ref}` が両者を繋いでいる。
+    **人に同じキーで書かせるのではなく、既にある対応関係を辿る。**
+    """
+    parent = {}
+
+    def find(x):
+        parent.setdefault(x, x)
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    for e in hist:
+        pl = e.get("payload", {}) or {}
+        ids = _correlation_ids(pl) | _alias_ids(pl)
+        ids = sorted(ids)
+        for other in ids[1:]:
+            union(ids[0], other)
+    return find
+
+
+def _same_work(pa, pb, hist=None):
+    """2つの payload が同じ仕事を指すか。
+
+    共有する識別子が1つでもあれば True。無い場合でも、台帳が持つ別名の対応関係
+    （candidate_id ↔ issue-N）を辿って同じ仕事に行き着けば True。
+    """
     a, b = _correlation_ids(pa), _correlation_ids(pb)
-    return bool(a & b)
+    if a & b:
+        return True
+    if not hist or not a or not b:
+        return False
+    find = _work_aliases(hist)
+    return bool({find(x) for x in a} & {find(y) for y in b})
 
 
 def _same_deliverable(a, b):
@@ -167,7 +229,7 @@ REQUIRES_PRIOR = {
     # None == None が一致してしまい **deploy ゲートが丸ごと無効**だった（seq 205 が通った）。
     "result_deployed": lambda ev, hist: any(
         e["class"] == "refutation_attempted"
-        and _same_work(e["payload"], ev["payload"])
+        and _same_work(e["payload"], ev["payload"], hist)
         and e["payload"].get("verdict") == "survives"
         for e in hist
     ),
@@ -254,10 +316,20 @@ def _distinct_actor_violation(ev, hist):
             continue
         # 識別子は束ねて照合する — 書き手が deliverable で書いても candidate_id で書いても
         # 同じ仕事として相関する（片方しか見ないと、キーを変えた瞬間に統制が消える）。
-        if _same_work(e["payload"], ev["payload"]) and e.get("actor") == actor:
-            shared = ", ".join(sorted(_correlation_ids(e["payload"]) & ids))
+        if _same_work(e["payload"], ev["payload"], hist) and e.get("actor") == actor:
+            shared = sorted(_correlation_ids(e["payload"]) & ids)
+            if shared:
+                what = ", ".join(shared)
+            else:
+                # 別名経由で一致した場合。**どう繋がったかを見せる** — 「同じ仕事だ」と
+                # 言われた側が納得も反論もできないメッセージは、拒否の理由になっていない。
+                mine = ", ".join(sorted(ids))
+                theirs = ", ".join(sorted(_correlation_ids(e["payload"])
+                                          | _alias_ids(e["payload"])))
+                what = (f"同じ仕事（この判定は {mine} を指し、seq {e.get('seq')} は {theirs} を"
+                        f"指す。台帳の別名対応で同一と解決した）")
             return (f"{ev['class']} rejected — actor {actor!r} already acted as {e['class']} for "
-                    f"{shared}: {why}")
+                    f"{what}: {why}")
     return None
 
 # an honest per-class reason for a requires_prior rejection (the reject message uses this instead
