@@ -53,6 +53,7 @@ environment happens to set.
 import json
 import os
 import re
+import tempfile
 import shlex
 import subprocess
 import sys
@@ -487,6 +488,39 @@ _SEAM_MARKERS = ("outputs you must produce", "boundary contract", "inputs you re
 _INDEP_MARKERS = ("independent:", "non-integrating", "no seam", "outputs are not merged",
                   "independent fan-out")
 
+def _seam_from_referenced_file(prompt_raw):
+    """プロンプトが指すファイルを**ガード自身が読んで** seam contract を探す。
+
+    以前は「参照先の中身は spawn 時点で保証できない」としてプロンプト本文しか見なかった。
+    しかし保証できないのは *ガードが読まなければ* の話で、読めば保証できる。本文限定だと
+    150行超の seam contract を毎回貼る必要があり、maker の context を圧迫する。
+
+    読むのは **絶対パス、または org のルート配下の相対パス**に限る。パスは prompt に
+    書かれた文字列であって信用できないので、org の外や巨大ファイルは読まない。
+    """
+    hits = re.findall(r"(?:^|[\s\"'`(=])((?:/|\./|\.orgforge/|[\w.-]+/)[\w./-]+\.(?:md|txt))",
+                      prompt_raw)
+    root = os.getcwd()
+    for rel in hits[:8]:
+        path = rel if os.path.isabs(rel) else os.path.join(root, rel)
+        try:
+            path = os.path.realpath(path)
+            # org のルート配下 / 一時ディレクトリのみ。任意のファイルを読ませない
+            if not (path.startswith(os.path.realpath(root))
+                    or path.startswith("/tmp") or path.startswith("/private/tmp")
+                    or path.startswith(os.path.realpath(tempfile.gettempdir()))):
+                continue
+            if not os.path.isfile(path) or os.path.getsize(path) > 512 * 1024:
+                continue
+            with open(path, encoding="utf-8", errors="replace") as f:
+                body = f.read(512 * 1024).lower()
+        except Exception:
+            continue
+        if any(m in body for m in _SEAM_MARKERS):
+            return path
+    return None
+
+
 def _declared_owns(prompt):
     """Parse the `owns:` / `owns —` territory list a seam contract declares in a spawn prompt.
     handoff.py writes an `Owns:` line (docs/06 §2.1.1); we read the paths/globs after it so the gate
@@ -554,6 +588,11 @@ def spawn_needs_seam_or_independence(tool_name, ti):
     prompt = prompt_raw.lower()
     has_seam = any(m in prompt for m in _SEAM_MARKERS)
     has_indep = any(m in prompt for m in _INDEP_MARKERS)
+    seam_file = None
+    if not (has_seam or has_indep):
+        # 本文に無ければ、プロンプトが指すファイルを読んで探す（参照渡しを許す）
+        seam_file = _seam_from_referenced_file(prompt_raw)
+        has_seam = seam_file is not None
     if not (has_seam or has_indep):
         return ("this Agent spawn carries neither a seam contract (build it with tools/handoff.py: "
                 "slice + inputs/outputs the child integrates to) nor an explicit independence "

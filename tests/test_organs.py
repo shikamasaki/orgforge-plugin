@@ -1038,14 +1038,16 @@ def test_admission_lookup_tolerates_identifier_drift(tmp_path):
         os.environ.pop("ORG_LEDGER_ROOT", None)
 
 
-def test_verify_tells_you_to_paste_into_the_prompt_body():
-    """seam ガードは spawn プロンプト本文を見るので、ファイル経由だと HELD される。
+def test_verify_allows_passing_by_file_reference():
+    """本文でもファイル参照でも渡せることを案内する（0.19.0 でガードが読むようになった）。
 
-    verify がその使い方を案内しないと、生成した seam contract がガードに届かない。
+    以前は本文限定だったので「本文に貼れ」と案内していた。264行を毎回貼ると maker の
+    context を圧迫するので、ガード側がファイルを読んで検証するように変えた。
     """
     src = (TOOLS / "org_cycle.py").read_text(encoding="utf-8")
-    assert "プロンプト本文" in src and "HELD" in src, \
-        "verify の出力に『本文に貼る』案内が無い — ファイル渡しでガードに弾かれる"
+    seg = src[src.index("def cmd_verify"):]
+    assert "ファイルに落として" in seg and "参照させてもよい" in seg
+    assert "HELD" not in seg, "ファイル渡しが弾かれる前提の案内が残っている"
 
 
 # ── 実地フィードバック: 統合直前が最も抜けやすい ─────────────────────────
@@ -1539,3 +1541,76 @@ def test_verify_template_has_no_undefined_shell_var():
     """雛形は貼ってそのまま動くこと。$P は未定義で、打てない雛形は打たれない。"""
     src = (TOOLS / "org_cycle.py").read_text(encoding="utf-8")
     assert "$P/tools" not in src, "未定義の $P が雛形に残っている"
+
+
+# ── 0.19.0: 実務で「無くて困った」もの ──────────────────────────────────
+def test_correction_voids_a_probe(tmp_path):
+    """correction{kind: probe} で無効化した記録は board が数えない。
+
+    追記型なので過去は消せない。自由記述の note では機械が読めず、実地では検証用プローブ
+    4件が実判定として数えられ board が現実と食い違った。
+    """
+    led = _write_ledger(tmp_path, "c1", [
+        {"seq": 1, "class": "admission_decided", "payload": {"issue": 11, "verdict": "admit"}},
+        {"seq": 2, "class": "correction",
+         "payload": {"corrects": [1], "kind": "probe", "reason": "仕様検証",
+                     "corrected_by": "supervisor"}},
+    ])
+    out = _status(led).stdout
+    assert "skeptic の記録が無い" not in out, f"訂正済みのプローブを実判定として数えた: {out}"
+
+
+def test_correction_backfill_is_not_voided(tmp_path):
+    """backfill は「後から書いた実判定」であって無効ではない。"""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("ledger_c", TOOLS / "ledger.py")
+    m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+    evs = [{"seq": 9, "class": "correction",
+            "payload": {"corrects": [1], "kind": "backfill", "reason": "遡及記録"}},
+           {"seq": 10, "class": "correction",
+            "payload": {"corrects": [2], "kind": "probe", "reason": "検証"}}]
+    assert m.corrected_seqs(evs) == {2}, "backfill まで無効化した"
+
+
+def test_show_lists_every_judgment_with_correction_marks():
+    """1つの Issue の判定履歴を一望できる（何周目のどの判定かが分かる）。"""
+    src = (TOOLS / "org_cycle.py").read_text(encoding="utf-8")
+    seg = src[src.index("def cmd_show"):]
+    assert "訂正済み" in seg and "backfill" in seg
+    assert "次:" in seg, "いま何待ちかが出ない"
+
+
+def test_begin_warns_but_does_not_block_on_unready_deps():
+    """事前チェックは見せるだけ。判断は人がする。"""
+    src = (TOOLS / "org_cycle.py").read_text(encoding="utf-8")
+    seg = src[src.index("def _readiness"):src.index("def cmd_begin")]
+    assert "needs-human" in seg and "rework" in seg
+    body = src[src.index("def cmd_begin"):src.index("def _steps_complete")] \
+        if "def _steps_complete" in src[src.index("def cmd_begin"):] else src[src.index("def cmd_begin"):]
+    assert "止めない" in src, "警告が停止になっている（begin は判断しない）"
+
+
+def test_seam_guard_accepts_a_referenced_file(tmp_path):
+    """seam contract をファイルで渡せる。ガード自身が読んで検証する。"""
+    import importlib.util
+    hook = TOOLS.parent / "integrations" / "common" / "org_hook.py"
+    spec = importlib.util.spec_from_file_location("org_hook_s", hook)
+    h = importlib.util.module_from_spec(spec); spec.loader.exec_module(h)
+    cwd = os.getcwd(); os.chdir(tmp_path)
+    try:
+        good = tmp_path / "seam.md"
+        good.write_text("# HAND-OFF\n## Your slice\nX\nInputs you receive: A\n"
+                        "Outputs you MUST produce: B\n", encoding="utf-8")
+        assert h.spawn_needs_seam_or_independence(
+            "Task", {"prompt": f"契約は {good} を読むこと"}) is None, "seam 入りファイルが弾かれた"
+
+        bad = tmp_path / "memo.md"
+        bad.write_text("ただのメモ", encoding="utf-8")
+        assert h.spawn_needs_seam_or_independence(
+            "Task", {"prompt": f"手順は {bad}"}) is not None, "seam の無いファイルが通った"
+        assert h.spawn_needs_seam_or_independence(
+            "Task", {"prompt": "手順は /etc/passwd"}) is not None, "org 外のファイルを読んだ"
+        assert h.spawn_needs_seam_or_independence(
+            "Task", {"prompt": "いい感じにやって"}) is not None, "契約なしが通った"
+    finally:
+        os.chdir(cwd)

@@ -413,11 +413,10 @@ def cmd_verify(a):
                + ('skeptic はその穴を潰しに行くこと。' if role == 'gate' else ''))
     out.append("```")
     print("\n".join(out))
-    print(f"\n— この出力を {role} subagent の**プロンプト本文にそのまま貼る**こと"
-          f"（ファイルに落として「これを読め」と渡さない）。\n"
-          f"  seam ガードは spawn 時のプロンプト本文を検査するので、seam contract が"
-          f"ファイルの中にあると検出できず、spawn が HELD される。\n"
-          f"  ガードが本文を見るのは正しい — 参照先の中身は spawn 時点で保証できないため。\n"
+    print(f"\n— この出力を {role} subagent に渡すこと。本文に貼っても、ファイルに落として"
+          f"参照させてもよい\n"
+          f"  （seam ガードは本文に契約が無ければ、プロンプトが指すファイルを自分で読んで"
+          f"検証する）。\n"
           f"配管はここまで。verdict / why / risk は {role} が決める。", file=sys.stderr)
     return 0
 
@@ -551,7 +550,57 @@ def _sub(kind):
         return os.path.join(os.getcwd(), ".orgforge", kind)
 
 
+
+def _readiness(issue):
+    """着手前に「本当に始めてよいか」を見る。**止めない — 見せる。**
+
+    begin は無条件に開始していた。依存が rework 中でも、前提の人間タスクが残っていても
+    始まる。github_sync ready は Issue 番号の依存しか見ておらず、rework 中の依存も
+    needs-human も見ていない。判断は人がするが、材料が無ければ判断のしようがない。
+    """
+    warns = []
+    _, body = _issue_body(issue)
+    for dep in sorted(set(re.findall(r"depends_on[^\n]*?#(\d+)", body or "", re.I))):
+        av, _, _ = _admission_for(int(dep))
+        code, out = _raw(["gh", "issue", "view", dep, "--json", "state,title,labels"]
+                         + (["--repo", _repo()] if _repo() else []))
+        state, title, labels = "", "", []
+        if code == 0:
+            try:
+                d = json.loads(out)
+                state, title = d.get("state", ""), d.get("title", "")
+                labels = [l.get("name", "") for l in d.get("labels", [])]
+            except Exception:
+                pass
+        if av == "reject":
+            warns.append(f"#{dep}（{title[:34]}）は gate が reject して rework 中")
+        elif state == "OPEN" and av != "admit":
+            warns.append(f"#{dep}（{title[:34]}）はまだ完了していない")
+        if "orgforge:needs-human" in labels:
+            warns.append(f"#{dep} は人間の作業待ち（needs-human）")
+
+    # 自分自身に needs-human が付いていないか / 未解決の人間タスクが無いか
+    code, out = _raw(["gh", "issue", "list", "--state", "open",
+                      "--label", "orgforge:needs-human", "--json", "number,title", "--limit", "5"]
+                     + (["--repo", _repo()] if _repo() else []))
+    if code == 0:
+        try:
+            for h in json.loads(out or "[]"):
+                warns.append(f"人間の作業待ち: #{h['number']} {h['title'][:44]}")
+        except Exception:
+            pass
+    return warns
+
+
 def cmd_begin(a):
+    warns = [] if getattr(a, "no_check", False) else _readiness(a.issue)
+    if warns:
+        print(f"着手前の確認（#{a.issue}）:", file=sys.stderr)
+        for w in warns:
+            print(f"  ⚠ {w}", file=sys.stderr)
+        print("  — これらは**止めない**。承知のうえで進めるなら、そのまま実行される。\n"
+              "     前提が崩れたまま作ったものは、後で gate が拒否する側に回る。\n",
+              file=sys.stderr)
     parent = a.parent or resolve_parent(a.issue)
     cid = a.candidate_id or _candidate_id(a.issue)
     if parent is None:
@@ -904,8 +953,99 @@ def cmd_record(a):
     return _execute(steps, f"backfill {a.event} #{a.issue}")
 
 
+
+def _events_for(issue):
+    """#issue に関係する台帳イベントを時系列で返す（訂正で無効化されたものは除く）。"""
+    root = None
+    try:
+        sys.path.insert(0, HERE)
+        from discover import ledger_root
+        from ledger import corrected_seqs
+        root = ledger_root()
+    except Exception:
+        return [], set()
+    path = os.path.join(root, "ledger.jsonl") if root else None
+    if not path or not os.path.isfile(path):
+        return [], set()
+    evs = []
+    for line in open(path, encoding="utf-8"):
+        try:
+            evs.append(json.loads(line))
+        except Exception:
+            continue
+    voided = corrected_seqs(evs)
+    want = str(issue).lstrip("#")
+    mine = []
+    for e in evs:
+        pl = e.get("payload", {}) or {}
+        ids = {str(pl.get(k, "")).lstrip("#") for k in
+               ("deliverable", "issue", "claim_id", "candidate_id", "spec_ref") if pl.get(k)}
+        alias = str(pl.get("pack_manifest_id") or pl.get("contract_ref") or "")
+        if want in ids or alias in (f"issue-{want}", want):
+            mine.append(e)
+    return mine, voided
+
+
+def cmd_show(a):
+    """1つの Issue について「誰が何を判定し、いま何待ちか」を一望する。
+
+    実地では gh issue view と台帳の grep と status.py を別々に叩く必要があり、#7 が3周した
+    ときにどの周のどの判定を見ているのか分からなくなった。#8 の refutation 欠落も #11 の
+    reject 欠落も、この視点があれば即座に見つかっていた。
+    """
+    title, _ = _issue_body(a.issue)
+    av, aseq, _ = _admission_for(a.issue)
+    rv, rseq, _ = _refutation_for(a.issue)
+    evs, voided = _events_for(a.issue)
+
+    state = ("rework 待ち" if av == "reject" else
+             "統合できる" if av == "admit" and rv == "survives" else
+             "反証で差し戻し" if rv == "refuted" else
+             "skeptic 待ち" if av == "admit" else
+             "gate 待ち" if any(e["class"] == "cycle_completed" for e in evs) else
+             "実装中" if any(e["class"] == "cycle_started" for e in evs) else "未着手")
+
+    print(f"#{a.issue} {title or ''} — {state}")
+
+    br = _branch_for(a.issue)
+    code, log = _raw(["git", "log", "--oneline", "-3", br])
+    if code == 0 and log.strip():
+        print(f"  実装:     {' / '.join(l.split(' ',1)[0] for l in log.strip().splitlines())}"
+              f"  ({br})")
+    wt = os.path.join(os.getcwd(), ".orgforge", "wt", f"issue-{a.issue}")
+    print(f"  worktree: {'.orgforge/wt/issue-%d/' % a.issue if os.path.isdir(wt) else '(なし)'}")
+
+    # 判定の履歴 — 何周目のどの判定かが分かるように全部出す
+    judged = [e for e in evs if e["class"] in
+              ("admission_decided", "refutation_attempted", "rework_requested",
+               "integration_admitted", "result_deployed")]
+    if judged:
+        print("  判定:")
+        for e in judged:
+            pl = e.get("payload", {}) or {}
+            mark = "✗" if e.get("seq") in voided else " "
+            why = (pl.get("why") or pl.get("reason") or "")[:70]
+            note = " ⟨訂正済み⟩" if e.get("seq") in voided else ""
+            bf = " ⟨backfill⟩" if pl.get("backfilled") else ""
+            print(f"   {mark} seq {e.get('seq')}: {e['class']} = {pl.get('verdict', '-')}"
+                  f" by {e.get('actor')}{note}{bf}"
+                  + (f"\n        {why}" if why else ""))
+    else:
+        print("  判定:     まだ無い")
+
+    nxt = ("gate 再判定 → skeptic → integrate" if av == "reject" else
+           f"integrate --issue {a.issue}" if av == "admit" and rv == "survives" else
+           f"verify --issue {a.issue} --role skeptic" if av == "admit" else
+           f"verify --issue {a.issue} --role gate")
+    print(f"  次:       {nxt}")
+    return 0
+
+
 def cmd_plan(a):
     """何も実行せず、打つイベント列だけを印字する。"""
+    # plan こそ「打つ前に見る」場所なので、着手前の確認はここにも出す。
+    for w in ([] if getattr(a, "no_check", False) else _readiness(a.issue)):
+        print(f"  ⚠ {w}", file=sys.stderr)
     parent = a.parent or resolve_parent(a.issue)
     cid = a.candidate_id or _candidate_id(a.issue)
     print(f"# begin #{a.issue} ({a.role}) — parent=#{parent or '(解決できず)'} candidate_id={cid}")
@@ -930,6 +1070,8 @@ def main(argv):
                        help="省略時は Issue の candidate_id トレーラから読む")
         q.add_argument("--base", help="worktree を切る元（既定 develop）")
         q.add_argument("--why", help="なぜ今これを選んだか（attention_allocated の reason）")
+        q.add_argument("--no-check", dest="no_check", action="store_true",
+                       help="着手前の確認（依存の状態・人間の作業待ち）を出さない")
         q.add_argument("--no-worktree", dest="no_worktree", action="store_true",
                        help="worktree を作らない。**並列で回すなら使わないこと** — 同一ツリーで"
                             "並列 maker を走らせると、あるIssueのコミットが別Issueのブランチに"
@@ -937,6 +1079,9 @@ def main(argv):
     q = sub.add_parser("verify", help="gate/skeptic を起動する材料を組み立てる（判定はしない）")
     q.add_argument("--issue", required=True, type=int)
     q.add_argument("--role", required=True, choices=("gate", "skeptic"))
+
+    q = sub.add_parser("show", help="1つの Issue の全体像（判定履歴・いま何待ちか）")
+    q.add_argument("--issue", required=True, type=int)
 
     q = sub.add_parser("gc", help="溜まった worktree を片付ける（未コミットのものは残す）")
     q.add_argument("--base", default="develop")
@@ -993,7 +1138,7 @@ def main(argv):
     q.add_argument("--candidate-id", dest="candidate_id")
     a = p.parse_args(argv[1:])
     return {"begin": cmd_begin, "complete": cmd_complete, "plan": cmd_plan,
-            "verify": cmd_verify, "integrate": cmd_integrate, "handback": cmd_handback, "gc": cmd_gc, "record": cmd_record}[a.cmd](a)
+            "verify": cmd_verify, "integrate": cmd_integrate, "handback": cmd_handback, "gc": cmd_gc, "record": cmd_record, "show": cmd_show}[a.cmd](a)
 
 
 if __name__ == "__main__":

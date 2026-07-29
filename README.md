@@ -243,10 +243,19 @@ cycle_started → log → stage）は順序と actor が決まっているので
 以上、必ず再発する）ので、判断ではなく物理で分ける。検証側は `org_cycle.py verify --issue N
 --role gate|skeptic` が、seam contract・**`agents/<role>.md` の憲章（＝検証チェックリスト）**・
 Issue の SPEC/MUST・`decide` の雛形を組み立て、skeptic には gate が既に見たことを引き渡す —
-検証手順を毎回人が書き下ろすと、書くたびに基準が変わるため。**自動化したのは配管だけで、
+検証手順を毎回人が書き下ろすと、書くたびに基準が変わるため。PR は `handback`、develop への
+fan-in は `integrate`（**gate の admit と skeptic の survives が台帳に無ければ止まる**）、
+1つの Issue の全体像は `show`（判定履歴・いま何待ちか）。**自動化したのは配管だけで、
 何を選ぶか・誰に委ねるか・admit するかは自動化していない**（docs/03 §6.5 — forced delegation は
 設計エラー、forced invariant は正しい）。とりわけ `verify` は verdict / why / risk を一切埋めない:
 ツールが判定した瞬間に gate は形骸化する。
+
+**判定と記録は機械が照合する。** 台帳は自己承認を拒否し（maker は自分の成果物を admit できない）、
+skeptic の反証を経ていない deploy を拒否する。識別子が `candidate_id` と `deliverable` に
+分かれていても、台帳にある対応関係を辿って同じ仕事だと解決する — 書き手がどのキーを使ったかで
+統制の有効性が変わってはいけないため。相関の取れない判定は素通りさせず拒否する。追記型なので
+誤記や検証プローブは `correction` で無効を宣言する（機械が読める形で。自由記述の注記では
+board も検出器も除外できない）。
 
 The org's **own metabolism** — `/orgforge-plugin:org-work`,
 `/orgforge-plugin:org-discover`, `/orgforge-plugin:org-tick` — runs on cadence and you rarely type it. Plus a Codex `.codex/` config;

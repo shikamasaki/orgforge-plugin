@@ -202,6 +202,10 @@ python3 tools/org_cycle.py  gc        [--base develop] [--all]
                             # 統合済みの worktree だけ片付ける（未統合・未コミットは残す）
 python3 tools/org_cycle.py  record    --issue N --event E --verdict V --by WHO --why TXT
                             # 済んだ判定を遡って台帳に記録（backfilled 印が付く）
+python3 tools/org_cycle.py  show      --issue N
+                            # 1つの Issue の全体像: 実装コミット・worktree・判定履歴
+                            # （訂正済み / backfill の印つき）・いま何待ちか・次の一手。
+                            # 3周した Issue で「どの周のどの判定か」を追うための視点
 python3 tools/org_cycle.py  plan     --role R --issue N   # 何も実行せずイベント列を印字
 python3 tools/req_lint.py   check <REQUIREMENTS.md> [--json] [--warn-only]
                             # 要求記述の書式検査（29148 tailored + EARS、docs/11 §0b）
@@ -225,6 +229,13 @@ python3 tools/doctrine.py   propose <root> <role> --claim TXT --source S --confi
                             # retrieved-at / review-by が無いと gate が admit できない
 python3 tools/doctrine.py   admit <root> <role> <claim-id> --by gate
 python3 tools/doctrine.py   render|show|stale <root> [<role>]
+python3 tools/ledger.py     append --actor A --class correction \
+                            --payload '{"corrects":[204,205],"kind":"probe","reason":"...",
+                                        "corrected_by":"..."}'
+                            # 追記型なので過去は消せない。誤記・検証プローブを「無効」と
+                            # **機械が読める形で**宣言する。kind: probe|mistake は status /
+                            # learning が除外し、backfill|superseded は除外しない
+                            # （後から書いた実判定と、時系列で置き換わったものは別物）
 python3 tools/learning.py   repeats <root> [--recurrence N]
                             # 同じ死因の再発を検出。死因は cause / reason / why / checklist_ref
                             # のいずれかで書く。読めなければ clean ではなく unknown と報告する

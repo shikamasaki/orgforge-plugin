@@ -107,6 +107,35 @@ python3 "${CLAUDE_PLUGIN_ROOT}/tools/org_cycle.py" begin \
 
 逐次で1件だけ回すときは `--no-worktree` で省ける。**並列で回すなら使わないこと。**
 
+**`begin` / `plan` は着手前の確認も出す。** 依存が rework 中か、人間の作業待ち（needs-human）が
+残っていないか。**止めはしない** — 判断はあなたの仕事だが、材料が無ければ判断のしようがない。
+前提が崩れたまま作ったものは、後で gate が拒否する側に回る。`--no-check` で省ける。
+
+### 2c. 1つの Issue の全体像を見る — `show`
+
+```
+python3 "${CLAUDE_PLUGIN_ROOT}/tools/org_cycle.py" show --issue <N>
+```
+
+実装コミット・worktree・**判定履歴（誰が何周目に何を判定したか。訂正済み / backfill の印つき）**・
+いま何待ちか・次の一手を一望する。3周した Issue で「どの周のどの判定を見ているのか」が
+分からなくなるのを防ぐ。実地では #8 の refutation 欠落も #11 の reject 欠落も、この視点が
+あれば即座に見つかっていた。
+
+### 2d. 誤って書いた記録・検証プローブは `correction` で無効にする
+
+台帳は追記型なので過去を消せない。**自由記述の注記では機械が読めず**、status も learning も
+除外できない（実地で検証プローブ4件が実判定として board に出た）:
+
+```
+python3 "${CLAUDE_PLUGIN_ROOT}/tools/ledger.py" append --actor <役割> --class correction \
+  --payload '{"corrects":[<seq>,...],"kind":"probe|mistake|backfill|superseded",
+              "reason":"<なぜ無効か>","corrected_by":"<誰が>"}'
+```
+
+`probe`（検証用で実判定ではない）と `mistake`（誤記）は集計から除外される。`backfill` は
+「後から書いた実判定」なので除外されず、`superseded` は最新判定の解決が扱う。
+
 **止まったら、そこから先は打たれていない。** 台帳が拒否したなら順序違反であり、前提を満たして
 から再実行すること。各イベントは natural-key で冪等なので、**再実行は安全**（済んだ分は no-op）。
 
@@ -234,10 +263,11 @@ python3 "${CLAUDE_PLUGIN_ROOT}/tools/org_cycle.py" verify --issue <N> --role gat
 python3 "${CLAUDE_PLUGIN_ROOT}/tools/org_cycle.py" verify --issue <N> --role skeptic
 ```
 
-出力を **subagent のプロンプト本文にそのまま貼る**（ファイルに落として「これを読め」と渡さない —
-seam ガードは spawn 時のプロンプト本文を検査するので、seam contract がファイルの中にあると
-検出できず spawn が HELD される。ガードが本文を見るのは正しい: 参照先の中身は spawn 時点で
-保証できない）。組み立てられるのは以下で、**すべて配管**:
+出力を subagent に渡す。**本文に貼っても、ファイルに落として参照させてもよい** — seam ガードは
+本文に seam contract が無ければ、プロンプトが指すファイルを**自分で読んで**検証する（org の
+ルート配下と一時ディレクトリに限る）。以前は本文限定で、264行の契約を毎回貼る必要があり
+maker の context を圧迫していた。「参照先の中身は保証できない」のはガードが読まなければの
+話で、読めば保証できる。組み立てられるのは以下で、**すべて配管**:
 
 - `handoff.py` を内部で呼んだ **seam contract**（引数6個の手打ちが消える）
 - **`agents/<role>.md` の憲章**＝検証チェックリストの注入（← ここが肝。基準が1箇所に固定される）

@@ -18,10 +18,41 @@ Light:
 import argparse
 import json
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _organ import OK, read_events   # noqa: E402
+
+
+
+def _reject_reason(issue):
+    """その Issue の最新 reject の理由を1行で。
+
+    理由は decide が Issue コメントに厚く書く（台帳が持つのは digest だけ — 設計どおり）。
+    board からそれが読めないと、CEO が見る唯一の画面に「何が問題か」が一行も出ない。
+    GitHub が見られなければ黙って None を返す（board は落とさない）。
+    """
+    import subprocess
+    try:
+        p = subprocess.run(["gh", "issue", "view", str(issue), "--json", "comments"],
+                           capture_output=True, text=True, timeout=15)
+        if p.returncode != 0:
+            return None
+        cs = json.loads(p.stdout).get("comments", [])
+    except Exception:
+        return None
+    for c in reversed(cs):
+        b = c.get("body") or ""
+        if "admission_decided" not in b or "`reject`" not in b:
+            continue
+        m = re.search(r"\*\*Why \(the reasoning\):\*\*\s*\n(.+)", b)
+        if m:
+            s = " ".join(m.group(1).split())
+            # board は一望する画面なので、1件が数行を占めると一望でなくなる。
+            # 全文は Issue と `org_cycle show --issue N` にある。
+            return s[:70] + ("…" if len(s) > 70 else "")
+    return None
 
 
 def _needs_human_issues():
@@ -122,9 +153,18 @@ def cmd_status(a):
     # 残り続け、rework 中の成果物を「admit 済み」と数える。実地では #11 が admit(216) →
     # reject(218) の順で記録されたのに board が RED を出し続けた。台帳は追記型なので、
     # 「一度でも admit があった」と「いま admit されている」は別物。
+    # correction{kind: probe|mistake} で無効化された記録は数えない。実地では仕様検証の
+    # プローブ4件が実判定として board に出ていた（#11 が RED になった直接の原因）。
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from ledger import corrected_seqs
+        voided = corrected_seqs(events)
+    except Exception:
+        voided = set()
+
     latest_admission = {}
     for e in events:
-        if e["class"] != "admission_decided":
+        if e["class"] != "admission_decided" or e.get("seq") in voided:
             continue
         pl = e.get("payload", {}) or {}
         key = str(pl.get("issue") or pl.get("deliverable") or "")
@@ -138,7 +178,7 @@ def cmd_status(a):
     # risk 付き admit も、後で reject された分は数えない（同上）
     risky = []
     for e in events:
-        if e["class"] != "admission_decided":
+        if e["class"] != "admission_decided" or e.get("seq") in voided:
             continue
         pl = e.get("payload", {}) or {}
         if pl.get("verdict") != "admit" or pl.get("risk_accepted") is not True:
@@ -162,8 +202,26 @@ def cmd_status(a):
     # ただし黙って消えると、rework が止まっていることに誰も気づかない。
     rejected = sorted(k for k, (_, v) in latest_admission.items() if v == "reject")
     if rejected:
-        amber.append(f"gate が reject して rework 待ち: "
-                     f"{', '.join('#' + x for x in rejected[:5])}")
+        # **何が問題だったかを一行出す。** 件数だけでは CEO に何も伝わらない。
+        # 判定理由は decide で厚く書かれているのに board から読めないのは、
+        # 唯一の画面が要約を持たないということ。
+        why_of = {}
+        for e in events:
+            if e["class"] != "admission_decided" or e.get("seq") in voided:
+                continue
+            pl = e.get("payload", {}) or {}
+            if pl.get("verdict") != "reject":
+                continue
+            k = str(pl.get("issue") or pl.get("deliverable") or "")
+            cur = latest_admission.get(k)
+            if cur and cur[0] == (e.get("seq") or 0):
+                w = (pl.get("why") or pl.get("reason") or "").strip().replace("\n", " ")
+                if w:
+                    why_of[k] = w[:80] + ("…" if len(w) > 80 else "")
+        for k in rejected[:5]:
+            reason = why_of.get(k) or _reject_reason(k)
+            amber.append(f"#{k} rework 待ち" + (f" — {reason}" if reason else ""))
+        amber.append("詳細は `org_cycle.py show --issue N`")
 
     unrefuted = {a for a in admits if a and a not in refutes}
     if unrefuted:

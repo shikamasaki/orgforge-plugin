@@ -38,6 +38,18 @@ event_classes:
   # /clear). Stamped at each milestone of a cycle: how far (0..1 or a phase label), what was just done,
   # the concrete next step, and any blocker. work_in_progress reads the LATEST per candidate; /org-resume
   # replays it to continue exactly where the cycle stopped. This is the backlog's memory of "how far".
+  # correction: 追記型の台帳では過去を消せないので、誤って書かれた／検証目的で書かれた
+  # イベントを「無効」と宣言するのはこのイベントの仕事。自由記述の note では機械が読めず、
+  # status / learning が除外できない（実地でプローブ4件が実判定として数えられ、board が
+  # 現実と食い違った）。corrects で対象の seq を、kind で理由の型を構造化して指す。
+  #   kind: probe        — 仕様検証のために書いたもので、実際の判定ではない
+  #         mistake      — 誤って書いた（対象・値の取り違え）
+  #         backfill     — 後から実時点の記録を補ったもの（対象が実判定であることは変わらない）
+  #         superseded   — 後続の判定で置き換わった
+  # 訂正そのものも追記なので、訂正の訂正も可能。誰が無効化したかは actor に残る。
+  correction:           { corrects: [seq], kind: probe|mistake|backfill|superseded, reason,
+                          corrected_by }   # LEDGER-CORRECTION
+
   progress_recorded:    { role, candidate_id, fraction, phase, done_so_far, next_step,
                           blocked_by, artifacts: [ref] }
   # accountable_supervisor (docs/09 §A1): which supervising role owns this output up the chain,

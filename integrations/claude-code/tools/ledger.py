@@ -151,6 +151,33 @@ def _same_work(pa, pb, hist=None):
     return bool({find(x) for x in a} & {find(y) for y in b})
 
 
+
+def corrected_seqs(events, kinds=("probe", "mistake")):
+    """`correction` で無効化された seq の集合。
+
+    追記型なので過去は消せない。「これは実判定ではない」を機械が読める形で宣言するのが
+    correction で、status / learning はこれを見て除外する。自由記述の note では読めず、
+    実地ではプローブ4件が実判定として数えられ board が現実と食い違った。
+
+    既定では probe / mistake だけを除外する — backfill は「後から書いた実判定」であって
+    無効ではないし、superseded は最新判定の解決（時系列）が扱う領域なので、ここで消すと
+    二重に効いてしまう。
+    """
+    out = set()
+    for e in events:
+        if e.get("class") != "correction":
+            continue
+        pl = e.get("payload", {}) or {}
+        if pl.get("kind") not in kinds:
+            continue
+        for s in (pl.get("corrects") or []):
+            try:
+                out.add(int(s))
+            except (TypeError, ValueError):
+                continue
+    return out
+
+
 def _same_deliverable(a, b):
     """Do two payloads name the same deliverable? Compared as NORMALIZED STRINGS, not by ==.
 
