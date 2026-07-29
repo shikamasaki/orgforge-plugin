@@ -90,6 +90,14 @@
   tests and confirm it fails; then restore. A test that passes against broken code does not exist, and
   with no human reading the diff nothing else will notice — an agent writing tests to satisfy a coverage
   bar produces exactly this. Record the red output in the work log (`log --result`), not just the green.
+- **その検査が「鳴らない場合」を1つ書く。** `<この検証が、対象が壊れているのに通ってしまう
+  条件を1つ挙げる — 例「Supabase が落ちていると 46 件が skip され、RLS の穴があっても green」>`
+  テストを RED にできても、**その検査が対象に届いていない**ことは起こる。実地の #9 は13周
+  かかったが、その多くは実装ではなく検査側の欠陥だった: テストが `sw.ts` を一度も実行して
+  いなかった／警報が条件分岐で構造的に鳴らなかった／ミューテーション実行器が構文エラーを
+  SURVIVED と誤読した／ブラウザ検査が「offline.html でないこと」しか見ていなかった。
+  いずれも「テストは書いてある・green である」を満たしている。**書けないなら、その検査は
+  まだ何を見ているか分かっていない。**
 - **Pass environment dependencies as arguments** — the clock, the home directory, the **platform**, the
   filesystem root. Not `process.platform` read deep inside a function, but a parameter. This is what
   makes platform and time-dependent behaviour testable *without* that platform, and it is why the

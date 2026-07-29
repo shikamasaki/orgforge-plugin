@@ -421,6 +421,15 @@ industrialize under upstream guardrails), all bounded by "autonomy is bounded by
   (kiro.dev; "the spec is source-of-truth and code is a build artifact"; steering docs product/tech/
   structure.md; "spec-driven codebases benefit as models improve") — the SDD lineage docs/12 §1 maps
   onto orgforge's spec=organization / projection=generated-view.
+  **分割基準を実テンプレートで確認した（2026-07、main ブランチ）:** Spec Kit の `[P]` は
+  *"different files, no dependencies"*（`templates/tasks-template.md`）で、粒度そのものの規範は
+  実質「exact file path を1つ書けること」+ *"Avoid: vague tasks"* のみ。Kiro は粒度を直接
+  規範化しており *"Tasks should be scoped to specific coding activities (e.g., 'Implement X function'
+  rather than 'Support X feature')"* と例示する。**両者とも「タスクが大きすぎる」ことの検出機構を
+  持たない** — Spec Kit の `analyze` の Detection Passes（A duplication / B ambiguity /
+  C underspecification / D constitution / E coverage gaps / F inconsistency）に粒度の検査は無く、
+  Kiro は人間の承認ゲート（`spec-tasks-review`）だけである。人間の diff レビューを廃止した org
+  （docs/11 §4f）ではその頼り先が無いので、orgforge は `split-check` に警告を置く（docs/11 §4b）。
 - **[S] Osmani, "Software Factories, Light and Dark"** — the comprehension-debt failure mode (months of
   green tests while understanding erodes); move human judgment upstream. Anchors docs/12 §6's "don't
   measure by items-drained."

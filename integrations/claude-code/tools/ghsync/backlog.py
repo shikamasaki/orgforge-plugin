@@ -269,7 +269,6 @@ def cmd_split_check(a):
         if "owns" in low and (":" in line):
             territory = line.split(":", 1)[1]
             # split on commas / 'and' / semicolons; count distinct top-level dirs (before the first '/')
-            import re
             parts = [p.strip() for p in re.split(r"[,;、]| and ", territory) if p.strip()
                      and not p.strip().startswith("<")]   # ignore the unfilled placeholder
             tops = {p.split("/")[0].strip("` ") for p in parts}
@@ -297,6 +296,63 @@ def cmd_split_check(a):
         warnings.append("the MUST/acceptance criteria are not in EARS (no WHEN/WHILE/IF/WHERE/SHALL) — "
                         "prose like \"auth works\" isn't testable; rewrite each as an EARS pattern "
                         "(docs/11 §4b), so the gate has a checkable bar.")
+    # (d) 守る対象の偏り — 認可を扱う deliverable なのに、**何が守られているか**が偏っていないか。
+    #
+    # 実地の #11: MUST 12件のうち認可を定めているのは2件だけで、しかもその1件は「あだ名」
+    # （装飾的なテキスト列）だった。金額・支払者・債務の向き・グループ所有権については
+    # 一行も無い。skeptic の言葉では「装飾的なテキスト列を守り、金額・支払者・債務の向き・
+    # グループ所有権を無防備にしていた」。結果、後半6周の rework は Issue のどの MUST にも
+    # 対応しない作業になった。
+    #
+    # **起票時に気づける材料**を出す（判定はしない — 何を守るべきかは人が決める）。
+    must_lines = [l for l in body.splitlines()
+                  if re.search(r"\bSHALL\b|しなければならない|するものとする", l)]
+    AUTHZ_DOMAIN = ("RLS", "ROW LEVEL SECURITY", "権限", "認可", "policy", "grant",
+                    "SECURITY DEFINER", "拒否", "許可")
+    if len(must_lines) >= 6 and sum(1 for w in AUTHZ_DOMAIN if w in body) >= 2:
+        authz_musts = [l for l in must_lines if any(k in l for k in AUTHZ_DOMAIN)]
+        # 「入った後に何ができるか」を定めた MUST があるか。**内側の主体**が出てくるかで見る。
+        # 資産名（金額・支払）で判定すると `SUM(shares.amount) = expenses.amount` のような
+        # 整合性制約を「金額を守っている」と誤読する — あれは認可ではない。
+        INSIDE = ("メンバーが", "メンバー同士", "他のメンバー", "他人の", "作成者", "所有者",
+                  "自分以外", "owner", "creator", "member who", "書き換え")
+        # 「非メンバーが」は境界の話。部分一致で内側に数えると、境界しか定めていない Issue が
+        # 「内側も定めている」ことになり、この検査が丸ごと無効になる（実地の #11 がそうだった）。
+        OUTSIDE = ("非メンバー", "non-member", "未認証", "unauthenticated", "anonymous")
+        guarded = [l for l in authz_musts
+                   if any(k in l for k in INSIDE) and not any(o in l for o in OUTSIDE)]
+        # あだ名・表示名だけを守っているなら、それは「守っている」に数えない（実地の #11）
+        DECORATIVE = ("あだ名", "表示名", "nickname", "display_name", "アイコン", "avatar")
+        substantive = [l for l in guarded if not any(d in l for d in DECORATIVE)]
+        if authz_musts and not substantive:
+            warnings.append(
+                f"MUST {len(must_lines)} 件中、認可を定めているのは {len(authz_musts)} 件だが、"
+                f"**「入った後に何ができるか」を定めたものが無い**"
+                + (f"（内側に触れているのは装飾的な列だけ: "
+                   f"{', '.join(l.strip()[:28] for l in guarded[:2])}…）" if guarded else "") + "。"
+                f"実地では、この形の Issue が「装飾的なテキスト列を守り、金額・支払者・債務の向き・"
+                f"所有権を無防備にする」状態を生み、12周の rework になった。"
+                f"認可は「誰が入れるか」と「入った後に何ができるか」の両方で成立する — "
+                f"**内側の規則**が要求として書かれているか確認すること。")
+
+    # (e) 壊れ方が何種類あるか — `owns` が同じでも、**壊れ方と検証手段が違えば別 Issue**。
+    # 実地の #11 は「スキーマの形（型・制約）」と「認可（攻撃シナリオ）」を1つに束ねており、
+    # gate が毎回両方を見ることになり、一方の修正が他方を壊し続けた（migration 5本が相互干渉）。
+    FAILURE_MODES = {
+        "スキーマ/型の誤り": ("型", "制約", "schema", "column", "not null", "型検査", "migration"),
+        "認可の穴": ("RLS", "権限", "認可", "policy", "grant", "SECURITY DEFINER", "非メンバー"),
+        "計算の誤り": ("端数", "合計", "配分", "計算", "金額が一致", "SUM"),
+        "配信/実行環境": ("Service Worker", "PWA", "CI", "ビルド", "デプロイ", "キャッシュ"),
+    }
+    hit = [k for k, kws in FAILURE_MODES.items() if sum(1 for w in kws if w in body) >= 2]
+    if len(hit) > 1:
+        warnings.append(
+            f"壊れ方が {len(hit)} 種類ある: {' / '.join(hit)}。"
+            f"**`owns` が同じでも、壊れ方と検証手段が違えば別 Issue** — 束ねると gate が毎回"
+            f"「どこを見るか」から始めることになり、一方の修正が他方を壊す"
+            f"（実地の #11 は migration 5本が相互干渉した）。"
+            f"「この deliverable が壊れたとき、壊れ方は1種類か」を問うこと。")
+
     if warnings:
         print(f"RE-SPLIT / RESHAPE CANDIDATE — issue #{a.issue} may not be ready for a no-context maker:")
         for w in warnings:

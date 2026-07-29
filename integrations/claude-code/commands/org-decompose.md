@@ -53,11 +53,34 @@ Issues it becomes. The doctrine (docs/11 §4b, docs/03 §6.2):
 - **One task = one independently-completable unit** — one endpoint, one function, one screen, one
   migration. Not a domain, not "the auth system".
 - **Split at every seam where sibling `owns` sets are disjoint.** Disjoint `owns` ⇒ the two units are
-  `[P]` parallel-safe ⇒ they are separate Issues. This is the discriminator; use it, not intuition.
+  `[P]` parallel-safe ⇒ they are separate Issues. Spec Kit の `[P]`（"different files, no
+  dependencies"）と同じ判定である。
+- **`owns` が同じでも、壊れ方と検証手段が違えば別 Issue。** これは `owns` の交わりでは
+  captured されない軸で、実地で最も高くついた（下記）。問うべきは:
+
+  > この deliverable が壊れたとき、**壊れ方は1種類か**。検証に必要な手段は**1種類か**。
+
+  2種類以上なら分割候補。実地の #11（中核スキーマと RLS）は `supabase/` に閉じていたため
+  `owns` 基準では分割されなかったが、中身は「スキーマの形（型・制約で守る）」と
+  「認可（攻撃シナリオで守る）」という**壊れ方も検証手段も別の2つ**だった。結果、gate が
+  毎回「どこを見るか」の探索から始め、migration 5本が相互に干渉し（0009 が直したものを
+  0010 が壊し、0011 が別の2件を RED にした）、**12周しても終わらなかった**。同じ日に
+  #8（1つの関数）と #10（CI 設定）は1〜2周で通っている。
+
+  Kiro の規範が同じことを別の言い方でしている — タスクは *"Implement X function" rather than
+  "Support X feature"*。機能単位ではなく、**1つの壊れ方に対応する単位**に落とす。
 - **Do NOT split reciprocally-coupled work.** If two candidate units must constantly adjust to each
   other, they are ONE Issue — over-splitting coupled work costs far more than it saves (docs/12 §6).
 - **Order by dependency.** A unit that consumes another's seam records `depends_on: #<issue>` and the
   state it needs (`merged to develop`). Create the depended-upon Issue first so the number exists.
+
+**要求そのものが薄くないかを、切る前に見る。** 分割の失敗は、しばしば要求の欠落として現れる。
+実地の #11 は EARS 12件のうち認可を定めたものが4件で、そのどれも「入った後に何ができるか」を
+定めていなかった（内側に触れていたのは「あだ名」＝装飾的なテキスト列だけ）。**金額・支払者・
+債務の向き・グループ所有権は無防備**で、後半6周の rework は Issue のどの MUST にも対応しない
+作業になった。この deliverable が扱う資産に対し、MUST が**誰から誰を**守ると定めているか —
+片側しか定めていないなら、要求を書き足してから切ること。`github_sync split-check` が起票後に
+同じ検査をするが、**起票時に気づけるならそのほうが安い**。
 
 Lean toward **finer** splits when in doubt about independent units (a coarse task produces 大味 output),
 and toward **keeping together** when the coupling is genuine. You MAY fan out helper subagents to draft

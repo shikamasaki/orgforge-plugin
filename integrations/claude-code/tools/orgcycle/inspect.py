@@ -119,9 +119,37 @@ def cmd_show(a):
                  else "実装の欠陥" if txt else "不明")
             kinds.append(k)
         print(f"  周回:     {len(rounds)} 周 — 直近3回: {' / '.join(kinds)}")
+        # 4（要望書の提案4）については、**実装を見送った。**
+        # 「直近の rework が MUST のどれに対応しているか」を語彙の重なりで判定してみたが、
+        # 実データで誤検出した: 完了済みの #7（MUST どおりの一様性の話）に「スコープ外」と
+        # 警告を出し、本当にスコープ外だった #11 は `expenses` がたまたま一致して素通りした。
+        # 対応関係の判定は語彙一致では届かない — 誤警告は正しい警告まで無効化する
+        # （実地で complete の狼少年が Issue コメントの目視統合を招いた）。
+        # 提案の狙い（スコープ外の作業を検出する）は、split-check の (d)(e) と
+        # 上の「不可逆 N 件」が別の角度から材料を出している。
         if kinds.count("テストの欠陥") == 3:
             print(f"            直近3周とも「MUST は満たすが検査が足りない」型。"
                   f"実装ではなく検査の欠陥が続いている")
+
+    # 3: この Issue が生んだ**不可逆な変更**の数。実地の #11 は migration を5本生み、
+    # それらが相互に干渉した（0009 が直したものを 0010 が壊し、0011 が別の2件を RED にした）。
+    # **3本目を書く時点で「これは1つの Issue ではない」と気づけたはず。** 止めない — 材料を出す。
+    irreversible = []
+    for ev in evs:
+        if ev["class"] != "asset_touched" or ev.get("seq") in voided:
+            continue
+        pl = ev.get("payload", {}) or {}
+        irreversible.append(pl.get("name") or pl.get("op") or "?")
+    br = _branch_for(a.issue)
+    code, mig = _raw(["git", "diff", "--name-only", f"{a.base if hasattr(a, 'base') else 'develop'}...{br}"])
+    migrations = [f for f in (mig or "").split("\n")
+                  if re.search(r"(^|/)(migrations?|db/migrate)/", f)]
+    total = sorted(set(irreversible) | set(os.path.basename(m) for m in migrations))
+    if len(total) >= 3:
+        print(f"  不可逆:   {len(total)} 件 — {', '.join(t[:34] for t in total[:5])}"
+              + (" …" if len(total) > 5 else ""))
+        print(f"            1つの deliverable が3件以上の不可逆な変更を生んでいる。"
+              f"Issue の切り方を見直す価値がある（実地の #11 は migration 5本が相互干渉した）")
 
     nxt = ("gate 再判定 → skeptic → integrate" if av == "reject" else
            f"integrate --issue {a.issue}" if av == "admit" and rv == "survives" else

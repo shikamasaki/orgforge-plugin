@@ -658,3 +658,57 @@ def test_log_progress_stays_cheap(monkeypatch):
                         detail="調査中", phase=None, event_id="e3",
                         command=None, result=None))
     assert rc == 0, "軽い刻みまで塞いだら、途中経過が書かれなくなる"
+
+
+# ── 0.24.0: 分割基準に「壊れ方」と「守る対象の偏り」を足す ────────────────
+def test_split_check_flags_multiple_failure_modes(monkeypatch):
+    """`owns` が同じでも、壊れ方と検証手段が違えば別 Issue。
+
+    実地の #11 は supabase/ に閉じていたため owns 基準では分割されなかったが、中身は
+    「スキーマの形（型・制約）」と「認可（攻撃シナリオ）」という別々の壊れ方だった。
+    結果 migration 5本が相互干渉し、12周しても終わらなかった。
+    """
+    body = ("## MUST\n"
+            "- The system SHALL 全テーブルで ROW LEVEL SECURITY を有効にする\n"
+            "- IF 非メンバーが SELECT する THEN THE system SHALL 拒否する\n"
+            "- The system SHALL 金額の列を integer で定義し float を用いない\n"
+            "- The system SHALL migration を冪等にする\n"
+            "- The system SHALL SUM(shares.amount) = expenses.amount を制約で検査する\n"
+            "- The system SHALL 端数の配分で合計が一致することを保証する\n")
+    fake = FakeGh(replies={"issue view": (0, json.dumps({"body": body, "title": "t"}))})
+    monkeypatch.setattr(GS, "gh", fake)
+    rc, out = _quiet(GS.cmd_split_check, _ns(repo="o/r", issue=11))
+    assert rc == 10, out
+    assert "壊れ方が" in out
+
+
+def test_split_check_flags_boundary_only_authz(monkeypatch):
+    """境界だけを定めて内側を定めていない要求を警告する。
+
+    「非メンバーが」は境界の話。部分一致で内側に数えると検査が丸ごと無効になる。
+    """
+    body = ("## MUST\n"
+            "- The system SHALL 全テーブルで ROW LEVEL SECURITY を有効にする\n"
+            "- IF 非メンバーが行を SELECT する THEN THE system SHALL 拒否する\n"
+            "- WHEN メンバーが自分のあだ名を変更する THE system SHALL 許可する\n"
+            "- The system SHALL 表示名を profiles に持つ\n"
+            "- The system SHALL joined_at を持つ\n"
+            "- The system SHALL archived_at を立てる\n"
+            "- The system SHALL left_at を立てる\n")
+    fake = FakeGh(replies={"issue view": (0, json.dumps({"body": body, "title": "t"}))})
+    monkeypatch.setattr(GS, "gh", fake)
+    rc, out = _quiet(GS.cmd_split_check, _ns(repo="o/r", issue=11))
+    assert "入った後に何ができるか" in out, out
+
+
+def test_split_check_does_not_flag_a_single_concern(monkeypatch):
+    """関心事が1つの Issue は警告しない（実地の #8 / #10 は1〜2周で通った）。"""
+    body = ("## MUST\n"
+            "- WHEN 支出が3人で割られる THE system SHALL 合計が一致する配分を返す\n"
+            "- IF 端数が出る THEN THE system SHALL 決定的な順序で配る\n"
+            "- The system SHALL 同一入力に対し同一の結果を返す\n"
+            "- The system SHALL 負の負担額を返さない\n")
+    fake = FakeGh(replies={"issue view": (0, json.dumps({"body": body, "title": "t"}))})
+    monkeypatch.setattr(GS, "gh", fake)
+    rc, out = _quiet(GS.cmd_split_check, _ns(repo="o/r", issue=7))
+    assert "壊れ方が" not in out and "入った後に" not in out, out

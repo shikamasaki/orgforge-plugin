@@ -661,6 +661,47 @@ re-split candidate (a *shape* check, not a quality judgment).
 
 ---
 
+### 分割の判断軸 — SDD の既存ツールが持つもの、持たないもの
+
+タスクへの分割基準を Spec Kit と Kiro の実テンプレートで確認した（原文は docs/sources）。
+
+| | Spec Kit | Kiro | orgforge |
+|---|---|---|---|
+| 分割の第一軸 | ユーザーストーリー（P1/P2/P3） | design のコンポーネント + 逐次の依存連鎖 | coverage-manifest の must-have 行 |
+| 並列の判定 | `[P]` = *"different files, no dependencies"* | 概念なし（逐次前提） | `owns` の交わり（= Spec Kit と同じ判定） |
+| 粒度の明文規範 | 実質なし（"exact file path" 必須 + *"not vague"*） | *"Implement X function" rather than "Support X feature"* | 「壊れ方が1種類か」（下記） |
+| **過大タスクの検出** | **なし** | **なし**（人間の承認ゲートのみ） | `split-check`（警告） |
+| テスト | OPTIONAL（明示要求時のみ） | TDD 既定 | 必須（機械バー docs/11 §4e） |
+
+**`owns` の交わりだけでは足りない、というのが実地で最も高くついた発見である。** これは
+Spec Kit の `[P]` と同じ判定であり、**同じ限界を継承していた**: `owns` が `supabase/` に
+閉じていた #11 は分割されなかったが、中身は「スキーマの形（型・制約で守る）」と
+「認可（攻撃シナリオで守る）」という壊れ方も検証手段も別の2つだった。結果、gate が14回の
+判定のうち一度も同じ観点で連続できず、migration 5本が相互に干渉し、12周しても終わらなかった。
+同じ日に #8（1つの関数）と #10（CI 設定）は1〜2周で通っている。
+
+そこで軸を1本足す:
+
+> この deliverable が壊れたとき、**壊れ方は1種類か**。検証に必要な手段は**1種類か**。
+
+Kiro の *"Implement X function" rather than "Support X feature"* は、同じことを別の言い方で
+述べている — 機能単位ではなく、**1つの壊れ方に対応する単位**に落とせ、ということである。
+
+**過大タスクの検出を Spec Kit も Kiro も持たない**（どちらも人間の承認ゲート頼り）。人間の
+diff レビューを廃止した org（§4f）では、その頼り先が無い。`github_sync split-check` が
+起票後に警告を出す — 壊れ方が複数か、認可の要求が境界だけを定めていないか、を見る。
+**止めない、警告する**: 何を守るべきかは人が決める。
+
+### 分割の失敗は、しばしば要求の欠落として現れる
+
+#11 の後半6周は、Issue の EARS 12件のどれにも対応していない作業だった（メンバー間の
+UPDATE / INSERT 権限・同意の表現・前提の凍結 — MUST に1件も無い）。skeptic の言葉では
+**「装飾的なテキスト列を守り、金額・支払者・債務の向き・グループ所有権を無防備にしていた」**。
+
+認可を扱う deliverable なのに、MUST が「誰が入れるか」しか定めておらず「入った後に何が
+できるか」を定めていない、という偏りは**起票時に検出できる**。切り方の問題として現れる前に、
+要求の問題として捕まえるほうが安い。
+
 ## 4c. The integration seam — feature → develop → main, and where fan-out fans back in
 
 docs/03 fans work **out** into parallel task sub-issues; the theory it rests on (Lawrence & Lorsch, via
