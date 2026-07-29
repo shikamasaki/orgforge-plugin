@@ -245,43 +245,22 @@ def check(path):
                       "message": "未解決の [NEEDS CLARIFICATION] が残っている。"
                                  "推測で実装させないため、実装前に必ず解消すること"})
 
-    # VOIDDEP — 動詞の目的語に対する依存が満たされていない（QUS の Complete、docs/sources）
+    # VOIDDEP（QUS の Complete）は **0.25.0 で入れ、0.25.1 で取り下げた。**
     #
-    # Lucassen et al. の形式化: `voidDep(µ1) ↔ depends(av1, av2) ∧ ∄µ2 ∈ U. do2 = do1`
-    # 「to read, update or delete an item one first needs to create it」— 更新や削除を定めて
-    # いるのに、その対象を**作る**要求がどこにも無ければ、要求集合に穴がある。
+    # 形式化そのものは正しい — "to read, update or delete an item one first needs to create it"。
+    # 問題は日本語の要求記述で**目的語を機械的に切り出せない**ことだった。実装は
+    # バッククォート識別子を見ていたが、実地の REQUIREMENTS.md には識別子が **0 件**。
+    # 「利用者が表示名を変更したとき」のように普通の名詞で書くのが自然な日本語であり、
+    # テンプレートもそう書かせている。助詞で区切って「〜を<動詞>」を拾う実装も試したが、
+    # `利用者が支出` と `メンバーが支出` が別物として抽出され、**全件が誤検出**になった。
+    # 形態素解析を持ち込めば届くが、それは req_lint の重さを一段変える判断になる。
     #
-    # これは orgforge が実地で踏んだ形の一般化でもある: #11 は「誰が入れるか」を定めて
-    # 「入った後に何ができるか」を定めていなかった。QUS は動詞-目的語の依存に限定しているが、
-    # 同じ述語が**能力の依存**にも当てはまる。
-    CREATE_V = ("作成", "登録", "追加", "生成", "create", "register", "add", "insert")
-    MUTATE_V = {"更新": "update", "変更": "update", "編集": "update", "削除": "delete",
-                "取消": "delete", "update": "update", "delete": "delete", "edit": "update",
-                "remove": "delete"}
-    created, mutated = set(), {}
-    for i, line in enumerate(body.split("\n"), 1):
-        # 目的語 = その行に出てくる `entity` / 「〜を」の直前の名詞。ここでは **バッククォート
-        # 付きの識別子**だけを見る — 散文から名詞を切り出すと誤検出が支配的になる。
-        objs = set(re.findall(r"`([A-Za-z_][\w.]{2,})`", line))
-        if not objs:
-            continue
-        low = line.lower()
-        if any(v in low for v in CREATE_V):
-            created |= objs
-        for jp, kind in MUTATE_V.items():
-            if jp in low:
-                for o in objs:
-                    mutated.setdefault(o, (i, kind))
-    for obj, (i, kind) in mutated.items():
-        if obj in created:
-            continue
-        # 作る要求が無い対象を更新/削除している
-        v.append({"code": "VOIDDEP", "severity": "warn", "line": i,
-                  "message": f"`{obj}` を {kind} する要求はあるが、**作る要求がどこにも無い**"
-                             f"（QUS の Complete: 更新・削除は作成に依存する）。"
-                             f"別の要求文書が扱うなら参照を、扱わないなら要求を書き足すこと"})
+    # 誤検出しかしない検査は、無いより悪い（誤警告は正しい警告まで無効化する）。
+    # 狙い（要求の欠落を捕まえる）は `github_sync split-check` の「認可が境界だけを定めて
+    # いないか」が実データで機能しているので、そちらに寄せる。
+    # 再挑戦するなら、**英語の要求か、識別子を義務づける記法**が前提になる。
 
-    # SC — 成功基準が採番されているか
+    # SC — 成功基準が採番されているか    # SC — 成功基準が採番されているか
     if not SC_ID.search(body):
         v.append({"code": "SC", "severity": "warn", "line": 0,
                   "message": "成功基準が SC-001 形式で採番されていない（技術非依存・定量的に）"})

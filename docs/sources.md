@@ -437,7 +437,10 @@ industrialize under upstream guardrails), all bounded by "autonomy is bounded by
   Reading**（Basili et al.）のテスター視点 Q1 *"Can you make up reasonable test cases for each
   item?"* がそれを他者検証の手続きに変える。**QUS**（Lucassen et al., Requirements Engineering
   2016）は `Complete` を形式化し — *"to read, update or delete an item one first needs to create
-  it"*、述語 `voidDep(µ1) ↔ depends(av1,av2) ∧ ∄µ2∈U. do2=do1` — これが req_lint の VOIDDEP。
+  it"*、述語 `voidDep(µ1) ↔ depends(av1,av2) ∧ ∄µ2∈U. do2=do1`。**req_lint に実装したが
+  取り下げた（0.25.1）** — 形式化は正しいが、日本語の要求記述から目的語を機械的に切り出せない。
+  実地の REQUIREMENTS.md にバッククォート識別子は0件で、検査が一度も発火しなかった。
+  AQUSA が意味理解を要する基準の自動化を諦めているのと、同じ壁に当たったことになる。
   **Humanizing Work** の垂直スライス定義 *"you'll probably have to touch multiple architectural
   layers"* は、**層/ファイル単位の分割を明示的な反パターンとする**（docs/11 §4b）。
   **SPIDR**（Cohn）の5軸（Spike/Path/Interface/Data/Rules）はいずれも実装場所ではなく
