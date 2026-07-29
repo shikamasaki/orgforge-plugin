@@ -194,6 +194,23 @@ def cmd_verify(a):
         out.append("HOLD（exit 10）なら reject。パスが通らない場合はそう報告すること — "
                    "「ツールが無いので未実行」は、機械バーが効いていないという最も重い所見。")
     if role == "skeptic" and prior:
+        # 5: gate は毎回 --risk に「今回撃っていない領域」を書く。実地では #9 で gate が
+        # 「1件も当てていない」と書いた領域から実バグが出た。人が手で転記していたので配管が運ぶ。
+        # **断片を正規表現で切り出すより、gate が書いた Known risk の節ごと渡す** —
+        # gate は既に構造化して書いており、切り刻むと重複した断片が並んで読めなくなる
+        # （最初の実装がそうなった）。**何を撃つかは skeptic が決める。**
+        m = re.search(r"\*\*Known risk accepted:\*\*\s*(.+?)(?:\n\n|\Z)", prior, re.S)
+        if m:
+            body = m.group(1).strip()
+            if re.search(r"撃って|当てて|試して|検証して|not exercised|no (?:test|probe|mutation)",
+                         body):
+                out.append("\n## gate が「今回撃っていない」と書いた領域（**標的候補**）\n")
+                out.append(body[:3000])
+                out.append("\n> gate がここを撃っていないと明言している以上、**この領域には"
+                           "検査が一度も通っていない**。実地では gate が「1件も当てていない」と"
+                           "書いた領域から実バグが出た。撃つかどうかは skeptic が決めるが、"
+                           "撃たないなら --risk にその理由を書くこと。")
+
         # 5: --risk を書けば admit できる構造なので、書き得にしない。gate が自分で書いた
         # リスクは、skeptic が最初に潰しに行くべき的として明示する（配管: 抜き出して渡すだけ）。
         risks = re.findall(r"\*\*Known risk accepted:\*\*\s*(.+?)(?:\n\n|\Z)", prior, re.S)

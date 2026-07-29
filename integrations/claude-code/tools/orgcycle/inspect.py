@@ -17,7 +17,37 @@ from ._core import (
     _ledger,
     _raw,
     _refutation_for,
+    _repo,
 )
+
+
+
+def _issue_reasons(issue):
+    """Issue に載っている admission_decided の理由を**古い順**に全部返す。
+
+    台帳は digest しか持たない（設計どおり）ので、理由は Issue にある。1件だけ引くと
+    どの周回も同じ最新コメントを見てしまい、周回の性質が全部同じに見える（最初の実装が
+    そうなった）。周回ごとに違うものを見たいので、並びで取る。
+    """
+    args = ["gh", "issue", "view", str(issue), "--json", "comments"]
+    r = _repo()
+    if r:
+        args += ["--repo", r]
+    code, out = _raw(args)
+    if code != 0:
+        return []
+    try:
+        cs = json.loads(out).get("comments", [])
+    except Exception:
+        return []
+    out_r = []
+    for c in cs:
+        b = c.get("body") or ""
+        if "admission_decided" not in b:
+            continue
+        m = re.search(r"\*\*Why \(the reasoning\):\*\*\s*\n(.+)", b)
+        out_r.append(" ".join(m.group(1).split())[:600] if m else "")
+    return out_r
 
 
 def cmd_show(a):
@@ -66,6 +96,32 @@ def cmd_show(a):
                   + (f"\n        {why}" if why else ""))
     else:
         print("  判定:     まだ無い")
+
+    # 4: 周回が何を意味しているか。#9 が9周、#11 が10周した。統制は毎回実害のある欠陥を
+    # 見つけており機能しているが、**いつ収束するかの見通しが立たない**。回数だけでなく
+    # 「直近の判定が何を問題にしているか」が見えると、切るかどうかの判断材料になる。
+    # **判定はしない** — 「もう切れ」とは言わない。性質の変化を並べるだけ。
+    rounds = [e for e in judged if e["class"] == "admission_decided"]
+    if len(rounds) >= 3:
+        reasons = _issue_reasons(a.issue)
+        kinds = []
+        for idx, e in enumerate(rounds[-3:]):
+            pl = e.get("payload", {}) or {}
+            txt = " ".join(str(pl.get(k, "")) for k in ("why", "reason", "note"))
+            if not txt.strip():
+                # 台帳の並びと Issue の並びを末尾から対応させる（どちらも時系列）
+                j = len(reasons) - 3 + idx
+                txt = reasons[j] if 0 <= j < len(reasons) else ""
+            # 分類はキーワードによる粗い当て推量である。**判断材料であって判断ではない** —
+            # 「テストの欠陥が3周続いている」は切る理由になり得るが、切るかどうかは CEO が決める。
+            # 誤分類しうるので、原文は Issue と `judged` の一覧で読めるようにしてある。
+            k = ("テストの欠陥" if re.search(r"テスト|警報|検出できな|placebo|ミューテーション", txt)
+                 else "実装の欠陥" if txt else "不明")
+            kinds.append(k)
+        print(f"  周回:     {len(rounds)} 周 — 直近3回: {' / '.join(kinds)}")
+        if kinds.count("テストの欠陥") == 3:
+            print(f"            直近3周とも「MUST は満たすが検査が足りない」型。"
+                  f"実装ではなく検査の欠陥が続いている")
 
     nxt = ("gate 再判定 → skeptic → integrate" if av == "reject" else
            f"integrate --issue {a.issue}" if av == "admit" and rv == "survives" else

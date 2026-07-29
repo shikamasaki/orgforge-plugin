@@ -608,3 +608,69 @@ def test_verify_finds_handoff_for_the_seam_contract(tmp_path):
                        capture_output=True, text=True, cwd=str(tmp_path), timeout=60)
     out = p.stdout + p.stderr
     assert "seam contract の生成に失敗" not in out, f"handoff.py を見失っている: {out[:300]}"
+
+
+# ── 0.23.0: worktree の迷子台帳 / 周回の性質 / 未撃領域の引き渡し ──────────
+def test_worktree_is_not_mistaken_for_the_org_root(tmp_path):
+    """worktree の中からは親を辿ること。
+
+    doctrine / evidence を git 追跡下に置いた結果、worktree にも `.orgforge/` が復元され、
+    それが ORG_MARKERS に当たって探索が止まった。そこで subagent が ledger append を打つと
+    worktree 側の空の台帳に書かれ、`appended seq=1` が返る — **実判定が本体から消える**。
+    実地で1日3回起き、実判定4件が迷子になった。警告で防ぐ設計は破れる（gate が踏んだ）。
+    """
+    import importlib, sys as _s
+    if str(TOOLS) not in _s.path:
+        _s.path.insert(0, str(TOOLS))
+    disc = importlib.import_module("discover")
+
+    repo = tmp_path / "r"; repo.mkdir()
+    def g(*a, cwd=repo):
+        return subprocess.run(["git", *a], cwd=cwd, capture_output=True, text=True)
+    g("init", "-q", "-b", "main"); g("config", "user.email", "t@t"); g("config", "user.name", "t")
+    (repo / ".orgforge").mkdir(); (repo / ".orgforge" / "doctrine").mkdir()
+    (repo / ".orgforge" / "doctrine" / "x.json").write_text("{}")
+    g("add", "-A"); g("commit", "-qm", "seed"); g("branch", "develop")
+
+    wt = repo / ".orgforge" / "wt" / "issue-3"
+    wt.parent.mkdir(parents=True, exist_ok=True)
+    g("worktree", "add", "-q", "-b", "feat/issue-3", str(wt), "develop")
+    assert (wt / ".orgforge").is_dir(), "前提: worktree に .orgforge が復元される"
+
+    saved = os.environ.pop("ORG_LEDGER_ROOT", None)
+    try:
+        assert disc.org_root(str(wt)) == str(repo.resolve()), \
+            "worktree を org root と誤認した（迷子台帳ができる）"
+        assert disc.ledger_root(str(wt)) == os.path.join(str(repo.resolve()),
+                                                         ".orgforge", "ledger")
+    finally:
+        if saved is not None:
+            os.environ["ORG_LEDGER_ROOT"] = saved
+
+
+def test_integrate_passes_its_own_test_output_to_the_log():
+    """integrate 自身が log の必須検査に引っかかっていた。
+
+    マイルストーンの log は --command/--result を要求するのに integrate はそれを渡さず、
+    統合は完了するのに Issue へのログだけ落ちた。自分で走らせた結果を持っているのだから、
+    人に書かせる理由が無い。
+    """
+    src = _cycle_src("ship")
+    seg = src[src.index("def cmd_integrate"):]
+    assert '"--command", a.test' in seg and 'test_out["text"]' in seg
+
+
+def test_show_reports_what_the_rounds_are_about():
+    """周回の回数だけでなく、直近が何を問題にしているかを出す。"""
+    src = _cycle_src("inspect")
+    assert "周回:" in src and "直近3回" in src
+    # 周回ごとに違う理由を見ること（1件だけ引くと全部同じに見える）
+    assert "_issue_reasons" in src
+    assert "判断材料であって判断ではない" in src, "board が「切れ」と判定してはいけない"
+
+
+def test_verify_hands_the_unshot_areas_to_skeptic():
+    """gate が「今回撃っていない」と書いた領域を skeptic に標的として渡す。"""
+    src = _cycle_src("judge")
+    assert "撃っていない" in src and "Known risk accepted" in src
+    assert "標的候補" in src

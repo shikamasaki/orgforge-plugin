@@ -208,14 +208,24 @@ def cmd_integrate(a):
 
     branch = a.branch or _branch_for(a.issue)
     base = a.base or "develop"
+    # 統合テストの実出力を保持する。**integrate 自身が log の必須検査に引っかかっていた** —
+    # マイルストーンの log は --command/--result を要求するのに、integrate はそれを渡さず、
+    # 統合は完了するのに Issue へのログだけ落ちていた（実地で人が手で補った）。
+    # 自分で走らせた結果を持っているのだから、人に書かせる理由が無い。
+    test_out = {"text": ""}
+
+    def _run_test():
+        code, out = _raw(a.test.split())
+        test_out["text"] = (out or "").strip()
+        return code, out
+
     steps = [
         (f"{base} に切り替え",
          lambda: _raw(["git", "checkout", base])),
         (f"{branch} を --no-ff でマージ",
          lambda: _raw(["git", "merge", "--no-ff", branch,
                        "-m", f"Merge {branch} into {base} (#{a.issue})"])),
-        (f"統合後の全体テスト: {a.test}",
-         lambda: _raw(a.test.split())),
+        (f"統合後の全体テスト: {a.test}", _run_test),
     ]
     rc = _execute(steps, f"integrate #{a.issue} → {base}")
     if rc != 0:
@@ -236,6 +246,9 @@ def cmd_integrate(a):
         (f"log → #{a.issue}",
          lambda: _gh_sync("log", "--issue", str(a.issue), "--event", "integration_admitted",
                           "--event-id", f"integrate-{a.issue}",
-                          "--detail", f"{branch} → {base} に統合、統合後 `{a.test}` green")),
+                          "--detail", f"{branch} → {base} に統合、統合後 `{a.test}` green",
+                          "--command", a.test,
+                          "--result", (test_out["text"] or "(統合テストの出力が空)")[-4000:],
+                          "--files", branch)),
     ]
     return _execute(rec, f"record integrate #{a.issue}")

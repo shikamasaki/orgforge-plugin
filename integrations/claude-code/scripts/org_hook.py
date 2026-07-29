@@ -297,7 +297,14 @@ def _asset_dimension(tool_name, ti):
         _has_token(toks, "rm", "dd", "truncate", "mkfs", "shred")                 # dangerous binaries
         or _has_token(toks, "DROP", "DELETE", "TRUNCATE")                         # SQL (as whole tokens)
         or _has_token(toks, "--force", "--delete", "-delete")                     # force / find -delete
-        or _has_seq(toks, ("git", "push"), ("git", "reset"), ("reset", "--hard"),
+        # `git push` は **force 系だけ**が破壊的。通常の push は追記であって、取り消せる
+        # （revert / 新しいコミット）。一律に数えた結果、実地では日常の開発で cap が満杯に
+        # なり、maker が作業を終えたのに push できなくなった。cap が測るのは irreversibility
+        # であって活動量ではない — 開発そのものを止めるなら、それは cap の誤用である。
+        # force-with-lease も他人の履歴を消しうるので重い側に残す。
+        or (_has_seq(toks, ("git", "push"))
+            and _has_token(toks, "--force", "-f", "--force-with-lease", "--delete", "--mirror"))
+        or _has_seq(toks, ("git", "reset"), ("reset", "--hard"),
                     ("terraform", "destroy"), ("kubectl", "delete"))
         or "shutil.rmtree" in cmd                                                 # python dotted call
         or _redirects_to_system_path(cmd)                                        # `> /etc/…` overwrite of a system path
@@ -347,7 +354,13 @@ def _asset_dimension(tool_name, ti):
 # floor must clear that, not a hand-count of 3. Tune per adopter via ORG_CAP_<DIMENSION>; a tighter
 # threat tier (asset-touching prod) sets these lower, a sandboxed dev tier may raise them further.
 _DEFAULT_CAPS = {
-    "destructive_ops": "50",   # rm/DROP/force per day — irreversible but routine in real work; scope-weighted
+    # rm/DROP/force per day — irreversible but routine in real work; scope-weighted.
+    # 50 は実地で足りなかった: 18 Issue を並列で回す1日で満杯になり、maker が作業を終えたのに
+    # push できない状態が起きた。cap の目的は「取り返しのつかない操作の暴走を止める」ことで
+    # あって、開発の速度を律することではない。通常の `git push` を対象から外した（0.23.0）
+    # うえで、なお現実的な余裕として 150 にする。**重み3の操作（rm -rf / DROP / reset --hard）
+    # なら50回で到達する**ので、暴走に対する歯止めとしては十分に効く。
+    "destructive_ops": "150",
     "external_writes": "30",   # outbound POST/PUT/DELETE per day — irreversible side effect
     "infra_changes":   "20",   # apply to real infra per day — irreversible, rarer than local deletes
     "shell_effect":    "100",  # DEPRECATED: the classifier no longer emits shell_effect (unknown≠metered);

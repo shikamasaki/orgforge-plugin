@@ -237,7 +237,7 @@ def test_real_destructive_still_caught_by_word_boundary(tmp_path):
         "rm -rf /tmp/dir",
         "dd if=/dev/zero of=/tmp/x",
         "find . -name '*.tmp' -delete",
-        "git push origin main",
+        "git push --force origin main",   # 通常の push は 0.23.0 で対象外
         "git reset --hard HEAD~1",
         "echo bad | bash",
         "cat evil.sh | sh",
@@ -415,3 +415,31 @@ def test_harness_probe_level1_passes_on_real_hook(tmp_path):
                         "--hook", str(HOOK), "--tools", str(TOOLS)],
                        capture_output=True, text=True)
     assert r.returncode == 0 and "Level 1 PASSED" in (r.stdout + r.stderr)
+
+
+# ── 0.23.0: cap が開発そのものを止めていた ──────────────────────────────
+def test_ordinary_push_is_not_metered():
+    """通常の `git push` は追記であって取り消せる。
+
+    一律に破壊的として数えた結果、実地では18 Issue を並列で回す1日で cap が満杯になり、
+    **maker が作業を終えたのに push できない**状態が起きた。cap が測るのは
+    irreversibility であって活動量ではない — 開発そのものを止めるなら cap の誤用である。
+    """
+    import importlib.util, pathlib
+    hook = pathlib.Path(__file__).resolve().parent.parent / "integrations" / "common" / "org_hook.py"
+    spec = importlib.util.spec_from_file_location("org_hook_p", hook)
+    h = importlib.util.module_from_spec(spec); spec.loader.exec_module(h)
+    for cmd in ("git push origin feat/issue-9", "git push -u origin feat/x", "git push"):
+        assert h._asset_dimension("Bash", {"command": cmd}) is None, f"課金された: {cmd}"
+
+
+def test_force_push_and_history_rewrites_stay_metered():
+    """緩めたのは通常の push だけ。履歴を消しうるものは重いまま。"""
+    import importlib.util, pathlib
+    hook = pathlib.Path(__file__).resolve().parent.parent / "integrations" / "common" / "org_hook.py"
+    spec = importlib.util.spec_from_file_location("org_hook_f", hook)
+    h = importlib.util.module_from_spec(spec); spec.loader.exec_module(h)
+    for cmd in ("git push --force origin main", "git push --force-with-lease origin main",
+                "git push --delete origin old", "git reset --hard HEAD~1"):
+        dim, w = h._asset_dimension("Bash", {"command": cmd})
+        assert w > 0, f"force 系が無料になった: {cmd}"

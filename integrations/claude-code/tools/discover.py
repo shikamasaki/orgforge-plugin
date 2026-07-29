@@ -41,12 +41,36 @@ def org_root(start=None):
     (post-init, pre-founding) — so discovery works between /org-init and /org-found too."""
     d = os.path.abspath(start or os.getcwd())
     while True:
-        if any(os.path.exists(os.path.join(d, m)) for m in ORG_MARKERS):
+        if any(os.path.exists(os.path.join(d, m)) for m in ORG_MARKERS) and not _is_worktree(d):
             return d
         parent = os.path.dirname(d)
         if parent == d:
             return None
         d = parent
+
+
+def _is_worktree(d):
+    """`begin` が作った Issue ごとの作業ツリーか（`.orgforge/wt/issue-N/`）。
+
+    **worktree を org root と誤認すると、迷子の台帳ができる。** doctrine と evidence を
+    git 追跡下に置いた結果、worktree にも `.orgforge/` が復元され、それが ORG_MARKERS に
+    当たって親の探索が止まる。そこで subagent が `ledger append` を打つと worktree 側の
+    空の台帳に書かれ、`appended seq=1` が返る — 実判定が本体の台帳から消える。
+    実地で1日に3回起き、実判定4件が迷子になった。
+
+    警告で防ぐ設計は破れる（gate が一度踏んだ）ので、構造で防ぐ: worktree の中からは
+    必ず親を辿る。判定は `git worktree` の実体（`.git` が**ファイル**でその中身が
+    `gitdir:` を指す）で行う — パス名ではなくツリーの性質で見る。
+    """
+    dotgit = os.path.join(d, ".git")
+    if not os.path.isfile(dotgit):
+        return False
+    try:
+        with open(dotgit, encoding="utf-8") as f:
+            head = f.read(256)
+    except OSError:
+        return False
+    return head.startswith("gitdir:") and "/worktrees/" in head
 
 
 def ledger_root(start=None):

@@ -203,7 +203,7 @@ enforcement:
   # the hook's classifier (org_hook.py _DEFAULT_CAPS). Tune to YOUR org's real throughput; the
   # defaults are generous enough not to throttle honest work (docs/05 §5.1).
   caps:
-    destructive_ops: 50      # rm/DROP/force per day — irreversible but routine; scope-weighted
+    destructive_ops: 150      # rm/DROP/force per day — irreversible but routine; scope-weighted
     external_writes: 30      # outbound POST/PUT/DELETE per day — irreversible side effect
     infra_changes: 20        # apply to real infra per day — irreversible
     file_mutations: 500      # overwriting existing files per day — reversible under VCS; high ceiling

@@ -45,7 +45,7 @@ research/ML day that deletes and replaces artifacts many times) proceeds untouch
 
 | Variable | Dimension — what it meters | Default (per day) |
 |---|---|---|
-| `ORG_CAP_DESTRUCTIVE_OPS` | `rm`/`dd`/`DROP`/`--force`/`git push`/`reset --hard`/… — irreversible deletes & force-writes (scope-weighted: one `rm -rf`/`DROP` counts as 3) | `50` |
+| `ORG_CAP_DESTRUCTIVE_OPS` | `rm`/`dd`/`DROP`/`--force`/`reset --hard`/… — irreversible deletes & force-writes (scope-weighted: one `rm -rf`/`DROP` counts as 3). **通常の `git push` は対象外** — 追記であって取り消せる。force 系（`--force`/`--delete`/`--mirror`）だけを数える。再生成できる対象（`.orgforge/wt/`・`node_modules`・ビルド成果物）は重み 0 | `150` |
 | `ORG_CAP_EXTERNAL_WRITES` | outbound `POST`/`PUT`/`DELETE` (curl/wget with a write verb) | `30` |
 | `ORG_CAP_INFRA_CHANGES` | `terraform apply`/`kubectl apply`/`aws`/`gcloud` — changes to real infra | `20` |
 | `ORG_CAP_FILE_MUTATIONS` | overwriting an **existing** file (reversible under VCS — high ceiling; new-file creates are never metered) | `500` |
@@ -144,7 +144,7 @@ are **dev overrides** over these values:
 ```yaml
 enforcement:
   caps:                    # per-day blast-radius budgets — a gate HOLDS when the window sum would exceed
-    destructive_ops: 50    #   ← overridden by ORG_CAP_DESTRUCTIVE_OPS
+    destructive_ops: 150   #   ← overridden by ORG_CAP_DESTRUCTIVE_OPS
     external_writes: 30    #   ← ORG_CAP_EXTERNAL_WRITES
     infra_changes: 20      #   ← ORG_CAP_INFRA_CHANGES
     file_mutations: 500    #   ← ORG_CAP_FILE_MUTATIONS
