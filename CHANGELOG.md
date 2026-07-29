@@ -3,6 +3,26 @@
 All notable changes to orgforge-plugin. This project follows a pragmatic semver:
 minor = new mechanisms/features, patch = fixes, major = breaking articulation changes.
 
+## 0.9.3
+
+**zsh が変数を単語分割しないため、0.9.2 の修正が別の形で壊れていた。**
+
+0.9.2 でシェル関数を消した際、引数を文字列に組み立てて渡す形にした:
+
+```sh
+A=organization.yaml; for f in …; do A="$A $f"; done
+python3 org_lint.py $A          # ← zsh では引数1個として渡る
+```
+
+`sh`/`bash` は `$A` を空白で分割するが、**zsh は分割しない**（SH_WORD_SPLIT が既定 off）。
+Claude Code のシェルは zsh なので、5ファイル分の文字列が**1引数**として渡り、
+`org_lint` が「引数が足りない」と判断して usage を出して exit 2 になった。
+
+位置パラメータ（`set -- "$@" "$f"`）に置き換えた。これは sh/bash/zsh のいずれでも
+正しく複数引数として渡る。
+
+**`!` ブロックのシェルは zsh である。** 変数に組み立てた引数リストを裸で渡してはならない。
+
 ## 0.9.2
 
 **`/org-found` が引数を2つ以上受け取ると lint が壊れるバグを修正。**
