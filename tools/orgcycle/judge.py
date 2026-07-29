@@ -44,7 +44,6 @@ def _role_charter(role):
 
 def _seam(role, issue, title):
     """handoff.py を内部で呼んで seam contract を作る。引数6個の手打ちをここで吸収する。"""
-    here = os.path.dirname(os.path.abspath(__file__))
     slice_ = {
         "gate": f"#{issue} 「{title}」の admission — MUST を1つずつ再導出する",
         "skeptic": f"#{issue} 「{title}」の admit 済み成果物への反証",
@@ -53,7 +52,7 @@ def _seam(role, issue, title):
         "gate": "admission_decided（verdict は自分で決める。admit には --evidence が要る）",
         "skeptic": "refutation_attempted（verdict は自分で決める。survives には --evidence が要る）",
     }.get(role, "決定と、その根拠")
-    code, out = _run([os.path.join(here, "handoff.py"), role,
+    code, out = _run([os.path.join(HERE, "handoff.py"), role,
                "--slice", slice_,
                "--inputs", f"task Issue #{issue} の SPEC / MUST と、maker の成果物",
                "--outputs", outputs,

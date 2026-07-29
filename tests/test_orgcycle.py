@@ -180,29 +180,50 @@ def test_verify_rejects_unknown_role():
     assert p.returncode != 0
 
 
-def test_verify_finds_charter_in_bundled_layout():
-    """バンドル（agents/ が tools/ の兄弟）でも憲章を見つける。
+def test_verify_finds_charter_in_every_layout():
+    """憲章を **CLAUDE_PLUGIN_ROOT の有無にかかわらず**見つけること。
 
-    プラグインとして入った形でだけ憲章を見失うと、verify は「基準の出所が1つ」という
-    唯一の存在理由を失う。repo 直下の配置だけ見ていて実際に取りこぼした。
+    以前のテストは env を設定してから呼んでいたため、**env が無い経路＝実際の使われ方**を
+    検査していなかった。その結果 0.22.0 の分割で `_agents_dir` の探索先が1階層ずれ、
+    verify が gate/skeptic とも「agents/*.md が見つからない（探した先: None）」で死んだのに、
+    テストは緑のままだった。壊れる場所で検証していないテストは無いのと同じ — #7 の
+    split() で捕まえたのと同じ形を、テスト側でやっていた。
     """
-    import importlib.util
     m = _cycle_mod("judge")
     bundled = TOOLS.parent / "integrations" / "claude-code"
-    if not (bundled / "agents").is_dir():
-        return  # バンドル未生成の環境ではスキップ
-    os.environ["CLAUDE_PLUGIN_ROOT"] = str(bundled)
+    saved = os.environ.pop("CLAUDE_PLUGIN_ROOT", None)
     try:
+        # (1) env なし — repo を直接使う形。実地で壊れたのはこちら
         for role in ("gate", "skeptic"):
             charter, path = m._role_charter(role)
-            assert charter, f"バンドル配置で {role} の憲章を見失った（探した先: {path}）"
+            assert charter, f"env 無しで {role} の憲章を見失った（探した先: {path}）"
+        # (2) env あり — プラグインとして入った形
+        if (bundled / "agents").is_dir():
+            os.environ["CLAUDE_PLUGIN_ROOT"] = str(bundled)
+            for role in ("gate", "skeptic"):
+                charter, path = m._role_charter(role)
+                assert charter, f"バンドル配置で {role} の憲章を見失った（探した先: {path}）"
     finally:
         os.environ.pop("CLAUDE_PLUGIN_ROOT", None)
+        if saved is not None:
+            os.environ["CLAUDE_PLUGIN_ROOT"] = saved
 
 
-# ── 実地フィードバック: 識別子の揺れで admission を見失う ─────────────────
-# gate が deliverable に "settle()"（関数名）を書き、complete の照合が "8"（Issue番号）で
-# 探して「admission がまだ」と出た。記録は seq 96 に存在していた。
+def test_verify_actually_injects_the_charter(tmp_path):
+    """`_role_charter` 単体ではなく、**verify の出力に憲章が入る**ことを見る。
+
+    ヘルパが動いても、組み立て側で落としていれば意味がない。実地の症状は
+    「verify が使えない」であって「_role_charter が None を返す」ではなかった。
+    """
+    p = subprocess.run([sys.executable, str(TOOLS / "org_cycle.py"), "verify",
+                        "--issue", "1", "--role", "gate"],
+                       capture_output=True, text=True, cwd=str(tmp_path), timeout=60)
+    out = p.stdout + p.stderr
+    # gh が無い / Issue が読めない環境では exit 3 で落ちるのが正しい。
+    # ただし **憲章が見つからない（exit 2）で落ちてはいけない** — それは配線の欠陥。
+    assert "agents/gate.md が見つからない" not in out, \
+        f"憲章の探索が壊れている: {out[:300]}"
+    assert p.returncode != 2, out
 
 
 def test_verify_allows_passing_by_file_reference():
@@ -527,9 +548,11 @@ def test_ghsync_core_HERE_points_at_tools():
     record.py が ledger.py を見失うと、判断が Issue にだけ残り台帳が欠ける —
     まさに 0.21.0 で塞いだ片側落ちが、分割によって再発する。
     """
-    src = _gh_src("record")
-    assert "os.path.dirname(os.path.dirname(os.path.abspath(__file__)))" in src, \
+    src = _gh_src("_core")
+    assert "HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))" in src, \
         "tools/ を基点にしていない（ledger.py を見失う）"
+    # record.py は HERE を使うこと（自前で解決し直さない）
+    assert "HERE" in _gh_src("record")
 
 
 def test_ghsync_every_subcommand_still_dispatches():
@@ -550,3 +573,38 @@ def test_bundle_includes_ghsync():
         dst = bundled / src.name
         assert dst.is_file(), f"バンドルに {src.name} が無い"
         assert dst.read_text(encoding="utf-8") == src.read_text(encoding="utf-8")
+
+
+def test_path_base_is_resolved_in_exactly_one_place():
+    """`__file__` からのパス解決は各パッケージ1箇所（HERE）に集約すること。
+
+    0.22.0 の分割で `tools/` → `tools/orgcycle/` と階層が1つ深くなったとき、各所に散った
+    `os.path.dirname(os.path.abspath(__file__))` のうち直し漏れが2箇所出た:
+    `_agents_dir`（憲章を見失い verify が gate/skeptic とも死ぬ）と `_seam`（handoff.py を
+    見失い seam contract が生成できない）。**基点が散っていると、階層が変わるたびに
+    直し漏れが起きる。**
+    """
+    for pkg in ("orgcycle", "ghsync"):
+        d = TOOLS / pkg
+        if not d.is_dir():
+            continue
+        hits = []
+        for f in sorted(d.glob("*.py")):
+            for i, line in enumerate(f.read_text(encoding="utf-8").split("\n"), 1):
+                if "__file__" in line and not line.lstrip().startswith("#"):
+                    hits.append(f"{f.name}:{i}")
+        assert len(hits) == 1, \
+            f"{pkg}: __file__ の解決が {len(hits)} 箇所にある（HERE に集約すること）: {hits}"
+
+
+def test_verify_finds_handoff_for_the_seam_contract(tmp_path):
+    """seam contract の生成（handoff.py）も見失っていないこと。
+
+    憲章と同じ穴を _seam も踏んでいた。ヘルパ単体ではなく、verify の出力に
+    Boundary contract が入ることで見る。
+    """
+    p = subprocess.run([sys.executable, str(TOOLS / "org_cycle.py"), "verify",
+                        "--issue", "1", "--role", "gate"],
+                       capture_output=True, text=True, cwd=str(tmp_path), timeout=60)
+    out = p.stdout + p.stderr
+    assert "seam contract の生成に失敗" not in out, f"handoff.py を見失っている: {out[:300]}"

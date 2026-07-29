@@ -13,6 +13,12 @@ import sys
 CLAIM_PREFIX = "orgforge:claimed:"
 
 
+# tools/ を指す。**このファイルは tools/ghsync/ に居るので親を1つ上る。**
+# パスの基点はここに集約する — 各所で `__file__` を解決し直すと、階層が変わったとき
+# 直し漏れが起きる（0.22.0 で _agents_dir と _seam が実際にそうなった）。
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
 def gh(args, check=True):
     """Run a gh command; return (code, stdout). gh handles auth; we never see the token."""
     try:

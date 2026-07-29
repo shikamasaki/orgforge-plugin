@@ -265,8 +265,11 @@ def _candidate_id(issue, repo=None):
 def _agents_dir():
     """agents/*.md の場所。プラグインとして入っている場合と、この repo を直接使う場合の両方。"""
     env = os.environ.get("CLAUDE_PLUGIN_ROOT")
-    here = os.path.dirname(os.path.abspath(__file__))     # .../tools
-    bases = ([env] if env else []) + [os.path.dirname(here)]
+    # HERE は tools/ を指す（このファイルは tools/orgcycle/ に居る）。その親が
+    # プラグインルート / repo ルート。**分割時に `__file__` の階層が1つ深くなったのに
+    # ここを直さず、探索先が全部1階層ずれて憲章を見失った**（0.22.0 の実害）。
+    # 基点は HERE に集約する — `__file__` を各所で解決し直すと、また同じ穴を掘る。
+    bases = ([env] if env else []) + [os.path.dirname(HERE)]
     for base in bases:
         # プラグインとして入った形（agents/ は tools/ の兄弟）と、この repo を直接使う形の両方。
         # 片方しか見ないと、バンドル側で憲章を見失って verify が成り立たなくなる。

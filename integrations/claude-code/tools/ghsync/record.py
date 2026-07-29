@@ -12,6 +12,7 @@ import subprocess
 import sys
 
 from ._core import (
+    HERE,
     _already_logged,
     _stable_key,
     gh,
@@ -82,9 +83,7 @@ def _append_progress_receipt(a):
         payload["result"] = str(a.result)[:4000]
     if getattr(a, "files", None):
         payload["files"] = a.files
-    # tools/ を指す — このファイルは tools/ghsync/ に居るので親を1つ上る。
-    # ここを直し忘れると ledger.py を見失い、判断が Issue にだけ残る。
-    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    here = HERE
     try:
         p = subprocess.run([sys.executable, os.path.join(here, "ledger.py"), "append",
                             "--actor", payload["role"], "--class", "progress_recorded",
@@ -286,9 +285,7 @@ def cmd_decide(a):
     # **台帳を先に通す。** 統制（自己承認拒否・順序違反）は台帳が持っているので、
     # Issue に書いてから台帳が拒否すると「Issue には admit と書いてあるが台帳には無い」
     # という最悪の食い違いが残る。拒否されるなら、外に見える記録を作る前に止める。
-    # tools/ を指す — このファイルは tools/ghsync/ に居るので親を1つ上る。
-    # ここを直し忘れると ledger.py を見失い、判断が Issue にだけ残る。
-    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    here = HERE
     payload = {"verdict": a.verdict, "deliverable": str(a.issue), "issue": a.issue,
                "reasoning_sha256": digest}
     if getattr(a, "phase", None):
