@@ -3,6 +3,32 @@
 All notable changes to orgforge-plugin. This project follows a pragmatic semver:
 minor = new mechanisms/features, patch = fixes, major = breaking articulation changes.
 
+## 0.9.1
+
+**ドキュメントを 0.9.0 の実態に合わせ、`/org-init` の誤爆を機械的に止める。** 機能追加はない
+patch リリースだが、**バージョンを上げないと `/plugin update` がキャッシュを更新しない** —
+同じ version 番号のままドキュメントやコマンドを直しても、利用者には届かない（実地で判明）。
+
+### 直したドキュメントの齟齬（実地で判明した4点）
+
+- **コマンド名が未修飾だった** — 正しくは `/orgforge-plugin:org-init`。README / QUICKSTART /
+  REFERENCE / ARCHITECTURE の24箇所を修正。他のプラグインと名前が衝突しないための正式な形
+- **インストール手順が directory 参照のままだった** — ローカルディレクトリ参照はそのマシンで
+  しか動かず、**未コミットの変更がそのまま動く**（検証していないコードで org を動かすことになる）。
+  GitHub 参照に書き換え、push が必須になる開発フローも明記
+- **「`ORG_LEDGER_ROOT` は必須」が 0.9.0 で嘘になっていた** — 発見が既定なので通常は不要。
+  REFERENCE の env var 節を「すべて上書き」に書き直し、優先順位（明示的な引数 > 環境変数 >
+  発見）と、なぜ発見が既定かを明記。QUICKSTART §2 も「セットアップは不要」に全面改稿
+- README に `org-adopt` が無かった
+
+### `/org-init` の誤爆ガードを機械判定に
+
+ステップ0が「場所を表示する」だけで判断を人任せにしていたため、**プラグイン自身の開発ツリーを
+org 化する事故を2回起こした**（`.orgforge/` + テンプレ7点 + `develop` ブランチ + GitHub ラベル
+9件。いずれも復旧済み）。`.claude-plugin/marketplace.json` か `integrations/claude-code/commands`
+の存在で機械的に判定し、**⛔ STOP を出して以降のステップを止める**ようにした。
+「これは表示ではなく指示である」ことも明記 — 表示は読み飛ばされる。
+
 ## 0.9.0
 
 **An org is a place on disk, not a shell environment — and the founding→backlog path is now a complete,
