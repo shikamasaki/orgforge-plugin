@@ -60,7 +60,12 @@ roles:
   - role: skeptic                       # adversarial CHECKER — judge tier, method is free (docs/03 §2)
     model_tier: judge
     model_family: family-B              # DIFFERENT family from the gate/maker: an adversarial checker
-                                        # on the same base model shares their blind spots (docs/03 §3)
+                                        # on the same base model shares their blind spots (docs/03 §3).
+                                        # **同一ハーネスの subagent では inherit になり、この宣言は
+                                        # 効かない。** 血統を実際に分けるには別ハーネスで動かす —
+                                        # integrations/README の「Codex as a judge」を見ること。
+                                        # 下の output.json_schema は Codex の --output-schema に
+                                        # 写せる（template/schemas/skeptic-verdict.json）。
     effort: high
     context_budget_tokens: 40000
     stop: { goal: "refuted / survives decided for the admitted positive", max_iterations: 6 }

@@ -316,6 +316,62 @@ def _reasoning_defect(why, verdict, event):
     return None
 
 
+def _org_lineage():
+    """constitution の `enforcement.judges.lineage` を読む。既定は `same-harness`。
+
+    宣言していない org では何も変わらない。**層を増やすのは選択であって前提ではない。**
+    読めないときも既定に倒す — 設定を読めないことで org を止めるのは筋が違う。
+    """
+    try:
+        sys.path.insert(0, HERE)
+        from discover import constitution
+        import yaml
+        path = constitution()
+        if not path or not os.path.isfile(path):
+            return "same-harness"
+        with open(path, encoding="utf-8") as f:
+            c = yaml.safe_load(f) or {}
+    except Exception:
+        return "same-harness"
+    return str((((c.get("enforcement") or {}).get("judges") or {}).get("lineage")
+                or "same-harness")).strip()
+
+
+def _has_lineage_verdict(issue, event, lineage):
+    """その Issue の同じ event に、指定した血統の **通した** 判定が台帳にあるか。
+
+    否（reject/refuted）は数えない — 探しているのは一致なので、片方が否ならそもそも
+    admit を記録する場面ではない。訂正済み（`corrected_seqs`）は数えない。
+    """
+    ok = {"admission_decided": ("admit",), "refutation_attempted": ("survives",)}.get(event, ())
+    try:
+        sys.path.insert(0, HERE)
+        from discover import ledger_root
+        from ledger import corrected_seqs
+        root = ledger_root()
+    except Exception:
+        return False
+    path = os.path.join(root, "ledger.jsonl") if root else None
+    if not path or not os.path.isfile(path):
+        return False
+    evs = []
+    for line in open(path, encoding="utf-8"):
+        try:
+            evs.append(json.loads(line))
+        except Exception:
+            continue
+    voided = corrected_seqs(evs)
+    want = str(issue).lstrip("#")
+    for e in evs:
+        if e.get("class") != event or e.get("seq") in voided:
+            continue
+        pl = e.get("payload", {}) or {}
+        ids = {str(pl.get(k, "")).lstrip("#") for k in ("issue", "deliverable") if pl.get(k)}
+        if want in ids and pl.get("lineage") == lineage and pl.get("verdict") in ok:
+            return True
+    return False
+
+
 def cmd_decide(a):
     """Record a JUDGMENT on the task Issue — the verdict AND the reasoning that produced it.
 
@@ -350,6 +406,38 @@ def cmd_decide(a):
                   f"  **maker の報告の質は admit の代わりにならない。** 台帳は phase_started に対して\n"
                   f"  既に同じ検査をしている（design が admit されていなければ implement を拒否）。\n"
                   f"  統合の記録が admit なしに残ると、後から見て「通った」と読めてしまう。",
+                  file=sys.stderr)
+            return 4
+
+    # cross-harness を宣言した org では、admit/survives は **両方の血統の一致** を要求する。
+    # 片方でも reject/refuted なら reject — 厳しい側に倒す。実測: #11 の認可穴と #42 の
+    # Testing Library 欠落は、どちらも同一ハーネスが通したあと別血統が捕まえた。
+    #
+    # **これを decide が持つ理由**: verify が両方の判定を並べて監督が読むだけなら、監督は
+    # 都合のいい方を採れる。検査を増やしたのに緩くなる（docs/11「検査を呼ぶかどうかを、
+    # 検査される側が決められてはいけない」の、判定を採用する側での形）。
+    if a.event in ("admission_decided", "refutation_attempted") \
+            and a.verdict in ("admit", "survives") and _org_lineage() == "cross-harness":
+        _who = "gate" if a.event == "admission_decided" else "skeptic"
+        if not getattr(a, "lineage", None):
+            print(f"{a.event} = {a.verdict} を記録できない: --lineage が無い。\n"
+                  f"  この org は constitution で judges.lineage = cross-harness を宣言している。\n"
+                  f"  judge は2人いるので、**どちらの血統の判定か**を書かないと一致を数えられない:\n"
+                  f"    --lineage same-harness   （同一ハーネスの {_who} subagent の判定）\n"
+                  f"    --lineage cross-harness  （別ハーネス headless の {_who} の判定）",
+                  file=sys.stderr)
+            return 4
+        other = "cross-harness" if a.lineage == "same-harness" else "same-harness"
+        if not _has_lineage_verdict(a.issue, a.event, other):
+            print(f"{a.event} = {a.verdict} を記録できない: "
+                  f"{other} の {_who} の判定が台帳に無い。\n"
+                  f"  **admit は一致を要求する** — 片方でも否なら否なので、片側だけの admit は"
+                  f"後から見て「通った」と読めてしまう。\n"
+                  f"  もう一方を先に通すこと:\n"
+                  f'    python3 "{os.path.join(HERE, "org_cycle.py")}" verify '
+                  f"--issue {a.issue} --role {_who}\n"
+                  f"  （{other} が否だったなら、admit ではなくその否を記録する。"
+                  f"食い違いは judges_disagreed に残す — **血統を分けた目的**なので消さない）",
                   file=sys.stderr)
             return 4
 
@@ -414,7 +502,8 @@ def cmd_decide(a):
     # という最悪の食い違いが残る。拒否されるなら、外に見える記録を作る前に止める。
     here = HERE
     payload = {"verdict": a.verdict, "deliverable": str(a.issue), "issue": a.issue,
-               "reasoning_sha256": digest}
+               "reasoning_sha256": digest,
+        **({"lineage": a.lineage} if getattr(a, "lineage", None) else {})}
     if getattr(a, "phase", None):
         payload["phase"] = a.phase
     if getattr(a, "risk", None):

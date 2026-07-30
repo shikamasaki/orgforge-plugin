@@ -91,6 +91,38 @@ cp integrations/codex/config.toml  <repo>/.codex/config.toml
 export ORG_LEDGER_ROOT=/path/to/ledger
 ```
 
+### Codex as a judge — a genuinely different lineage
+
+`template/role-settings.yaml` declares `skeptic: model_family: family-B` — a different family from
+the gate and the maker, because an adversarial checker on the same base model shares their blind
+spots (docs/03 §3). Inside one harness a subagent inherits the parent's model, so that declaration
+had no effect. Running the judge on **another harness** is what makes the lineage real.
+
+```bash
+# 1. build the prompt (the seam gate reads a referenced file, so a path works too)
+python3 tools/org_cycle.py verify --issue 11 --role skeptic > /tmp/sk11.md
+
+# 2. run it headless, with the verdict shape enforced by the schema
+codex exec --sandbox read-only -m gpt-5.5   --output-schema template/schemas/skeptic-verdict.json   -o /tmp/sk11.json "$(cat /tmp/sk11.md)" </dev/null
+
+# 3. check the report has the shape its role owes before reading it as a judgment
+python3 tools/org_cycle.py intake --issue 11 --role skeptic --report - < /tmp/sk11.json
+```
+
+Two layers, deliberately: `--output-schema` enforces the *shape* of the verdict (a report cannot
+come back missing `verdict` or `evidence`), and `intake` checks the *content* (a field present but
+empty is still incomplete). A judge runs `--sandbox read-only`, so it cannot write regardless of
+whether the Codex hook is wired.
+
+Verified against Codex CLI 0.146.0 with a ChatGPT account, where two things bit:
+
+- **`gpt-5-codex` is rejected** — *"not supported when using Codex with a ChatGPT account."*
+  Confirm a model name with `codex exec -m <m> "Reply OK"` before writing it into a config.
+- **Structured Outputs requires every property in `required`** when `additionalProperties: false`.
+  An optional field is expressed as `"type": ["string", "null"]`, not by omission from `required`.
+- `codex exec` reads stdin, so a non-interactive call needs `</dev/null`; outside a git repo it
+  needs `--skip-git-repo-check`.
+
 Codex's `PreToolUse` hook calls the **same** `org_hook.py`, so the identical guardrail blocks
 identical actions. In unattended CI, either register the hook as **managed** or run with
 `--dangerously-bypass-hook-trust` (Codex requires hooks to be trusted). Tool availability is set by

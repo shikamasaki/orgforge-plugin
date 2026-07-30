@@ -138,6 +138,11 @@ def main(argv):
                    help="THE REASONING that produced the verdict — what was weighed and what evidence "
                         "decided it. With human review retired this is the only account of why the "
                         "change merged; a restatement of the verdict is rejected (docs/11 §4f)")
+    # 判定した judge の血統。judges.lineage = cross-harness の org では、admit/survives の
+    # 記録に **両方の血統** が要る（片方でも否なら否なので、admit だけが一致を要求する）。
+    q.add_argument("--lineage", choices=("same-harness", "cross-harness"),
+                   help="この判定を出した judge の血統（cross-harness の org で admit/survives "
+                        "を記録するときは必須）")
     q.add_argument("--by", help="the role that decided (gate, skeptic, registrar, …)")
     q.add_argument("--phase", help="the SDLC phase this judgment gates")
     q.add_argument("--evidence", help="what was consulted — test output, CI run, repro_lint verdict, files read")

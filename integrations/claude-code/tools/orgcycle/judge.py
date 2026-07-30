@@ -5,6 +5,9 @@ gate / skeptic が決める。ツールが verdict を決めた瞬間に gate �
 
 import json
 import os
+import shutil
+import subprocess
+import tempfile
 import re
 import sys
 
@@ -271,7 +274,10 @@ def cmd_verify(a):
                f"gate が refute することも**拒否する** — あなたの独立性は記録の時点で"
                f"機械的に検査される。")
 
-    print("\n".join(out))
+    _lineage, _hcfg = _judge_lineage(role)
+    # cross-harness では stdout は **判定** の置き場所にする（intake にそのまま渡せる形）。
+    # 材料は stderr に回す — 監督が読めることは残す。
+    print("\n".join(out), file=sys.stderr if _lineage == "cross-harness" else sys.stdout)
     # 監督向け（stderr）— subagent が返した値を流し込むコマンド。**判定は埋めない。**
     print(f"\n===== 監督（あなた）が打つコマンド — {role} が返した値を入れる =====\n"
           f'python3 "{os.path.join(HERE, "github_sync.py")}" decide --issue {a.issue} '
@@ -297,6 +303,40 @@ def cmd_verify(a):
           f"--round {len(rounds) + 1 if 'rounds' in dir() else '<何周目か>'}\n"
           f"（これを打たないと `show` の rework 警告が沈黙する — 台帳に材料が入らないので"
           f"閾値に届かない。**道具は数えられないものを数えない**）\n", file=sys.stderr)
+    # ヘッドレスで回す形（Codex / claude -p）。**血統を分けるなら別ハーネスで動かす** —
+    # role-settings.yaml は skeptic に family-B（gate と別系統）を宣言しているが、同一ハーネスの
+    # subagent では inherit になり、同じ base model の盲点を共有する（docs/03 §3）。
+    # constitution の `enforcement.judges.lineage` を読む。**既定は same-harness** —
+    # 別ハーネスの契約・CLI・認証を前提にすると、持っていない環境で org が回らなくなる。
+    # 層を増やすのは選択であって前提ではない。
+    _schema = os.path.join(os.path.dirname(HERE), "template", "schemas", f"{role}-verdict.json")
+    if _lineage == "cross-harness":
+        if not os.path.isfile(_schema):
+            print(f"judges.lineage = cross-harness だが {role} の出力スキーマが無い "
+                  f"（探した先: {_schema}）。スキーマ無しで別ハーネスに投げると、verdict が"
+                  f"欠けた散文が返ってきても構造では気づけない。**血統を分ける前にスキーマを"
+                  f"揃えること。**", file=sys.stderr)
+            return 2
+        # **judge は2人走る。** 同一ハーネスの subagent（材料は上の stderr）と、別ハーネスの
+        # headless（下で起動する）。片方でも reject/refuted なら reject —
+        # AND ではなく厳しい側に倒す。実測（#11 の認可穴・#42 の Testing Library 欠落）で
+        # **2件とも厳しい側が正しかった**。多数決にすると 1:1 で決まらず、監督の裁量に戻る。
+        rc = _run_headless(role, a.issue, "\n".join(out), _hcfg, _schema)
+        print(f"\n===== judge は2人いる（judges.lineage = cross-harness）=====\n"
+              f"  1. 同一ハーネスの {role} subagent — 上の材料をそのまま渡す\n"
+              f"  2. 別ハーネスの {role} — " +
+              ("上の JSON（stdout）が その判定である" if rc == 0
+               else "**起動できなかった。判定は得られていない**") + "\n"
+              f"  **片方でも {bad} なら {bad} として扱う。** 一致を要求する形なので、"
+              f"admit を記録するには両方の admit が要る（decide が検査する）。\n"
+              f"  判定が食い違ったら、食い違いそのものを記録すること —\n"
+              f'    python3 "{os.path.join(HERE, "ledger.py")}" append '
+              f"--class judges_disagreed --actor <あなたの役割> \\\n"
+              f"      --payload '{{\"issue\": {a.issue}, \"role\": \"{role}\", "
+              f"\"same_harness\": \"<verdict>\", \"cross_harness\": \"<verdict>\"}}'\n"
+              f"  （食い違いは異常ではなく**血統を分けた目的**である。消さずに数えること）",
+              file=sys.stderr)
+
     print(f"— この出力を {role} subagent に渡すこと。本文に貼っても、ファイルに落として"
           f"参照させてもよい\n"
           f"  （seam ガードは本文に契約が無ければ、プロンプトが指すファイルを自分で読んで"
@@ -338,6 +378,121 @@ _TRUNCATED = (r"^\s*(now|next|then)\b", r"(しましょう|します)。?\s*$",
               r"(let me|i'll|i will)\b.*:$", r":\s*$")
 
 
+
+def _run_headless(role, issue, material, cfg, schema):
+    """judge を別ハーネスで実際に起動し、構造化された verdict を持ち帰る。
+
+    **案内を出すだけにしない。** 打つかどうかを監督が選べるなら、それは「検査を呼ぶかどうかを
+    検査される側が決める」構造に戻る（docs/11）。cross-harness を宣言した org では、verify が
+    自分で起動して結果を出すところまでを配管とする。
+
+    judge は read-only で走らせる。**別ハーネスのガードレールは未検証**なので、書けないなら
+    そのハーネスが何を許していても安全側に倒れる。
+    """
+    cfg = cfg or {}
+    cli = str(cfg.get("cli") or "codex")
+    model, effort = cfg.get("model"), cfg.get("effort")
+    exe = shutil.which(cli)
+    if not exe:
+        print(f"judges.harness.{role}.cli = {cli!r} が PATH に無い。"
+              f"インストールと認証を済ませるか、constitution の judges.lineage を "
+              f"same-harness に戻すこと。", file=sys.stderr)
+        return 4
+
+    out_json = os.path.join(tempfile.gettempdir(), f"orgforge-{role}-{issue}.json")
+    if cli == "codex":
+        cmd = [exe, "exec", "--sandbox", "read-only"]
+        if model:
+            cmd += ["-m", str(model)]
+        if effort:
+            cmd += ["-c", f"model_reasoning_effort={effort}"]
+        cmd += ["--output-schema", schema, "-o", out_json, material]
+    elif cli == "claude":
+        # claude -p は --output-schema を持たないので、スキーマを本文で要求し、
+        # 返ってきた JSON を intake の側で検査する。**構造の保証が一段弱いことを言う。**
+        cmd = [exe, "-p", material + "\n\n## 返す形\n"
+               "次のスキーマに厳密に一致する JSON **のみ** を返すこと（前後に散文を付けない）:\n"
+               + open(schema, encoding="utf-8").read(),
+               "--output-format", "json"]
+        if model:
+            cmd += ["--model", str(model)]
+    else:
+        print(f"judges.harness.{role}.cli = {cli!r} は未対応（codex | claude）。", file=sys.stderr)
+        return 2
+
+    # **read-only の judge は、実行して緑を確かめる MUST を構造的に admit できない。**
+    # 実測: #34 は「静的には妥当だが『100回連続 green』を read-only サンドボックスで再導出
+    # できない」として park を返した。park 自体は正しい振る舞い（測れないのに admit しない）だが、
+    # 判定を回してから分かるのは無駄なので、**先に言う**。
+    print(f"[{role}] judge は read-only で走る（judges.read_only）。別ハーネスのガードレールは"
+          f"未検証なので、書けないなら安全側に倒れる。\n"
+          f"  ただし **実行して緑を確かめる類の MUST は再導出できず、park になる** "
+          f"（テストの連続実行・実 DB への到達・ビルド）。\n"
+          f"  その MUST が admission の荷重を持つなら、判定の前に監督が実測して "
+          f"evidence として渡すこと。", file=sys.stderr)
+    print(f"[{role}] {cli} を read-only で起動している"
+          + (f"（model={model}" + (f", effort={effort}" if effort else "") + "）" if model else "")
+          + " — 応答まで数分かかることがある …", file=sys.stderr)
+    try:
+        # stdin を閉じる。codex exec は stdin を読もうとして、端末が無いと止まる（実測）。
+        pr = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True,
+                            text=True, timeout=int(os.environ.get("ORG_JUDGE_TIMEOUT", "1800")))
+    except subprocess.TimeoutExpired:
+        print(f"[{role}] {cli} がタイムアウトした（ORG_JUDGE_TIMEOUT で延ばせる）。",
+              file=sys.stderr)
+        return 5
+    if pr.returncode != 0:
+        print(f"[{role}] {cli} が exit={pr.returncode} で終了した:\n"
+              f"{(pr.stderr or pr.stdout or '')[-1200:]}", file=sys.stderr)
+        return 6
+
+    raw = None
+    if os.path.isfile(out_json):
+        raw = open(out_json, encoding="utf-8").read()
+    elif cli == "claude":
+        try:                                    # claude -p --output-format json の封筒を開ける
+            raw = (json.loads(pr.stdout) or {}).get("result") or pr.stdout
+        except Exception:
+            raw = pr.stdout
+    if not raw or not raw.strip():
+        print(f"[{role}] {cli} が空を返した。判定は得られていない。", file=sys.stderr)
+        return 7
+
+    print(raw)                                  # 監督が読む・intake に渡せる形で stdout に出す
+    print(f"\n[{role}] 別ハーネス（{cli}"
+          + (f" / {model}" if model else "") + f"）の判定を持ち帰った。**まだ記録していない。**\n"
+          f"  内容の側から検査する:\n"
+          f'    python3 "{os.path.join(HERE, "org_cycle.py")}" intake --issue {issue} '
+          f"--role {role} --report {out_json if os.path.isfile(out_json) else '-'}\n"
+          f"  検査を通ったら記録する（verdict / why は判定した側のもの。監督が書き換えない）。",
+          file=sys.stderr)
+    return 0
+
+
+def _judge_lineage(role):
+    """constitution の `enforcement.judges` を読む。(lineage, harness-cfg) を返す。
+
+    **既定は `same-harness`。** 別ハーネスを前提にすると、その契約・CLI・認証を持っていない
+    環境で org が回らなくなる。複数の血統を並べるのは「スイスチーズ」の層を増やす選択であって、
+    org が成立する前提ではない。
+    """
+    try:
+        sys.path.insert(0, HERE)
+        from discover import constitution
+        import yaml
+        path = constitution()
+        if not path or not os.path.isfile(path):
+            return "same-harness", None
+        with open(path, encoding="utf-8") as f:
+            c = yaml.safe_load(f) or {}
+    except Exception:
+        return "same-harness", None
+    j = ((c.get("enforcement") or {}).get("judges") or {})
+    lineage = str(j.get("lineage") or "same-harness").strip()
+    cfg = (j.get("harness") or {}).get(role)
+    return lineage, cfg if isinstance(cfg, dict) else None
+
+
 def cmd_intake(a):
     """subagent が返した報告が成果物の形になっているかを検査する。
 
@@ -355,8 +510,35 @@ def cmd_intake(a):
               f"（定義済み: {', '.join(sorted(_INTAKE))}）。", file=sys.stderr)
         return 2
 
-    missing = [(k, why) for k, pat, why in checks
-               if not re.search(pat, text, re.I | re.M)]
+    # 構造化された返り値（Codex の --output-schema など）なら、**正規表現ではなく構造で見る**。
+    # スキーマが形を保証していても、`out_of_scope` に「無し」と書くべき欄が空文字だったり、
+    # verdict が enum 外の値だったりはしうる。JSON なら確実に読めるので、そちらを優先する。
+    as_json = None
+    try:
+        cand = json.loads(text)
+        if isinstance(cand, dict):
+            as_json = cand
+    except Exception:
+        pass
+
+    if as_json is not None:
+        missing = []
+        for k, pat, why in checks:
+            v = as_json.get(k)
+            if k == "verdict":
+                ok = isinstance(v, str) and re.fullmatch(pat.replace(r"\b", ""), v.strip(), re.I)
+            else:
+                ok = bool(str(v).strip()) if not isinstance(v, (list, dict)) else bool(v) or v == []
+            if not ok:
+                missing.append((k, why + "（構造化された返り値の該当欄が空 / 値が不正）"))
+        # スキーマが required にしていても、値が空文字なら埋まっていない
+        for k in ("why", "evidence"):
+            v = str(as_json.get(k) or "").strip()
+            if k in dict((c[0], 1) for c in checks) and len(v) < 20 and (k, ) not in [(m[0],) for m in missing]:
+                missing.append((k, "構造化された返り値の該当欄が短すぎる（20文字未満）"))
+    else:
+        missing = [(k, why) for k, pat, why in checks
+                   if not re.search(pat, text, re.I | re.M)]
     truncated = [p for p in _TRUNCATED if re.search(p, text.strip(), re.I | re.M)]
 
     print(f"— intake #{a.issue} ({role}) — {len(text)} 文字")

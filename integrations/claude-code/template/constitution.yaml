@@ -198,6 +198,32 @@ mandate_precedence:
 # only as a DEV OVERRIDE (a developer's laptop may loosen a cap locally, but the shipped org's gate
 # regime is what is written here and ledgered). no_agent_writes_this_file covers this block too.
 enforcement:
+  # ── judge の血統（スイスチーズ層）─────────────────────────────────────
+  # 「1つの銀の弾丸を求めるより、複数のモデルを組み合わせた方がうまくいく」— 同じ base model の
+  # checker は maker と同じ盲点を共有する（docs/03 §3）。role-settings.yaml は skeptic に
+  # `model_family: family-B` を宣言しているが、**同一ハーネスの subagent では inherit** に
+  # なるので、宣言だけでは血統が分かれない。
+  #
+  # 既定は `same-harness` — 起動しているエージェントの中だけで回す。別ハーネスの契約・CLI・
+  # 認証を前提にすると、持っていない環境で org が回らなくなる。**層を増やすのは選択であって
+  # 前提ではない。**
+  judges:
+    lineage: same-harness   # same-harness | cross-harness
+                            #   same-harness: gate も skeptic も起動中のエージェントで回す（既定）
+                            #   cross-harness: 下の harness 指定に従って別ハーネスで回す。
+                            #     `verify` が打つべきコマンドを出す（実行は監督が行う）
+    # cross-harness のときだけ読まれる。ここに書いたものが `verify` の案内に出る。
+    # **モデル名は必ず1回実際に叩いて確かめること** — 契約によって使えないものがある
+    # （実測: ChatGPT アカウントで `gpt-5-codex` は 400 で拒否された）。
+    harness:
+      gate: null                       # null = 起動中のエージェントで回す
+      skeptic: null                    # 例: { cli: codex, model: "gpt-5.5", effort: high }
+                                       #   → codex exec --sandbox read-only -m gpt-5.5 …
+                                       #     --output-schema template/schemas/skeptic-verdict.json
+    # judge は書き込みを持たない。別ハーネスで回す場合も read-only で走らせる —
+    # そのハーネスのガードレールが未検証でも、書けないなら安全側に倒れる。
+    read_only: true
+
   # blast-radius caps — the per-day budget of irreversible/asset-touching exposure, by dimension.
   # A gate HOLDS (escalates) when the rolling-window sum would exceed the cap. Dimension names match
   # the hook's classifier (org_hook.py _DEFAULT_CAPS). Tune to YOUR org's real throughput; the

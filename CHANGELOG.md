@@ -6,6 +6,69 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 0.32.0
+
+### Added
+- **Judge lineage is now a declared, enforced choice** — `constitution.yaml`
+  `enforcement.judges.lineage` selects `same-harness` (default; nothing changes for an org that
+  has not contracted a second harness) or `cross-harness`. Under `cross-harness`, `verify`
+  **launches the second-lineage judge itself** (`codex exec` / `claude -p`, read-only,
+  `--output-schema`) and returns its verdict on stdout, rather than printing a command the
+  supervisor may or may not run. Both judges run: the in-harness subagent and the headless one.
+- **`decide` requires both lineages to agree before recording an admit** — under
+  `cross-harness`, `admission_decided = admit` / `refutation_attempted = survives` needs
+  `--lineage` and a matching pass from the other lineage already in the ledger. Either side's
+  reject/refuted stands alone. Without this, `verify` would print two verdicts and the
+  supervisor could pick the convenient one — more checks, less strictness.
+- **`drift factors`** — reads the reject/refuted reasons across Issues and counts common
+  factors, so a defect recurring in five deliverables can be traced to what produced it
+  (spec wording, the standard handed to the gate, conventions, task granularity) instead of
+  being fixed five times. It reports what it could not count, and decides nothing.
+- `verify` warns up front that a read-only judge structurally cannot admit a MUST that
+  requires execution (a test loop, a live DB, a build) — measured: it returns `park`.
+
+### Fixed
+- `drift` read whole Issue comments, matching maker reports and rework instructions, so four
+  of eight factors hit every Issue and the distribution vanished. It now parses only the
+  judgment comment's `Why` section.
+
+### Notes
+- Two live findings from a second lineage, both after the in-harness judge had passed the work:
+  a `left_at`-blind membership check granting SELECT authority across groups, and a
+  "screen tests are writable" MUST met in wording with no DOM test environment installed.
+- `role-settings.yaml`'s `model_family: family-B` still has no effect on an in-harness
+  subagent; `judges.lineage: cross-harness` is what makes the separation real.
+
+## 0.31.0
+
+`role-settings.yaml` has declared `skeptic: model_family: family-B` — a different family from the
+gate and maker — since the settings layer existed. Inside one harness a subagent inherits the
+parent's model, so the declaration had no effect: the adversarial checker shared the maker's blind
+spots (docs/03 §3). Running a judge on **another harness** is what makes that lineage real.
+
+### Added
+- `template/schemas/{gate,skeptic}-verdict.json` — the `output.json_schema` from
+  `role-settings.yaml`, in a form `codex exec --output-schema` accepts. A verdict cannot come back
+  missing `verdict`, `evidence` or (for the skeptic) the mutations it tried.
+- `verify` prints the headless route on stderr: build the prompt, run it on the other harness with
+  the schema, then pass the result through `intake` before reading it as a judgment.
+
+### Changed
+- `intake` reads a structured verdict **as structure** rather than by regex. A schema can require a
+  field and still receive an empty string; shape and content are now two separate layers.
+- `integrations/codex/config.toml` sets `model_reasoning_effort = "high"` for the judge tier and
+  notes that a model name must be confirmed against the account before being written down.
+
+### Notes
+Verified against Codex CLI 0.146.0 with a ChatGPT account. Three things bit, all recorded in
+`integrations/README.md`: `gpt-5-codex` is rejected for ChatGPT accounts; Structured Outputs
+requires every property in `required` when `additionalProperties: false` (an optional field is
+`"type": ["string", "null"]`); and `codex exec` reads stdin, so a non-interactive call needs
+`</dev/null`.
+
+A judge runs `--sandbox read-only`, so it cannot write regardless of whether the Codex hook is
+wired — the guardrail projection for Codex remains unexercised.
+
 ## 0.30.0
 
 Controls existed for the deliverable, the judgment, the report and the declaration. Nothing

@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "skeptic の判定",
+  "description": "role-settings.yaml の skeptic.output（json_schema）を Codex の --output-schema に写したもの。構造化して返させることで、報告が作業の途中で切れても欠落が機械的に分かる（org_cycle intake と同じ狙いを、返り値の側で満たす）。 Structured Outputs の制約により、properties の全キーが required に入る（任意項目は null を許す）。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "evidence",
+    "mutations",
+    "out_of_scope",
+    "risk",
+    "verdict",
+    "why"
+  ],
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "enum": [
+        "survives",
+        "refuted"
+      ],
+      "description": "MUST に対する反証の結果。範囲外の欠陥は verdict に数えない"
+    },
+    "why": {
+      "type": "string",
+      "minLength": 40,
+      "description": "構成した具体的なシナリオと、押したときに何が起きたか。survives でも「誰にとって、どの条件で壊れうるか」を書く"
+    },
+    "evidence": {
+      "type": "string",
+      "minLength": 20,
+      "description": "実際に走らせた／読んだもの。コマンドと実出力"
+    },
+    "mutations": {
+      "type": "array",
+      "description": "撃ったミューテーション。次の周回が同じ場所を撃ち直さないために要る",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "detected",
+          "note",
+          "what"
+        ],
+        "properties": {
+          "what": {
+            "type": "string",
+            "description": "何をどう壊したか"
+          },
+          "detected": {
+            "type": "boolean",
+            "description": "既存のテストが検出したか"
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "out_of_scope": {
+      "type": "array",
+      "description": "MUST の範囲外で見つけた欠陥。verdict には数えず「Issue 化を推奨」として返す。無ければ空配列",
+      "items": {
+        "type": "string"
+      }
+    },
+    "risk": {
+      "type": "string",
+      "description": "排除しきれなかった失敗モード。無いなら「無い」と明示"
+    }
+  }
+}

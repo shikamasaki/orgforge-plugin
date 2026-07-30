@@ -1057,3 +1057,158 @@ def test_integrate_plan_lists_only_real_jobs(tmp_path):
     for wrong in ("pull_request", "push", "permissions"):
         assert wrong not in out.split("job:")[1].split("\n")[0], f"{wrong} を job と誤認した"
     assert "条件付きの job がある" not in out, "条件が無いのに警告した"
+
+
+# ── 0.31.0: 別ハーネスを judge として使う（血統を実際に分ける）──────────────
+def test_verdict_schemas_satisfy_structured_outputs():
+    """Structured Outputs は `additionalProperties: false` のとき全キーを required に要求する。
+
+    実測で 400 invalid_json_schema: "'required' is required to be supplied and to be an array
+    including every key in properties. Missing 'note'." 任意の項目は required から外すのではなく
+    `"type": ["string", "null"]` で表現する。
+    """
+    base = TOOLS.parent / "template" / "schemas"
+    assert base.is_dir(), "verdict スキーマが無い"
+
+    def check(node, path="root"):
+        if isinstance(node, dict):
+            if node.get("type") == "object" and "properties" in node:
+                assert node.get("additionalProperties") is False, f"{path}: 追加プロパティを許している"
+                assert set(node.get("required", [])) == set(node["properties"]), \
+                    f"{path}: required が properties 全キーを含んでいない"
+            for k, v in node.items():
+                check(v, f"{path}.{k}")
+        elif isinstance(node, list):
+            for i, v in enumerate(node):
+                check(v, f"{path}[{i}]")
+
+    for role in ("gate", "skeptic"):
+        d = json.loads((base / f"{role}-verdict.json").read_text(encoding="utf-8"))
+        check(d, role)
+        assert "verdict" in d["properties"], role
+        assert d["properties"]["verdict"].get("enum"), f"{role}: verdict が enum でない"
+
+
+def test_intake_reads_a_structured_verdict():
+    """構造化された返り値は、正規表現ではなく構造で見る。
+
+    スキーマが required にしていても、値が空文字なら埋まっていない。形（スキーマ）と
+    中身（intake）で2層にする。
+    """
+    ok = json.dumps({
+        "verdict": "survives",
+        "why": "3経路で試し、いずれも security definer を経由して拒否された。詳細は以下。",
+        "evidence": "psql -c \"update …\" → ERROR: violates row-level security / npm test → 78 passed",
+        "mutations": [{"what": "is_group_member を select true に", "detected": True, "note": None}],
+        "out_of_scope": [], "risk": "中間積の上限チェックが無い"}, ensure_ascii=False)
+    p = subprocess.run([sys.executable, str(TOOLS / "org_cycle.py"), "intake",
+                        "--issue", "11", "--role", "skeptic", "--report", "-"],
+                       input=ok, capture_output=True, text=True, timeout=60)
+    assert p.returncode == 0, p.stdout + p.stderr
+
+    empty = json.dumps({"verdict": "survives", "why": "", "evidence": "",
+                        "mutations": [], "out_of_scope": [], "risk": ""})
+    q = subprocess.run([sys.executable, str(TOOLS / "org_cycle.py"), "intake",
+                        "--issue", "11", "--role", "skeptic", "--report", "-"],
+                       input=empty, capture_output=True, text=True, timeout=60)
+    assert q.returncode == 10, "欄が空の構造化返り値を通した"
+
+
+def test_verify_offers_the_headless_route():
+    """別ハーネスで judge を回す形を、そのまま打てる形で出すこと。"""
+    src = _cycle_src("judge")
+    seg = src[src.index("def cmd_verify"):]
+    assert "--output-schema" in seg and "intake" in seg
+    assert "別の血統" in seg or "別ハーネス" in seg
+
+
+# ── judges.lineage（スイスチーズ層）─────────────────────────────────────
+# **既定が変わらないことを、まず固定する。** 別ハーネスの契約・CLI・認証を前提にすると、
+# 持っていない環境で org が回らなくなる。層を増やすのは選択であって前提ではない。
+
+def test_judge_lineage_defaults_to_same_harness(tmp_path, monkeypatch):
+    """constitution が judges を宣言していなければ same-harness。"""
+    sys.path.insert(0, str(TOOLS))
+    from orgcycle.judge import _judge_lineage
+    (tmp_path / ".orgforge" / "ledger").mkdir(parents=True)   # org_root は .orgforge/ で判定
+    (tmp_path / "constitution.yaml").write_text("enforcement:\n  caps: {}\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    assert _judge_lineage("gate") == ("same-harness", None)
+
+
+def test_judge_lineage_reads_harness_config(tmp_path, monkeypatch):
+    sys.path.insert(0, str(TOOLS))
+    from orgcycle.judge import _judge_lineage
+    (tmp_path / "constitution.yaml").write_text(
+        "enforcement:\n  judges:\n    lineage: cross-harness\n"
+        "    harness:\n      skeptic: { cli: codex, model: \"gpt-5.5\", effort: high }\n",
+        encoding="utf-8")
+    (tmp_path / ".orgforge" / "ledger").mkdir(parents=True)
+    monkeypatch.chdir(tmp_path)
+    lineage, cfg = _judge_lineage("skeptic")
+    assert lineage == "cross-harness"
+    assert cfg["cli"] == "codex" and cfg["model"] == "gpt-5.5"
+    # gate は未指定 → None（宣言していない役は既定のまま）
+    assert _judge_lineage("gate")[1] is None
+
+
+def test_headless_reports_missing_cli_instead_of_falling_back(tmp_path, monkeypatch):
+    """CLI が無いとき、**黙って same-harness に落ちない**。
+
+    「別血統で検査した」と思っているのに実際は同じ血統だった、が最悪の状態である
+    （信号が壊れていることが分からない）。非 0 を返して言うこと。
+    """
+    sys.path.insert(0, str(TOOLS))
+    from orgcycle.judge import _run_headless
+    schema = TEMPLATE / "schemas" / "gate-verdict.json"
+    rc = _run_headless("gate", 1, "材料", {"cli": "no-such-cli-xyz"}, str(schema))
+    assert rc != 0
+
+
+def test_decide_requires_both_lineages_for_admit(tmp_path, monkeypatch):
+    """cross-harness の org では、片側だけの admit を記録できない。
+
+    verify が両方の判定を並べて監督が読むだけなら、監督は都合のいい方を採れる —
+    検査を増やしたのに緩くなる。だから **decide が持つ**。
+    """
+    sys.path.insert(0, str(TOOLS))
+    import importlib
+    rec = importlib.import_module("ghsync.record")
+    (tmp_path / "constitution.yaml").write_text(
+        "enforcement:\n  judges:\n    lineage: cross-harness\n", encoding="utf-8")
+    led = tmp_path / ".orgforge" / "ledger"
+    led.mkdir(parents=True)
+    (led / "ledger.jsonl").write_text("", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ORG_LEDGER_ROOT", str(led))
+    assert rec._org_lineage() == "cross-harness"
+    # 台帳が空 → どちらの血統の admit も無い
+    assert rec._has_lineage_verdict(7, "admission_decided", "same-harness") is False
+    # reject は一致を要求しない（否は片方で足りる）
+    assert rec._has_lineage_verdict(7, "admission_decided", "cross-harness") is False
+
+
+def test_drift_reads_only_the_why_section(monkeypatch):
+    """判定の Why 節だけを読む。コメント全体を検索すると分布が消える（実測）。"""
+    sys.path.insert(0, str(TOOLS))
+    import importlib
+    drift = importlib.import_module("drift")
+    body = ("## ⛔ admission_decided — `reject`\n"
+            "**Why (the reasoning):**\n未測定のまま断定していた。\n\n"
+            "**Evidence consulted:**\n回帰テストは緑だった。\n")
+    monkeypatch.setattr(drift, "_sh", lambda cmd: json.dumps({"comments": [{"body": body}]}))
+    got = drift._issue_reasons(1)
+    assert len(got) == 1
+    assert "未測定" in got[0]
+    # Evidence 節は事由ではない — 拾ってはいけない
+    assert "回帰" not in got[0]
+
+
+def test_drift_skips_non_judgment_comments(monkeypatch):
+    """maker の報告や rework 指示は事由ではない。"""
+    sys.path.insert(0, str(TOOLS))
+    import importlib
+    drift = importlib.import_module("drift")
+    body = "**cycle_completed** — 実装完了。\n**Why:**\n未測定のまま断定した。\n"
+    monkeypatch.setattr(drift, "_sh", lambda cmd: json.dumps({"comments": [{"body": body}]}))
+    assert drift._issue_reasons(1) == []

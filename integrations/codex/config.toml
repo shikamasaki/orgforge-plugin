@@ -5,9 +5,14 @@
 # org's SCHEDULE (template/schedule.yaml) is still driven by an external cron/CI (R0 — no built-in
 # scheduler, same as Claude Code); this file only sets model/sandbox/approval/MCP per project.
 
-# neutral model_tier -> a concrete Codex model (adopter fills in the real names)
+# neutral model_tier -> a concrete Codex model (adopter fills in the real names).
+# 検証時点（0.146.0 / ChatGPT アカウント）で `gpt-5-codex` は
+#   "The 'gpt-5-codex' model is not supported when using Codex with a ChatGPT account."
+# で拒否された。API キーではなく ChatGPT の契約で使う場合、使えるモデルは限られる —
+# **モデル名は必ず1回 `codex exec -m <m> "Reply OK"` で確かめてから書くこと。**
 model = "gpt-5.5"
-model_reasoning_effort = "medium"        # neutral effort -> minimal|low|medium|high|xhigh
+model_reasoning_effort = "high"          # neutral effort -> minimal|low|medium|high|xhigh
+                                         # judge tier（gate/skeptic）は high。worker は medium
 
 # Tier-A default: workspace-write sandbox is the ordinary dept substrate. A Tier-B (asset-touching)
 # dept needs a host that provides credential custody + an external watchdog (docs/01 §5); do NOT
