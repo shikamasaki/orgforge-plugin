@@ -276,7 +276,7 @@ event_classes:
                           predicted_outcome, evidence: [ref], issue, reasoning_sha256,
                           decision_by, recorded_by, committed_by,
                           identity_assurance, recorder_assurance, workload_isolation,
-                          reviewer_independence, signer_id, key_id,
+                          reviewer_independence, agreed_identity_assurance, signer_id, key_id,
                           lineage: "same-harness|cross-harness|joint — `joint` means generated from two
                                     agreeing verdict_provisional records, not placed by one judge",
                           agreed_by, from_seqs, review_subject_id,
@@ -315,6 +315,8 @@ event_classes:
                           verdict, for_event, issue, deliverable, reasoning_sha256, reasoning_ref,
                           decision_by, recorded_by, committed_by,
                           identity_assurance, recorder_assurance, workload_isolation,
+                          # **writer の隔離は judge の隔離ではない。** 欄を分ける（0.39.2）。
+                          writer_isolation,
                           signer_id, key_id,
 
                           review_subject_id: "digest of (issue, role, phase, base_sha,
@@ -329,6 +331,8 @@ event_classes:
                           same_harness: verdict, cross_harness: verdict,
                           decision_by, recorded_by, committed_by,
                           identity_assurance, recorder_assurance, workload_isolation,
+                          # **writer の隔離は judge の隔離ではない。** 欄を分ける（0.39.2）。
+                          writer_isolation,
                           signer_id, key_id,
 
                           note: "NOT an anomaly — this is the POINT of separating lineage. Never deleted;

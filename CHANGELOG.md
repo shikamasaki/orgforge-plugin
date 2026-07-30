@@ -6,6 +6,49 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 0.39.4 — an environment variable reopened everything the previous release closed
+
+Fourth audit, NO-GO on all four lenses again. 0.39.3 refused forged identity in the payload — and
+then accepted it if the caller also set `ORG_IDENTITY_VERIFIED=1`. **The check I added was gated on a
+flag the caller controls**, and the test I wrote set that flag without any receipt.
+
+### Fixed — P0
+- **`ORG_IDENTITY_VERIFIED` is gone.** `ledger.py append` now takes `--receipt` and **verifies it
+  itself**, generating the identity fields. The caller can hand over a receipt; it cannot assert that
+  one was checked. Without a receipt, the fields are still written — as `claimed` — so "checked and
+  found self-declared" stays distinguishable from "never looked".
+- **Policy can no longer be switched off by the caller.** Measured: `ORG_REQUIRE_ATTESTED_IDENTITY=0`
+  turned enforcement off, and so did **deleting `constitution.yaml`**. Now a root-owned
+  `/usr/local/etc/orgforge/policy.yaml` is final when present; the environment variable additionally
+  requires `ORG_ALLOW_POLICY_ENV=1` so it can never take effect quietly; and a **sticky marker** means
+  an org that once enabled enforcement refuses to run if the declaration later disappears —
+  **removing a declaration is not disabling it**.
+- **The hook and `ghsync` now speak to the daemon.** They called `ledger.py` directly, so under
+  `ORG_WRITER_SOCKET` every cap reservation and every judgment returned exit 4 — the guardrail would
+  have stopped ordinary operation entirely. Measured after the fix: the hook runs and the reservation
+  lands.
+- **The hook reads halt state through the writer.** Measured: re-pointing the org's ledger symlink at
+  an empty directory took `halt-status` from exit 10 to exit 0 while the authoritative ledger was
+  still halted — the hook lost the stop. The daemon reads the **real path** fixed at startup;
+  re-pointing the symlink no longer hides anything.
+
+### Fixed — the rest
+- `--allow-uid` is wired into the plist (it existed but was never passed, so it did nothing in a real
+  deployment). The caller UID defaults to `SUDO_UID`, not root.
+- A corrupt nonce file no longer restarts as empty — it refuses. Being unable to detect a replay is
+  the same as having no nonce.
+- The client refuses a caller-owned anchor unless `ORG_WRITER_TRUST_SELF=1` is explicit, since anyone
+  who can write the anchor can substitute the socket. Stage A sets it deliberately, and says it is
+  not a boundary.
+- `--dry-run` no longer executes backticks inside an unquoted heredoc.
+- **Per-org namespacing**: authoritative path, socket, launchd label, config and backup are all keyed
+  by the org. `--uninstall` now needs to know which org, restores the symlinks to real directories,
+  and copies the authoritative contents back.
+
+### Status
+`sudo` and live-org application remain NO-GO. `workload_isolation` is `process_mediated`; H1's
+`separate_uid` is unresolved.
+
 ## 0.39.3 — the enforcement I added could be bypassed by writing two strings
 
 Third audit, again NO-GO on all four lenses. The worst finding is about my own work: **the control

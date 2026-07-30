@@ -633,6 +633,18 @@ def rule_blast_radius(tool_name, ti):
     #   append 失敗を無視するので次の呼び出しが committed=0 を見る（cap が記憶を失う）／
     #   hold は deny して終わるので止めたことが残らない。
     # reserve-exposure は lock の中で 検査と予約を一操作にし、**書けた判断だけが allow** になる。
+    # **writerd がいる org では RPC 経由で予約する。** 直接 ledger.py を呼ぶと
+    # 「writerd 経由でなければ書けない」に当たって exit 4 になり、正規運用が止まる
+    # （実測で指摘された）。
+    if os.environ.get("ORG_WRITER_SOCKET"):
+        # 段階A（同じ利用者が daemon を動かしている）では anchor が自分所有になる。
+        # **信頼境界ではない**ので、明示的に立てる（段階B では root 所有になり不要）。
+        os.environ.setdefault("ORG_WRITER_TRUST_SELF", "1")
+        return ["writer_client.py", "reserve-exposure", "--",
+                "--dimension", dimension, "--delta", str(delta), "--cap", cap,
+                "--actor", "harness-agent", "--window-since", _window_since(),
+                "--session-id", SESSION_ID, "--tool-use-id", TOOL_USE_ID,
+                "--rule", "blast_radius"]
     return ["ledger.py", "reserve-exposure", LEDGER_ROOT, "--dimension", dimension,
             "--delta", str(delta), "--cap", cap, "--actor", "harness-agent",
             "--window-since", _window_since(),
@@ -886,10 +898,17 @@ def _check_halt(tool_name, tool_input):
     # トップレベルが hook プロセスの中で走る — 壊れた（あるいは差し替えられた）ledger.py が
     # `sys.exit(0)` を持っていれば、**hook がそこで allow として終了する**（実測でそうなった）。
     # 統制の判定を、判定対象と同じプロセスで動かしてはいけない。
+    # **停止の判定も writer に聞く。** org 側の symlink を張り替えて空の台帳を見せられると、
+    # hook は停止を見失う（実測: HALT 中でも exit 10 → 0 になった）。writer は起動時に固定した
+    # 実体のパスを見る。
+    os.environ.setdefault("ORG_WRITER_TRUST_SELF", "1")   # 段階A。境界ではない
+    _cmd = ([sys.executable, os.path.join(TOOLS_DIR, "writer_client.py"), "halt-status"]
+            if os.environ.get("ORG_WRITER_SOCKET")
+            else [sys.executable, os.path.join(TOOLS_DIR, "ledger.py"),
+                  "halt-status", LEDGER_ROOT])
     try:
-        r = subprocess.run([sys.executable, os.path.join(TOOLS_DIR, "ledger.py"),
-                            "halt-status", LEDGER_ROOT],
-                           capture_output=True, encoding="utf-8", errors="replace", timeout=30)
+        r = subprocess.run(_cmd, capture_output=True, encoding="utf-8",
+                           errors="replace", timeout=30)
     except Exception as e:
         # 「確かめられない」は評価できなかった case — 開発用の逃げ道（ORG_HOOK_FAIL_OPEN）が
         # 効く側である。**読めた結果が halt なら効かせない**（下で _deny する）。

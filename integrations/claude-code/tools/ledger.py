@@ -321,55 +321,123 @@ DISTINCT_ACTOR = {
 def _enforce_attested():
     """統制イベントに receipt 由来の identity を要求するか。**三値で扱う。**
 
-      True   … 要求する（constitution が明示）
-      False  … 要求しない（constitution が明示、または constitution が無い org）
-      raise  … **判定できない**（破損・型不正・PyYAML 欠落）→ fail-closed
+    **caller が消せる設定を根拠にしない。** 実測（監査）:
+      - `ORG_REQUIRE_ATTESTED_IDENTITY=0` を足すだけで強制が消えた
+      - `constitution.yaml` を **削除** するだけで強制が消えた
 
-    実測（監査）: 破損した constitution で強制が黙って消えた（破損前 exit 3 → 破損後 exit 0）。
-    **設定を読めないことを「無効」と読み替えてはいけない** — 有効にしていた org が、
-    ファイルが壊れた瞬間に無防備になる。
+    したがって:
+      1. **policy は root 所有の場所から読む**（`ORG_POLICY_FILE`、既定
+         `/usr/local/etc/orgforge/policy.yaml`）。そこに宣言があれば **それが最終**で、
+         env でも org の constitution でも上書きできない。
+      2. policy が無い org（段階A / 未導入）では constitution を読む。**削除は「無効」ではなく
+         「宣言が無い」**なので、有効にしていた org が消しただけで無防備にならないよう、
+         **一度でも有効だった記録があれば消えたことを拒否する**（下の sticky）。
+      3. 読めない・型が違うなら止める（fail-closed）。
+
+    env override は **policy が無いときの開発用**に限り、`ORG_ALLOW_POLICY_ENV=1` を同時に
+    要求する — 黙って効く逃げ道にしない。
     """
+    # ① root 所有の policy が最終
+    pol = os.environ.get("ORG_POLICY_FILE") or "/usr/local/etc/orgforge/policy.yaml"
+    if os.path.isfile(pol):
+        try:
+            st = os.stat(pol)
+        except OSError as e:
+            raise SystemExit(f"policy を stat できない: {e}\n  ファイル: {pol}")
+        if st.st_uid != 0 and st.st_uid != os.getuid():
+            raise SystemExit(f"policy の所有者が root でも自分でもない（uid={st.st_uid}）: {pol}")
+        if st.st_mode & 0o022:
+            raise SystemExit(f"policy が他者から書き込み可能（mode "
+                             f"{oct(st.st_mode & 0o777)}）: {pol}\n"
+                             f"  **書ける主体は強制を外せる。**")
+        try:
+            import yaml
+            with open(pol, encoding="utf-8") as f:
+                doc = yaml.safe_load(f) or {}
+        except Exception as e:
+            raise SystemExit(f"policy を読めないので強制の有無を判定できない: {e}\n"
+                             f"  ファイル: {pol}\n  **判定できないなら止める。**")
+        if not isinstance(doc, dict):
+            raise SystemExit(f"policy が map ではない: {pol}")
+        v = doc.get("require_attested_identity")
+        if v is not None:
+            if not isinstance(v, bool):
+                raise SystemExit(f"policy の require_attested_identity が真偽値でない"
+                                 f"（{v!r}）: {pol}")
+            return v            # **これが最終。** env も constitution も上書きできない
+
+    # ② env は policy が無いときの開発用。**黙って効かせない。**
     env = os.environ.get("ORG_REQUIRE_ATTESTED_IDENTITY")
     if env is not None:
+        if os.environ.get("ORG_ALLOW_POLICY_ENV") != "1":
+            raise SystemExit(
+                "ORG_REQUIRE_ATTESTED_IDENTITY が設定されているが、環境変数で強制を切り替える"
+                "ことは許していない。\n"
+                "  **caller が消せる設定を根拠にしない** — 実測で、この変数を足すだけで強制が"
+                "消えた。\n"
+                "  開発で使うなら ORG_ALLOW_POLICY_ENV=1 も明示すること"
+                "（本番では root 所有の policy を使う）。")
+        if env not in ("0", "1"):
+            raise SystemExit(f"ORG_REQUIRE_ATTESTED_IDENTITY が 0/1 でない（{env!r}）。")
         return env == "1"
+
+    # ③ org の constitution
     try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        from discover import constitution
+        from discover import constitution, ledger_root
         path = constitution()
     except Exception as e:
-        raise SystemExit(f"constitution の場所を解決できないので、identity の強制が有効か"
-                         f"判定できない: {e}\n"
-                         f"  **判定できないなら止める。** 有効にしていた org が、読めなくなった"
-                         f"瞬間に無防備になってはいけない。")
-    if not path or not os.path.isfile(path):
-        return False                    # constitution を持たない org = 宣言が無い
+        raise SystemExit(f"constitution の場所を解決できないので、強制の有無を判定できない: {e}")
+    declared = None
+    if path and os.path.isfile(path):
+        try:
+            import yaml
+        except Exception:
+            raise SystemExit("PyYAML が無いので constitution を読めず、強制の有無を判定できない。")
+        try:
+            with open(path, encoding="utf-8") as f:
+                c = yaml.safe_load(f)
+        except Exception as e:
+            raise SystemExit(f"constitution.yaml を解析できないので判定できない: {e}\n"
+                             f"  ファイル: {path}\n  **破損を「強制なし」と読み替えない。**")
+        if c is not None:
+            if not isinstance(c, dict):
+                raise SystemExit(f"constitution.yaml が map ではない: {path}")
+            enf = c.get("enforcement")
+            if enf is not None and not isinstance(enf, dict):
+                raise SystemExit(f"enforcement が map ではない: {path}")
+            j = ((enf or {}).get("judges") or {})
+            if not isinstance(j, dict):
+                raise SystemExit(f"enforcement.judges が map ではない: {path}")
+            v = j.get("require_attested_identity")
+            if v is not None:
+                if not isinstance(v, bool):
+                    raise SystemExit(f"require_attested_identity が真偽値でない（{v!r}）: {path}")
+                declared = v
+
+    # ④ **sticky。** 一度でも有効だった org で、宣言が消えたなら止める。
+    #    実測: constitution を削除するだけで強制が消えた。「消した」は「無効にした」ではない。
     try:
-        import yaml
+        root = ledger_root()
+        marker = os.path.join(root, "attested-identity-enabled") if root else None
     except Exception:
-        raise SystemExit("PyYAML が無いので constitution を読めず、identity の強制が有効か"
-                         "判定できない。\n  python3 -m pip install pyyaml")
-    try:
-        with open(path, encoding="utf-8") as f:
-            c = yaml.safe_load(f)
-    except Exception as e:
-        raise SystemExit(f"constitution.yaml を解析できないので、identity の強制が有効か"
-                         f"判定できない: {e}\n  ファイル: {path}\n"
-                         f"  **破損を「強制なし」と読み替えない。**")
-    if c is None:
-        return False
-    if not isinstance(c, dict):
-        raise SystemExit(f"constitution.yaml が map ではない（{type(c).__name__}）: {path}")
-    enf = c.get("enforcement")
-    if enf is not None and not isinstance(enf, dict):
-        raise SystemExit(f"constitution.yaml の enforcement が map ではない: {path}")
-    j = ((enf or {}).get("judges") or {})
-    if not isinstance(j, dict):
-        raise SystemExit(f"constitution.yaml の enforcement.judges が map ではない: {path}")
-    v = j.get("require_attested_identity", False)
-    if not isinstance(v, bool):
-        raise SystemExit(f"require_attested_identity が真偽値でない（{v!r}）: {path}\n"
-                         f"  **曖昧な値を「偽」と読まない。**")
-    return v
+        marker = None
+    if declared is True and marker:
+        try:
+            if not os.path.exists(marker):
+                with open(marker, "w", encoding="utf-8") as f:
+                    f.write("require_attested_identity was enabled here\n")
+        except OSError:
+            pass
+    if declared is None and marker and os.path.exists(marker):
+        raise SystemExit(
+            f"この org は以前 require_attested_identity を有効にしていたが、いまその宣言が無い。\n"
+            f"  痕跡: {marker}\n"
+            f"  **宣言を消すことは無効にすることではない。** constitution が失われたか、"
+            f"意図的に外されたかを確かめること。\n"
+            f"  本当に無効にするなら constitution に `require_attested_identity: false` と"
+            f"明示し、この痕跡を消すこと。")
+    return bool(declared)
 
 
 def _distinct_actor_violation(ev, hist):
@@ -406,7 +474,7 @@ def _distinct_actor_violation(ev, hist):
         # ない — 実測（監査）: `identity_assurance: attested` と `decision_by` を書くだけで
         # admit が通り、鎖も intact だった。そして **私のテストがそれを正常系として固定して
         # いた**。書けるものを検査に使ってはいけない。
-        if os.environ.get("ORG_IDENTITY_VERIFIED") != "1":
+        if not (ev.get("_verified_identity") or {}).get("decision_by"):
             return (f"{ev['class']} は generic append では記録できない"
                     f"（require_attested_identity が有効）。\n"
                     f"  **payload に identity_assurance を書いても証拠にならない** — "
@@ -956,6 +1024,50 @@ def require_writer_path(op):
             f"workload_isolation は process_mediated である。")
 
 
+
+def _verify_receipt_for(a, payload, cls):
+    """`--receipt` を検証し、identity fields を生成する。(fields, error)。
+
+    **環境変数の「検証済み」印は使わない。** caller が立てられるものは証拠にならない —
+    実測（監査）で、`ORG_IDENTITY_VERIFIED=1` を足すだけで偽の identity が通った。
+
+    ここで検証するのはこの道具自身であり、caller は receipt を **渡せるだけ**である。
+    署名が合わなければ何も生成しない。
+    """
+    rc_arg = getattr(a, "receipt", None)
+    if not rc_arg:
+        return {}, None
+    try:
+        rc = json.loads(open(rc_arg, encoding="utf-8").read()) \
+            if os.path.isfile(rc_arg) else json.loads(rc_arg)
+    except Exception as e:
+        return None, f"--receipt を読めない: {e}"
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from identity import verify_receipt, observed_recorder
+    except Exception as e:
+        return None, f"identity モジュールを読めない: {e}"
+    # **判定の中身と receipt が一致することを確かめる。** 一致を見ないと、別の判定の receipt を
+    # 持ち込んで identity だけ借りられる。
+    expect = {}
+    for k, pk in (("verdict", "verdict"), ("role", "role"), ("lineage", "lineage"),
+                  ("review_subject_id", "review_subject_id"),
+                  ("reasoning_sha256", "reasoning_sha256")):
+        if payload.get(pk) is not None:
+            expect[k] = payload[pk]
+    who, assurance, err = verify_receipt(rc, expect)
+    if err:
+        return None, err
+    recorded_by, rec_assurance = observed_recorder()
+    return {"decision_by": who, "recorded_by": recorded_by,
+            "identity_assurance": assurance.get("identity_assurance"),
+            "recorder_assurance": rec_assurance,
+            "workload_isolation": assurance.get("workload_isolation"),
+            "writer_isolation": assurance.get("writer_isolation") or "none",
+            **({"signer_id": assurance["signer_id"], "key_id": assurance["key_id"]}
+               if assurance.get("signer_id") else {})}, None
+
+
 def cmd_append(a):
     """Append one event under the hash chain. actor is from --actor (runtime identity),
     never the payload. seq is gapless. requires_prior is enforced against real history."""
@@ -985,14 +1097,22 @@ def cmd_append(a):
     # ものではない。名指しできると、既存の記録と同じキーを主張して no-op を作れる
     # （＝書いたつもりで書かれていない、あるいは他人の記録を自分のものとして読ませる）。
     # **identity fields は caller が書けない。** writer（receipt を検証した経路）が生成する。
-    _IDENT = ("identity_assurance", "decision_by", "recorder_assurance", "signer_id", "key_id")
-    if isinstance(payload, dict) and os.environ.get("ORG_IDENTITY_VERIFIED") != "1":
+    # **caller が立てられる印を信頼しない。** 実測（監査）: `ORG_IDENTITY_VERIFIED=1` を
+    # 環境に足すだけで偽の identity が通った。環境変数は caller が制御できるので、
+    # 「検証済み」の証拠にならない。
+    #
+    # 代わりに **receipt そのものを渡させ、ここで検証する**。検証できたときだけ identity を
+    # 生成する（caller が書いた identity fields は常に拒否する）。
+    _IDENT = ("identity_assurance", "decision_by", "recorder_assurance", "signer_id", "key_id",
+              "workload_isolation", "writer_isolation")
+    if isinstance(payload, dict):
         forged = [k for k in _IDENT if k in payload]
         if forged:
             print(f"append: payload に {', '.join(forged)} を含めてはいけない — "
-                  f"identity は receipt を検証した経路が生成する。\n"
+                  f"identity は **この道具が receipt を検証して生成する**。\n"
                   f"  **書けるものを検査に使ってはいけない。** 実測で、これらを書くだけで"
-                  f"職務分離を回避できた。", file=sys.stderr)
+                  f"職務分離を回避でき、環境変数を足すだけでも回避できた。\n"
+                  f"  judgment を記録するなら --receipt を渡すこと。", file=sys.stderr)
             return 2
     if isinstance(payload, dict) and "_nk" in payload:
         print("append: payload に '_nk' を含めてはいけない — 冪等キーは道具が付ける。"
@@ -1038,6 +1158,27 @@ def cmd_append(a):
             print(f"append: {serr}\n"
                   f"  schema の場所と PyYAML を確認すること。", file=sys.stderr)
             return 2
+        # **receipt を検証して identity を生成する。** caller は receipt を渡せるだけで、
+        # identity fields を書くことはできない（上で拒否済み）。
+        _ident, _ierr = _verify_receipt_for(a, payload, a.cls)
+        if _ierr:
+            print(f"append: receipt を検証できない — {_ierr}\n"
+                  f"  **検証できない receipt では identity を生成しない。**", file=sys.stderr)
+            return 4
+        if _ident:
+            payload.update(_ident)
+        elif a.cls in ("verdict_provisional", "admission_decided", "refutation_attempted",
+                       "judges_disagreed"):
+            # **receipt が無いときも identity を記録する — ただし `claimed` として。**
+            # 欄が無いと「確かめた結果 claimed だった」のか「そもそも見ていない」のかを
+            # 区別できない。書き手が生成するので、caller は値を選べない。
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            from identity import observed_recorder
+            _rb, _ra = observed_recorder()
+            payload.update({"decision_by": a.actor, "recorded_by": _rb,
+                            "identity_assurance": "claimed", "recorder_assurance": _ra,
+                            "workload_isolation": "none"})
+
         # 新規 append だけを検証する。既存イベントに遡って適用すると移行できない。
         bad, warns = validate_event(a.cls, payload, snap)   # writer_op なし = writer 専用は拒否
         if bad:
@@ -1107,6 +1248,8 @@ def cmd_append(a):
                 return 2
         ev = {"id": eid, "seq": seq, "ts": ts, "actor": a.actor,
               "class": a.cls, "payload": payload,
+              # 検証結果を統制の判定に渡す。**台帳には書かない**（hash の直前で外す）。
+              "_verified_identity": _ident,
               "schema_id": "orgforge-ledger",
               "schema_version": LEDGER_SCHEMA_VERSION,
               "schema_sha256": snap["digest"],
@@ -1120,6 +1263,7 @@ def cmd_append(a):
         if sod:
             print(f"append: {sod}", file=sys.stderr)
             return 3
+        ev.pop("_verified_identity", None)   # 内部の受け渡し用。記録には残さない
         ev["hash"] = _hash(head["hash"], ev)
         log, headp = _paths(a.root)
         # append → fsync(log) → HEAD を一時ファイルへ → atomic rename → fsync(dir)
@@ -2190,6 +2334,11 @@ def main(argv):
                    help="実時点を後から補う場合の時刻（ISO8601 UTC）。通常は渡さない — "
                         "時刻は writer が付ける。未来や遠い過去は拒否される")
     q.add_argument("--ts", dest="ts_legacy", default=None, help=argparse.SUPPRESS)
+    # **judgment を記録するなら receipt を渡す。** この道具が検証し、identity fields を生成する。
+    # 環境変数の印は受け取らない — caller が立てられるものは証拠にならない。
+    q.add_argument("--receipt", default=None,
+                   help="judge が署名した receipt（ファイルか JSON）。検証できたときだけ "
+                        "identity fields が生成される")
     # cap 予約は writer 側の専用操作。**時刻の引数を定義しない** — cap 予約に backfill を
     # 持ち込むと、窓の外に予約を置いて上限を迂回できる。
     rx = sub.add_parser("reserve-exposure",

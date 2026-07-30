@@ -16,7 +16,7 @@ def main(argv):
     if len(argv) < 2 or argv[1] in ("-h", "--help"):
         print(__doc__.strip() + "\n\n"
               "  writer_client.py <op> [--org NAME] -- <ledger.py に渡す引数…>\n\n"
-              "  op: append | trip-halt | release-halt | reserve-exposure\n"
+              "  op: append | trip-halt | release-halt | reserve-exposure | halt-status\n"
               "  **台帳のパスは渡せない** — writerd が org 名から決める。")
         return 0
     op = argv[1]
@@ -33,6 +33,11 @@ def main(argv):
         print(json.dumps({"ok": False, "reason": "writer_unreachable", "detail": err},
                          ensure_ascii=False))
         return 4
+    if op == "halt-status":
+        # **hook が読む形で返す。** exit code（0/10）と stdout をそのまま透過させる。
+        sys.stdout.write(resp.get("stdout") or "")
+        sys.stderr.write(resp.get("stderr") or "")
+        return resp.get("exit_code", 4)
     print(json.dumps(resp, ensure_ascii=False))
     if resp.get("stdout"):
         print(resp["stdout"].rstrip(), file=sys.stderr)

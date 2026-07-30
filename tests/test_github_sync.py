@@ -907,6 +907,7 @@ def test_decision_by_comes_from_a_verified_receipt(tmp_path):
     assert pl["decision_by"] == "gate-signer"
     assert pl["identity_assurance"] == "attested"     # 共有鍵なので authenticated ではない
     assert pl["signer_id"] == "gate-signer" and pl["key_id"] == "k-gate"
+    # **payload に書いたのではなく、書き手が receipt を検証して生成した**（0.39.4）
     # CLI で decision_by を申告する経路が無いこと
     h = _tool(org, "github_sync.py", "provisional", "--help")
     assert "--decision-by" not in h.stdout

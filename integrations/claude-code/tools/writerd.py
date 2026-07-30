@@ -143,6 +143,15 @@ def check_socket_parent(path, require_root_owned=False):
             ast_ = os.stat(anchor)
         except OSError:
             return None                  # anchor を辿れないなら leaf の検査までで止める
+        # **caller 所有の anchor を信頼しない。** anchor に書ける主体は leaf ごと差し替えられる
+        # ので、偽の writer に繋がされる（実測で指摘された）。`ORG_WRITER_TRUST_SELF=1` は
+        # 段階A（同じ利用者が daemon も動かしている）でだけ使う逃げ道である。
+        if (ast_.st_uid == os.getuid() and ast_.st_uid != 0
+                and os.environ.get("ORG_WRITER_TRUST_SELF") != "1"):
+            return (f"socket の anchor が caller 自身の所有である（uid={ast_.st_uid}）: {anchor}\n"
+                    f"  **書ける主体は leaf ごと差し替えられる** — 偽の writer に繋がされる。\n"
+                    f"  段階A（自分で daemon を動かしている）なら ORG_WRITER_TRUST_SELF=1 を"
+                    f"明示すること。**それは信頼境界ではない。**")
         if ast_.st_mode & 0o022:
             return (f"socket の anchor が他者から書き込み可能である "
                     f"（mode {oct(ast_.st_mode & 0o777)}）: {anchor}\n"
@@ -207,14 +216,22 @@ class _NonceStore:
         self._seen = {}
         self._lock = threading.Lock()
         self._path = path
+        self.load_error = None
         if path and os.path.isfile(path):
             try:
                 with open(path, encoding="utf-8") as f:
                     self._seen = {k: float(v) for k, v in (json.load(f) or {}).items()}
-            except Exception:
-                self._seen = {}          # 読めないなら空から始める
+            except Exception as e:
+                # **壊れた nonce ファイルを「空」として再開しない。** 実測（監査）: 壊すと
+                # 空から始まり、同じ nonce が再受理された。再送を検出できない状態は、
+                # nonce を持たないのと同じである。
+                self.load_error = (f"nonce ファイルを読めない（{e}）: {path}\n"
+                                   f"  **空として再開しない** — 再送を検出できない。"
+                                   f"内容を確認して手当てすること。")
 
     def check_and_add(self, nonce):
+        if self.load_error:
+            raise OSError(self.load_error)
         now = time.time()
         with self._lock:
             for k, ts in list(self._seen.items()):
@@ -356,6 +373,20 @@ class Writer:
         if req.get("digest") != request_digest(req):
             return {"ok": False, "reason": "request_tampered",
                     "detail": "要求の digest が本文と一致しない。途中で書き換えられている。"}, False
+        # **読み取りは nonce を要求しない。** 副作用が無く、拒否すると org を診断できない。
+        # ただし digest（改変の検出）は読み取りにも効かせる。
+        if req.get("op") == "halt-status":
+            org_r = req.get("org")
+            if org_r not in self.roots:
+                return {"ok": False, "reason": "unknown_org"}, False
+            try:
+                r = subprocess.run([sys.executable, os.path.join(HERE, "ledger.py"),
+                                    "halt-status", self.roots[org_r]],
+                                   capture_output=True, text=True, timeout=30)
+            except Exception as e:
+                return {"ok": False, "reason": "read_failed", "detail": str(e)}, False
+            return {"ok": True, "reason": "read", "exit_code": r.returncode,
+                    "stdout": r.stdout, "stderr": r.stderr}, True
         nonce = req.get("nonce")
         if not nonce or not isinstance(nonce, str) or len(nonce) < 16:
             return {"ok": False, "reason": "missing_nonce",
@@ -385,10 +416,23 @@ class Writer:
         if not isinstance(argv, list) or not all(isinstance(x, str) for x in argv):
             return {"ok": False, "reason": "bad_argv",
                     "detail": "argv が文字列の配列でない。"}, False
+        # **読み取りも writer に聞く。** org 側の symlink を張り替えて空の台帳を見せられると、
+        # hook は停止を見失う（実測: HALT 中でも halt-status が exit 10 → 0 になった）。
+        # writer は起動時に固定した **実体のパス** を見るので、張り替えても影響しない。
+        if op == "halt-status":
+            try:
+                r = subprocess.run([sys.executable, os.path.join(HERE, "ledger.py"),
+                                    "halt-status", root],
+                                   capture_output=True, text=True, timeout=30)
+            except Exception as e:
+                return {"ok": False, "reason": "read_failed", "detail": str(e)}, False
+            return {"ok": True, "reason": "read", "exit_code": r.returncode,
+                    "stdout": r.stdout, "stderr": r.stderr}, True
         if op not in ("append", "trip-halt", "release-halt", "reserve-exposure"):
             return {"ok": False, "reason": "unsupported_op",
                     "detail": f"op={op!r} は writerd 経由では実行できない"
-                              f"（append / trip-halt / release-halt / reserve-exposure）。"}, False
+                              f"（append / trip-halt / release-halt / reserve-exposure / "
+                              f"halt-status）。"}, False
         # **caller が root を指定する経路を閉じる。** argv からパスらしきものを弾く。
         for a in argv:
             if a == root or a.startswith("/") and os.path.sep in a and (

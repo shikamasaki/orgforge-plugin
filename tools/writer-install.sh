@@ -43,9 +43,11 @@ SOCK_PARENT="/usr/local/var/orgforge/run"      # writer 所有。daemon が sock
 INSTALL_DIR="/usr/local/libexec/orgforge"
 CONFIG="/usr/local/etc/orgforge/writerd.conf"
 BACKUP_DIR="/usr/local/var/orgforge/backup"
-AUTHORITATIVE="/usr/local/var/orgforge/authoritative"   # 権威データ。**org tree の外**
+AUTHORITATIVE=""                     # 権威データ。**org tree の外**。org ごとに分ける
+ORG_NAME=""                          # namespace。既定は org root のハッシュ
 DAEMON_PYTHON="/usr/bin/python3"     # LaunchDaemon が起動する処理系。--daemon-python で変えられる
 CALLER_GROUP="staff"                 # 台帳を読める group（caller の primary group）
+CALLER_UID=""                        # 書き込みを認可する peer。既定は sudo の呼び出し元
 
 ORG_ROOT=""
 DRY_RUN=0
@@ -53,8 +55,10 @@ UNINSTALL=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --org-root) ORG_ROOT="${2:-}"; shift 2 ;;
+    --org-name) ORG_NAME="${2:-}"; shift 2 ;;
     --daemon-python) DAEMON_PYTHON="${2:-}"; shift 2 ;;
     --caller-group)  CALLER_GROUP="${2:-}"; shift 2 ;;
+    --caller-uid)    CALLER_UID="${2:-}"; shift 2 ;;
     --dry-run)  DRY_RUN=1; shift ;;
     --uninstall) UNINSTALL=1; shift ;;
     -h|--help) sed -n '1,40p' "$0"; exit 0 ;;
@@ -82,12 +86,29 @@ if [ "$DRY_RUN" = 0 ] && [ "$(id -u)" != "0" ]; then
 fi
 say "OS: $(sw_vers -productName) $(sw_vers -productVersion)"
 say "実行者: uid=$(id -u) ($(whoami))"
+# sudo で呼ばれたなら、**元の利用者**を書き込みの認可対象にする（root ではない）。
+if [ -z "${CALLER_UID}" ]; then
+  CALLER_UID="${SUDO_UID:-$(id -u)}"
+fi
+say "書き込みを認可する caller uid: ${CALLER_UID}（--caller-uid で変えられる）"
 
 if [ "$UNINSTALL" = 0 ]; then
   [ -n "${ORG_ROOT}" ] || fail "--org-root が必要（org のルート = .orgforge の親）"
   [ -d "${ORG_ROOT}/.orgforge/ledger" ] || fail "台帳が見つからない: ${ORG_ROOT}/.orgforge/ledger"
   ORG_ROOT="$(cd "${ORG_ROOT}" && pwd)"
+  # **org ごとに分ける。** 固定のパス・Label・backup を共有すると、2つ目の org を入れた瞬間に
+  # 1つ目の設定を壊す（実測で指摘された）。
+  if [ -z "${ORG_NAME}" ]; then
+    ORG_NAME="$(printf '%s' "${ORG_ROOT}" | shasum -a 256 | cut -c1-12)"
+  fi
+  AUTHORITATIVE="/usr/local/var/orgforge/orgs/${ORG_NAME}"
+  SOCK_PARENT="/usr/local/var/orgforge/run/${ORG_NAME}"
+  LABEL="com.orgforge.writerd.${ORG_NAME}"
+  PLIST="/Library/LaunchDaemons/${LABEL}.plist"
+  BACKUP_DIR="/usr/local/var/orgforge/backup/${ORG_NAME}"
+  CONFIG="/usr/local/etc/orgforge/${ORG_NAME}.conf"
   say "org: ${ORG_ROOT}"
+  say "namespace: ${ORG_NAME}（--org-name で固定できる）"
   # **元の所有者を記録する。** rollback で戻すために必要である。
   ORIG_OWNER="$(stat -f '%Su:%Sg' "${ORG_ROOT}/.orgforge/ledger")"
   say "台帳の現在の所有者: ${ORIG_OWNER}"
@@ -95,7 +116,7 @@ if [ "$UNINSTALL" = 0 ]; then
   # **daemon が使う python で検査する。** 利用者の python3 に入っていても、LaunchDaemon が
   # 起動する /usr/bin/python3 に無ければ writerd は schema を読めない（実測で指摘された）。
   if ! PYTHONNOUSERSITE=1 "${DAEMON_PYTHON}" -c 'import yaml' 2>/dev/null; then
-    fail "$(cat <<EOF
+    fail "$(cat <<'EOF' 
 ${DAEMON_PYTHON} に PyYAML が無い（writerd が schema を読むのに要る）。
   LaunchDaemon はここで起動するので、利用者の python3 に入っていても足りない。
   **とくに ~/Library/Python/*/lib/python/site-packages にある場合は無効である** —
@@ -128,6 +149,20 @@ fi
 
 # ── uninstall ────────────────────────────────────────────────────────────────
 if [ "$UNINSTALL" = 1 ]; then
+  # **どの org を外すのかを決める。** namespace が無いと、複数 org で固定の Label / backup を
+  # 共有し、1つ外すと全部壊れる（実測で指摘された）。
+  if [ -z "${ORG_NAME}" ] && [ -n "${ORG_ROOT}" ]; then
+    ORG_NAME="$(printf '%s' "$(cd "${ORG_ROOT}" && pwd)" | shasum -a 256 | cut -c1-12)"
+  fi
+  if [ -z "${ORG_NAME}" ]; then
+    fail "--org-root か --org-name が必要（どの org を外すのか決まらない）"
+  fi
+  AUTHORITATIVE="/usr/local/var/orgforge/orgs/${ORG_NAME}"
+  SOCK_PARENT="/usr/local/var/orgforge/run/${ORG_NAME}"
+  LABEL="com.orgforge.writerd.${ORG_NAME}"
+  PLIST="/Library/LaunchDaemons/${LABEL}.plist"
+  BACKUP_DIR="/usr/local/var/orgforge/backup/${ORG_NAME}"
+  say "namespace: ${ORG_NAME}"
   echo
   echo "── uninstall（**台帳は消さない**。所有者を戻し、daemon を外すだけ）"
   if [ -f "${PLIST}" ]; then
@@ -248,13 +283,13 @@ if [ "$DRY_RUN" = 0 ]; then
   if [ -f "${BACKUP_DIR}/original-owner" ]; then
     say "元の所有者は既に記録されている（$(cat "${BACKUP_DIR}/original-owner")）— 上書きしない"
   elif [ "$(printf '%s' "${ORIG_OWNER}" | cut -d: -f1)" = "${SERVICE_USER}" ]; then
-    fail "$(cat <<EOF
+    fail "$(cat <<EOF2
 台帳の所有者が既に ${SERVICE_USER} だが、元の所有者の記録が無い。
   このまま進めると uninstall が ${SERVICE_USER} へ「復元」して、caller に戻せなくなる。
   手で記録してから再実行すること:
     echo '<元の owner:group>' | sudo tee ${BACKUP_DIR}/original-owner
     echo '${ORG_ROOT}' | sudo tee ${BACKUP_DIR}/original-org-root
-EOF
+EOF2
 )"
   else
     printf '%s\n' "${ORIG_OWNER}" > "${BACKUP_DIR}/original-owner"
@@ -345,6 +380,9 @@ else
          プラグインのテンプレートに fallback する — org が変えた規則ではなく、テンプレートの
          規則で検証されることになる（実測で指摘された）。 -->
     <string>--schema</string><string>${AUTHORITATIVE}/ledger-schema.yaml</string>
+    <!-- **caller UID を配線する。** socket は 0666 なので繋げること自体は誰でもできる —
+         繋げることと書けることは別である。 -->
+    <string>--allow-uid</string><string>${CALLER_UID}</string>
     <string>--require-root-owned</string>
   </array>
   <key>RunAtLoad</key><true/>

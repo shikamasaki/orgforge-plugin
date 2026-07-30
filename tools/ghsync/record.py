@@ -539,12 +539,16 @@ def cmd_provisional(a):
     # 冪等キーは **判定の同一性**で作る。`_reasoning_digest` は散文だけを束ねる（tamper
     # evidence の対象は散文なので正しい）ため、同じ理由で verdict を変えた判定が同一キーに
     # なってしまう。verdict と subject を含めて、差し替えが no-op に落ちないようにする。
-    # **receipt を検証したこの経路だけが identity fields を書ける。**
-    # generic append からは書けない（ledger.py が payload の identity を拒否する）。
-    os.environ["ORG_IDENTITY_VERIFIED"] = "1"
+    # **receipt そのものを渡す。** 環境変数の「検証済み」印は使わない — caller が立てられる
+    # ものは証拠にならない（実測: ORG_IDENTITY_VERIFIED=1 を足すだけで偽装が通った）。
+    # 書き手（ledger.py / writerd）が自分で検証し、identity fields を生成する。
+    for k in ("decision_by", "recorded_by", "identity_assurance", "recorder_assurance",
+              "workload_isolation", "signer_id", "key_id"):
+        payload.pop(k, None)
     rc = _ledger_append(a.by or a.role, "verdict_provisional", payload,
                         f"verdict_provisional-{a.issue}-{a.lineage}-{a.verdict}"
-                        f"-{a.subject[:8]}-{digest[:12]}")
+                        f"-{a.subject[:8]}-{digest[:12]}",
+                        receipt=getattr(a, "receipt", None))
     if rc != 0:
         return 4
     print(f"recorded provisional {a.role}={a.verdict} ({a.lineage}) on #{a.issue}.")
@@ -685,10 +689,10 @@ def cmd_provisional(a):
     joint = {"issue": a.issue, "deliverable": str(a.issue), "verdict": a.verdict,
              "lineage": "joint", "agreed_by": sorted([a.lineage, other]),
              "reviewer_independence": independence,
-             "decision_by": f"system:joint({decision_by or (a.by or a.role)},"
-                            f"{peer.get('decision_by') or '?'})",
-             "recorded_by": recorded_by,
-             "identity_assurance": min(
+             # **identity は payload に書かない。** 2件の provisional に既に記録されており、
+             # `from_seqs` からたどれる。ここに書くと「道具が自分で名乗った identity」になり、
+             # caller が書けるものと区別できなくなる（0.39.4 で append 側が拒否する）。
+             "agreed_identity_assurance": min(
                  (mine_assurance.get("identity_assurance") or "claimed",
                   (peer.get("assurance") or {}).get("identity_assurance") or "claimed"),
                  key=lambda x: ["claimed", "observed", "attested", "authenticated"].index(x)),
@@ -757,14 +761,22 @@ def _provisional_for(issue, event, lineage):
     return hit
 
 
-def _ledger_append(actor, cls, payload, natural_key):
-    """台帳に1件追記する。**失敗を黙って飲まない。**"""
+def _ledger_append(actor, cls, payload, natural_key, receipt=None):
+    """台帳に1件追記する。**失敗を黙って飲まない。**
+
+    **writerd がいる org では RPC 経由にする。** 直接 ledger.py を呼ぶと「writerd 経由でなければ
+    書けない」に当たって exit 4 になり、判定の記録が止まる（実測で指摘された）。
+    """
+    args = ["--actor", actor, "--class", cls, "--natural-key", natural_key,
+            "--payload", json.dumps(payload, ensure_ascii=False)]
+    if receipt:
+        args += ["--receipt", receipt]
+    if os.environ.get("ORG_WRITER_SOCKET"):
+        cmd = [sys.executable, os.path.join(HERE, "writer_client.py"), "append", "--", *args]
+    else:
+        cmd = [sys.executable, os.path.join(HERE, "ledger.py"), "append", *args]
     try:
-        r = subprocess.run([sys.executable, os.path.join(HERE, "ledger.py"), "append",
-                            "--actor", actor, "--class", cls,
-                            "--natural-key", natural_key,
-                            "--payload", json.dumps(payload, ensure_ascii=False)],
-                           capture_output=True, text=True, timeout=30)
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
     except Exception as e:
         print(f"台帳に追記できなかった: {e}", file=sys.stderr)
         return 4

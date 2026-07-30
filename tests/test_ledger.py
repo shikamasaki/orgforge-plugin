@@ -1283,7 +1283,7 @@ def test_release_needs_an_authenticated_independent_approver(tmp_path):
     assert code == 2
     # **どちらの層で止まってもよい。** identity fields を payload に書けない検査（0.39.3）が
     # writer-only の検査より先に働く — どちらも「generic append では書けない」ことを言っている。
-    assert ("writer 専用" in out) or ("identity は receipt を検証した経路が生成する" in out), out
+    assert ("writer 専用" in out) or ("receipt を検証して生成する" in out), out
     assert run("ledger.py", "halt-status", str(tmp_path))[0] == 10   # まだ止まっている
 
 
@@ -1530,6 +1530,7 @@ def _wd_start(tmp_path):
     os.chmod(anchor, 0o755)
     sdir = anchor / "r"; sdir.mkdir(); os.chmod(sdir, 0o755)
     sock = sdir / "w.sock"
+    os.environ["ORG_WRITER_TRUST_SELF"] = "1"   # 段階A。**信頼境界ではない**
     proc = subprocess.Popen(
         [sys.executable, str(TOOLS / "writerd.py"), "serve",
          "--org", f"default={led}", "--socket", str(sock)],
@@ -1548,7 +1549,7 @@ def _wd_start(tmp_path):
 
 
 def _wd_client(sock, *args, org="default"):
-    env = dict(os.environ, ORG_WRITER_SOCKET=str(sock))
+    env = dict(os.environ, ORG_WRITER_SOCKET=str(sock), ORG_WRITER_TRUST_SELF="1")
     r = subprocess.run([sys.executable, str(TOOLS / "writer_client.py"), "append",
                         "--org", org, "--", *args],
                        capture_output=True, text=True, env=env)
@@ -1706,9 +1707,13 @@ def test_socket_parent_must_not_be_world_writable(tmp_path, mode, expect):
     wd = importlib.import_module("writerd")
     parent = tmp_path / "p"; parent.mkdir()
     os.chmod(parent, mode)
-    err = wd.check_socket_parent(str(parent / "writer.sock"))
-    assert (err is None) is expect, err
-    os.chmod(parent, 0o755)
+    os.environ["ORG_WRITER_TRUST_SELF"] = "1"      # 段階A（anchor が自分所有）
+    try:
+        err = wd.check_socket_parent(str(parent / "writer.sock"))
+        assert (err is None) is expect, err
+    finally:
+        os.environ.pop("ORG_WRITER_TRUST_SELF", None)
+        os.chmod(parent, 0o755)
 
 
 def test_socket_parent_may_not_be_a_symlink(tmp_path):
@@ -1941,16 +1946,8 @@ def test_actor_alias_cannot_bypass_separation_of_duties(tmp_path):
     r = app("gate-signer", {"deliverable": "7", "verdict": "admit", "gate": "g",
                             "identity_assurance": "attested", "decision_by": "gate-signer"})
     assert r.returncode == 2, r.stdout + r.stderr
-    # receipt を検証した経路（writer）からなら通る
-    env = dict(os.environ, ORG_IDENTITY_VERIFIED="1")
-    r = subprocess.run(
-        [sys.executable, str(TOOLS / "ledger.py"), "append", str(led),
-         "--actor", "gate-signer", "--class", "admission_decided",
-         "--payload", json.dumps({"deliverable": "7", "verdict": "admit", "gate": "g",
-                                  "identity_assurance": "attested",
-                                  "decision_by": "gate-signer"})],
-        cwd=org, capture_output=True, text=True, env=env)
-    assert r.returncode == 0, r.stdout + r.stderr
+    # **receipt を渡す経路は test_the_verified_path_can_record が確かめる。**
+    # ここでは「名乗りだけでは通らない」ことに集中する。
 
 
 def test_attested_enforcement_defaults_off(tmp_path):
@@ -2078,7 +2075,7 @@ def test_payload_cannot_forge_identity_fields(tmp_path):
                     {"deliverable": "7", "verdict": "admit",
                      "identity_assurance": "attested", "decision_by": "i-made-this-up"})
     assert r.returncode == 2, r.stdout + r.stderr
-    assert "identity は receipt を検証した経路が生成する" in (r.stdout + r.stderr)
+    assert "この道具が receipt を検証して生成する" in (r.stdout + r.stderr)
     assert not (led / "ledger.jsonl").exists() or \
         not (led / "ledger.jsonl").read_text(encoding="utf-8").strip()
 
@@ -2092,13 +2089,43 @@ def test_generic_append_cannot_record_a_judgment(tmp_path):
 
 
 def test_the_verified_path_can_record(tmp_path):
-    """**receipt を検証した経路だけが書ける。** 止まるだけでは運用できない。"""
+    """**receipt を渡した経路だけが書ける。** 止まるだけでは運用できない。
+
+    0.39.4 で `ORG_IDENTITY_VERIFIED` は廃止した — caller が立てられる印は証拠にならない
+    （実測: その環境変数を足すだけで偽の identity が通った）。receipt そのものを渡させ、
+    書き手が検証する。
+    """
     org, led = _att_org(tmp_path)
+    # 環境変数では通らない
     env = dict(os.environ, ORG_IDENTITY_VERIFIED="1")
     r = _att_append(org, led, "gate-signer",
                     {"deliverable": "7", "verdict": "admit",
-                     "identity_assurance": "authenticated", "decision_by": "gate-signer"},
-                    env=env)
+                     "identity_assurance": "attested", "decision_by": "gate-signer"}, env=env)
+    assert r.returncode == 2, r.stdout + r.stderr
+
+    # receipt を渡せば通る
+    trust = org / ".orgforge" / "trust"; trust.mkdir(parents=True, exist_ok=True)
+    tenv = dict(os.environ, ORG_TRUST_STORE=str(trust / "keys.json"))
+    subprocess.run([sys.executable, str(TOOLS / "identity.py"), "keygen", "--key-id", "k1",
+                    "--signer-id", "gate-signer", "--private-out", str(org / "k.pem")],
+                   cwd=org, capture_output=True, text=True, env=tenv, check=True)
+    rc = subprocess.run([sys.executable, str(TOOLS / "identity.py"), "receipt",
+                         "--org-id", "o", "--ledger-id", "l", "--subject", "s7",
+                         "--issue", "7", "--role", "gate", "--phase", "implement",
+                         "--lineage", "same-harness", "--verdict", "admit",
+                         "--requirements-digest", "rd", "--reasoning-sha256", "rs",
+                         "--issued-at", "2026-07-31T00:00:00Z", "--key-id", "k1",
+                         "--private-key", str(org / "k.pem")],
+                        cwd=org, capture_output=True, text=True, env=tenv, check=True).stdout
+    (org / "r.json").write_text(rc.strip(), encoding="utf-8")
+    r = subprocess.run(
+        [sys.executable, str(TOOLS / "ledger.py"), "append", str(led),
+         "--actor", "gate-signer", "--class", "admission_decided",
+         "--receipt", str(org / "r.json"),
+         "--payload", json.dumps({"deliverable": "7", "verdict": "admit", "role": "gate",
+                                  "lineage": "same-harness", "review_subject_id": "s7",
+                                  "reasoning_sha256": "rs"})],
+        cwd=org, capture_output=True, text=True, env=tenv)
     assert r.returncode == 0, r.stdout + r.stderr
 
 
@@ -2183,9 +2210,18 @@ def test_client_accepts_a_writer_owned_leaf(tmp_path):
     anchor = pathlib.Path(_tf.mkdtemp(prefix="an", dir="/tmp")); leaf = anchor / "r"
     leaf.mkdir(); os.chmod(anchor, 0o755); os.chmod(leaf, 0o755)
     # 所有者は自分だが、client の検査は「誰が差し替えられるか」を見る（所有者を問わない）
-    assert wd.check_socket_parent(str(leaf / "w.sock")) is None
-    os.chmod(leaf, 0o777)
-    assert wd.check_socket_parent(str(leaf / "w.sock")) is not None
+    # 段階A では anchor が自分所有になる。**信頼境界ではない**ので明示が要る。
+    os.environ["ORG_WRITER_TRUST_SELF"] = "1"
+    try:
+        assert wd.check_socket_parent(str(leaf / "w.sock")) is None
+        os.chmod(leaf, 0o777)
+        assert wd.check_socket_parent(str(leaf / "w.sock")) is not None
+    finally:
+        os.environ.pop("ORG_WRITER_TRUST_SELF", None)
+    # 明示しなければ、caller 所有の anchor は拒否される
+    os.chmod(leaf, 0o755)
+    err = wd.check_socket_parent(str(leaf / "w.sock"))
+    assert err and "caller 自身の所有" in err
 
 
 def test_peer_uid_allowlist_is_available():
