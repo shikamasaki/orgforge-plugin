@@ -6,6 +6,55 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 0.39.2 — the second audit: the installer still could not run, and actor spoofing was open
+
+Re-audit (four `claude -p` lenses, all NO-GO again) found nine more. Nothing was run against the live
+org and no `sudo` was executed.
+
+### Fixed — the P0 that undermined H1
+**`--actor` alone bypassed separation of duties.** Measured: the maker's own self-admission is
+refused, but the *same process* re-running with `--actor gate-alias` succeeded and the chain verified
+clean. If the name can be changed at will, comparing names proves nothing.
+
+Control events (`admission_decided`, `refutation_attempted`) can now require a receipt-derived
+identity — `enforcement.judges.require_attested_identity`. **It defaults to false**, because turning
+it on stops every org that has not yet distributed keys; that is a migration decision, not a safe
+default. With it on, a self-declared actor is refused and a receipt-derived one passes.
+
+### Fixed — the installer produced a state that still could not run
+- **A root-owned `0755` parent cannot be bound by a different-UID daemon.** `bind()` needs write
+  permission on the parent, so `0755` fails to start and `1770` is refused by `writerd` — neither
+  works. Split into **anchor** (root-owned `0755`, so a caller cannot swap the leaf) and **leaf**
+  (writer-owned `0755`, so the daemon can create its socket). `writerd` now checks both.
+  launchd socket activation would be stronger still; anchor/leaf is chosen for portability.
+- **The daemon's schema was not pinned**, so `ledger.py` fell back to the plugin template depending
+  on cwd — validating against the template's rules rather than the org's. The plist now passes
+  `--schema` from the root-owned config.
+
+### Fixed — two labels that were still not measured
+- **`measured_isolation()` never compared the caller's UID.** Measured: writer UID = caller UID = 502
+  still reported `separate_uid`. It is now evaluated **per request** against the peer UID — at startup
+  there is no caller to compare against.
+- **The writer's isolation was being written into the judge's `workload_isolation`**, so two distinct
+  signers were promoted to `distinct_workload`. **A shared writer UID says nothing about whether two
+  judges are isolated from each other.** They are now separate fields: `writer_isolation` for the
+  writer, and `workload_isolation` only from what the judge itself attests.
+
+### Fixed — the verifier
+`--no-write` still produced one real append (the replay check needs a successful first call — that
+check is now skipped instead). RPC and `writerd check` failures printed `✗` without incrementing
+`FAIL`, so a run could report failures and still exit 0.
+
+### Fixed — the installer's rollback
+Re-running overwrote `original-owner` with the *writer* (since ownership had already changed), so
+`--uninstall` would have "restored" the ledger to the service account. It is now written once, and
+re-running with no record while ownership is already the service user is a hard stop with the manual
+fix printed.
+
+### Status
+`sudo` remains NO-GO pending re-audit. `workload_isolation` stays `process_mediated`; H1's
+`separate_uid` is unresolved. PyYAML should go into a root-owned venv rather than the system Python.
+
 ## 0.39.1 — the stage-B installer produced a state that could not run
 
 An independent audit (four `claude -p` lenses, all NO-GO) reviewed the stage-B scripts before any

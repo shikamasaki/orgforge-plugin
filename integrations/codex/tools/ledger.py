@@ -317,6 +317,36 @@ DISTINCT_ACTOR = {
 }
 
 
+
+def _enforce_attested():
+    """統制イベントに receipt 由来の identity を要求するか（constitution が決める）。
+
+    **既定は偽である。** 真にすると、receipt を持たない既存の運用が全部止まる — それは
+    fail-closed ではなく、既知の移行不備による可用性事故である（docs/11）。org が鍵を配り、
+    judge が署名を出せるようになってから真にする。
+
+    読めないときは **偽に倒す** — この設定を読めないことで org を止めるのは筋が違う。
+    ただし真にしている org でファイルが読めなくなった場合、強制が黙って消えることになるので、
+    その org は `ledger.py schema` で差分を検出できる（validation の欠落として出る）。
+    """
+    env = os.environ.get("ORG_REQUIRE_ATTESTED_IDENTITY")
+    if env is not None:
+        return env == "1"
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from discover import constitution
+        import yaml
+        path = constitution()
+        if not path or not os.path.isfile(path):
+            return False
+        with open(path, encoding="utf-8") as f:
+            c = yaml.safe_load(f) or {}
+    except Exception:
+        return False
+    j = ((c.get("enforcement") or {}).get("judges") or {})
+    return bool(j.get("require_attested_identity"))
+
+
 def _distinct_actor_violation(ev, hist):
     """Return a rejection reason if this event's actor already acted as maker/prior-judge for the same
     candidate, else None. Compares the ACTOR (envelope), never a payload field — a payload role name is
@@ -337,6 +367,26 @@ def _distinct_actor_violation(ev, hist):
                 f"  相関キーが無いと maker と gate が同一 actor かを照合できず、この統制は"
                 f"無言で無効になる（{why}）\n"
                 f"  対象の Issue 番号か candidate_id を payload に入れて再実行すること。")
+    # **`--actor` を変えるだけで職務分離を回避できてはいけない。**
+    # 実測: maker 本人の自己 admit は拒否されるが、同じプロセスが `--actor gate-alias` に
+    # 変えると通り、鎖も intact だった。名乗りを変えられるなら、比較に意味が無い。
+    #
+    # したがって **統制の中核となる判定は、検証済み receipt 由来の `decision_by` を要求する**。
+    # receipt が無ければ、その判定は「独立性を強制する根拠」にはならない — 記録は残せるが、
+    # `identity_assurance: claimed` として残り、admission の生成には使えない。
+    _ENFORCED = {"admission_decided", "refutation_attempted"}
+    if ev["class"] in _ENFORCED and _enforce_attested():
+        pl = ev.get("payload") or {}
+        if (pl.get("identity_assurance") or "claimed") == "claimed":
+            return (f"{ev['class']} は自己申告の actor では記録できない"
+                    f"（identity_assurance={pl.get('identity_assurance') or 'claimed'}）。\n"
+                    f"  **`--actor` を変えるだけで職務分離を回避できる** — 実測で、maker 本人の\n"
+                    f"  自己 admit は拒否されるが、同じプロセスが別名を名乗ると通っていた。\n"
+                    f"  判断の主体は署名 receipt から確定させること:\n"
+                    f"    github_sync.py provisional --receipt <judge が署名した receipt> …\n"
+                    f"  （この強制は constitution の enforcement.judges.require_attested_identity\n"
+                    f"   が真のときに働く。既定は偽 — 段階的に移行できるようにするため）")
+
     # **職務分離は `decision_by` 同士を比べる（H1）。** `recorded_by` を比べてはいけない —
     # 代理記録では常に同じ主体になるので、比べると正当な運用が全て違反になる。
     # `decision_by` が無い（0.36.x 以前 / receipt 無し）イベントは、legacy の `actor` を

@@ -223,6 +223,15 @@ enforcement:
     # judge は書き込みを持たない。別ハーネスで回す場合も read-only で走らせる —
     # そのハーネスのガードレールが未検証でも、書けないなら安全側に倒れる。
     read_only: true
+    # 統制の中核（admission_decided / refutation_attempted）に、**署名 receipt 由来の
+    # identity** を要求するか。**既定は false。**
+    #
+    # false のとき、`--actor` を変えるだけで職務分離を回避できる（実測: maker 本人の自己
+    # admit は拒否されるが、同じプロセスが別名を名乗ると通り、鎖も intact だった）。
+    # true にすれば塞がるが、**receipt を持たない既存の運用は全部止まる** — 鍵を配り、
+    # judge が署名を出せるようになってから true にすること。
+    # 段階的に移行できるようにするための既定であって、false が安全という意味ではない。
+    require_attested_identity: false
 
   # blast-radius caps — the per-day budget of irreversible/asset-touching exposure, by dimension.
   # A gate HOLDS (escalates) when the rolling-window sum would exceed the cap. Dimension names match

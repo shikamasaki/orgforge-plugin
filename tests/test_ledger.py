@@ -1769,32 +1769,36 @@ def test_verify_script_refuses_to_run_as_root():
 # 起動しない／caller が接続できない／台帳が読めないなら、install は完了していない。
 
 def test_stage_b_permissions_let_the_daemon_start(tmp_path):
-    """段階B の親ディレクトリ権限で writerd が起動できること。
+    """段階B の権限で **daemon が socket を作れる**こと。
 
-    実測（監査）: installer が 1770 を設定し、**writerd 自身がそれを拒否して起動しなかった**。
-    caller に必要なのは通過（x）であって書き込みではない — 0755 が正しい。
+    実測（監査）: root 所有 0755 の親には別 UID の daemon が bind できない
+    （`bind()` は親への書き込み権限を要求する）。0755 も 1770 も動かない。
+    したがって anchor（root 所有・caller が書けない）と leaf（writer 所有・bind できる）に分ける。
     """
     sys.path.insert(0, str(TOOLS))
     import importlib
     wd = importlib.import_module("writerd")
-    parent = tmp_path / "p"; parent.mkdir()
-    # installer が設定する mode を、root 所有として評価する（uid の検査だけ別に見る）
-    # **root 所有の実在ディレクトリで判定する。** 自分の tmp では uid の検査で先に落ち、
-    # group-write の判定に到達しない。
-    for path, should_pass in (("/usr/local", True), ("/var/run", False)):
-        if not os.path.isdir(path):
-            continue
-        st = os.stat(path)
-        if st.st_uid != 0:
-            continue
-        err = wd.check_socket_parent(f"{path}/w.sock", require_root_owned=True)
-        assert (err is None) == should_pass, f"{path} (mode {oct(st.st_mode & 0o777)}): {err}"
-        if not should_pass:
-            assert "group から書き込み可能" in err
-    # other-write は段階A でも拒否する
-    os.chmod(parent, 0o777)
-    assert wd.check_socket_parent(str(parent / "w.sock")) is not None
-    os.chmod(parent, 0o755)
+    # **短いパスを使う。** AF_UNIX の上限（macOS 104 バイト）は pytest の tmp_path で超える。
+    import tempfile as _tf
+    anchor = pathlib.Path(_tf.mkdtemp(prefix="an", dir="/tmp")); leaf = anchor / "r"
+    leaf.mkdir(parents=True)
+    os.chmod(anchor, 0o755); os.chmod(leaf, 0o755)
+    # leaf は自分（= writer 役）の所有・他者書き込み不可 → **bind できる形**
+    import socket as _s
+    sk = _s.socket(_s.AF_UNIX, _s.SOCK_STREAM)
+    try:
+        sk.bind(str(leaf / "w.sock"))
+        (leaf / "w.sock").unlink()
+    finally:
+        sk.close()
+    # anchor が root 所有でなければ段階B としては拒否される（このテストでは自分所有なので拒否）
+    err = wd.check_socket_parent(str(leaf / "w.sock"), require_root_owned=True)
+    assert err and "anchor が root 所有でない" in err
+    # leaf が他者から書けるなら拒否（other-write は段階A でも落ちる）
+    os.chmod(leaf, 0o777)
+    err = wd.check_socket_parent(str(leaf / "w.sock"), require_root_owned=True)
+    assert err and ("書き込み可能" in err)
+    os.chmod(leaf, 0o755)
 
 
 def test_installer_uses_permissions_the_daemon_accepts():
@@ -1893,3 +1897,128 @@ def test_verifier_checks_the_ledger_stays_readable():
     src = (TOOLS / "writer-verify.sh").read_text(encoding="utf-8")
     assert "caller から台帳を **読める**" in src
     assert "verify / board / projection が動かない" in src
+
+
+# ══ 0.39.2 — 再監査が見つけた9件 ═══════════════════════════════════════════════
+
+def test_actor_alias_cannot_bypass_separation_of_duties(tmp_path):
+    """**`--actor` を変えるだけで職務分離を回避できてはいけない。**
+
+    実測（監査）: maker 本人の自己 admit は拒否されるが、同じプロセスが `--actor gate-alias`
+    に変えると通り、鎖も intact だった。名乗りを変えられるなら、比較に意味が無い。
+    """
+    org = tmp_path / "org"; led = org / ".orgforge" / "ledger"; led.mkdir(parents=True)
+    import shutil as _sh
+    _sh.copy(TEMPLATE / "ledger-schema.yaml", org / "ledger-schema.yaml")
+    (org / "constitution.yaml").write_text(
+        "enforcement:\n  judges:\n    require_attested_identity: true\n", encoding="utf-8")
+
+    def app(actor, payload):
+        return subprocess.run(
+            [sys.executable, str(TOOLS / "ledger.py"), "append", str(led),
+             "--actor", actor, "--class", "admission_decided",
+             "--payload", json.dumps(payload)],
+            cwd=org, capture_output=True, text=True)
+
+    # 自己申告の actor では通らない
+    r = app("gate-alias", {"deliverable": "7", "verdict": "admit", "gate": "g"})
+    assert r.returncode == 3, r.stdout + r.stderr
+    assert "自己申告の actor では記録できない" in (r.stdout + r.stderr)
+    # receipt 由来（identity_assurance がある）なら通る
+    r = app("gate-signer", {"deliverable": "7", "verdict": "admit", "gate": "g",
+                            "identity_assurance": "attested", "decision_by": "gate-signer"})
+    assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_attested_enforcement_defaults_off(tmp_path):
+    """**既定は偽。** 真にすると receipt を持たない既存の運用が全部止まる。"""
+    org = tmp_path / "org"; led = org / ".orgforge" / "ledger"; led.mkdir(parents=True)
+    import shutil as _sh
+    _sh.copy(TEMPLATE / "ledger-schema.yaml", org / "ledger-schema.yaml")
+    (org / "constitution.yaml").write_text("enforcement: {}\n", encoding="utf-8")
+    r = subprocess.run([sys.executable, str(TOOLS / "ledger.py"), "append", str(led),
+                        "--actor", "gate", "--class", "admission_decided",
+                        "--payload", json.dumps({"deliverable": "7", "verdict": "admit"})],
+                       cwd=org, capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_stage_b_socket_parent_must_be_bindable(tmp_path):
+    """**daemon が socket を作れる形であること。** root 所有 0755 では bind できない。
+
+    実測（監査）: `bind()` は親への書き込み権限を要求する。0755 も 1770 も動かない —
+    前者は daemon が作れず、後者は writerd が拒否する。anchor / leaf に分ける。
+    """
+    import socket as _s
+    # root 所有 0755 に別 UID（自分）が bind できないこと
+    for d in ("/usr/local", "/Library/LaunchDaemons"):
+        if not os.path.isdir(d) or os.stat(d).st_uid != 0:
+            continue
+        sk = _s.socket(_s.AF_UNIX, _s.SOCK_STREAM)
+        try:
+            sk.bind(os.path.join(d, f"t-{os.getpid()}.sock"))
+            os.unlink(os.path.join(d, f"t-{os.getpid()}.sock"))
+            assert False, f"{d} に bind できてしまった（テストの前提が崩れている）"
+        except PermissionError:
+            pass
+        finally:
+            sk.close()
+    # installer は anchor（root）と leaf（writer）を分けること
+    src = (TOOLS / "writer-install.sh").read_text(encoding="utf-8")
+    assert "SOCK_ANCHOR=" in src and "SOCK_PARENT=" in src
+    assert "chown '${SERVICE_USER}:${SERVICE_GROUP}' '${SOCK_PARENT}'" in src
+    assert "chown root:wheel '${SOCK_ANCHOR}'" in src
+
+
+def test_writerd_pins_the_schema(tmp_path):
+    """schema を明示しないと cwd 依存でテンプレートに fallback する。"""
+    src = (TOOLS / "writerd.py").read_text(encoding="utf-8")
+    assert 'env["ORG_LEDGER_SCHEMA"] = self.schema' in src
+    assert '"--schema"' in src
+    # installer が root 所有の設定から渡すこと
+    isrc = (TOOLS / "writer-install.sh").read_text(encoding="utf-8")
+    assert "--schema" in isrc
+
+
+def test_isolation_compares_the_peer_uid(tmp_path):
+    """**caller と同じ UID なら隔離ではない。** 要求ごとに peer UID と比べる。"""
+    sys.path.insert(0, str(TOOLS))
+    import importlib
+    wd = importlib.import_module("writerd")
+    src = __import__("inspect").getsource(wd.measured_isolation)
+    assert "peer_uid" in src
+    assert "peer_uid == me" in src
+
+
+def test_writer_isolation_does_not_become_judge_isolation():
+    """**同じ writer UID は judge 同士の隔離を証明しない。**
+
+    実測（監査）: writer の隔離値が judge の workload_isolation に入り、別 signer なら
+    distinct_workload へ昇格していた。judge は writer とは別のプロセスで動く。
+    """
+    src = (TOOLS / "identity.py").read_text(encoding="utf-8")
+    assert '"writer_isolation": os.environ.get("ORG_WRITER_ISOLATION")' in src
+    assert '"workload_isolation": os.environ.get("ORG_WRITER_ISOLATION")' not in src
+    assert "judge_workload" in src
+
+
+def test_verifier_counts_rpc_failures():
+    """✗ を印字するだけでは、検査が落ちても最終 exit が 0 になる。"""
+    src = (TOOLS / "writer-verify.sh").read_text(encoding="utf-8")
+    assert "FAIL + RPC_BAD" in src
+    assert 'bad "writerd check が落ちた"' in src
+
+
+def test_verifier_no_write_writes_nothing():
+    """`--no-write` では ⑨ の正常系 append も出さない。"""
+    src = (TOOLS / "writer-verify.sh").read_text(encoding="utf-8")
+    assert "no_write = sys.argv[3]" in src
+    assert "再送: --no-write なので飛ばす" in src
+
+
+def test_installer_does_not_overwrite_the_original_owner():
+    """再 install で「元の所有者」を writer に書き換えない（uninstall が壊れる）。"""
+    src = (TOOLS / "writer-install.sh").read_text(encoding="utf-8")
+    assert "再 install では上書きしない" in src
+    assert "元の所有者は既に記録されている" in src
+    assert "へ「復元」して、caller に戻せなくなる" in src

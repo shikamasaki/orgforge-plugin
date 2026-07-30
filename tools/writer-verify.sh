@@ -222,9 +222,12 @@ fi
 
 echo
 echo "── ⑨ RPC の改変・再送が拒否されるか"
-python3 - "$SOCK" "$T" <<'PY'
+# **--no-write では正常系の append も出さない。** 改変・再送の検査は拒否されるものだけで
+# 成立するが、再送の検査には「1回目が通る」ことが要る — そこは書き込みになるので飛ばす。
+RPC_OUT="$(python3 - "$SOCK" "$T" "$NO_WRITE" <<'PY'
 import json, socket, sys
 sock, tools = sys.argv[1], sys.argv[2]
+no_write = sys.argv[3] == "1"
 sys.path.insert(0, tools)
 from writerd import request_digest, PROTOCOL
 def send(req):
@@ -244,9 +247,12 @@ t = dict(base); t["argv"] = list(base["argv"]); t["argv"][1] = "attacker"
 r = send(t)
 print(("  ✓ " if r.get("reason") == "request_tampered" else "  ✗ ") +
       f"RPC 改変: {r.get('reason')}")
-r1, r2 = send(base), send(base)
-print(("  ✓ " if r2.get("reason") == "replayed_nonce" else "  ✗ ") +
-      f"再送: 1回目={r1.get('reason')} 2回目={r2.get('reason')}")
+if no_write:
+    print("  - 再送: --no-write なので飛ばす（1回目が正常な append になるため）")
+else:
+    r1, r2 = send(base), send(base)
+    print(("  ✓ " if r2.get("reason") == "replayed_nonce" else "  ✗ ") +
+          f"再送: 1回目={r1.get('reason')} 2回目={r2.get('reason')}")
 p = dict(base); p["nonce"] = "p" * 32
 p["argv"] = base["argv"] + ["/tmp/evil/ledger.jsonl"]
 p["digest"] = request_digest(p)
@@ -259,6 +265,12 @@ r = send(u)
 print(("  ✓ " if r.get("reason") == "unknown_org" else "  ✗ ") +
       f"未知の org: {r.get('reason')}")
 PY
+)"
+printf '%s\n' "$RPC_OUT"
+# **✗ を数える。** 印字するだけでは、検査が落ちても最終 exit が 0 になる（実測で指摘）。
+RPC_BAD="$(printf '%s' "$RPC_OUT" | grep -c '✗' || true)"
+RPC_OK="$(printf '%s' "$RPC_OUT" | grep -c '✓' || true)"
+PASS=$((PASS + RPC_OK)); FAIL=$((FAIL + RPC_BAD))
 
 echo
 echo "── ⑩ 台帳の健全性（writerd が壊していないこと）"
@@ -270,14 +282,20 @@ fi
 
 echo
 echo "── ⑪ writerd 自身の判定（socket と資産）"
-python3 "$T/writerd.py" check --socket "$SOCK" --require-root-owned 2>&1 | python3 -c "
+CHECK_OUT="$(python3 "$T/writerd.py" check --socket "$SOCK" --require-root-owned 2>&1)"
+if printf '%s' "$CHECK_OUT" | python3 -c "
 import json, sys
 d = json.load(sys.stdin)
-print(('  ✓ ' if d['ok'] else '  ✗ ') + f\"writerd check: ok={d['ok']} isolation={d.get('workload_isolation')}\")
-if d.get('detail'): print('    ' + d['detail'].split(chr(10))[0])
+print(f\"    ok={d['ok']} isolation={d.get('workload_isolation')}\")
+if d.get('detail'): print('    ' + str(d['detail']).split(chr(10))[0])
 for a in d.get('asset_issues') or []:
     print('    - ' + a['path'].split('/')[-1] + ': ' + a['issue'][:70])
-"
+sys.exit(0 if d['ok'] else 1)
+"; then
+  ok "writerd check が通った"
+else
+  bad "writerd check が落ちた"
+fi
 
 echo
 echo "════════════════════════════════════════════"

@@ -101,19 +101,32 @@ def check_socket_parent(path, require_root_owned=False):
                 f"（mode {oct(st.st_mode & 0o777)}）: {parent}\n"
                 f"  **書ける主体は socket を差し替えられる** — 偽の writer に繋がされる。")
     if require_root_owned:
-        # 段階B: root 所有で、**caller の属する group からも書けない**こと。
-        # 1770 のように group-write を許すと、その group に入る caller が socket を差し替え
-        # られる（実測: installer が 1770 を設定し、writerd 自身がそれを拒否して起動しなかった）。
-        # **通過（x）は許し、書き込み（w）は落とす** — 0755 が正しい。
-        if st.st_uid != 0:
-            return (f"socket の親ディレクトリが root 所有でない（uid={st.st_uid}）: {parent}\n"
-                    f"  同じ UID で書き換えられる限り、caller は socket を差し替えられる。"
-                    f"**workload_isolation を separate_uid と呼べない。**")
-        if st.st_mode & 0o020:
-            return (f"socket の親ディレクトリが group から書き込み可能である "
+        # 段階B。**leaf は writer 所有でよい** — daemon が socket を作るには親への書き込み権限が
+        # 要るので、root 所有 0755 では bind できない（実測: Permission denied）。
+        # 保証は「**anchor（leaf の親）に caller が書けないので、leaf ごと差し替えられない**」
+        # ことである。したがって:
+        #   leaf   … 自分（writer）の所有で、他者から書けないこと
+        #   anchor … root 所有で、他者から書けないこと
+        if st.st_uid not in (0, os.getuid()):
+            return (f"socket の親（leaf）の所有者が writer でも root でもない"
+                    f"（uid={st.st_uid}）: {parent}")
+        if st.st_mode & 0o022:
+            return (f"socket の親（leaf）が他者から書き込み可能である "
                     f"（mode {oct(st.st_mode & 0o777)}）: {parent}\n"
-                    f"  その group に入る caller は socket を差し替えられる。"
-                    f"**通過（x）だけを許し、書き込み（w）は落とすこと** — 0755 が正しい。")
+                    f"  その主体は socket を差し替えられる。")
+        anchor = os.path.dirname(parent)
+        try:
+            ast_ = os.stat(anchor)
+        except OSError as e:
+            return f"socket の anchor を stat できない（{e}）: {anchor}"
+        if ast_.st_uid != 0:
+            return (f"socket の anchor が root 所有でない（uid={ast_.st_uid}）: {anchor}\n"
+                    f"  anchor に書ける主体は **leaf ごと差し替えられる**。"
+                    f"**workload_isolation を separate_uid と呼べない。**")
+        if ast_.st_mode & 0o022:
+            return (f"socket の anchor が他者から書き込み可能である "
+                    f"（mode {oct(ast_.st_mode & 0o777)}）: {anchor}\n"
+                    f"  **caller が leaf を差し替えられる。**")
     else:
         # 段階A（同一 UID）: 自分の所有でよい。group-write も自分の group なので許す。
         if st.st_uid not in (0, os.getuid()):
@@ -249,7 +262,7 @@ def audit_writer_assets(root, org_root=None, require_owner_uid=None):
 
 
 
-def measured_isolation(sock_path, ledger_roots):
+def measured_isolation(sock_path, ledger_roots, peer_uid=None):
     """`workload_isolation` を **実測で** 決める。フラグでは決めない。
 
     実測（監査）: `--require-root-owned` を渡しただけで `separate_uid` と報告していた。
@@ -273,13 +286,24 @@ def measured_isolation(sock_path, ledger_roots):
                 return "process_mediated"
         except OSError:
             return "process_mediated"
+    # **caller と同じ UID なら隔離ではない。** 実測（監査）: writer UID = caller UID = 502 でも
+    # separate_uid を返していた。**要求ごとに peer UID と比べる**必要がある — 起動時には
+    # 誰が繋いでくるか分からない。
+    if peer_uid is None:
+        return "process_mediated"        # 比べられないなら弱い方に倒す
+    if peer_uid == me:
+        return "process_mediated"
     return "separate_uid"
 
 
 class Writer:
-    def __init__(self, roots, require_root_owned=False, isolation="process_mediated"):
+    def __init__(self, roots, require_root_owned=False, isolation="process_mediated",
+                 schema=None, caller_uid_differs=None):
         self.roots = roots                      # {org_name: ledger_root}
         self.isolation = isolation              # **実測値**。フラグではない
+        self.schema = schema                    # root 所有の設定から固定する
+        self.caller_uid_differs = caller_uid_differs
+        self.sock_path = None                   # serve が設定する
         self.nonces = _NonceStore()
         self.require_root_owned = require_root_owned
         self.lock = threading.Lock()            # 1プロセス内の直列化
@@ -331,7 +355,14 @@ class Writer:
         # **recorded_by は peer credential から。** decision_by には使わない。
         env = dict(os.environ)
         env["ORG_LEDGER_ROOT"] = root
-        env["ORG_WRITER_ISOLATION"] = self.isolation
+        # **schema を明示する。** 渡さないと ledger.py が cwd から org を探し、見つからなければ
+        # プラグインのテンプレートに fallback する（実測で指摘）— org が緩めた／厳しくした規則
+        # ではなく、テンプレートの規則で検証されることになる。
+        if self.schema:
+            env["ORG_LEDGER_SCHEMA"] = self.schema
+        # **要求ごとに実測する。** 起動時の判定では caller が誰か分からない。
+        env["ORG_WRITER_ISOLATION"] = measured_isolation(
+            self.sock_path, list(self.roots.values()), peer_uid=peer_uid)
         env["ORG_WRITER_PEER_UID"] = str(peer_uid) if peer_uid is not None else ""
         env["ORG_WRITER_PEER_PID"] = str(peer_pid) if peer_pid is not None else ""
         env["ORG_INSIDE_WRITER"] = "1"          # ledger.py がこれを見て直接書き込みを許す
@@ -382,7 +413,9 @@ def serve(a):
     # **isolation は実測で決める。** フラグを渡したかどうかで決めてはいけない
     # （実測: --require-root-owned を渡しただけで separate_uid と報告していた）。
     iso = measured_isolation(sock, list(roots.values()))
-    w = Writer(roots, require_root_owned=a.require_root_owned, isolation=iso)
+    w = Writer(roots, require_root_owned=a.require_root_owned, isolation=iso,
+               schema=a.schema)
+    w.sock_path = sock
     print(json.dumps({"listening": sock, "orgs": sorted(roots),
                       "workload_isolation": iso,
                       "note": ("同一 UID の writerd は OS 境界ではない — caller は daemon を"
@@ -483,7 +516,10 @@ def main(argv):
     q.add_argument("--socket", default=None)
     q.add_argument("--pidfile", default=None)
     q.add_argument("--require-root-owned", dest="require_root_owned", action="store_true",
-                   help="socket の親ディレクトリが root 所有であることを要求する（段階B）")
+                   help="socket の anchor が root 所有であることを要求する（段階B）")
+    q.add_argument("--schema", default=None,
+                   help="ledger-schema.yaml のパス。**root 所有の設定から固定する** — "
+                        "渡さないと ledger.py が cwd から探し、テンプレートに fallback する")
     q.set_defaults(fn=serve)
     q = sub.add_parser("check", help="socket と親ディレクトリを検証する（書き込みはしない）")
     q.add_argument("--socket", default=None)

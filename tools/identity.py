@@ -311,9 +311,20 @@ def verify_receipt(receipt, expect, store=None, expect_release=False):
         assurance = {
             "identity_assurance": "authenticated" if store.get("mode") == "authenticated"
                                   else "attested",
-            # **隔離は別軸である。** 鍵が非対称でも、writer が同じ UID で動いていれば
-            # workload は隔離されていない。ここでは writer 側が観測して上書きする。
-            "workload_isolation": os.environ.get("ORG_WRITER_ISOLATION") or "none",
+            # **writer の隔離は judge の隔離ではない。** 実測（監査）: writer の隔離値が
+            # judge の workload_isolation に入り、別 signer なら distinct_workload へ昇格して
+            # いた。**同じ writer UID は judge 同士が別ワークロードである証拠にならない** —
+            # judge は writer とは別のプロセス（別のマシンかもしれない）で動く。
+            #
+            # judge のワークロードは、judge 自身が receipt で申告する（`judge_workload`）か、
+            # 分からなければ `none` である。writer の値を借りてはいけない。
+            "workload_isolation": (receipt.get("judge_workload")
+                                   if receipt.get("judge_workload") in
+                                   ("separate_process", "separate_uid", "separate_host")
+                                   else "none"),
+            # writer 側の隔離は **別の欄**に置く。混ぜると「writer を隔離したから judge も
+            # 独立している」という誤読を生む。
+            "writer_isolation": os.environ.get("ORG_WRITER_ISOLATION") or "none",
             "signer_id": receipt["signer_id"], "key_id": receipt["key_id"],
             "may_release_halt": bool(key.get("may_release_halt")),
         }

@@ -38,7 +38,8 @@ SERVICE_USER="_orgforge-writer"
 SERVICE_GROUP="_orgforge-writer"
 LABEL="com.orgforge.writerd"
 PLIST="/Library/LaunchDaemons/${LABEL}.plist"
-SOCK_PARENT="/var/run/orgforge"
+SOCK_ANCHOR="/usr/local/var/orgforge"          # root 所有。caller はここに書けない
+SOCK_PARENT="/usr/local/var/orgforge/run"      # writer 所有。daemon が socket を作る
 INSTALL_DIR="/usr/local/libexec/orgforge"
 CONFIG="/usr/local/etc/orgforge/writerd.conf"
 BACKUP_DIR="/usr/local/var/orgforge/backup"
@@ -145,6 +146,7 @@ if [ "$UNINSTALL" = 1 ]; then
     say "元の所有者の記録が無い — **手で戻すこと**: chown -R \$(whoami) <org>/.orgforge"
   fi
   run "rm -rf '${SOCK_PARENT}' '${INSTALL_DIR}'"
+  say "（${SOCK_ANCHOR} は他の用途にも使うので消さない）"
   say "socket 親ディレクトリと daemon の複製を消した"
   if id -u "${SERVICE_USER}" >/dev/null 2>&1; then
     run "sysadminctl -deleteUser '${SERVICE_USER}' 2>/dev/null || dscl . -delete '/Users/${SERVICE_USER}'"
@@ -200,12 +202,24 @@ say "**caller はここを書き換えられない** — writerd 自体の差し
 echo
 echo "── socket の親ディレクトリ"
 run "mkdir -p '${SOCK_PARENT}'"
-run "chown root:wheel '${SOCK_PARENT}'"
-# **0755。** 1770 だと writerd 自身が「group から書ける親は差し替えられる」として起動を拒否する
-# （実測でそうなった）。caller に必要なのは **通過（x）** であって書き込みではない。
-# socket そのものは writerd が 0666 で作るので、接続はできる。
+# **anchor と leaf を分ける。**
+#
+#   anchor: root 所有 0755。**caller はここに書けない**ので、leaf ごと差し替えられない。
+#   leaf:   writer 所有 0755。**daemon がここに socket を作る**（bind は親への書き込み権限が要る）。
+#
+# 実測（監査）: root 所有 0755 の親には **daemon 自身が bind できない**（Permission denied）。
+# 0755 も 1770 も、どちらでも動かない — 前者は daemon が作れず、後者は writerd が拒否する。
+# caller から見た保証は「**anchor に書けないので leaf を差し替えられない**」ことである。
+#
+# より強い形は launchd の socket activation（launchd が先に socket を作り FD を daemon に渡す）
+# で、その場合 leaf すら writer 所有でなくてよい。ここでは移植性のため anchor/leaf 方式を採る。
+run "chown root:wheel '${SOCK_ANCHOR}'"
+run "chmod 0755 '${SOCK_ANCHOR}'"
+run "mkdir -p '${SOCK_PARENT}'"
+run "chown '${SERVICE_USER}:${SERVICE_GROUP}' '${SOCK_PARENT}'"
 run "chmod 0755 '${SOCK_PARENT}'"
-say "${SOCK_PARENT} （root 所有 0755 — 通過は許し、**誰も書き込めない**）"
+say "${SOCK_ANCHOR} （root 所有 0755 — **caller はここに書けない**）"
+say "${SOCK_PARENT} （${SERVICE_USER} 所有 0755 — daemon が socket を作れる／caller は書けない）"
 say "**caller は親ディレクトリを差し替えられない** — 偽 socket に繋がされる経路を塞ぐ"
 
 # ── 設定（root 所有。caller は台帳のパスを指定できない）─────────────────────
@@ -224,12 +238,28 @@ say "${CONFIG} （root 所有）— **書き込み先はここで決まる。RPC
 echo
 echo "── writer が所有すべき資産"
 run "mkdir -p '${BACKUP_DIR}'"
+# **再 install で上書きしない。** 2回目の実行では所有者が既に writer になっているので、
+# それを「元の所有者」として記録すると、uninstall が service UID へ「復元」してしまう
+# （実測で指摘された）。最初の1回だけ書く。
 if [ "$DRY_RUN" = 0 ]; then
-  printf '%s\n' "${ORIG_OWNER}" > "${BACKUP_DIR}/original-owner"
-  printf '%s\n' "${ORG_ROOT}"   > "${BACKUP_DIR}/original-org-root"
-  chmod 600 "${BACKUP_DIR}"/original-*
+  if [ -f "${BACKUP_DIR}/original-owner" ]; then
+    say "元の所有者は既に記録されている（$(cat "${BACKUP_DIR}/original-owner")）— 上書きしない"
+  elif [ "$(printf '%s' "${ORIG_OWNER}" | cut -d: -f1)" = "${SERVICE_USER}" ]; then
+    fail "$(cat <<EOF
+台帳の所有者が既に ${SERVICE_USER} だが、元の所有者の記録が無い。
+  このまま進めると uninstall が ${SERVICE_USER} へ「復元」して、caller に戻せなくなる。
+  手で記録してから再実行すること:
+    echo '<元の owner:group>' | sudo tee ${BACKUP_DIR}/original-owner
+    echo '${ORG_ROOT}' | sudo tee ${BACKUP_DIR}/original-org-root
+EOF
+)"
+  else
+    printf '%s\n' "${ORIG_OWNER}" > "${BACKUP_DIR}/original-owner"
+    printf '%s\n' "${ORG_ROOT}"   > "${BACKUP_DIR}/original-org-root"
+    chmod 600 "${BACKUP_DIR}"/original-*
+    say "元の所有者を ${BACKUP_DIR} に記録した（rollback 用。**再 install では上書きしない**）"
+  fi
 fi
-say "元の所有者を ${BACKUP_DIR} に記録した（rollback 用）"
 # **鍵は先に退避する。** 所有者を変えると読めなくなる場合があるため。
 if [ -d "${ORG_ROOT}/.orgforge/trust" ]; then
   run "cp -R '${ORG_ROOT}/.orgforge/trust' '${BACKUP_DIR}/trust-backup'"
@@ -278,6 +308,10 @@ else
     <string>serve</string>
     <string>--org</string><string>default=${ORG_ROOT}/.orgforge/ledger</string>
     <string>--socket</string><string>${SOCK_PARENT}/writer.sock</string>
+    <!-- **schema を固定する。** 渡さないと ledger.py が cwd から org を探し、見つからなければ
+         プラグインのテンプレートに fallback する — org が変えた規則ではなく、テンプレートの
+         規則で検証されることになる（実測で指摘された）。 -->
+    <string>--schema</string><string>${ORG_ROOT}/ledger-schema.yaml</string>
     <string>--require-root-owned</string>
   </array>
   <key>RunAtLoad</key><true/>
