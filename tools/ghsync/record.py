@@ -85,7 +85,12 @@ def _append_progress_receipt(a):
         payload["files"] = a.files
     here = HERE
     try:
-        p = subprocess.run([sys.executable, os.path.join(here, "ledger.py"), "append",
+        # **統制の書き込みは writerd 経由に統一する。** 直接呼ぶと ORG_WRITER_SOCKET 下で
+        # exit 4 になり、正規運用が止まる。
+        _base = ([sys.executable, os.path.join(here, "writer_client.py"), "append", "--"]
+                 if os.environ.get("ORG_WRITER_SOCKET")
+                 else [sys.executable, os.path.join(here, "ledger.py"), "append"])
+        p = subprocess.run(_base + [
                             "--actor", payload["role"], "--class", "progress_recorded",
                             "--natural-key", f"progress-{a.issue}-{a.event_id or a.event}",
                             "--payload", json.dumps(payload, ensure_ascii=False)],
@@ -672,8 +677,10 @@ def cmd_provisional(a):
     joint_digest = hashlib.sha256(
         json.dumps({k: v["reasoning_sha256"] for k, v in sorted(pair.items())},
                    sort_keys=True).encode("utf-8")).hexdigest()
-    # **独立性は別軸である（H1）。** 署名されていても、同じ signer / 同じ鍵が両方の血統を
-    # 作れるなら独立レビューではない。一致は成立するが、**その一致が何を意味するか**は変わる。
+    # **joint は writer の専用操作が生成する。** ここで payload を組み立てて generic append に
+    # 渡すと、`require_attested_identity` が「receipt が無い」として拒否し、**一致しても
+    # admission を作れないデッドロック**になる（joint に judge の receipt は存在しない —
+    # 一致は判断ではなく事実の関数だからである）。
     from identity import reviewer_independence
     mine_assurance = {"signer_id": ident.get("signer_id"), "key_id": ident.get("key_id"),
                       "workload_isolation": ident.get("workload_isolation") or "none",
@@ -683,31 +690,25 @@ def cmd_provisional(a):
         print(f"\n  ★ 2血統が一致したが、**同じ signer が両方に署名している**"
               f"（{mine_assurance['signer_id']}）。\n"
               f"  署名されていても、同じ鍵が両方の血統を作れるなら **独立レビューではない**。\n"
-              f"  admission は生成するが、reviewer_independence = same_signer として記録する —\n"
-              f"  **独立性の証拠として数えないこと。** 血統ごとに別の signer を使うか、\n"
-              f"  Authenticated Mode（隔離 writer / 鍵の保護）を待つこと。", file=sys.stderr)
-    joint = {"issue": a.issue, "deliverable": str(a.issue), "verdict": a.verdict,
-             "lineage": "joint", "agreed_by": sorted([a.lineage, other]),
-             "reviewer_independence": independence,
-             # **identity は payload に書かない。** 2件の provisional に既に記録されており、
-             # `from_seqs` からたどれる。ここに書くと「道具が自分で名乗った identity」になり、
-             # caller が書けるものと区別できなくなる（0.39.4 で append 側が拒否する）。
-             "agreed_identity_assurance": min(
-                 (mine_assurance.get("identity_assurance") or "claimed",
-                  (peer.get("assurance") or {}).get("identity_assurance") or "claimed"),
-                 key=lambda x: ["claimed", "observed", "attested", "authenticated"].index(x)),
-             "review_subject_id": a.subject,
-             "from_seqs": sorted([peer["seq"], mine["seq"]]),
-             "reasoning_by_lineage": pair,
-             "reasoning_sha256": joint_digest}
-    if getattr(a, "phase", None):
-        joint["phase"] = a.phase
-    rc = _ledger_append(a.by or a.role, event, joint,
-                        f"{event}-{a.issue}-joint-{digest[:12]}")
-    if rc != 0:
+              f"  **独立性の証拠として数えないこと。**", file=sys.stderr)
+
+    args = ["--issue", str(a.issue), "--event", event]
+    if os.environ.get("ORG_WRITER_SOCKET"):
+        cmd = [sys.executable, os.path.join(HERE, "writer_client.py"),
+               "derive-admission", "--", *args]
+    else:
+        cmd = [sys.executable, os.path.join(HERE, "ledger.py"), "derive-admission", *args]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    except Exception as e:
+        print(f"admission を生成できなかった: {e}", file=sys.stderr)
+        return 4
+    if r.returncode != 0:
+        print(f"admission を生成できなかった:\n"
+              f"  {((r.stdout or '') + (r.stderr or '')).strip()[:500]}", file=sys.stderr)
         return 4
     print(f"\n  ✓ 2血統が {a.verdict} で一致した — {event} を生成した"
-          f"（from seqs {joint['from_seqs']}）。\n"
+          f"（reviewer_independence={independence}）。\n"
           f"  この admission は **判定ではなく一致の記録** である。"
           f"verdict / why は judge が書いたものをそのまま持ち越している。")
     return 0
@@ -919,7 +920,10 @@ def cmd_decide(a):
     if getattr(a, "risk", None):
         payload["risk_accepted"] = True
     try:
-        r = subprocess.run([sys.executable, os.path.join(here, "ledger.py"), "append",
+        _base = ([sys.executable, os.path.join(here, "writer_client.py"), "append", "--"]
+                 if os.environ.get("ORG_WRITER_SOCKET")
+                 else [sys.executable, os.path.join(here, "ledger.py"), "append"])
+        r = subprocess.run(_base + [
                             "--actor", a.by, "--class", a.event,
                             # 冪等キーは **判定の内容ごと**に一意。`{event}-{issue}` だと2周目の
                             # 判定が1周目と衝突して no-op になり、しかも冪等チェックは統制より

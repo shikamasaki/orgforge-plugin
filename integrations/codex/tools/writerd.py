@@ -74,6 +74,50 @@ def socket_path(root=None):
     return os.path.join(root, "writer.sock") if root else None
 
 
+
+def load_manifest(path=None):
+    """root 所有の manifest から **daemon の設定を固定配線する**。
+
+    daemon が起動時に「どの org を、どの schema と policy と trust store で扱うか」を
+    **caller の環境からではなく、root 所有のファイルから**受け取る。env や cwd に依存すると、
+    caller が差し替えられる。
+
+    形:
+        orgs:
+          default:
+            ledger: /usr/local/var/orgforge/orgs/<ns>/ledger
+            schema: /usr/local/var/orgforge/orgs/<ns>/ledger-schema.yaml
+            trust:  /usr/local/var/orgforge/orgs/<ns>/trust/keys.json
+        policy: /usr/local/etc/orgforge/policy.yaml
+        allow_uids: [501]
+
+    返り値: (manifest, error)。**読めないなら起動しない。**
+    """
+    path = path or os.environ.get("ORG_WRITER_MANIFEST")
+    if not path:
+        return None, None                       # manifest 無し（段階A）
+    if not os.path.isfile(path):
+        return None, f"manifest が無い: {path}"
+    try:
+        st = os.stat(path)
+    except OSError as e:
+        return None, f"manifest を stat できない: {e}"
+    if st.st_uid != 0 and st.st_uid != os.getuid():
+        return None, (f"manifest の所有者が root でも自分でもない（uid={st.st_uid}）: {path}\n"
+                      f"  **書ける主体が daemon の設定を差し替えられる。**")
+    if st.st_mode & 0o022:
+        return None, (f"manifest が他者から書き込み可能（mode {oct(st.st_mode & 0o777)}）: {path}")
+    try:
+        import yaml
+        with open(path, encoding="utf-8") as f:
+            doc = yaml.safe_load(f) or {}
+    except Exception as e:
+        return None, f"manifest を読めない: {e}"
+    if not isinstance(doc, dict) or not isinstance(doc.get("orgs"), dict):
+        return None, f"manifest に orgs が無い（または map でない）: {path}"
+    return doc, None
+
+
 def check_socket_parent(path, require_root_owned=False):
     """socket の **親ディレクトリ** を検証する。
 
@@ -353,6 +397,8 @@ class Writer:
         self.roots = roots                      # {org_name: ledger_root}
         self.isolation = isolation              # **実測値**。フラグではない
         self.schema = schema                    # root 所有の設定から固定する
+        self.trust = None                       # 同上
+        self.policy = None                      # 同上
         self.caller_uid_differs = caller_uid_differs
         self.sock_path = None                   # serve が設定する
         self.allowed_uids = allowed_uids        # None = 制限なし（段階A）
@@ -428,11 +474,12 @@ class Writer:
                 return {"ok": False, "reason": "read_failed", "detail": str(e)}, False
             return {"ok": True, "reason": "read", "exit_code": r.returncode,
                     "stdout": r.stdout, "stderr": r.stderr}, True
-        if op not in ("append", "trip-halt", "release-halt", "reserve-exposure"):
+        if op not in ("append", "trip-halt", "release-halt", "reserve-exposure",
+                      "derive-admission"):
             return {"ok": False, "reason": "unsupported_op",
                     "detail": f"op={op!r} は writerd 経由では実行できない"
                               f"（append / trip-halt / release-halt / reserve-exposure / "
-                              f"halt-status）。"}, False
+                              f"derive-admission / halt-status）。"}, False
         # **caller が root を指定する経路を閉じる。** argv からパスらしきものを弾く。
         for a in argv:
             if a == root or a.startswith("/") and os.path.sep in a and (
@@ -449,6 +496,11 @@ class Writer:
         # ではなく、テンプレートの規則で検証されることになる。
         if self.schema:
             env["ORG_LEDGER_SCHEMA"] = self.schema
+        # **trust store も固定する。** caller の環境から取ると、偽の鍵 registry を指させる。
+        if self.trust:
+            env["ORG_TRUST_STORE"] = self.trust
+        if self.policy:
+            env["ORG_POLICY_FILE"] = self.policy
         # **要求ごとに実測する。** 起動時の判定では caller が誰か分からない。
         env["ORG_WRITER_ISOLATION"] = measured_isolation(
             self.sock_path, list(self.roots.values()), peer_uid=peer_uid)
@@ -471,8 +523,27 @@ class Writer:
 
 def serve(a):
     """socket を開いて要求を待つ。**親ディレクトリを検証してから開く。**"""
+    manifest, merr = load_manifest(getattr(a, "manifest", None))
+    if merr:
+        print(f"writerd: {merr}\n"
+              f"  **設定を読めないなら起動しない。**", file=sys.stderr)
+        return 4
     roots = {}
-    for spec in a.org:
+    if manifest:
+        # **manifest が最終。** caller の --org / --schema では上書きできない。
+        for name, spec in manifest["orgs"].items():
+            if not isinstance(spec, dict) or not spec.get("ledger"):
+                print(f"writerd: manifest の orgs.{name} に ledger が無い", file=sys.stderr)
+                return 4
+            roots[name] = os.path.abspath(spec["ledger"])
+        a.schema = (manifest["orgs"].get(list(roots)[0], {}) or {}).get("schema") or a.schema
+        if manifest.get("policy"):
+            os.environ["ORG_POLICY_FILE"] = manifest["policy"]
+        if manifest.get("trust"):
+            os.environ["ORG_TRUST_STORE"] = manifest["trust"]
+        if manifest.get("allow_uids") and not getattr(a, "allow_uid", None):
+            a.allow_uid = [str(u) for u in manifest["allow_uids"]]
+    for spec in (a.org or []):
         if "=" not in spec:
             print(f"--org は name=path の形で渡すこと: {spec!r}", file=sys.stderr)
             return 2
@@ -481,7 +552,10 @@ def serve(a):
         if not os.path.isdir(roots[name]):
             print(f"台帳のルートが無い: {roots[name]}", file=sys.stderr)
             return 2
-    sock = a.socket or socket_path(list(roots.values())[0] if roots else None)
+    if not roots:
+        print("writerd: 書き込み先が決まらない（--manifest か --org）", file=sys.stderr)
+        return 2
+    sock = (manifest or {}).get("socket") or a.socket or socket_path(list(roots.values())[0])
     if not sock:
         print("socket のパスが決まらない（--socket か ORG_WRITER_SOCKET）", file=sys.stderr)
         return 2
@@ -518,6 +592,10 @@ def serve(a):
     w = Writer(roots, require_root_owned=a.require_root_owned, isolation=iso,
                schema=a.schema, allowed_uids=allowed)
     w.sock_path = sock
+    if manifest:
+        first = manifest["orgs"].get(list(roots)[0]) or {}
+        w.trust = first.get("trust") or manifest.get("trust")
+        w.policy = manifest.get("policy")
     print(json.dumps({"listening": sock, "orgs": sorted(roots),
                       "workload_isolation": iso,
                       "note": ("同一 UID の writerd は OS 境界ではない — caller は daemon を"
@@ -613,7 +691,10 @@ def main(argv):
         description="台帳への書き込みを1プロセスに集約する（段階A: process_mediated）")
     sub = p.add_subparsers(dest="cmd", required=True)
     q = sub.add_parser("serve", help="socket を開いて要求を待つ")
-    q.add_argument("--org", action="append", required=True, metavar="NAME=LEDGER_ROOT",
+    q.add_argument("--manifest", default=None,
+                   help="root 所有の manifest。**あればこれが最終** — org / schema / policy / "
+                        "trust / allow_uids を caller の環境ではなくここから取る")
+    q.add_argument("--org", action="append", metavar="NAME=LEDGER_ROOT",
                    help="書いてよい台帳。**caller はパスを指定できず、この name で選ぶ**")
     q.add_argument("--socket", default=None)
     q.add_argument("--pidfile", default=None)

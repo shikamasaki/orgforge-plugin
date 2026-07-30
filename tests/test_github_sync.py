@@ -11,6 +11,20 @@ import pathlib
 import sys
 import pytest
 
+
+def _real_ids(org):
+    """その org の (org_id, ledger_id)。**書き込み先から決まる値**に receipt を合わせる。"""
+    sys.path.insert(0, str(REPO / "tools"))
+    import importlib
+    led = importlib.import_module("ledger")
+    import os as _os
+    cwd = _os.getcwd()
+    try:
+        _os.chdir(org)
+        return led._org_and_ledger_id(str(org / ".orgforge" / "ledger"))
+    finally:
+        _os.chdir(cwd)
+
 REPO = pathlib.Path(__file__).resolve().parent.parent
 # github_sync は tools/ghsync/ に分割された（0.22.0）。テストは「どのモジュールに居るか」
 # ではなく振る舞いを見たいので、全モジュールの名前を1つの名前空間に集めたビューを使う。
@@ -868,9 +882,13 @@ def _h1_setup(tmp_path, keys=(("k-gate", "gate-signer"),)):
 
 def _h1_receipt(org, subj, dig, reqd, key_id="k-gate", role="gate",
                 lineage="same-harness", verdict="admit", issue="7", out="r.json"):
-    r = _tool(org, "identity.py", "receipt", "--org-id", "org-A", "--ledger-id", "led-A",
+    # **org_id / ledger_id は書き込み先から決まる。** receipt もそれに合わせる —
+    # 合わせないと「別 org の receipt」として正しく拒否される（0.39.5 で束縛を完全化）。
+    _oid, _lid = _real_ids(org)
+    r = _tool(org, "identity.py", "receipt", "--org-id", _oid, "--ledger-id", _lid,
               "--subject", subj, "--issue", issue, "--role", role, "--phase", "implement",
-              "--lineage", lineage, "--verdict", verdict, "--requirements-digest", reqd,
+              "--lineage", lineage, "--verdict", verdict, "--event-class", "verdict_provisional",
+            "--requirements-digest", reqd,
               "--reasoning-sha256", dig, "--issued-at", "2026-07-30T12:00:00Z",
               "--key-id", key_id)
     assert r.returncode == 0, r.stdout + r.stderr

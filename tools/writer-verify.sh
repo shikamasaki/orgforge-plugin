@@ -28,13 +28,14 @@
 set -uo pipefail
 
 ORG_ROOT=""
+ORG_NAME=""
 NO_WRITE=0
-SOCK="/usr/local/var/orgforge/run/writer.sock"   # installer と同じ leaf
-LABEL="com.orgforge.writerd"
+SOCK=""                      # namespace から決める（installer と同じ規則）
 SERVICE_USER="_orgforge-writer"
 while [ $# -gt 0 ]; do
   case "$1" in
     --org-root) ORG_ROOT="${2:-}"; shift 2 ;;
+    --org-name) ORG_NAME="${2:-}"; shift 2 ;;
     --socket)   SOCK="${2:-}"; shift 2 ;;
     --no-write) NO_WRITE=1; shift ;;
     -h|--help)  sed -n '1,28p' "$0"; exit 0 ;;
@@ -42,6 +43,13 @@ while [ $# -gt 0 ]; do
   esac
 done
 [ -n "$ORG_ROOT" ] || { echo "--org-root が必要" >&2; exit 2; }
+# **namespace は installer と同じ規則で決める。** 食い違うと、存在しない socket を検査する。
+if [ -z "$ORG_NAME" ]; then
+  ORG_NAME="$(printf '%s' "$(cd "$ORG_ROOT" && pwd)" | shasum -a 256 | cut -c1-12)"
+fi
+[ -n "$SOCK" ] || SOCK="/usr/local/var/orgforge/run/${ORG_NAME}/writer.sock"
+AUTHORITATIVE="/usr/local/var/orgforge/orgs/${ORG_NAME}"
+LABEL="com.orgforge.writerd.${ORG_NAME}"
 LED="$ORG_ROOT/.orgforge/ledger"
 T="$(cd "$(dirname "$0")" && pwd)"
 
@@ -59,6 +67,7 @@ fi
 note "実行者: uid=$(id -u) ($(whoami))"
 note "台帳:   $LED"
 note "socket: $SOCK"
+note "namespace: $ORG_NAME"
 
 echo
 echo "── ① 台帳の所有者が別 UID か"
@@ -132,8 +141,7 @@ fi
 echo
 echo "── ④ 鍵 registry / schema を差し替えられないか"
 for f in "$ORG_ROOT/.orgforge/trust/keys.json" "$ORG_ROOT/ledger-schema.yaml" \
-         /usr/local/var/orgforge/authoritative/trust/keys.json \
-         /usr/local/var/orgforge/authoritative/ledger-schema.yaml; do
+         "$AUTHORITATIVE/trust/keys.json" "$AUTHORITATIVE/ledger-schema.yaml"; do
   [ -f "$f" ] || { note "$（無い）: $f"; continue; }
   # **1バイトも書かない。** 上書きを試すと本物の鍵 registry / schema を壊す。
   if python3 -c "
@@ -198,7 +206,7 @@ for p in "$ORG_ROOT/.orgforge/ledger" "$ORG_ROOT/.orgforge/trust" "$ORG_ROOT/led
   if [ -L "$p" ]; then
     REAL="$(readlink "$p")"
     case "$REAL" in
-      /usr/local/var/orgforge/authoritative/*) ok "$(basename "$p") は org 外の権威データを指す（$REAL）" ;;
+      "$AUTHORITATIVE"/*) ok "$(basename "$p") は org 外の権威データを指す（$REAL）" ;;
       *) bad "$(basename "$p") の symlink 先が権威データの外: $REAL" ;;
     esac
   else

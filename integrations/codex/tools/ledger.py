@@ -1025,6 +1025,40 @@ def require_writer_path(op):
 
 
 
+
+def _org_and_ledger_id(root):
+    """(org_id, ledger_id)。**書き込み先から取る** — payload の値は caller が書ける。
+
+    org_id  … org の識別子（`.orgforge/ORG_ID` があればそれ、無ければ org root のハッシュ）
+    ledger_id … 台帳の識別子（`<root>/LEDGER_ID` があればそれ、無ければ root のハッシュ）
+
+    どちらも無い org では None を返し、その項目の一致検査は行わない — 既存の org を
+    止めないため。**新しく作る org では書く**（`org-init` が置く）。
+    """
+    def _read_or_hash(path, fallback):
+        if path and os.path.isfile(path):
+            try:
+                v = open(path, encoding="utf-8").read().strip()
+                if v:
+                    return v
+            except OSError:
+                pass
+        return hashlib.sha256(os.path.abspath(fallback).encode()).hexdigest()[:16] \
+            if fallback else None
+
+    led_id = _read_or_hash(os.path.join(root, "LEDGER_ID") if root else None, root)
+    org_root = None
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from discover import org_root as _orgroot
+        org_root = _orgroot()
+    except Exception:
+        pass
+    org_id = _read_or_hash(
+        os.path.join(org_root, ".orgforge", "ORG_ID") if org_root else None, org_root)
+    return org_id, led_id
+
+
 def _verify_receipt_for(a, payload, cls):
     """`--receipt` を検証し、identity fields を生成する。(fields, error)。
 
@@ -1049,12 +1083,22 @@ def _verify_receipt_for(a, payload, cls):
         return None, f"identity モジュールを読めない: {e}"
     # **判定の中身と receipt が一致することを確かめる。** 一致を見ないと、別の判定の receipt を
     # 持ち込んで identity だけ借りられる。
-    expect = {}
+    # **receipt を、この判定に完全に束縛する。** 一部だけ見ると、見ていない項目が違う receipt を
+    # 流用できる（別 org / 別 issue / 別クラスへの再利用）。
+    expect = {"event_class": cls}
     for k, pk in (("verdict", "verdict"), ("role", "role"), ("lineage", "lineage"),
                   ("review_subject_id", "review_subject_id"),
-                  ("reasoning_sha256", "reasoning_sha256")):
+                  ("reasoning_sha256", "reasoning_sha256"),
+                  ("issue", "issue"), ("phase", "phase")):
         if payload.get(pk) is not None:
             expect[k] = payload[pk]
+    # org / ledger は台帳の側が持つ。**payload からではなく、書き込み先から取る** —
+    # payload の値は caller が書けるので、一致を確かめても意味が無い。
+    _org_id, _led_id = _org_and_ledger_id(a.root)
+    if _org_id:
+        expect["org_id"] = _org_id
+    if _led_id:
+        expect["ledger_id"] = _led_id
     who, assurance, err = verify_receipt(rc, expect)
     if err:
         return None, err
@@ -2096,6 +2140,171 @@ def cmd_halt_status(a):
     return 10
 
 
+
+def cmd_derive_admission(a):
+    """**2件の認証済み provisional から admission を生成する。** writer の専用操作。
+
+    ## なぜ専用操作にするのか
+
+    joint admission は「2つの判定が一致した」という **事実の関数**であって、新しい判断ではない。
+    したがって judge の receipt は存在しない — それを generic append で書こうとすると、
+    `require_attested_identity` が「receipt が無い」として拒否し、**一致しても admission を
+    作れないデッドロック**になる。
+
+    ここでは台帳の中の2件を読んで検証する:
+      - 同じ issue / event / subject であること
+      - verdict が一致していること
+      - **両方が認証済み**であること（claimed の判定からは joint を作らない）
+      - 血統が異なること（same-harness と cross-harness）
+
+    生成する identity は `system:joint(...)` であり、**judge の identity ではない** —
+    誰かの判断として記録しない。
+    """
+    with _LedgerLock(a.root) as lk:
+        if lk.error:
+            print(json.dumps({"ok": False, "reason": "lock_failed", "detail": lk.error},
+                             ensure_ascii=False))
+            return 4
+        snap, serr = load_schema_snapshot()
+        if serr:
+            print(json.dumps({"ok": False, "reason": "schema_unreadable", "detail": serr},
+                             ensure_ascii=False))
+            return 4
+        head, herr = _head_from_log(a.root)
+        if herr:
+            print(json.dumps({"ok": False, "reason": "ledger_unhealthy", "detail": herr},
+                             ensure_ascii=False))
+            return 4
+        try:
+            evs = _read_events(a.root)
+        except Exception as e:
+            print(json.dumps({"ok": False, "reason": "ledger_unreadable", "detail": str(e)},
+                             ensure_ascii=False))
+            return 4
+        voided = set(corrected_seqs(evs)) | set(corrected_seqs(evs, kinds=("superseded",)))
+        found = {}
+        for e in evs:
+            if e.get("class") != "verdict_provisional" or e.get("seq") in voided:
+                continue
+            pl = e.get("payload") or {}
+            if str(pl.get("issue", "")).lstrip("#") != str(a.issue).lstrip("#"):
+                continue
+            if pl.get("for_event") != a.event:
+                continue
+            found[pl.get("lineage")] = {**pl, "seq": e.get("seq")}
+        if len(found) < 2:
+            print(json.dumps({"ok": False, "reason": "not_enough_verdicts",
+                              "detail": f"#{a.issue} / {a.event} の provisional が "
+                                        f"{len(found)} 件しかない（血統: {sorted(found)}）。"
+                                        f"2血統が揃ってから生成すること。"}, ensure_ascii=False))
+            return 3
+        subs = {v.get("review_subject_id") for v in found.values()}
+        if len(subs) != 1:
+            print(json.dumps({"ok": False, "reason": "subject_mismatch",
+                              "detail": f"2件が別の対象を見ている: {sorted(map(str, subs))}"},
+                             ensure_ascii=False))
+            return 3
+        verdicts = {v.get("verdict") for v in found.values()}
+        if len(verdicts) != 1:
+            print(json.dumps({"ok": False, "reason": "verdicts_disagree",
+                              "detail": f"一致していない: {sorted(map(str, verdicts))}。"
+                                        f"**片方でも否なら否である。**"}, ensure_ascii=False))
+            return 5
+        # **両方が認証済みでなければ joint を作らない。** claimed の判定から作ると、
+        # 「一致した」という事実に、確かめていない identity の重みが乗る。
+        weak = {lin: v.get("identity_assurance") or "claimed" for lin, v in found.items()
+                if (v.get("identity_assurance") or "claimed") == "claimed"}
+        if weak and a.require_attested:
+            print(json.dumps({"ok": False, "reason": "unattested_verdicts",
+                              "detail": f"identity が claimed の判定がある: {weak}。"
+                                        f"**確かめていない identity から joint を作らない。**"},
+                             ensure_ascii=False))
+            return 4
+        # **独立性も writer が判定する。** 2件の signer / key / workload は台帳にあるので、
+        # 呼び出し側の申告を待つ必要が無い。
+        try:
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            from identity import reviewer_independence
+            _a, _b = list(found.values())
+            independence = reviewer_independence(
+                _a.get("decision_by"),
+                {"signer_id": _a.get("signer_id"), "key_id": _a.get("key_id"),
+                 "workload_isolation": _a.get("workload_isolation") or "none"},
+                {"signer_id": _b.get("signer_id"), "key_id": _b.get("key_id"),
+                 "workload_isolation": _b.get("workload_isolation") or "none"})
+        except Exception:
+            independence = "same_signer"        # 判定できないなら最も弱い方に倒す
+        lineages = sorted(found)
+        pair = {lin: {"seq": v["seq"], "reasoning_sha256": v.get("reasoning_sha256"),
+                      "reasoning_ref": v.get("reasoning_ref")} for lin, v in found.items()}
+        joint_digest = hashlib.sha256(json.dumps(
+            {k: v["reasoning_sha256"] for k, v in sorted(pair.items())},
+            sort_keys=True).encode("utf-8")).hexdigest()
+        order = ["claimed", "observed", "attested", "authenticated"]
+        payload = {"issue": a.issue, "deliverable": str(a.issue),
+                   "verdict": list(verdicts)[0], "lineage": "joint",
+                   "agreed_by": lineages, "review_subject_id": list(subs)[0],
+                   "reviewer_independence": independence,
+                   "from_seqs": sorted(v["seq"] for v in found.values()),
+                   "reasoning_by_lineage": pair, "reasoning_sha256": joint_digest,
+                   "agreed_identity_assurance": min(
+                       (v.get("identity_assurance") or "claimed" for v in found.values()),
+                       key=order.index),
+                   # **judge の identity ではない。** 誰かの判断として記録しない。
+                   "decision_by": f"system:joint({','.join(lineages)})",
+                   "recorded_by": "system:writer", "identity_assurance": "derived",
+                   "recorder_assurance": "observed", "workload_isolation": "none"}
+        bad, _w = validate_event(a.event, payload, snap, writer_op=a.event)
+        if bad:
+            print(json.dumps({"ok": False, "reason": "schema_rejected", "detail": bad},
+                             ensure_ascii=False))
+            return 4
+        ev = {"id": "e" + hashlib.sha256(
+                  f"{head['seq'] + 1}:{a.event}:"
+                  f"{json.dumps(payload, sort_keys=True, ensure_ascii=False)}".encode()
+              ).hexdigest()[:12],
+              "seq": head["seq"] + 1, "ts": _now_iso(), "actor": "system:writer",
+              "class": a.event, "payload": payload,
+              "schema_id": "orgforge-ledger", "schema_version": LEDGER_SCHEMA_VERSION,
+              "schema_sha256": snap["digest"], "prev_hash": head["hash"]}
+        ev["hash"] = _hash(head["hash"], ev)
+        log, headp = _paths(a.root)
+        prior = os.path.getsize(log) if os.path.exists(log) else 0
+        try:
+            # 故障注入。**書けなかったら生成しない**ことを検査できなければ、そう言えない。
+            if os.environ.get("ORG_LEDGER_FORCE_APPEND_FAIL") == "1":
+                raise OSError("ORG_LEDGER_FORCE_APPEND_FAIL=1（故障注入）")
+            with open(log, "a", encoding="utf-8") as f:
+                f.write(json.dumps(ev, ensure_ascii=False) + "\n")
+                f.flush()
+                os.fsync(f.fileno())
+            tmp = headp + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump({"seq": ev["seq"], "hash": ev["hash"]}, f)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, headp)
+            _fsync_dir(a.root)
+        except Exception as e:
+            try:
+                if os.path.exists(log) and os.path.getsize(log) > prior:
+                    with open(log, "r+b") as f:
+                        f.truncate(prior)
+                        f.flush()
+                        os.fsync(f.fileno())
+            except Exception:
+                pass
+            print(json.dumps({"ok": False, "reason": "not_persisted", "detail": str(e)},
+                             ensure_ascii=False))
+            return 4
+    print(json.dumps({"ok": True, "reason": "derived", "seq": ev["seq"],
+                      "verdict": payload["verdict"], "from_seqs": payload["from_seqs"],
+                      "reviewer_independence": independence,
+                      "agreed_identity_assurance": payload["agreed_identity_assurance"]},
+                     ensure_ascii=False))
+    return 0
+
+
 def cmd_verify(a):
     """Replay the whole chain from GENESIS — the external watchdog's core primitive. Reports
     the FIRST break (edited line, reordered seq, or forged hash). Exit 1 if the chain is broken."""
@@ -2355,6 +2564,18 @@ def main(argv):
     rx.add_argument("--tool-use-id", dest="tool_use_id", required=True)
     rx.add_argument("--rule", required=True)
     rx.set_defaults(fn=cmd_reserve_exposure)
+    # **2件の認証済み provisional から admission を生成する。** judge の receipt は存在しない
+    # （一致は判断ではなく事実の関数）ので、専用操作にする — generic append では
+    # 「receipt が無い」として拒否され、一致してもデッドロックする。
+    da = sub.add_parser("derive-admission",
+                        help="2血統の一致から admission を生成する（writer 専用）")
+    da.add_argument("root", nargs="?", default=None)
+    da.add_argument("--issue", required=True)
+    da.add_argument("--event", required=True,
+                    choices=("admission_decided", "refutation_attempted"))
+    da.add_argument("--require-attested", dest="require_attested", action="store_true",
+                    help="claimed の判定からは生成しない")
+    da.set_defaults(fn=cmd_derive_admission)
     # HALT。**writer 専用の操作。** 記録できなければ非ゼロで返す（呼び出し側は通さない）。
     th = sub.add_parser("trip-halt", help="halt を発動する（ラッチ→台帳の順に書く）")
     th.add_argument("root", nargs="?", default=None)

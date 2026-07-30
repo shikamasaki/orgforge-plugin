@@ -6,6 +6,50 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 0.39.5 — three bundles, no new features
+
+Scoped to the three bundles the audit asked for. No new capability was added.
+
+### A. Judgment boundary
+- **A receipt is now bound to the whole judgment**: org, ledger, issue, `event_class`, subject,
+  phase, verdict and both digests (`protocol_version` 3). `org_id`/`ledger_id` are taken **from the
+  write target**, not from the payload — a value the caller writes cannot be checked against itself.
+  Eight reuse attempts are refused: other issue, other class, other subject, other verdict, other
+  lineage, other org, other ledger, other reasoning.
+- **`ledger.py derive-admission`** builds the joint admission from two recorded provisional verdicts.
+  A joint has no judge receipt — agreement is a function of fact, not a judgment — so writing it
+  through generic append hit "no receipt" and **deadlocked: two lineages could agree and no admission
+  could be recorded**. The derived event is `system:writer` / `system:joint(...)`, never anyone's
+  judgment, and `reviewer_independence` is computed by the writer from what is in the ledger.
+  It refuses disagreement, mismatched subjects, and (with `--require-attested`) `claimed` verdicts.
+
+### B. Runtime trust boundary
+- **`ORG_WRITER_TRUST_SELF` is gone from the hook.** The guardrail was relaxing its own trust so it
+  could connect to a caller-owned anchor. Relaxing is now the operator's explicit choice. Measured: a
+  world-writable socket parent makes the hook deny.
+- **`writerd --manifest`** pins orgs, schema, policy, trust store and allowed UIDs from a root-owned
+  file; when present it overrides `--org`/`--schema`, and the daemon refuses to start if it cannot be
+  read or is world-writable.
+- **All control writes go through RPC.** `ghsync`'s remaining direct `ledger.py append` calls would
+  have returned exit 4 under `ORG_WRITER_SOCKET`.
+- **RPC reservations are checked the same way as direct ones** — `exit 0` *and* `decision == allow`.
+  The hook was only pattern-matching the direct form, so the RPC path was judged on its exit code
+  alone.
+
+### C. Stage B lifecycle
+- One namespace rule shared by installer and verifier (`sha256(org root)[:12]`), covering the
+  authoritative path, socket, launchd label, config and backup.
+- **`--uninstall` runs in order**: stop the daemon → copy authoritative contents back → replace
+  symlinks with real directories → restore ownership. Stopping first matters (otherwise the writer
+  writes while you copy); restoring ownership last matters (otherwise the writer cannot write).
+- **Shared code and the service UID survive while another org remains.** Uninstall requires an org
+  and refuses without one. Measured: two orgs get distinct namespaces, and uninstalling one only
+  touches its own paths.
+
+### Status
+`sudo` and live-org application remain NO-GO pending re-audit. `workload_isolation` is
+`process_mediated`; H1's `separate_uid` is unresolved.
+
 ## 0.39.4 — an environment variable reopened everything the previous release closed
 
 Fourth audit, NO-GO on all four lenses again. 0.39.3 refused forged identity in the payload — and

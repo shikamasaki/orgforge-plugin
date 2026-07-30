@@ -16,7 +16,7 @@ def main(argv):
     if len(argv) < 2 or argv[1] in ("-h", "--help"):
         print(__doc__.strip() + "\n\n"
               "  writer_client.py <op> [--org NAME] -- <ledger.py に渡す引数…>\n\n"
-              "  op: append | trip-halt | release-halt | reserve-exposure | halt-status\n"
+              "  op: append | trip-halt | release-halt | reserve-exposure | halt-status | derive-admission\n"
               "  **台帳のパスは渡せない** — writerd が org 名から決める。")
         return 0
     op = argv[1]
@@ -33,6 +33,16 @@ def main(argv):
         print(json.dumps({"ok": False, "reason": "writer_unreachable", "detail": err},
                          ensure_ascii=False))
         return 4
+    if op in ("reserve-exposure", "derive-admission"):
+        # **中の判断をそのまま出す。** hook は `decision` を読んで allow/deny を決めるので、
+        # RPC の封筒でくるむと読めなくなる（終了コードだけを信じる形に戻ってしまう）。
+        sys.stdout.write(resp.get("stdout") or "")
+        sys.stderr.write(resp.get("stderr") or "")
+        if not resp.get("ok") and not (resp.get("stdout") or "").strip().startswith("{"):
+            # writer 自身が拒否した（RPC 層のエラー）。**判断が読めないなら通さない。**
+            print(json.dumps({"decision": "deny", "reason": resp.get("reason"),
+                              "detail": resp.get("detail")}, ensure_ascii=False))
+        return resp.get("exit_code", 4)
     if op == "halt-status":
         # **hook が読む形で返す。** exit code（0/10）と stdout をそのまま透過させる。
         sys.stdout.write(resp.get("stdout") or "")

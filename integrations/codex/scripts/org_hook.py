@@ -637,9 +637,9 @@ def rule_blast_radius(tool_name, ti):
     # 「writerd 経由でなければ書けない」に当たって exit 4 になり、正規運用が止まる
     # （実測で指摘された）。
     if os.environ.get("ORG_WRITER_SOCKET"):
-        # 段階A（同じ利用者が daemon を動かしている）では anchor が自分所有になる。
-        # **信頼境界ではない**ので、明示的に立てる（段階B では root 所有になり不要）。
-        os.environ.setdefault("ORG_WRITER_TRUST_SELF", "1")
+        # **hook は信頼を緩めない。** 以前ここで ORG_WRITER_TRUST_SELF を立てていたが、
+        # それは「caller 所有の anchor でも繋ぐ」という判断を **統制側が勝手に下す**ことで
+        # あり、偽 socket に繋がされる余地を残す。緩めるなら **利用者が明示する**。
         return ["writer_client.py", "reserve-exposure", "--",
                 "--dimension", dimension, "--delta", str(delta), "--cap", cap,
                 "--actor", "harness-agent", "--window-since", _window_since(),
@@ -901,7 +901,6 @@ def _check_halt(tool_name, tool_input):
     # **停止の判定も writer に聞く。** org 側の symlink を張り替えて空の台帳を見せられると、
     # hook は停止を見失う（実測: HALT 中でも exit 10 → 0 になった）。writer は起動時に固定した
     # 実体のパスを見る。
-    os.environ.setdefault("ORG_WRITER_TRUST_SELF", "1")   # 段階A。境界ではない
     _cmd = ([sys.executable, os.path.join(TOOLS_DIR, "writer_client.py"), "halt-status"]
             if os.environ.get("ORG_WRITER_SOCKET")
             else [sys.executable, os.path.join(TOOLS_DIR, "ledger.py"),
@@ -1061,7 +1060,10 @@ def main():
         if not argv:
             continue
         code, output = _run_organ(argv)
-        is_reservation = argv[:2] == ["ledger.py", "reserve-exposure"]
+        # **RPC 経由も同じ検査にかける。** 以前は直接呼びの形だけを見ており、
+        # writer_client 経由の予約は終了コードだけで判断されていた。
+        is_reservation = argv[:2] in (["ledger.py", "reserve-exposure"],
+                                      ["writer_client.py", "reserve-exposure"])
         if is_reservation:
             # **終了コードだけを信じない。** 予約は structured result を返すので、
             # `exit 0 かつ decision == "allow"` の組でしか通さない。

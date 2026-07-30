@@ -32,7 +32,9 @@ import sys
 # 「署名されているから独立している」は誤りである。**同じ signer が両方の血統に署名できるなら、
 # それは独立レビューではない** — だから `reviewer_independence` を別軸として持つ。
 
-PROTOCOL_VERSION = 2                 # receipt の形式。ledger の schema_version とは別に動く
+PROTOCOL_VERSION = 3                 # receipt の形式。ledger の schema_version とは別に動く
+# v3: `event_class` を束縛に加えた。どのクラスの判定かを署名が覆わないと、
+#     admission_decided 用の receipt を refutation_attempted に流用できる。
 # v2: `judge_workload` を署名対象に加えた。v1 では署名の外にあり、**署名後に
 #     `separate_host` を足しても検証が通った**（実測）— 独立性の評価に使う値が
 #     署名されていないなら、その評価は根拠を持たない。
@@ -40,7 +42,10 @@ _RECEIPT_BOUND = ("receipt_id", "org_id", "ledger_id", "review_subject_id", "iss
                   "phase", "lineage", "verdict", "requirements_digest", "reasoning_sha256",
                   "signer_id", "key_id", "issued_at", "schema_version", "protocol_version",
                   # **独立性の評価に使う値は、署名が覆わなければならない。**
-                  "judge_workload")
+                  "judge_workload",
+                  # **どのクラスの判定か。** 覆わないと、admission 用の receipt を
+                  # refutation に流用できる。
+                  "event_class")
 
 
 # ══ Authenticated Mode: 非対称署名（judge は秘密鍵、writer は公開鍵だけ）══════
@@ -523,6 +528,7 @@ def _cmd_receipt(a):
          "issued_at": a.issued_at, "schema_version": a.schema_version,
          # **judge 自身が申告する。** 署名が覆うので、後から足せない。
          "judge_workload": a.judge_workload,
+         "event_class": a.event_class,
          "protocol_version": PROTOCOL_VERSION}
     if a.private_key:
         priv = (open(a.private_key, encoding="utf-8").read()
@@ -572,6 +578,10 @@ def main(argv):
     q.add_argument("--phase", default="")
     q.add_argument("--requirements-digest", dest="requirements_digest", default="")
     q.add_argument("--schema-version", dest="schema_version", type=int, default=1)
+    q.add_argument("--event-class", dest="event_class", required=True,
+                   choices=("admission_decided", "refutation_attempted", "verdict_provisional",
+                            "halt_released"),
+                   help="この receipt が使える台帳クラス。**署名が覆う**ので流用できない")
     q.add_argument("--judge-workload", dest="judge_workload", default="none",
                    choices=("none", "separate_process", "separate_uid", "separate_host"),
                    help="この judge がどこで動いたか。**署名が覆う**ので後から足せない")

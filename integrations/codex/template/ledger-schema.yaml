@@ -313,6 +313,8 @@ event_classes:
   # 作るのは配管であって判断ではない（一致という事実の関数）。**不一致なら道具は admit を作れない。**
   verdict_provisional:  { role: gate|skeptic, lineage: same-harness|cross-harness,
                           verdict, for_event, issue, deliverable, reasoning_sha256, reasoning_ref,
+                          # phase は receipt の束縛に入る（どの段階の判定か）
+                          phase,
                           decision_by, recorded_by, committed_by,
                           identity_assurance, recorder_assurance, workload_isolation,
                           # **writer の隔離は judge の隔離ではない。** 欄を分ける（0.39.2）。

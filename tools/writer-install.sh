@@ -164,33 +164,65 @@ if [ "$UNINSTALL" = 1 ]; then
   BACKUP_DIR="/usr/local/var/orgforge/backup/${ORG_NAME}"
   say "namespace: ${ORG_NAME}"
   echo
-  echo "── uninstall（**台帳は消さない**。所有者を戻し、daemon を外すだけ）"
+  echo "── uninstall（**台帳は消さない**。順序: daemon停止 → 書戻し → 実体化 → 所有者復元）"
+  # ① daemon を止める。**先に止めないと、書き戻している途中に writer が書く。**
   if [ -f "${PLIST}" ]; then
     run "launchctl bootout system '${PLIST}' 2>/dev/null || true"
     run "rm -f '${PLIST}'"
-    say "LaunchDaemon を外した"
+    say "① LaunchDaemon を停止して外した"
   else
-    say "LaunchDaemon は無い（何もしない）"
+    say "① LaunchDaemon は無い"
   fi
-  if [ -f "${BACKUP_DIR}/original-owner" ]; then
-    OWNER="$(cat "${BACKUP_DIR}/original-owner")"
-    ROOTP="$(cat "${BACKUP_DIR}/original-org-root" 2>/dev/null || true)"
-    if [ -n "$ROOTP" ] && [ -d "$ROOTP/.orgforge" ]; then
+
+  ROOTP="$(cat "${BACKUP_DIR}/original-org-root" 2>/dev/null || true)"
+  OWNER="$(cat "${BACKUP_DIR}/original-owner" 2>/dev/null || true)"
+  if [ -z "$ROOTP" ] && [ -n "${ORG_ROOT}" ]; then ROOTP="${ORG_ROOT}"; fi
+
+  # ②③ 権威側の内容を書き戻し、symlink を実体に置き換える。
+  if [ -n "$ROOTP" ] && [ -d "$ROOTP" ]; then
+    for pair in ".orgforge/ledger:ledger" ".orgforge/trust:trust" \
+                "ledger-schema.yaml:ledger-schema.yaml"; do
+      cur="$ROOTP/${pair%%:*}"; src="${AUTHORITATIVE}/${pair##*:}"
+      old_copy="$ROOTP/${pair%%:*}.pre-writer"
+      if [ -L "$cur" ]; then
+        run "rm -f '$cur'"
+        if [ -e "$src" ]; then
+          run "cp -R '$src' '$cur'"
+          say "② $(basename "$cur") に権威側の内容を書き戻した"
+        elif [ -e "$old_copy" ]; then
+          run "mv '$old_copy' '$cur'"
+          say "② $(basename "$cur") を install 前の内容に戻した"
+        fi
+      fi
+      [ -e "$old_copy" ] && say "  （install 前の控え: $old_copy — 確認して消すこと）"
+    done
+    say "③ symlink を実体に置き換えた"
+    # ④ 所有者を戻す。**書き戻したあとに行う** — 先に戻すと writer が書けなくなる。
+    if [ -n "$OWNER" ]; then
       run "chown -R '$OWNER' '$ROOTP/.orgforge'"
       run "chmod -R u+rwX '$ROOTP/.orgforge'"
-      say "台帳の所有者を $OWNER に戻した（$ROOTP）"
+      [ -e "$ROOTP/ledger-schema.yaml" ] && run "chown '$OWNER' '$ROOTP/ledger-schema.yaml'"
+      say "④ 所有者を $OWNER に戻した"
+    else
+      say "④ **元の所有者の記録が無い** — 手で戻すこと: chown -R \$(whoami) '$ROOTP/.orgforge'"
+    fi
+  fi
+
+  # ⑤ この org のものだけを消す。**共有物は他 org が残る間は消さない。**
+  run "rm -rf '${SOCK_PARENT}' '${AUTHORITATIVE}' '${BACKUP_DIR}' '${CONFIG}'"
+  say "⑤ この org（${ORG_NAME}）の socket / 権威データ / backup / 設定を消した"
+  REMAINING="$(ls -1 /usr/local/var/orgforge/orgs 2>/dev/null | wc -l | tr -d ' ')"
+  if [ "${REMAINING}" = "0" ]; then
+    run "rm -rf '${INSTALL_DIR}'"
+    say "  他の org が無いので共有コードも消した"
+    if id -u "${SERVICE_USER}" >/dev/null 2>&1; then
+      run "sysadminctl -deleteUser '${SERVICE_USER}' 2>/dev/null || dscl . -delete '/Users/${SERVICE_USER}'"
+      say "  サービスユーザー ${SERVICE_USER} を削除した"
     fi
   else
-    say "元の所有者の記録が無い — **手で戻すこと**: chown -R \$(whoami) <org>/.orgforge"
+    say "  **他の org が ${REMAINING} 件残っているので、共有コードとサービス UID は消さない**"
   fi
-  run "rm -rf '${SOCK_PARENT}' '${INSTALL_DIR}'"
-  say "（${SOCK_ANCHOR} は他の用途にも使うので消さない）"
-  say "socket 親ディレクトリと daemon の複製を消した"
-  if id -u "${SERVICE_USER}" >/dev/null 2>&1; then
-    run "sysadminctl -deleteUser '${SERVICE_USER}' 2>/dev/null || dscl . -delete '/Users/${SERVICE_USER}'"
-    say "サービスユーザー ${SERVICE_USER} を削除した"
-  fi
-  say "**鍵は消していない**（${ORG_ROOT}/.orgforge/trust）。判断の receipt を検証できなくなるため。"
+  say "**鍵は消していない**（権威側を org へ書き戻した）。判断の receipt を検証できなくなるため。"
   echo
   echo "✓ uninstall 完了。workload_isolation は process_mediated に戻る。"
   exit 0
