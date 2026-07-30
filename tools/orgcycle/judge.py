@@ -176,10 +176,15 @@ def cmd_verify(a):
 
     out.append(f"\n## 検証対象の SPEC / MUST（Issue #{a.issue} 本文）\n")
     out.append(body or "(本文が空 — SPEC の無い Issue は、それ自体が reject 事由)")
-    if prior:
+    # `prior`（gate の最新判定の全文）は、上の判定履歴が既に同じものを出している。
+    # **両方出すと同じ本文が2回並ぶ** — 実測で skeptic のプロンプト457行のうち、
+    # 「0013 の一手隣」26行と「maker の自己申告」20行超が重複していた。プロンプトの長さは
+    # 読む時間に直結する（実地の計測では総時間の21%が1回の待ち時間で、その一部がこれ）。
+    # 履歴を出していないときだけ prior を出す。
+    if prior and not (history or issue_rounds):
         out.append("\n## gate が既に見たこと（重複を避けるため。追認する義務はない）\n")
         out.append(prior)
-    elif role == "skeptic":
+    elif role == "skeptic" and not prior:
         out.append("\n## gate が既に見たこと\n(#%d に admission_decided の記録が無い。"
                    "gate の admit 前に skeptic を回そうとしていないか確認すること)" % a.issue)
 

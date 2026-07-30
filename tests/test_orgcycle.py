@@ -833,3 +833,28 @@ def test_internal_calls_suppress_the_banner():
     src = _cycle_src("_core")
     seg = src[src.index("def _run("):src.index("def _raw(")]
     assert "ORG_QUIET" in seg, "_run が banner を抑制していない"
+
+
+# ── 0.27.1: プロンプトの重複を削る（実測で総時間の21%が1回の待ち時間）──────
+def test_verify_does_not_repeat_the_prior_judgment_twice():
+    """判定履歴と「gate が既に見たこと」が同じ本文を2回出していた。
+
+    実測で skeptic のプロンプト457行のうち、gate の最新判定の全文が2箇所に現れていた
+    （同じ26行と20行超）。プロンプトの長さは読む時間に直結する。
+    """
+    src = _cycle_src("judge")
+    seg = src[src.index("def cmd_verify"):]
+    assert "if prior and not (history or issue_rounds):" in seg, \
+        "履歴を出したうえで prior も出すと、同じ本文が2回並ぶ"
+
+
+def test_verify_still_hands_over_the_unshot_areas():
+    """重複を削っても「gate が撃っていない領域」の引き渡しは残すこと。
+
+    実地では gate が「1件も当てていない」と書いた領域から実バグが出た。これは
+    prior から Known risk の節を抜き出すので、prior の取得自体は消してはいけない。
+    """
+    src = _cycle_src("judge")
+    seg = src[src.index("def cmd_verify"):]
+    assert 'if role == "skeptic" and prior:' in seg
+    assert "標的候補" in seg
