@@ -29,7 +29,7 @@ set -uo pipefail
 
 ORG_ROOT=""
 NO_WRITE=0
-SOCK="/var/run/orgforge/writer.sock"
+SOCK="/usr/local/var/orgforge/run/writer.sock"   # installer と同じ leaf
 LABEL="com.orgforge.writerd"
 SERVICE_USER="_orgforge-writer"
 while [ $# -gt 0 ]; do
@@ -131,7 +131,9 @@ fi
 
 echo
 echo "── ④ 鍵 registry / schema を差し替えられないか"
-for f in "$ORG_ROOT/.orgforge/trust/keys.json" "$ORG_ROOT/ledger-schema.yaml"; do
+for f in "$ORG_ROOT/.orgforge/trust/keys.json" "$ORG_ROOT/ledger-schema.yaml" \
+         /usr/local/var/orgforge/authoritative/trust/keys.json \
+         /usr/local/var/orgforge/authoritative/ledger-schema.yaml; do
   [ -f "$f" ] || { note "$（無い）: $f"; continue; }
   # **1バイトも書かない。** 上書きを試すと本物の鍵 registry / schema を壊す。
   if python3 -c "
@@ -151,7 +153,19 @@ PARENT="$(dirname "$SOCK")"
 if [ -d "$PARENT" ]; then
   POWNER="$(stat -f '%Su' "$PARENT")"; PMODE="$(stat -f '%Lp' "$PARENT")"
   note "親: $PARENT （$POWNER, mode $PMODE）"
-  if [ "$POWNER" = "root" ]; then ok "親ディレクトリは root 所有"; else bad "親が root 所有でない（$POWNER）"; fi
+  # **leaf は writer 所有が正しい。** daemon が socket を作るには親への書き込み権限が要る
+  # （実測: root 所有 0755 では bind できない）。root 所有を期待するのは anchor である。
+  if [ "$POWNER" = "$(whoami)" ]; then
+    bad "leaf が自分の所有（$POWNER）— **socket を差し替えられる**"
+  else
+    ok "leaf は $POWNER 所有（自分ではない）"
+  fi
+  GRAND_OWNER="$(stat -f '%Su' "$(dirname "$PARENT")")"
+  if [ "$GRAND_OWNER" = "root" ]; then
+    ok "anchor（$(dirname "$PARENT")）は root 所有"
+  else
+    bad "anchor が root 所有でない（$GRAND_OWNER）— **leaf ごと差し替えられる**"
+  fi
   # **移動を実際にやらない。** 成功すれば daemon の socket が消え、戻す前に何かが起きうる。
   # 移動できるのは **その親の親** に書ける主体なので、そちらの権限を見る。
   GRAND="$(dirname "$PARENT")"
@@ -174,6 +188,23 @@ if [ -d "$PARENT" ]; then
 else
   bad "socket の親ディレクトリが無い: $PARENT"
 fi
+
+echo
+echo "── ⑤' org tree の入れ物ごと差し替えられないか"
+# **中身の権限を絞っても、入れ物を差し替えられるなら意味が無い**（実測で指摘された）。
+# 権威データが org tree の外にあること、そして org 側が symlink ならその実体を見る。
+for p in "$ORG_ROOT/.orgforge/ledger" "$ORG_ROOT/.orgforge/trust" "$ORG_ROOT/ledger-schema.yaml"; do
+  [ -e "$p" ] || continue
+  if [ -L "$p" ]; then
+    REAL="$(readlink "$p")"
+    case "$REAL" in
+      /usr/local/var/orgforge/authoritative/*) ok "$(basename "$p") は org 外の権威データを指す（$REAL）" ;;
+      *) bad "$(basename "$p") の symlink 先が権威データの外: $REAL" ;;
+    esac
+  else
+    bad "$(basename "$p") が org tree の中に実体を持つ — **入れ物ごと差し替えられる**"
+  fi
+done
 
 echo
 echo "── ⑥ writerd の複製を差し替えられないか"

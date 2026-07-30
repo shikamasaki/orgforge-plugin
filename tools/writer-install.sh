@@ -43,6 +43,7 @@ SOCK_PARENT="/usr/local/var/orgforge/run"      # writer 所有。daemon が sock
 INSTALL_DIR="/usr/local/libexec/orgforge"
 CONFIG="/usr/local/etc/orgforge/writerd.conf"
 BACKUP_DIR="/usr/local/var/orgforge/backup"
+AUTHORITATIVE="/usr/local/var/orgforge/authoritative"   # 権威データ。**org tree の外**
 DAEMON_PYTHON="/usr/bin/python3"     # LaunchDaemon が起動する処理系。--daemon-python で変えられる
 CALLER_GROUP="staff"                 # 台帳を読める group（caller の primary group）
 
@@ -105,17 +106,19 @@ ${DAEMON_PYTHON} に PyYAML が無い（writerd が schema を読むのに要る
   「検証できないまま書かない」として全ての append を拒否する（fail-closed）。
   省略できない前提条件である。
 
-  どれかを選ぶこと:
-    1. システム全体に入れる（daemon から見える）:
-         sudo ${DAEMON_PYTHON} -m pip install --break-system-packages pyyaml
-    2. Homebrew の python を使う:
+  どれかを選ぶこと（**システム python を書き換えない順**）:
+    1. root 所有の専用 venv（推奨）— システムに触れず、daemon 専用に閉じる:
+         sudo ${DAEMON_PYTHON} -m venv /usr/local/libexec/orgforge/venv
+         sudo /usr/local/libexec/orgforge/venv/bin/pip install pyyaml
+         sudo chown -R root:wheel /usr/local/libexec/orgforge/venv
+         sudo $0 --org-root '<org>' --daemon-python /usr/local/libexec/orgforge/venv/bin/python3
+    2. Homebrew の python（自分で管理する処理系）:
          brew install python@3.13
          /opt/homebrew/bin/python3 -m pip install pyyaml
          sudo $0 --org-root '<org>' --daemon-python /opt/homebrew/bin/python3
-    3. venv を作って daemon にそこを使わせる:
-         sudo ${DAEMON_PYTHON} -m venv /usr/local/libexec/orgforge/venv
-         sudo /usr/local/libexec/orgforge/venv/bin/pip install pyyaml
-         sudo $0 --org-root '<org>' --daemon-python /usr/local/libexec/orgforge/venv/bin/python3
+
+  **`--break-system-packages` でシステム python に入れることは勧めない** — OS の管理下にある
+  処理系を書き換えると、他の何かが壊れたときに切り分けられなくなる。
   検査したコマンド: PYTHONNOUSERSITE=1 ${DAEMON_PYTHON} -c 'import yaml'
 EOF
 )"
@@ -229,7 +232,7 @@ run "mkdir -p '$(dirname "${CONFIG}")'"
 if [ "$DRY_RUN" = 1 ]; then
   printf '  [dry-run] %s に org=%s を書く\n' "${CONFIG}" "${ORG_ROOT}/.orgforge/ledger"
 else
-  printf 'org=default=%s\n' "${ORG_ROOT}/.orgforge/ledger" > "${CONFIG}"
+  printf 'org=default=%s\n' "${AUTHORITATIVE}/ledger" > "${CONFIG}"
   chown root:wheel "${CONFIG}"; chmod 644 "${CONFIG}"
 fi
 say "${CONFIG} （root 所有）— **書き込み先はここで決まる。RPC では指定できない**"
@@ -269,22 +272,51 @@ fi
 # **書けないが、読める。** 700 にすると caller の `ledger verify` も board も projection も
 # 落ちる（実測で指摘された）。統制は「書けないこと」であって「見えないこと」ではない —
 # 監査できない台帳は、監査のための台帳ではない。
-run "chown -R '${SERVICE_USER}:${CALLER_GROUP}' '${ORG_ROOT}/.orgforge/ledger'"
-run "chmod 750 '${ORG_ROOT}/.orgforge/ledger'"
-run "find '${ORG_ROOT}/.orgforge/ledger' -type f -exec chmod 640 {} +"
+# **org tree 自体が caller の所有なので、その中にあるものはパスごと差し替えられる。**
+# 実測（監査）: .orgforge と org root が caller 所有のままなので、writer 所有の ledger/trust や
+# root 所有の schema を **ディレクトリごと** 置き換えられた。中身の権限を絞っても、入れ物を
+# 差し替えられるなら意味が無い。
+#
+# したがって **権威データは org tree の外に置き、org tree からは symlink で指す**。
+# 実体は root 所有のディレクトリ配下にあり、caller はそこに書けない。
+# symlink を張り替えられても、writerd は `--org` で **実体のパス** を固定して起動するので、
+# 書き込み先は変わらない（読み手が騙される可能性は残る — それは次段で扱う）。
+run "mkdir -p '${AUTHORITATIVE}/ledger' '${AUTHORITATIVE}/trust'"
+run "chown root:wheel '${AUTHORITATIVE}'"
+run "chmod 0755 '${AUTHORITATIVE}'"
+if [ -d "${ORG_ROOT}/.orgforge/ledger" ] && [ ! -L "${ORG_ROOT}/.orgforge/ledger" ]; then
+  run "cp -R '${ORG_ROOT}/.orgforge/ledger/.' '${AUTHORITATIVE}/ledger/'"
+  run "mv '${ORG_ROOT}/.orgforge/ledger' '${ORG_ROOT}/.orgforge/ledger.pre-writer'"
+  run "ln -s '${AUTHORITATIVE}/ledger' '${ORG_ROOT}/.orgforge/ledger'"
+  say "台帳を ${AUTHORITATIVE}/ledger へ移し、org からは symlink で指す"
+  say "  （元は ${ORG_ROOT}/.orgforge/ledger.pre-writer に残す — **消さない**）"
+fi
+if [ -d "${ORG_ROOT}/.orgforge/trust" ] && [ ! -L "${ORG_ROOT}/.orgforge/trust" ]; then
+  run "cp -R '${ORG_ROOT}/.orgforge/trust/.' '${AUTHORITATIVE}/trust/'"
+  run "mv '${ORG_ROOT}/.orgforge/trust' '${ORG_ROOT}/.orgforge/trust.pre-writer'"
+  run "ln -s '${AUTHORITATIVE}/trust' '${ORG_ROOT}/.orgforge/trust'"
+  say "鍵 registry を ${AUTHORITATIVE}/trust へ移した"
+fi
+if [ -f "${ORG_ROOT}/ledger-schema.yaml" ] && [ ! -L "${ORG_ROOT}/ledger-schema.yaml" ]; then
+  run "cp '${ORG_ROOT}/ledger-schema.yaml' '${AUTHORITATIVE}/ledger-schema.yaml'"
+  run "chown root:wheel '${AUTHORITATIVE}/ledger-schema.yaml'"
+  run "chmod 0644 '${AUTHORITATIVE}/ledger-schema.yaml'"
+  run "mv '${ORG_ROOT}/ledger-schema.yaml' '${ORG_ROOT}/ledger-schema.yaml.pre-writer'"
+  run "ln -s '${AUTHORITATIVE}/ledger-schema.yaml' '${ORG_ROOT}/ledger-schema.yaml'"
+  say "schema を ${AUTHORITATIVE} へ移した（daemon は実体のパスを --schema で受け取る）"
+fi
+run "chown -R '${SERVICE_USER}:${CALLER_GROUP}' '${AUTHORITATIVE}/ledger'"
+run "chmod 750 '${AUTHORITATIVE}/ledger'"
+run "find '${AUTHORITATIVE}/ledger' -type f -exec chmod 640 {} +"
 say "台帳を ${SERVICE_USER} 所有・750/640（group=${CALLER_GROUP}）にした"
 say "  → **caller は読めるが書けない**（verify / board / projection は動く）"
-if [ -d "${ORG_ROOT}/.orgforge/trust" ]; then
-  run "chown -R root:${SERVICE_GROUP} '${ORG_ROOT}/.orgforge/trust'"
-  run "chmod 750 '${ORG_ROOT}/.orgforge/trust'"
-  run "chmod 640 '${ORG_ROOT}/.orgforge/trust/keys.json' 2>/dev/null || true"
+if [ -d "${AUTHORITATIVE}/trust" ]; then
+  run "chown -R root:${SERVICE_GROUP} '${AUTHORITATIVE}/trust'"
+  run "chmod 750 '${AUTHORITATIVE}/trust'"
+  run "chmod 640 '${AUTHORITATIVE}/trust/keys.json' 2>/dev/null || true"
   say "鍵 registry を root 所有・group 読み取りにした → **caller は公開鍵を差し替えられない**"
 fi
-if [ -f "${ORG_ROOT}/ledger-schema.yaml" ]; then
-  run "chown root:wheel '${ORG_ROOT}/ledger-schema.yaml'"
-  run "chmod 644 '${ORG_ROOT}/ledger-schema.yaml'"
-  say "schema を root 所有にした → **caller は検証規則を緩められない**"
-fi
+
 
 # ── LaunchDaemon ────────────────────────────────────────────────────────────
 echo
@@ -306,12 +338,13 @@ else
     <string>${DAEMON_PYTHON}</string>
     <string>${INSTALL_DIR}/tools/writerd.py</string>
     <string>serve</string>
-    <string>--org</string><string>default=${ORG_ROOT}/.orgforge/ledger</string>
+    <!-- **実体のパスを渡す。** org tree の symlink を張り替えられても、書き込み先は動かない。 -->
+    <string>--org</string><string>default=${AUTHORITATIVE}/ledger</string>
     <string>--socket</string><string>${SOCK_PARENT}/writer.sock</string>
     <!-- **schema を固定する。** 渡さないと ledger.py が cwd から org を探し、見つからなければ
          プラグインのテンプレートに fallback する — org が変えた規則ではなく、テンプレートの
          規則で検証されることになる（実測で指摘された）。 -->
-    <string>--schema</string><string>${ORG_ROOT}/ledger-schema.yaml</string>
+    <string>--schema</string><string>${AUTHORITATIVE}/ledger-schema.yaml</string>
     <string>--require-root-owned</string>
   </array>
   <key>RunAtLoad</key><true/>

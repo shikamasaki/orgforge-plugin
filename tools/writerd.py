@@ -128,10 +128,25 @@ def check_socket_parent(path, require_root_owned=False):
                     f"（mode {oct(ast_.st_mode & 0o777)}）: {anchor}\n"
                     f"  **caller が leaf を差し替えられる。**")
     else:
-        # 段階A（同一 UID）: 自分の所有でよい。group-write も自分の group なので許す。
-        if st.st_uid not in (0, os.getuid()):
-            return (f"socket の親ディレクトリの所有者が自分でも root でもない "
-                    f"（uid={st.st_uid}）: {parent}")
+        # 段階A / client 側。**leaf の所有者は writer であって caller ではない** —
+        # 実測（監査）: installer が leaf を writer 所有にする一方、client が「root か自分」しか
+        # 許さず、**正規の書き込み経路がゼロ**になっていた。
+        #
+        # client が確かめるべきは「**誰が leaf を差し替えられるか**」であって「leaf が誰のものか」
+        # ではない。他者から書けなければ、その socket は差し替えられない。
+        if st.st_mode & 0o022:
+            return (f"socket の親（leaf）が他者から書き込み可能である "
+                    f"（mode {oct(st.st_mode & 0o777)}）: {parent}\n"
+                    f"  **書ける主体は socket を差し替えられる** — 偽の writer に繋がされる。")
+        anchor = os.path.dirname(parent)
+        try:
+            ast_ = os.stat(anchor)
+        except OSError:
+            return None                  # anchor を辿れないなら leaf の検査までで止める
+        if ast_.st_mode & 0o022:
+            return (f"socket の anchor が他者から書き込み可能である "
+                    f"（mode {oct(ast_.st_mode & 0o777)}）: {anchor}\n"
+                    f"  **caller が leaf ごと差し替えられる。**")
     return None
 
 
@@ -183,23 +198,42 @@ def request_digest(req):
 class _NonceStore:
     """使用済み nonce。**再送を拒否するために持つ。**
 
-    プロセス内に持つので、daemon を再起動すると忘れる — それは弱点である。`separate_uid` の
-    段階では writer 所有の永続ストアに置くべきで、いまは「忘れる」と書いておく。
+    **プロセス内だけに持たない。** daemon を落として上げれば同じ要求を再送できてしまう
+    （実測で指摘された）。writer が所有するファイルに残し、書けないなら受け付けない —
+    再送を防げない状態で通すのは、nonce を持たないのと同じである。
     """
 
-    def __init__(self):
+    def __init__(self, path=None):
         self._seen = {}
         self._lock = threading.Lock()
+        self._path = path
+        if path and os.path.isfile(path):
+            try:
+                with open(path, encoding="utf-8") as f:
+                    self._seen = {k: float(v) for k, v in (json.load(f) or {}).items()}
+            except Exception:
+                self._seen = {}          # 読めないなら空から始める
 
     def check_and_add(self, nonce):
         now = time.time()
         with self._lock:
-            for k, t in list(self._seen.items()):
-                if now - t > _NONCE_TTL:
+            for k, ts in list(self._seen.items()):
+                if now - ts > _NONCE_TTL:
                     del self._seen[k]
             if nonce in self._seen:
                 return False
             self._seen[nonce] = now
+            if self._path:
+                try:
+                    tmp = self._path + ".tmp"
+                    with open(tmp, "w", encoding="utf-8") as f:
+                        json.dump(self._seen, f)
+                        f.flush()
+                        os.fsync(f.fileno())
+                    os.replace(tmp, self._path)
+                except Exception as e:
+                    del self._seen[nonce]
+                    raise OSError(f"nonce を永続化できない: {e}")
             return True
 
 
@@ -298,13 +332,17 @@ def measured_isolation(sock_path, ledger_roots, peer_uid=None):
 
 class Writer:
     def __init__(self, roots, require_root_owned=False, isolation="process_mediated",
-                 schema=None, caller_uid_differs=None):
+                 schema=None, caller_uid_differs=None, allowed_uids=None):
         self.roots = roots                      # {org_name: ledger_root}
         self.isolation = isolation              # **実測値**。フラグではない
         self.schema = schema                    # root 所有の設定から固定する
         self.caller_uid_differs = caller_uid_differs
         self.sock_path = None                   # serve が設定する
-        self.nonces = _NonceStore()
+        self.allowed_uids = allowed_uids        # None = 制限なし（段階A）
+        # **再起動で忘れない。** プロセス内だけに持つと、daemon を落として上げれば同じ要求を
+        # 再送できる（実測で指摘された）。writer が所有する台帳の隣に残す。
+        self.nonces = _NonceStore(
+            os.path.join(list(roots.values())[0], "writer-nonces.json") if roots else None)
         self.require_root_owned = require_root_owned
         self.lock = threading.Lock()            # 1プロセス内の直列化
 
@@ -325,6 +363,13 @@ class Writer:
         if not self.nonces.check_and_add(nonce):
             return {"ok": False, "reason": "replayed_nonce",
                     "detail": f"nonce {nonce[:16]}… は既に使われている。**再送は通さない。**"}, False
+
+        # **peer UID の認可。** socket は 0666 なので繋げること自体は誰でもできる。
+        # 「繋げた」ことは「書いてよい」ことではない。
+        if self.allowed_uids is not None and peer_uid not in self.allowed_uids:
+            return {"ok": False, "reason": "peer_not_authorized",
+                    "detail": f"peer uid={peer_uid} は書き込みを認可されていない"
+                              f"（許可: {sorted(self.allowed_uids)}）。"}, False
 
         org = req.get("org")
         if org not in self.roots:
@@ -413,8 +458,21 @@ def serve(a):
     # **isolation は実測で決める。** フラグを渡したかどうかで決めてはいけない
     # （実測: --require-root-owned を渡しただけで separate_uid と報告していた）。
     iso = measured_isolation(sock, list(roots.values()))
+    allowed = None
+    if getattr(a, "allow_uid", None):
+        allowed = set()
+        for spec in a.allow_uid:
+            try:
+                allowed.add(int(spec))
+            except ValueError:
+                import pwd
+                try:
+                    allowed.add(pwd.getpwnam(spec).pw_uid)
+                except KeyError:
+                    print(f"writerd: --allow-uid {spec!r} を解決できない", file=sys.stderr)
+                    return 2
     w = Writer(roots, require_root_owned=a.require_root_owned, isolation=iso,
-               schema=a.schema)
+               schema=a.schema, allowed_uids=allowed)
     w.sock_path = sock
     print(json.dumps({"listening": sock, "orgs": sorted(roots),
                       "workload_isolation": iso,
@@ -517,6 +575,9 @@ def main(argv):
     q.add_argument("--pidfile", default=None)
     q.add_argument("--require-root-owned", dest="require_root_owned", action="store_true",
                    help="socket の anchor が root 所有であることを要求する（段階B）")
+    q.add_argument("--allow-uid", action="append", metavar="UID_OR_NAME", dest="allow_uid",
+                   help="書き込みを認可する peer（複数可）。**socket は 0666 なので、繋げる"
+                        "ことと書けることは別である**。省略すると制限しない（段階A）")
     q.add_argument("--schema", default=None,
                    help="ledger-schema.yaml のパス。**root 所有の設定から固定する** — "
                         "渡さないと ledger.py が cwd から探し、テンプレートに fallback する")

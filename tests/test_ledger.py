@@ -1281,7 +1281,9 @@ def test_release_needs_an_authenticated_independent_approver(tmp_path):
                       "recovery_verified": "y", "identity_assurance": "authenticated"},
                      actor="registrar")
     assert code == 2
-    assert "writer 専用" in out
+    # **どちらの層で止まってもよい。** identity fields を payload に書けない検査（0.39.3）が
+    # writer-only の検査より先に働く — どちらも「generic append では書けない」ことを言っている。
+    assert ("writer 専用" in out) or ("identity は receipt を検証した経路が生成する" in out), out
     assert run("ledger.py", "halt-status", str(tmp_path))[0] == 10   # まだ止まっている
 
 
@@ -1521,17 +1523,27 @@ def _wd_start(tmp_path):
     (tmp_path / "constitution.yaml").write_text("enforcement: {}\n", encoding="utf-8")
     # **socket は短いパスに置く。** pytest の tmp_path は AF_UNIX の上限（macOS 104 バイト）を
     # 超える。実装側もその旨を報告するが、テストでは短い場所を使う。
+    # **anchor / leaf を作る。** socket を /tmp 直下に置くと anchor が /tmp（0777）になり、
+    # 「caller が leaf ごと差し替えられる」として writerd が正しく拒否する。
     import tempfile as _tf
-    sdir = pathlib.Path(_tf.mkdtemp(prefix="wd", dir="/tmp"))
+    anchor = pathlib.Path(_tf.mkdtemp(prefix="wd", dir="/tmp"))
+    os.chmod(anchor, 0o755)
+    sdir = anchor / "r"; sdir.mkdir(); os.chmod(sdir, 0o755)
     sock = sdir / "w.sock"
     proc = subprocess.Popen(
         [sys.executable, str(TOOLS / "writerd.py"), "serve",
          "--org", f"default={led}", "--socket", str(sock)],
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-    for _ in range(80):
+    # **起動を待ちきる。** 待たずに接続すると FileNotFoundError になり、
+    # 「daemon が動いていない」のか「まだ準備中」なのか区別できない。
+    for _ in range(200):
         if sock.exists():
             break
+        if proc.poll() is not None:      # 落ちたなら理由を出す
+            out = proc.stdout.read() if proc.stdout else ""
+            raise AssertionError(f"writerd が起動しなかった（exit {proc.returncode}）:\n{out}")
         time.sleep(0.05)
+    assert sock.exists(), "writerd が socket を作らなかった"
     return led, sock, proc
 
 
@@ -1807,11 +1819,12 @@ def test_installer_uses_permissions_the_daemon_accepts():
     **この2つがずれていると、install は成功して daemon は起動しない。**
     """
     src = (TOOLS / "writer-install.sh").read_text(encoding="utf-8")
-    assert "chmod 0755 '${SOCK_PARENT}'" in src, "socket 親が 0755 でない"
+    assert "chmod 0755 '${SOCK_PARENT}'" in src, "leaf が 0755 でない"
+    assert "chmod 0755 '${SOCK_ANCHOR}'" in src, "anchor が 0755 でない"
     assert "chmod 1770" not in src, "1770 は writerd が拒否する"
-    # 台帳は読めなければ verify も projection も動かない
-    assert "chmod 750 '${ORG_ROOT}/.orgforge/ledger'" in src
-    assert "chmod 700 '${ORG_ROOT}/.orgforge/ledger'" not in src
+    # 台帳は読めなければ verify も projection も動かない（権威データは org tree の外）
+    assert "chmod 750 '${AUTHORITATIVE}/ledger'" in src
+    assert "chmod 700" not in src
 
 
 def test_socket_is_connectable_by_a_caller(tmp_path):
@@ -1923,10 +1936,20 @@ def test_actor_alias_cannot_bypass_separation_of_duties(tmp_path):
     # 自己申告の actor では通らない
     r = app("gate-alias", {"deliverable": "7", "verdict": "admit", "gate": "g"})
     assert r.returncode == 3, r.stdout + r.stderr
-    assert "自己申告の actor では記録できない" in (r.stdout + r.stderr)
-    # receipt 由来（identity_assurance がある）なら通る
+    assert "generic append では記録できない" in (r.stdout + r.stderr)
+    # **payload に書くだけでは通らない**（0.39.3 で塞いだ）
     r = app("gate-signer", {"deliverable": "7", "verdict": "admit", "gate": "g",
                             "identity_assurance": "attested", "decision_by": "gate-signer"})
+    assert r.returncode == 2, r.stdout + r.stderr
+    # receipt を検証した経路（writer）からなら通る
+    env = dict(os.environ, ORG_IDENTITY_VERIFIED="1")
+    r = subprocess.run(
+        [sys.executable, str(TOOLS / "ledger.py"), "append", str(led),
+         "--actor", "gate-signer", "--class", "admission_decided",
+         "--payload", json.dumps({"deliverable": "7", "verdict": "admit", "gate": "g",
+                                  "identity_assurance": "attested",
+                                  "decision_by": "gate-signer"})],
+        cwd=org, capture_output=True, text=True, env=env)
     assert r.returncode == 0, r.stdout + r.stderr
 
 
@@ -2022,3 +2045,178 @@ def test_installer_does_not_overwrite_the_original_owner():
     assert "再 install では上書きしない" in src
     assert "元の所有者は既に記録されている" in src
     assert "へ「復元」して、caller に戻せなくなる" in src
+
+
+# ══ 0.39.3 — 第2再監査の7件 ═══════════════════════════════════════════════════
+# **私が前回入れた「強制」は、payload に2つの文字列を書くだけで回避でき、しかも
+# 私のテストがそれを正常系として固定していた。** 書けるものを検査に使ってはいけない。
+
+def _att_org(tmp_path, enforce="true"):
+    org = tmp_path / "org"; led = org / ".orgforge" / "ledger"; led.mkdir(parents=True)
+    import shutil as _sh
+    _sh.copy(TEMPLATE / "ledger-schema.yaml", org / "ledger-schema.yaml")
+    (org / "constitution.yaml").write_text(
+        f"enforcement:\n  judges:\n    require_attested_identity: {enforce}\n", encoding="utf-8")
+    return org, led
+
+
+def _att_append(org, led, actor, payload, env=None):
+    return subprocess.run(
+        [sys.executable, str(TOOLS / "ledger.py"), "append", str(led),
+         "--actor", actor, "--class", "admission_decided", "--payload", json.dumps(payload)],
+        cwd=org, capture_output=True, text=True, env=env)
+
+
+def test_payload_cannot_forge_identity_fields(tmp_path):
+    """**書けるものを検査に使ってはいけない。**
+
+    実測（監査）: `identity_assurance: attested` と `decision_by` を payload に書くだけで
+    admit が通り、鎖も intact だった。**前回の私のテストがこれを正常系として固定していた。**
+    """
+    org, led = _att_org(tmp_path)
+    r = _att_append(org, led, "forged",
+                    {"deliverable": "7", "verdict": "admit",
+                     "identity_assurance": "attested", "decision_by": "i-made-this-up"})
+    assert r.returncode == 2, r.stdout + r.stderr
+    assert "identity は receipt を検証した経路が生成する" in (r.stdout + r.stderr)
+    assert not (led / "ledger.jsonl").exists() or \
+        not (led / "ledger.jsonl").read_text(encoding="utf-8").strip()
+
+
+def test_generic_append_cannot_record_a_judgment(tmp_path):
+    """judgment class は generic append では書けない（強制が有効なとき）。"""
+    org, led = _att_org(tmp_path)
+    r = _att_append(org, led, "gate-alias", {"deliverable": "7", "verdict": "admit"})
+    assert r.returncode == 3, r.stdout + r.stderr
+    assert "generic append では記録できない" in (r.stdout + r.stderr)
+
+
+def test_the_verified_path_can_record(tmp_path):
+    """**receipt を検証した経路だけが書ける。** 止まるだけでは運用できない。"""
+    org, led = _att_org(tmp_path)
+    env = dict(os.environ, ORG_IDENTITY_VERIFIED="1")
+    r = _att_append(org, led, "gate-signer",
+                    {"deliverable": "7", "verdict": "admit",
+                     "identity_assurance": "authenticated", "decision_by": "gate-signer"},
+                    env=env)
+    assert r.returncode == 0, r.stdout + r.stderr
+
+
+@pytest.mark.parametrize("body,why", [
+    ("enforcement: [broken yaml\n", "構文が壊れている"),
+    ("enforcement: not-a-map\n", "enforcement が map でない"),
+    ("enforcement:\n  judges: 42\n", "judges が map でない"),
+    ("enforcement:\n  judges:\n    require_attested_identity: maybe\n", "真偽値でない"),
+])
+def test_unreadable_config_fails_closed(tmp_path, body, why):
+    """**設定を読めないことを「強制なし」と読み替えない。**
+
+    実測（監査）: 破損した constitution で強制が黙って消えた（破損前 exit 3 → 破損後 exit 0）。
+    有効にしていた org が、ファイルが壊れた瞬間に無防備になってはいけない。
+    """
+    org, led = _att_org(tmp_path)
+    (org / "constitution.yaml").write_text(body, encoding="utf-8")
+    r = _att_append(org, led, "gate-alias", {"deliverable": "7", "verdict": "admit"})
+    assert r.returncode != 0, f"{why}: 通ってしまった\n{r.stdout}{r.stderr}"
+    assert not (led / "ledger.jsonl").exists() or \
+        not (led / "ledger.jsonl").read_text(encoding="utf-8").strip()
+
+
+def test_judge_workload_is_covered_by_the_signature(tmp_path):
+    """**独立性の評価に使う値は、署名が覆わなければならない。**
+
+    実測（監査）: `judge_workload` が署名の外にあり、**署名後に `separate_host` を足しても
+    検証が通った**。
+    """
+    sys.path.insert(0, str(TOOLS))
+    import importlib
+    ident = importlib.import_module("identity")
+    assert "judge_workload" in ident._RECEIPT_BOUND
+    assert ident.PROTOCOL_VERSION >= 2       # 形式が変わったので版を上げる
+
+    store = tmp_path / "keys.json"
+    env = dict(os.environ, ORG_TRUST_STORE=str(store))
+    subprocess.run([sys.executable, str(TOOLS / "identity.py"), "keygen", "--key-id", "k1",
+                    "--signer-id", "s1", "--private-out", str(tmp_path / "k.pem")],
+                   capture_output=True, text=True, env=env, check=True)
+    r = subprocess.run([sys.executable, str(TOOLS / "identity.py"), "receipt",
+                        "--org-id", "o", "--ledger-id", "l", "--subject", "sub", "--issue", "7",
+                        "--role", "gate", "--phase", "implement", "--lineage", "same-harness",
+                        "--verdict", "admit", "--requirements-digest", "rd",
+                        "--reasoning-sha256", "rs", "--issued-at", "2026-07-31T00:00:00Z",
+                        "--key-id", "k1", "--private-key", str(tmp_path / "k.pem"),
+                        "--judge-workload", "separate_process"],
+                       capture_output=True, text=True, env=env, check=True)
+    rc = json.loads(r.stdout)
+    os.environ["ORG_TRUST_STORE"] = str(store)
+    try:
+        assert ident.verify_receipt(rc, {})[0] == "s1"
+        forged = dict(rc); forged["judge_workload"] = "separate_host"
+        who, _a, err = ident.verify_receipt(forged, {})
+        assert who is None and "署名が一致しない" in err
+    finally:
+        os.environ.pop("ORG_TRUST_STORE", None)
+
+
+def test_nonces_survive_a_daemon_restart(tmp_path):
+    """**再送を防げない状態で通さない。** プロセス内だけの nonce は再起動で消える。"""
+    sys.path.insert(0, str(TOOLS))
+    import importlib
+    wd = importlib.import_module("writerd")
+    path = tmp_path / "nonces.json"
+    s1 = wd._NonceStore(str(path))
+    assert s1.check_and_add("abc123") is True
+    s2 = wd._NonceStore(str(path))          # 「再起動」
+    assert s2.check_and_add("abc123") is False
+
+
+def test_client_accepts_a_writer_owned_leaf(tmp_path):
+    """**installer が作る leaf を client が拒否してはいけない。**
+
+    実測（監査）: installer が leaf を writer 所有にする一方、client が「root か自分」しか
+    許さず、**正規の書き込み経路がゼロ**になっていた。
+    """
+    sys.path.insert(0, str(TOOLS))
+    import importlib
+    wd = importlib.import_module("writerd")
+    import tempfile as _tf
+    anchor = pathlib.Path(_tf.mkdtemp(prefix="an", dir="/tmp")); leaf = anchor / "r"
+    leaf.mkdir(); os.chmod(anchor, 0o755); os.chmod(leaf, 0o755)
+    # 所有者は自分だが、client の検査は「誰が差し替えられるか」を見る（所有者を問わない）
+    assert wd.check_socket_parent(str(leaf / "w.sock")) is None
+    os.chmod(leaf, 0o777)
+    assert wd.check_socket_parent(str(leaf / "w.sock")) is not None
+
+
+def test_peer_uid_allowlist_is_available():
+    """socket が 0666 なので、**繋げることと書けることを分ける**認可が要る。"""
+    src = (TOOLS / "writerd.py").read_text(encoding="utf-8")
+    assert '"--allow-uid"' in src
+    assert "peer_not_authorized" in src
+
+
+def test_authoritative_data_lives_outside_the_org_tree():
+    """**中身の権限を絞っても、入れ物を差し替えられるなら意味が無い。**"""
+    src = (TOOLS / "writer-install.sh").read_text(encoding="utf-8")
+    assert "AUTHORITATIVE=" in src
+    assert "org tree の外" in src
+    assert "ln -s '${AUTHORITATIVE}/ledger'" in src
+    # daemon には実体のパスを渡す
+    assert "default=${AUTHORITATIVE}/ledger" in src
+
+
+def test_installer_and_verifier_agree_on_the_socket():
+    """パスが食い違えば、verifier は存在しない socket を検査する。"""
+    isrc = (TOOLS / "writer-install.sh").read_text(encoding="utf-8")
+    vsrc = (TOOLS / "writer-verify.sh").read_text(encoding="utf-8")
+    assert 'SOCK_PARENT="/usr/local/var/orgforge/run"' in isrc
+    assert 'SOCK="/usr/local/var/orgforge/run/writer.sock"' in vsrc
+    # verifier は leaf に root 所有を期待しない（writer 所有が正しい）
+    assert "leaf は $POWNER 所有（自分ではない）" in vsrc
+
+
+def test_pyyaml_guidance_prefers_a_root_owned_venv():
+    """システム python を書き換える案内を第一候補にしない。"""
+    src = (TOOLS / "writer-install.sh").read_text(encoding="utf-8")
+    assert "1. root 所有の専用 venv（推奨）" in src
+    assert "勧めない" in src

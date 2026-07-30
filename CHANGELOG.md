@@ -6,6 +6,48 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 0.39.3 — the enforcement I added could be bypassed by writing two strings
+
+Third audit, again NO-GO on all four lenses. The worst finding is about my own work: **the control
+added in 0.39.2 was defeated by putting `identity_assurance: attested` and `decision_by` in the
+payload — and the test I wrote fixed that forgery in place as the happy path.** A check whose input
+the caller can write is not a check.
+
+### Fixed
+- **Identity fields cannot come from the payload.** `identity_assurance`, `decision_by`,
+  `recorder_assurance`, `signer_id` and `key_id` are refused in any caller-supplied payload; only the
+  path that verified a receipt may write them. Judgment classes are refused from generic append
+  entirely when enforcement is on.
+- **Unreadable configuration no longer silences enforcement.** Measured: a corrupted
+  `constitution.yaml` took the check from exit 3 to exit 0. Reading it is now three-valued —
+  true, false, or **cannot tell** — and "cannot tell" fails closed. Broken YAML, a non-map
+  `enforcement`, a non-map `judges` and a non-boolean flag are each refused.
+- **`judge_workload` is now signed** (`protocol_version` 2). It was outside the signature while being
+  used to assess independence, so adding `separate_host` after signing still verified.
+- **Authoritative data moved out of the org tree.** `.orgforge` and the org root are caller-owned, so
+  a writer-owned ledger or a root-owned schema could be replaced *by path*. They now live under a
+  root-owned directory with symlinks from the org, and the daemon is given the **real paths**, so
+  re-pointing a symlink does not move where writes land.
+- **The installer's leaf and the client's expectation now agree.** The installer made the leaf
+  writer-owned while the client accepted only "root or self" — leaving **zero legitimate write
+  paths** even with the daemon up. The client now checks *who could substitute the socket* rather
+  than who owns it.
+- **The verifier used a different socket path** than the installer, and expected the leaf to be
+  root-owned (it must be writer-owned, or the daemon cannot bind). Both now match, and it also checks
+  that the org's entries are symlinks into the authoritative tree.
+- **Peer UID authorization** (`--allow-uid`): the socket is `0666`, so connecting is open to all —
+  connecting and being allowed to write are different things.
+- **Nonces persist across a restart.** Measured: they lived in process memory, so stopping and
+  starting the daemon let the same request through. If the nonce cannot be persisted, the request is
+  refused — being unable to detect a replay is the same as having no nonce.
+
+### PyYAML guidance
+A root-owned dedicated venv is now the first option; `--break-system-packages` was dropped entirely.
+
+### Status
+`sudo` and live-org application remain NO-GO pending re-audit. `workload_isolation` is
+`process_mediated`; H1's `separate_uid` is unresolved.
+
 ## 0.39.2 — the second audit: the installer still could not run, and actor spoofing was open
 
 Re-audit (four `claude -p` lenses, all NO-GO again) found nine more. Nothing was run against the live

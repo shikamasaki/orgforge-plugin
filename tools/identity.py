@@ -32,10 +32,15 @@ import sys
 # 「署名されているから独立している」は誤りである。**同じ signer が両方の血統に署名できるなら、
 # それは独立レビューではない** — だから `reviewer_independence` を別軸として持つ。
 
-PROTOCOL_VERSION = 1                 # receipt の形式。ledger の schema_version とは別に動く
+PROTOCOL_VERSION = 2                 # receipt の形式。ledger の schema_version とは別に動く
+# v2: `judge_workload` を署名対象に加えた。v1 では署名の外にあり、**署名後に
+#     `separate_host` を足しても検証が通った**（実測）— 独立性の評価に使う値が
+#     署名されていないなら、その評価は根拠を持たない。
 _RECEIPT_BOUND = ("receipt_id", "org_id", "ledger_id", "review_subject_id", "issue", "role",
                   "phase", "lineage", "verdict", "requirements_digest", "reasoning_sha256",
-                  "signer_id", "key_id", "issued_at", "schema_version", "protocol_version")
+                  "signer_id", "key_id", "issued_at", "schema_version", "protocol_version",
+                  # **独立性の評価に使う値は、署名が覆わなければならない。**
+                  "judge_workload")
 
 
 # ══ Authenticated Mode: 非対称署名（judge は秘密鍵、writer は公開鍵だけ）══════
@@ -274,6 +279,11 @@ def verify_receipt(receipt, expect, store=None, expect_release=False):
     for k in _RECEIPT_BOUND:
         if receipt.get(k) in (None, ""):
             return None, None, f"receipt に {k} が無い。束縛していない値は差し替えられる。"
+    if receipt.get("judge_workload") not in ("none", "separate_process", "separate_uid",
+                                             "separate_host"):
+        return None, None, (f"receipt の judge_workload が不正: "
+                            f"{receipt.get('judge_workload')!r}\n"
+                            f"  none | separate_process | separate_uid | separate_host")
     if receipt.get("protocol_version") != PROTOCOL_VERSION:
         return None, None, (f"receipt の protocol_version が {receipt.get('protocol_version')!r}"
                             f"（この検証器は v{PROTOCOL_VERSION}）。未知の版は検証できない。")
@@ -511,6 +521,8 @@ def _cmd_receipt(a):
          "reasoning_sha256": a.reasoning_sha256,
          "signer_id": key.get("signer_id") or a.key_id, "key_id": a.key_id,
          "issued_at": a.issued_at, "schema_version": a.schema_version,
+         # **judge 自身が申告する。** 署名が覆うので、後から足せない。
+         "judge_workload": a.judge_workload,
          "protocol_version": PROTOCOL_VERSION}
     if a.private_key:
         priv = (open(a.private_key, encoding="utf-8").read()
@@ -560,6 +572,9 @@ def main(argv):
     q.add_argument("--phase", default="")
     q.add_argument("--requirements-digest", dest="requirements_digest", default="")
     q.add_argument("--schema-version", dest="schema_version", type=int, default=1)
+    q.add_argument("--judge-workload", dest="judge_workload", default="none",
+                   choices=("none", "separate_process", "separate_uid", "separate_host"),
+                   help="この judge がどこで動いたか。**署名が覆う**ので後から足せない")
     q.add_argument("--private-key", dest="private_key", default=None,
                    help="秘密鍵（非対称鍵のとき必須）。ファイルか PEM 文字列")
     q.set_defaults(fn=_cmd_receipt)

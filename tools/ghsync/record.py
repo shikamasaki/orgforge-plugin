@@ -539,6 +539,9 @@ def cmd_provisional(a):
     # 冪等キーは **判定の同一性**で作る。`_reasoning_digest` は散文だけを束ねる（tamper
     # evidence の対象は散文なので正しい）ため、同じ理由で verdict を変えた判定が同一キーに
     # なってしまう。verdict と subject を含めて、差し替えが no-op に落ちないようにする。
+    # **receipt を検証したこの経路だけが identity fields を書ける。**
+    # generic append からは書けない（ledger.py が payload の identity を拒否する）。
+    os.environ["ORG_IDENTITY_VERIFIED"] = "1"
     rc = _ledger_append(a.by or a.role, "verdict_provisional", payload,
                         f"verdict_provisional-{a.issue}-{a.lineage}-{a.verdict}"
                         f"-{a.subject[:8]}-{digest[:12]}")

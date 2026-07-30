@@ -319,15 +319,15 @@ DISTINCT_ACTOR = {
 
 
 def _enforce_attested():
-    """統制イベントに receipt 由来の identity を要求するか（constitution が決める）。
+    """統制イベントに receipt 由来の identity を要求するか。**三値で扱う。**
 
-    **既定は偽である。** 真にすると、receipt を持たない既存の運用が全部止まる — それは
-    fail-closed ではなく、既知の移行不備による可用性事故である（docs/11）。org が鍵を配り、
-    judge が署名を出せるようになってから真にする。
+      True   … 要求する（constitution が明示）
+      False  … 要求しない（constitution が明示、または constitution が無い org）
+      raise  … **判定できない**（破損・型不正・PyYAML 欠落）→ fail-closed
 
-    読めないときは **偽に倒す** — この設定を読めないことで org を止めるのは筋が違う。
-    ただし真にしている org でファイルが読めなくなった場合、強制が黙って消えることになるので、
-    その org は `ledger.py schema` で差分を検出できる（validation の欠落として出る）。
+    実測（監査）: 破損した constitution で強制が黙って消えた（破損前 exit 3 → 破損後 exit 0）。
+    **設定を読めないことを「無効」と読み替えてはいけない** — 有効にしていた org が、
+    ファイルが壊れた瞬間に無防備になる。
     """
     env = os.environ.get("ORG_REQUIRE_ATTESTED_IDENTITY")
     if env is not None:
@@ -335,16 +335,41 @@ def _enforce_attested():
     try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         from discover import constitution
-        import yaml
         path = constitution()
-        if not path or not os.path.isfile(path):
-            return False
-        with open(path, encoding="utf-8") as f:
-            c = yaml.safe_load(f) or {}
+    except Exception as e:
+        raise SystemExit(f"constitution の場所を解決できないので、identity の強制が有効か"
+                         f"判定できない: {e}\n"
+                         f"  **判定できないなら止める。** 有効にしていた org が、読めなくなった"
+                         f"瞬間に無防備になってはいけない。")
+    if not path or not os.path.isfile(path):
+        return False                    # constitution を持たない org = 宣言が無い
+    try:
+        import yaml
     except Exception:
+        raise SystemExit("PyYAML が無いので constitution を読めず、identity の強制が有効か"
+                         "判定できない。\n  python3 -m pip install pyyaml")
+    try:
+        with open(path, encoding="utf-8") as f:
+            c = yaml.safe_load(f)
+    except Exception as e:
+        raise SystemExit(f"constitution.yaml を解析できないので、identity の強制が有効か"
+                         f"判定できない: {e}\n  ファイル: {path}\n"
+                         f"  **破損を「強制なし」と読み替えない。**")
+    if c is None:
         return False
-    j = ((c.get("enforcement") or {}).get("judges") or {})
-    return bool(j.get("require_attested_identity"))
+    if not isinstance(c, dict):
+        raise SystemExit(f"constitution.yaml が map ではない（{type(c).__name__}）: {path}")
+    enf = c.get("enforcement")
+    if enf is not None and not isinstance(enf, dict):
+        raise SystemExit(f"constitution.yaml の enforcement が map ではない: {path}")
+    j = ((enf or {}).get("judges") or {})
+    if not isinstance(j, dict):
+        raise SystemExit(f"constitution.yaml の enforcement.judges が map ではない: {path}")
+    v = j.get("require_attested_identity", False)
+    if not isinstance(v, bool):
+        raise SystemExit(f"require_attested_identity が真偽値でない（{v!r}）: {path}\n"
+                         f"  **曖昧な値を「偽」と読まない。**")
+    return v
 
 
 def _distinct_actor_violation(ev, hist):
@@ -377,13 +402,20 @@ def _distinct_actor_violation(ev, hist):
     _ENFORCED = {"admission_decided", "refutation_attempted"}
     if ev["class"] in _ENFORCED and _enforce_attested():
         pl = ev.get("payload") or {}
-        if (pl.get("identity_assurance") or "claimed") == "claimed":
-            return (f"{ev['class']} は自己申告の actor では記録できない"
-                    f"（identity_assurance={pl.get('identity_assurance') or 'claimed'}）。\n"
+        # **identity は writer が生成する。** payload に書かれた値は自己申告であって証拠では
+        # ない — 実測（監査）: `identity_assurance: attested` と `decision_by` を書くだけで
+        # admit が通り、鎖も intact だった。そして **私のテストがそれを正常系として固定して
+        # いた**。書けるものを検査に使ってはいけない。
+        if os.environ.get("ORG_IDENTITY_VERIFIED") != "1":
+            return (f"{ev['class']} は generic append では記録できない"
+                    f"（require_attested_identity が有効）。\n"
+                    f"  **payload に identity_assurance を書いても証拠にならない** — "
+                    f"書けるものを検査に使ってはいけない。\n"
                     f"  **`--actor` を変えるだけで職務分離を回避できる** — 実測で、maker 本人の\n"
                     f"  自己 admit は拒否されるが、同じプロセスが別名を名乗ると通っていた。\n"
-                    f"  判断の主体は署名 receipt から確定させること:\n"
+                    f"  judgment は **receipt を検証した経路** からのみ記録できる:\n"
                     f"    github_sync.py provisional --receipt <judge が署名した receipt> …\n"
+                    f"  その経路が receipt を検証し、identity fields を生成する。\n"
                     f"  （この強制は constitution の enforcement.judges.require_attested_identity\n"
                     f"   が真のときに働く。既定は偽 — 段階的に移行できるようにするため）")
 
@@ -952,6 +984,16 @@ def cmd_append(a):
     # **`_nk` は payload に書かせない。** 冪等キーは道具が付ける印であって、caller が名指しする
     # ものではない。名指しできると、既存の記録と同じキーを主張して no-op を作れる
     # （＝書いたつもりで書かれていない、あるいは他人の記録を自分のものとして読ませる）。
+    # **identity fields は caller が書けない。** writer（receipt を検証した経路）が生成する。
+    _IDENT = ("identity_assurance", "decision_by", "recorder_assurance", "signer_id", "key_id")
+    if isinstance(payload, dict) and os.environ.get("ORG_IDENTITY_VERIFIED") != "1":
+        forged = [k for k in _IDENT if k in payload]
+        if forged:
+            print(f"append: payload に {', '.join(forged)} を含めてはいけない — "
+                  f"identity は receipt を検証した経路が生成する。\n"
+                  f"  **書けるものを検査に使ってはいけない。** 実測で、これらを書くだけで"
+                  f"職務分離を回避できた。", file=sys.stderr)
+            return 2
     if isinstance(payload, dict) and "_nk" in payload:
         print("append: payload に '_nk' を含めてはいけない — 冪等キーは道具が付ける。"
               "caller が名指しできると、既存の記録と同じキーを主張して no-op を作れる。",
