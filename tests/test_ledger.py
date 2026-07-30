@@ -1265,16 +1265,20 @@ def test_unreadable_ledger_counts_as_halted(tmp_path):
     assert json.loads(out.splitlines()[0])["source"] == "unreadable"
 
 
-def test_release_is_not_implementable_yet(tmp_path):
-    """H4a では解除を実装しない — trip した主体と独立した承認が identity に依存する。"""
+def test_release_needs_an_authenticated_independent_approver(tmp_path):
+    """解除は存在するが、**自己申告では通らない。**
+
+    H4a では操作自体が無かった。0.38.0 で入ったが、要求するのは非対称鍵・独立した principal・
+    `may_release_halt` の認可・復旧の証拠である。generic append でも書けない。
+    """
     code, out = run("ledger.py", "--help")
-    assert "trip-halt" in out
-    assert "release" not in out.lower(), "解除の操作が生えている（H4b / H1 依存のはず）"
-    # generic append でも書けない
+    assert "trip-halt" in out and "release-halt" in out
     assert _trip(tmp_path)[0] == 0
+    # generic append では書けない（writer 専用）
     code, out = _app(tmp_path, "halt_released",
                      {"releases_seq": 1, "reason": "r", "released_by": "x",
-                      "recovery_verified": True}, actor="registrar")
+                      "recovery_verified": "y", "identity_assurance": "authenticated"},
+                     actor="registrar")
     assert code == 2
     assert "writer 専用" in out
     assert run("ledger.py", "halt-status", str(tmp_path))[0] == 10   # まだ止まっている
@@ -1312,3 +1316,189 @@ def test_identity_declares_four_separate_assurance_axes():
     assert "claimed" in ax["identity_assurance"]
     # legacy actor は claimed のまま昇格しない
     assert d["identity"]["legacy_actor"] == "claimed"
+
+
+# ══ Authenticated Mode + H4b — 認証付き halt 解除 ═════════════════════════════
+# **共有鍵は「鍵が違う」ことしか示さない。** 別主体・別プロセス・独立した承認を証明しないので、
+# 解除には使えない。非対称鍵（judge が秘密鍵、writer は公開鍵だけ）が前提である。
+
+def _am_org(tmp_path):
+    org = tmp_path / "org"
+    for d in (".orgforge/ledger", ".orgforge/trust", "keys"):
+        (org / d).mkdir(parents=True, exist_ok=True)
+    import shutil as _sh
+    _sh.copy(TEMPLATE / "ledger-schema.yaml", org / "ledger-schema.yaml")
+    (org / "constitution.yaml").write_text("enforcement: {}\n", encoding="utf-8")
+    return org, org / ".orgforge" / "ledger"
+
+
+def _am_env(org):
+    return dict(os.environ, ORG_TRUST_STORE=str(org / ".orgforge" / "trust" / "keys.json"))
+
+
+def _am_tool(org, script, *args, env=None):
+    return subprocess.run([sys.executable, str(TOOLS / script), *args], cwd=org,
+                          capture_output=True, text=True, env=env or _am_env(org))
+
+
+def test_trust_store_holds_public_keys_only(tmp_path):
+    """**writer は公開鍵だけを持つ。** 秘密鍵を持つ側は判定を偽造できる。"""
+    org, _ = _am_org(tmp_path)
+    r = _am_tool(org, "identity.py", "keygen", "--key-id", "k1", "--signer-id", "s1",
+                 "--private-out", "keys/k1.pem")
+    assert r.returncode == 0, r.stdout + r.stderr
+    store = json.loads((org / ".orgforge" / "trust" / "keys.json").read_text(encoding="utf-8"))
+    k = store["keys"]["k1"]
+    assert k.get("public_pem"), "公開鍵が入っていない"
+    assert "private_pem" not in k and "secret" not in k, "秘密鍵/共有鍵が store に漏れている"
+    assert store["mode"] == "authenticated"
+    assert (org / "keys" / "k1.pem").is_file()
+
+
+def test_a_private_key_in_the_trust_store_is_refused(tmp_path):
+    """store に秘密鍵が入っていたら読み込み自体を拒否する。"""
+    org, _ = _am_org(tmp_path)
+    (org / ".orgforge" / "trust" / "keys.json").write_text(json.dumps(
+        {"keys": {"k1": {"signer_id": "s1", "private_pem": "-----BEGIN..."}}}), encoding="utf-8")
+    sys.path.insert(0, str(TOOLS))
+    import importlib
+    ident = importlib.import_module("identity")
+    os.environ["ORG_TRUST_STORE"] = str(org / ".orgforge" / "trust" / "keys.json")
+    try:
+        store, err = ident.load_trust_store()
+        assert store is None and err and "秘密鍵" in err
+    finally:
+        os.environ.pop("ORG_TRUST_STORE", None)
+
+
+def test_public_key_cannot_produce_a_signature(tmp_path):
+    """公開鍵では署名を作れない — これが共有鍵との決定的な差である。"""
+    sys.path.insert(0, str(TOOLS))
+    import importlib
+    ident = importlib.import_module("identity")
+    priv, pub, err = ident.generate_keypair()
+    assert not err, err
+    sig, err = ident.sign_bytes(b"m", priv)
+    assert not err and sig.startswith("ed25519:")
+    assert ident.verify_bytes(b"m", sig, pub) == (True, None)
+    assert ident.verify_bytes(b"tampered", sig, pub)[0] is False
+    assert ident.sign_bytes(b"m", pub)[0] is None      # 公開鍵で署名できない
+
+
+def _am_setup_halt(tmp_path, **kw):
+    org, led = _am_org(tmp_path)
+    for kid, sid, extra in (("k-reg", "reg", []),
+                            ("k-appr", "appr", ["--may-release-halt"]),
+                            ("k-noauth", "noauth", [])):
+        assert _am_tool(org, "identity.py", "keygen", "--key-id", kid, "--signer-id", sid,
+                        "--private-out", f"keys/{kid}.pem", *extra).returncode == 0
+    assert _am_tool(org, "identity.py", "keygen", "--key-id", "k-shared",
+                    "--signer-id", "shared", "--shared-secret").returncode == 0
+    assert _am_tool(org, "ledger.py", "trip-halt", str(led), "--trigger", "t",
+                    "--reason", "検査のため", "--tripped-by", "reg").returncode == 0
+    return org, led
+
+
+def _am_receipt(org, key_id, priv=None, subject="halt:1", out="r.json"):
+    args = ["identity.py", "receipt", "--org-id", "o", "--ledger-id", "l",
+            "--subject", subject, "--issue", "0", "--role", "release", "--phase", "operate",
+            "--lineage", "release", "--verdict", "release", "--requirements-digest", "none",
+            "--reasoning-sha256", "none", "--issued-at", "2026-07-30T12:00:00Z",
+            "--key-id", key_id]
+    if priv:
+        args += ["--private-key", priv]
+    r = _am_tool(org, *args)
+    assert r.returncode == 0, r.stdout + r.stderr
+    (org / out).write_text(r.stdout.strip(), encoding="utf-8")
+    return out
+
+
+def _am_release(org, led, receipt, evidence="ledger verify → chain intact", env=None):
+    r = _am_tool(org, "ledger.py", "release-halt", str(led), "--receipt", receipt,
+                 "--reason", "復旧を確認した", "--recovery-verified", evidence, env=env)
+    return r.returncode, json.loads(r.stdout.splitlines()[0]) if r.stdout.strip() else {}
+
+
+def test_the_principal_that_tripped_cannot_release(tmp_path):
+    """**止めた主体が自分で解除できてはいけない。**"""
+    org, led = _am_setup_halt(tmp_path)
+    rc = _am_receipt(org, "k-reg", "keys/k-reg.pem")
+    code, d = _am_release(org, led, rc)
+    assert code == 4
+    assert d["released"] is False
+    assert _am_tool(org, "ledger.py", "halt-status", str(led)).returncode == 10   # 維持
+
+
+def test_a_shared_secret_cannot_release(tmp_path):
+    """共有鍵は「鍵が違う」ことしか示さない — 独立した承認を証明しない。"""
+    org, led = _am_setup_halt(tmp_path)
+    rc = _am_receipt(org, "k-shared")
+    code, d = _am_release(org, led, rc)
+    assert code == 4 and d["released"] is False
+    assert "共有鍵" in (d.get("detail") or "")
+
+
+def test_release_requires_explicit_authorization(tmp_path):
+    """`may_release_halt` を認可されていない鍵では解除できない。"""
+    org, led = _am_setup_halt(tmp_path)
+    rc = _am_receipt(org, "k-noauth", "keys/k-noauth.pem")
+    code, d = _am_release(org, led, rc)
+    assert code == 4 and d["released"] is False
+
+
+def test_a_release_receipt_is_bound_to_the_halt(tmp_path):
+    """別の halt の解除 receipt を再利用できない。"""
+    org, led = _am_setup_halt(tmp_path)
+    rc = _am_receipt(org, "k-appr", "keys/k-appr.pem", subject="halt:999")
+    code, d = _am_release(org, led, rc)
+    assert code == 4 and "一致しない" in (d.get("detail") or "")
+
+
+def test_release_requires_recovery_evidence(tmp_path):
+    """何を確かめて復旧したのかが無い解除は、後から検証できない。"""
+    org, led = _am_setup_halt(tmp_path)
+    rc = _am_receipt(org, "k-appr", "keys/k-appr.pem")
+    code, d = _am_release(org, led, rc, evidence="   ")
+    assert code == 2 and d["reason"] == "missing_recovery_evidence"
+
+
+def test_an_independent_authorized_approver_can_release(tmp_path):
+    """独立した approver（非対称・認可あり・証拠あり）なら解除できる。"""
+    org, led = _am_setup_halt(tmp_path)
+    rc = _am_receipt(org, "k-appr", "keys/k-appr.pem")
+    code, d = _am_release(org, led, rc)
+    assert code == 0, d
+    assert d["released"] is True and d["identity_assurance"] == "authenticated"
+    assert d["released_by"] == "appr" and d["tripped_by"] == "reg"
+    assert not (led / "HALT").exists()
+    assert _am_tool(org, "ledger.py", "halt-status", str(led)).returncode == 0
+    assert run("ledger.py", "verify", str(led))[0] == 0
+
+
+def test_a_release_that_cannot_be_recorded_keeps_the_halt(tmp_path):
+    """**記録できていないのに停止が解けることが、いちばん危ない fail-open である。**
+
+    順序: 検証 → append+fsync → **その後で** ラッチを消す。記録に失敗したら停止を維持する。
+    """
+    org, led = _am_setup_halt(tmp_path)
+    rc = _am_receipt(org, "k-appr", "keys/k-appr.pem")
+    env = dict(_am_env(org), ORG_LEDGER_FORCE_APPEND_FAIL="1")
+    code, d = _am_release(org, led, rc, env=env)
+    assert code == 4
+    assert d["reason"] == "release_not_persisted" and d["released"] is False
+    assert (led / "HALT").exists(), "記録できていないのにラッチが消えた"
+    assert _am_tool(org, "ledger.py", "halt-status", str(led)).returncode == 10
+    assert "halt_released" not in (led / "ledger.jsonl").read_text(encoding="utf-8")
+    # exact retry で安全に解除できる
+    code, d = _am_release(org, led, rc)
+    assert code == 0 and d["released"] is True
+    assert run("ledger.py", "verify", str(led))[0] == 0
+
+
+def test_releasing_when_nothing_is_halted_is_a_noop(tmp_path):
+    """active halt が無ければ何もしない（再実行が安全）。"""
+    org, led = _am_setup_halt(tmp_path)
+    rc = _am_receipt(org, "k-appr", "keys/k-appr.pem")
+    assert _am_release(org, led, rc)[0] == 0
+    code, d = _am_release(org, led, rc)
+    assert code == 2 and d["reason"] == "no_active_halt"

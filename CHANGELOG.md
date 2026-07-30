@@ -6,6 +6,51 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 0.38.0 — Authenticated Mode, and H4b: releasing a halt
+
+A different HMAC key proves only that *a key differs*. It does not prove a distinct principal, a
+distinct process, or an independent approval — so building halt-release on top of it would have put
+the name and the guarantee back out of step.
+
+### Added — Authenticated Mode
+- **Asymmetric signatures (Ed25519).** The judge holds the private key; **the writer holds only the
+  public key** and can therefore verify but not produce a judgment. That is the property a shared
+  secret cannot give. Backed by `cryptography` when present, `openssl` otherwise; if neither exists
+  the mode refuses to run rather than falling back to a shared secret.
+- **The trust store refuses to load if it contains a private key** — a writer holding one can forge
+  the judgments it is meant to check.
+- **Per-signer authorization**: `authorized_roles`, `authorized_lineages`, `may_release_halt`. A valid
+  signature and *permission to issue that verdict* are different things; an unlisted capability is
+  treated as denied.
+- `identity_assurance` reaches `authenticated` only with an asymmetric key in an authenticated-mode
+  store. `workload_isolation` stays a **separate axis** — a non-shared key says nothing about whether
+  the writer runs under a different UID.
+
+### Added — H4b: `ledger.py release-halt`
+Releasing requires **all** of: an asymmetric receipt, a principal **other than** whoever tripped it,
+`may_release_halt` authorization, a receipt bound to that specific halt's seq, and recorded recovery
+evidence. Order is: verify → append + fsync → **then** clear the latch.
+
+**If the release cannot be recorded, the halt stays.** Fault-injected: the release returns 4,
+`halt_released` is absent, the latch remains, `halt-status` still reports halted — and the same
+receipt replayed afterwards completes the release cleanly. Clearing the latch before recording would
+produce the worst state available: stopped, then un-stopped, with no record that either happened.
+
+### Acceptance tests (each run against a live org first, then fixed as tests)
+The tripping principal cannot release; a shared secret cannot release; an unauthorized key cannot
+release; a receipt bound to another halt is refused; missing recovery evidence is refused; an
+independent authorized approver succeeds and the gated action passes afterwards; a release that
+cannot be persisted keeps the halt; releasing with nothing halted is a no-op.
+
+### Explicitly outside the threat model
+**The host administrator.** They can disable the daemon or the hook, so no arrangement here
+constrains them. Stated rather than implied.
+
+### Still Compatibility Mode, and labelled as such
+`workload_isolation` is `none` until the writer runs as a separate UID or service with ledger writes
+restricted to it. Asymmetric keys close the "the verifier can also sign" hole; they do not by
+themselves isolate the workload.
+
 ## 0.37.0 — H1: three principals, four assurance axes (Compatibility Mode)
 
 `actor` conflated three things: who formed the judgment, who transcribed it, and who committed it.

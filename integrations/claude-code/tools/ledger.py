@@ -1634,6 +1634,163 @@ def cmd_trip_halt(a):
     return 0
 
 
+
+def cmd_release_halt(a):
+    """halt を解除する。**止めた主体とは独立した principal の署名が必要（H4b）。**
+
+    ## 順序が重要である
+
+      1. active halt を確認する（無ければ解除するものが無い）
+      2. **独立した release principal** を receipt で検証する
+         - 非対称鍵であること（共有鍵は「別主体」を証明しない）
+         - `may_release_halt` を認可されていること
+         - **halt を発動した主体と別であること**
+      3. 復旧の証拠を検証する（`--recovery-verified` の中身が空なら拒否）
+      4. `halt_released` を append + fsync
+      5. **その後で初めて** HALT ラッチを消す
+      6. ラッチの削除に失敗したら **停止を維持する**（消せないなら止まったままにする）
+
+    逆順にすると、ラッチを消したあとに台帳への追記が失敗して **halt が消えたまま記録が無い**
+    状態になる。それは「止まっていたのに、止まっていた証拠も止まっている状態も無い」である。
+    """
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from identity import verify_receipt, observed_recorder
+
+    halt, herr = active_halt(a.root)
+    if not halt:
+        print(json.dumps({"released": False, "reason": "no_active_halt"}, ensure_ascii=False))
+        return 2
+    if not (a.recovery_verified or "").strip():
+        print(json.dumps({"released": False, "reason": "missing_recovery_evidence",
+                          "detail": "--recovery-verified が必要。**何を確かめて復旧したのか**が"
+                                    "記録されない解除は、解除の判断を後から検証できない。"},
+                         ensure_ascii=False))
+        return 2
+    try:
+        rc = json.loads(open(a.receipt, encoding="utf-8").read()) \
+            if os.path.isfile(a.receipt) else json.loads(a.receipt)
+    except Exception as e:
+        print(json.dumps({"released": False, "reason": "receipt_unreadable",
+                          "detail": str(e)}, ensure_ascii=False))
+        return 2
+
+    # **解除の receipt は halt の seq に束縛する。** 束縛しないと、別の halt の解除 receipt を
+    # 持ち込んで使える（再利用）。
+    expect = {"review_subject_id": f"halt:{halt.get('seq')}", "role": "release",
+              "verdict": "release", "lineage": "release"}
+    released_by, ident, rerr = verify_receipt(rc, expect, expect_release=True)
+    if rerr:
+        print(json.dumps({"released": False, "reason": "receipt_rejected", "detail": rerr},
+                         ensure_ascii=False))
+        return 4
+    if ident.get("identity_assurance") != "authenticated":
+        print(json.dumps({"released": False, "reason": "not_authenticated",
+                          "detail": f"解除には authenticated な identity が必要"
+                                    f"（いま {ident.get('identity_assurance')!r}）。\n"
+                                    f"  共有鍵は「鍵が違う」ことしか示さず、"
+                                    f"**別主体・独立した承認を証明しない。**"},
+                         ensure_ascii=False))
+        return 4
+    # **止めた主体が自分で解除できてはいけない。**
+    tripped_by = halt.get("tripped_by")
+    if tripped_by and released_by == tripped_by:
+        print(json.dumps({"released": False, "reason": "not_independent",
+                          "detail": f"halt を発動した主体（{tripped_by}）が自分で解除しようと"
+                                    f"している。**独立した承認が要る。**"}, ensure_ascii=False))
+        return 4
+
+    recorded_by, rec_assurance = observed_recorder()
+    payload = {"releases_seq": halt.get("seq"), "reason": a.reason,
+               "released_by": released_by, "recovery_verified": a.recovery_verified,
+               "tripped_by": tripped_by,
+               "identity_assurance": ident.get("identity_assurance"),
+               "recorded_by": recorded_by, "recorder_assurance": rec_assurance,
+               "signer_id": ident.get("signer_id"), "key_id": ident.get("key_id")}
+
+    with _LedgerLock(a.root) as lk:
+        if lk.error:
+            print(json.dumps({"released": False, "reason": "lock_failed",
+                              "detail": lk.error}, ensure_ascii=False))
+            return 4
+        snap, serr = load_schema_snapshot()
+        if serr:
+            print(json.dumps({"released": False, "reason": "schema_unreadable",
+                              "detail": serr}, ensure_ascii=False))
+            return 4
+        bad, _w = validate_event("halt_released", payload, snap, writer_op="halt_released")
+        if bad:
+            print(json.dumps({"released": False, "reason": "schema_rejected",
+                              "detail": bad}, ensure_ascii=False))
+            return 4
+        head, hh = _head_from_log(a.root)
+        if hh:
+            print(json.dumps({"released": False, "reason": "ledger_unhealthy",
+                              "detail": hh}, ensure_ascii=False))
+            return 4
+        ev = {"id": "e" + hashlib.sha256(
+                  f"{head['seq'] + 1}:halt_released:"
+                  f"{json.dumps(payload, sort_keys=True, ensure_ascii=False)}".encode()
+              ).hexdigest()[:12],
+              "seq": head["seq"] + 1, "ts": _now_iso(), "actor": released_by,
+              "class": "halt_released", "payload": payload,
+              "schema_id": "orgforge-ledger", "schema_version": LEDGER_SCHEMA_VERSION,
+              "schema_sha256": snap["digest"], "prev_hash": head["hash"]}
+        ev["hash"] = _hash(head["hash"], ev)
+        log, headp = _paths(a.root)
+        prior_size = os.path.getsize(log) if os.path.exists(log) else 0
+        try:
+            # 故障注入。**記録できていないのに停止が解けることが、いちばん危ない fail-open**
+            # である。故障を再現できなければ「停止を維持する」とは言えない。
+            if os.environ.get("ORG_LEDGER_FORCE_APPEND_FAIL") == "1":
+                raise OSError("ORG_LEDGER_FORCE_APPEND_FAIL=1（故障注入）")
+            with open(log, "a", encoding="utf-8") as f:
+                f.write(json.dumps(ev, ensure_ascii=False) + "\n")
+                f.flush()
+                os.fsync(f.fileno())
+            tmp = headp + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump({"seq": ev["seq"], "hash": ev["hash"]}, f)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, headp)
+            _fsync_dir(a.root)
+        except Exception as e:
+            try:
+                if os.path.exists(log) and os.path.getsize(log) > prior_size:
+                    with open(log, "r+b") as f:
+                        f.truncate(prior_size)
+                        f.flush()
+                        os.fsync(f.fileno())
+            except Exception:
+                pass
+            print(json.dumps({"released": False, "reason": "release_not_persisted",
+                              "detail": f"解除を記録できなかった（{e}）。**停止は維持される。**"},
+                             ensure_ascii=False))
+            return 4
+
+        # **記録できてから、初めてラッチを消す。** 逆順にすると、ラッチを消したあとに追記が
+        # 失敗して「止まっていた証拠も、止まっている状態も無い」状態になる。
+        latch = os.path.join(a.root, HALT_LATCH)
+        latch_cleared = True
+        if os.path.exists(latch):
+            try:
+                os.unlink(latch)
+                _fsync_dir(a.root)
+            except Exception as e:
+                latch_cleared = False
+                print(f"release-halt: ラッチを消せなかった（{e}）。**停止は維持される** — "
+                      f"台帳の解除は記録済みなので、同じ receipt で再実行すれば後片付けだけが"
+                      f"行われる（exact retry は安全）。", file=sys.stderr)
+
+    print(json.dumps({"released": latch_cleared, "reason": "released" if latch_cleared
+                      else "recorded_but_latch_remains",
+                      "seq": ev["seq"], "releases_seq": halt.get("seq"),
+                      "released_by": released_by, "tripped_by": tripped_by,
+                      "identity_assurance": ident.get("identity_assurance")},
+                     ensure_ascii=False))
+    return 0 if latch_cleared else 4
+
+
 def cmd_halt_status(a):
     """halt しているかを報告する。**観測は halt 中でも通る。**"""
     h, err = active_halt(a.root)
@@ -1909,6 +2066,16 @@ def main(argv):
     th.add_argument("--reason", required=True, help="なぜ止めたのか（解除の判断に使う）")
     th.add_argument("--tripped-by", dest="tripped_by", required=True)
     th.set_defaults(fn=cmd_trip_halt)
+    rh = sub.add_parser("release-halt",
+                        help="halt を解除する（**独立した principal の非対称署名が必要**）")
+    rh.add_argument("root", nargs="?", default=None)
+    rh.add_argument("--receipt", required=True,
+                    help="解除の receipt。may_release_halt を認可された **非対称** 鍵で署名し、"
+                         "halt の seq に束縛されていること")
+    rh.add_argument("--reason", required=True, help="なぜ解除してよいと判断したのか")
+    rh.add_argument("--recovery-verified", dest="recovery_verified", required=True,
+                    help="**何を確かめて復旧したのか**（実行したコマンドと出力）")
+    rh.set_defaults(fn=cmd_release_halt)
     hs = sub.add_parser("halt-status", help="halt しているかを報告する（観測なので halt 中も通る）")
     hs.add_argument("root", nargs="?", default=None)
     hs.set_defaults(fn=cmd_halt_status)

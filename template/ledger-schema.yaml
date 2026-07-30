@@ -86,7 +86,8 @@ validation:
                               actor_role, decision, session_id, tool_use_id, rule,
                               request_digest]
     halt_tripped:            [trigger, scope, reason, tripped_by]
-    halt_released:           [releases_seq, reason, released_by, recovery_verified]
+    halt_released:           [releases_seq, reason, released_by, recovery_verified,
+                              identity_assurance]
   # **相関キーはどれか1つあればよい。** deliverable / candidate_id / claim_id / issue はどれも
   # 正当な相関キーで（`_same_work` が union-find で束ねる）、どれを使うかは経路によって違う。
   # 1つに固定すると正当な書き込みを弾く（実際に統制のテストを弾いた）。
@@ -246,9 +247,14 @@ event_classes:
   # 解除。**H4a では実装しない** — trip した主体と独立した承認が要り、それは identity の
   # 認証（H1）に依存する。ここで「誰が解除してよいか」を actor の自己申告で決めると、
   # 止めた本人が黙って解除できる。宣言だけ先に置き、書ける操作は H4b で足す。
-  halt_released:        { releases_seq, reason, released_by, recovery_verified,
-                          authority: "requires an approver independent of tripped_by — NOT
-                                      implementable until identity is authenticated (H1)" }
+  halt_released:        { releases_seq, reason, released_by, recovery_verified, tripped_by,
+                          identity_assurance, recorded_by, recorder_assurance,
+                          signer_id, key_id,
+                          authority: "requires an approver INDEPENDENT of tripped_by, holding an
+                                      asymmetric key authorized with may_release_halt. A shared
+                                      secret proves only that a key differs — not that a distinct
+                                      principal approved. Order: verify → append+fsync → THEN clear
+                                      the latch; if the latch cannot be cleared the halt STAYS." }
   # work (Organs 2/6)
   # source: how this backlog item entered the department's backlog (docs/09, docs/03). `mandate` =
   # a top-down instruction handed down; `self` = a self-generated task the department raised from its

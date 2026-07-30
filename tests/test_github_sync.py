@@ -851,7 +851,10 @@ _H1_WHY = ("gate の判定理由。独立に再導出した範囲と、判定の
 def _h1_setup(tmp_path, keys=(("k-gate", "gate-signer"),)):
     org = _h1_org(tmp_path)
     for kid, sid in keys:
-        r = _tool(org, "identity.py", "keygen", "--key-id", kid, "--signer-id", sid)
+        # **H1 の試験は Compatibility Mode を検査している。** 0.38.0 で keygen の既定が
+        # 非対称（Authenticated Mode）になったので、共有鍵を明示する。
+        r = _tool(org, "identity.py", "keygen", "--key-id", kid, "--signer-id", sid,
+                  "--shared-secret")
         assert r.returncode == 0, r.stdout + r.stderr
     sys.path.insert(0, str(REPO / "tools"))
     from orgcycle._core import review_subject
@@ -902,7 +905,7 @@ def test_decision_by_comes_from_a_verified_receipt(tmp_path):
     assert r.returncode == 0, r.stdout + r.stderr
     pl = _h1_events(org)[0]["payload"]
     assert pl["decision_by"] == "gate-signer"
-    assert pl["identity_assurance"] == "attested"     # authenticated ではない（共有鍵）
+    assert pl["identity_assurance"] == "attested"     # 共有鍵なので authenticated ではない
     assert pl["signer_id"] == "gate-signer" and pl["key_id"] == "k-gate"
     # CLI で decision_by を申告する経路が無いこと
     h = _tool(org, "github_sync.py", "provisional", "--help")
