@@ -6,6 +6,49 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 0.34.0 — H3: only a decision that was written becomes an allow
+
+The blast-radius cap used to work in two stages: an organ summed committed exposure, decided, and
+printed `LEDGER-EVENT`; the hook then appended it and ignored any failure. Three holes followed from
+that split. Parallel hooks could read the same `committed_so_far` and **both allow**, then append in
+turn — so the total exceeded the cap. An ignored append meant the next call saw `committed = 0`, which
+degrades an aggregate cap into a memoryless per-action check. And a hold was denied and returned, so
+**stopping something left no record**.
+
+### Added
+- **`ledger.py reserve-exposure`** — one writer operation holding, inside the lock: schema snapshot,
+  ledger-health check, idempotency lookup, exposure calculation, allow/hold decision, event append,
+  fsync. It returns a structured JSON result and **only returns allow once the reservation is
+  durable**. Measured: 16 concurrent reservations against `cap = 5` produced exactly 5 allows
+  totalling 5.0, no duplicate seq, chain intact.
+- **Holds are recorded.** The hook still blocks the call, but the decision is now in the ledger, so a
+  cap that fires leaves evidence instead of silence.
+- `committed_so_far` is computed by the writer and is **not an argument** — a caller able to declare
+  it could under-report its way past the cap. Malformed prior exposure denies rather than counting
+  as zero, since counting it as zero makes the running total look smaller than it is.
+- The idempotency key is `(session_id, tool_use_id, rule, event_class)`; `tool_use_id` alone collides
+  across sessions and rules. When invoked inside a subagent, `agent_id` is folded into the session
+  part — whether one tool call can fire PreToolUse twice is not documented, so the reservation is
+  keyed rather than assumed to fire once. **A missing key denies the metered action**: without
+  identity there is no guarantee against double-counting a re-fired hook.
+- The reservation defines **no timestamp argument at all** — not `--ts`, not `--backfill-ts`. Backfill
+  authority stays on the ordinary ledger path (an H1 question); letting it near a cap reservation
+  would allow placing a reservation outside the window it is summed over.
+
+### Fixed
+- **A bypass declaration that cannot be recorded now denies the call.** `ORG_ALLOW_MANUAL_MERGE` /
+  `ORG_ALLOW_MANUAL_GH` were `except: pass` with the exit code unchecked, so a failed write let the
+  bypass through with no trace. The escape hatch is granted in exchange for the declaration being
+  recorded; if it isn't recorded, the exchange did not happen.
+- Two hook tests seeded the ledger with hand-written events (`seq` starting at 0, no hashes). The
+  health check is right to refuse appending onto a chain that was never a chain; they now seed
+  through the real append path with a relative timestamp.
+
+### Rollout
+`ledger.py schema --fix` first, then confirm plain `ledger.py schema` exits 0 — **`--fix` returning 0
+is not preflight success**, since a conflict it declined to overwrite still leaves a difference. Only
+then is the reservation path meaningful. This repo's live org passed all three steps.
+
 ## 0.33.3 — the schema repairer weakened org-owned rules
 
 `schema --fix` replaced the whole `validation` block when it found any gap, so a stricter rule an org

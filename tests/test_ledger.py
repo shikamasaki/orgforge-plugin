@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 import pathlib
+import pytest
 import re
 import subprocess
 import sys
@@ -925,3 +926,144 @@ def test_yaml_block_span_stops_at_the_next_top_level_key(tmp_path):
     assert "b: 2" in got
     assert "event_classes" not in got
     assert "# a top-level comment" not in got
+
+
+# ══ H3 — reserve-exposure: 書けた判断だけが allow になる ══════════════════════
+# 従来: organ が「集計 → 判断 → LEDGER-EVENT 印字」、hook が「その後 append（失敗は無視）」。
+#   1. 集計と判断が lock の外なので、並列の hook が同じ committed を読んで両方 allow できる
+#   2. append 失敗を無視するので、次の呼び出しが committed=0 を見る（cap が記憶を失う）
+#   3. hold は deny して終わるので、止めたことが残らない
+# reserve-exposure は lock の中で検査と予約を一操作にする。
+
+def _reserve(root, delta, cap, tu, sess="s1", rule="rm_guard", dim="destructive_ops",
+             actor="system:org_hook", extra=()):
+    return run("ledger.py", "reserve-exposure", str(root), "--dimension", dim,
+               "--delta", str(delta), "--cap", str(cap), "--actor", actor,
+               "--session-id", sess, "--tool-use-id", tu, "--rule", rule, *extra)
+
+
+def _decisions(root):
+    return [(e["seq"], e["payload"]["decision"], e["payload"]["delta_requested"])
+            for e in _evs(root) if e["class"] == "exposure_budget_checked"]
+
+
+def test_reserve_accumulates_and_holds_at_the_cap(tmp_path):
+    """曝露は積み上がり、cap を超えると hold になる。"""
+    for i in range(3):
+        code, out = _reserve(tmp_path, 1, 3, f"t{i}")
+        assert code == 0, out
+    code, out = _reserve(tmp_path, 1, 3, "t3")
+    assert code == 10, out
+    assert json.loads(out.splitlines()[0])["decision"] == "hold"
+
+
+def test_hold_is_recorded_not_just_denied(tmp_path):
+    """**hold も台帳に残る。** 従来は deny して終わり、止めたことが記録されなかった。"""
+    _reserve(tmp_path, 5, 3, "t0")
+    d = _decisions(tmp_path)
+    assert len(d) == 1 and d[0][1] == "hold"
+
+
+def test_concurrent_reservations_never_exceed_the_cap(tmp_path):
+    """**16並列で合計が cap を超えない。** 従来は両方が同じ committed を読めた。"""
+    import concurrent.futures as cf
+    with cf.ThreadPoolExecutor(max_workers=16) as ex:
+        futs = [ex.submit(_reserve, tmp_path, 1, 5, f"t{i}") for i in range(16)]
+        codes = [f.result()[0] for f in futs]
+    assert sorted(set(codes)) == [0, 10], codes
+    allowed = sum(dl for _s, dc, dl in _decisions(tmp_path) if dc == "allow")
+    assert allowed == 5, f"allow の合計が cap を超えた: {allowed}"
+    assert codes.count(0) == 5
+    assert run("ledger.py", "verify", str(tmp_path))[0] == 0
+
+
+def test_replay_of_the_same_tool_use_is_idempotent(tmp_path):
+    """hook の再実行を二重計上しない。"""
+    assert _reserve(tmp_path, 1, 3, "same")[0] == 0
+    code, out = _reserve(tmp_path, 1, 3, "same")
+    assert code == 0
+    assert json.loads(out.splitlines()[0])["reason"] == "idempotent_replay"
+    assert len(_decisions(tmp_path)) == 1, "再実行が二重に記録された"
+
+
+def test_idempotency_key_spans_session_rule_and_class(tmp_path):
+    """`tool_use_id` 単独では別 session・別 rule の衝突を防げない。"""
+    assert _reserve(tmp_path, 1, 9, "tu", sess="s1", rule="r1")[0] == 0
+    assert _reserve(tmp_path, 1, 9, "tu", sess="s2", rule="r1")[0] == 0   # 別 session
+    assert _reserve(tmp_path, 1, 9, "tu", sess="s1", rule="r2")[0] == 0   # 別 rule
+    assert len(_decisions(tmp_path)) == 3, "衝突して no-op になった"
+
+
+@pytest.mark.parametrize("missing", ["session_id", "tool_use_id", "rule"])
+def test_missing_idempotency_key_denies_the_action(tmp_path, missing):
+    """欠落していれば metered action を deny する（同一性を確かめられない）。"""
+    kw = {"sess": "s1", "tu": "t1", "rule": "r1"}
+    kw["tu" if missing == "tool_use_id" else
+       "sess" if missing == "session_id" else "rule"] = ""
+    code, out = _reserve(tmp_path, 1, 3, kw["tu"], sess=kw["sess"], rule=kw["rule"])
+    assert code == 3, out
+    d = json.loads(out.splitlines()[0])
+    assert d["decision"] == "deny" and d["reason"] == f"missing_{missing}"
+    assert _decisions(tmp_path) == []
+
+
+def test_reserve_denies_when_the_ledger_is_unhealthy(tmp_path):
+    """壊れた台帳の上に予約を書かない。**書けないなら allow を返さない。**"""
+    assert _reserve(tmp_path, 1, 9, "t0")[0] == 0
+    with open(tmp_path / "ledger.jsonl", "a", encoding="utf-8") as f:
+        f.write('{"seq": 2, "class": "x"')        # torn line
+    code, out = _reserve(tmp_path, 1, 9, "t1")
+    assert code == 4
+    assert json.loads(out.splitlines()[0])["reason"] == "ledger_unhealthy"
+
+
+def test_reserve_denies_when_the_lock_fails(tmp_path):
+    """ロックできないなら予約しない — cap の原子性はロックに依存している。"""
+    env = dict(os.environ, ORG_LEDGER_FORCE_LOCK_FAIL="1")
+    env.pop("ORG_LEDGER_ALLOW_UNLOCKED", None)
+    r = subprocess.run([sys.executable, str(TOOLS / "ledger.py"), "reserve-exposure",
+                        str(tmp_path), "--dimension", "destructive_ops", "--delta", "1",
+                        "--cap", "9", "--actor", "a", "--session-id", "s",
+                        "--tool-use-id", "t", "--rule", "r"],
+                       capture_output=True, text=True, env=env)
+    assert r.returncode == 4
+    assert json.loads(r.stdout.splitlines()[0])["reason"] == "lock_failed"
+
+
+def test_reserve_defines_no_timestamp_argument(tmp_path):
+    """**cap 予約に backfill を持ち込まない。** 引数自体を定義しない。"""
+    code, out = run("ledger.py", "reserve-exposure", "--help")
+    assert "--backfill-ts" not in out
+    assert not re.search(r"(?m)^\s+--ts\b", out)
+    # 渡そうとしても受け付けない
+    code, out = _reserve(tmp_path, 1, 9, "t0", extra=("--backfill-ts", "2026-07-01T00:00:00Z"))
+    assert code != 0
+    assert _decisions(tmp_path) == []
+
+
+def test_reserve_does_not_take_committed_from_the_caller(tmp_path):
+    """`committed_so_far` は writer が数える。caller が申告できてはいけない。"""
+    code, out = run("ledger.py", "reserve-exposure", "--help")
+    assert "committed" not in out.lower()
+    _reserve(tmp_path, 2, 9, "t0")
+    _reserve(tmp_path, 2, 9, "t1")
+    d = _evs(tmp_path)[-1]["payload"]
+    assert d["committed_so_far"] == 2.0, "writer が数えていない"
+
+
+def test_malformed_prior_exposure_denies(tmp_path):
+    """壊れた曝露記録を 0 として数えない — 合計が実際より小さく見える。"""
+    assert _reserve(tmp_path, 1, 9, "t0")[0] == 0
+    p = tmp_path / "ledger.jsonl"
+    lines = p.read_text(encoding="utf-8").splitlines()
+    ev = json.loads(lines[0])
+    ev["payload"]["delta_requested"] = "not-a-number"
+    sys.path.insert(0, str(TOOLS))
+    import importlib
+    led = importlib.import_module("ledger")
+    ev["hash"] = led._hash("GENESIS", ev)          # 鎖は通るようにする
+    p.write_text(json.dumps(ev, ensure_ascii=False) + "\n", encoding="utf-8")
+    (tmp_path / "HEAD").write_text(json.dumps({"seq": 1, "hash": ev["hash"]}), encoding="utf-8")
+    code, out = _reserve(tmp_path, 1, 9, "t1")
+    assert code == 4
+    assert json.loads(out.splitlines()[0])["reason"] == "malformed_prior_exposure"

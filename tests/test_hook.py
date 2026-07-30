@@ -8,12 +8,24 @@ org_hook.py as a subprocess (the real host interface) and assert the block/allow
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 HOOK = REPO / "integrations" / "common" / "org_hook.py"
 TOOLS = REPO / "tools"
+
+
+_TU = 0          # tool_use_id の連番。呼び出しごとに違う値にする
+
+
+def _next_tu():
+    """呼び出しごとに違う tool_use_id を作る。**同じ値だと再実行として no-op になり、
+    曝露が積み上がらない** — 実運用でも tool_use_id は呼び出しごとに違う。"""
+    global _TU
+    _TU += 1
+    return _TU
 
 
 def fire(root, command, tool_name="Bash", env_extra=None):
@@ -23,8 +35,14 @@ def fire(root, command, tool_name="Bash", env_extra=None):
     env["ORG_TOOLS_DIR"] = str(TOOLS)
     if env_extra:
         env.update(env_extra)
+    # **実運用と同じ形で渡す。** PreToolUse の stdin は session_id と tool_use_id を持つ
+    # （2026-07 に docs で確認）。cap 予約はこれを冪等キーにするので、欠けていれば deny される
+    # ＝ テストが「識別子を渡さない」形だと、全 metered action が止まる。
+    # 呼び出しごとに違う tool_use_id にする — 同じなら再実行として no-op になり、
+    # 曝露が積み上がらない。
     ev = {"hook_event_name": "PreToolUse", "tool_name": tool_name,
-          "tool_input": {"command": command}}
+          "tool_input": {"command": command},
+          "session_id": "test-session", "tool_use_id": f"toolu_test{_next_tu():04d}"}
     r = subprocess.run([sys.executable, str(HOOK)], input=json.dumps(ev),
                        capture_output=True, text=True, env=env)
     return r.returncode, r.stdout + r.stderr
@@ -35,16 +53,28 @@ def test_blast_radius_window_rolls_forward_daily(tmp_path):
     # REGRESSION: the window was hardcoded to 1970-01-01 (all-time), so committed exposure
     # accumulated forever and the cap eventually blocked EVERY action — a deadlock where nothing
     # could be edited. With a rolling DAILY window, yesterday's exhausted budget does NOT count today.
-    (tmp_path / "HEAD").write_text("x")
-    # seed the ledger with a full day of file_mutations committed YESTERDAY (cap exhausted then)
-    lines = [json.dumps({"id": f"e{i}", "seq": i, "ts": "2026-07-17T10:00:00Z", "actor": "x",
-                         "class": "exposure_budget_checked",
-                         "payload": {"dimension": "file_mutations", "decision": "allow",
-                                     "delta_requested": 1.0}}) for i in range(200)]
-    (tmp_path / "ledger.jsonl").write_text("\n".join(lines) + "\n")
-    # a mutation TODAY (an existing file) must be allowed — yesterday's 200 fall outside today's window.
+    # **実際の append で seed する。** 手書きの偽イベント（seq=0 始まり、hash 無し）を置くと、
+    # Writer Phase 0 の健全性検査が正しく拒否する — 鎖の無い台帳に予約は書けない。
+    # 「昨日」は now からの相対で作る（固定日付は 90 日の backfill 窓を出て壊れる）。
+    import datetime as _dt
+    yesterday = (_dt.datetime.now(_dt.timezone.utc)
+                 - _dt.timedelta(days=1)).strftime("%Y-%m-%dT10:00:00Z")
+    for i in range(30):        # 200 件は実 append では遅すぎる。cap 既定 500 を超えない範囲で足る
+        r = subprocess.run(
+            [sys.executable, str(TOOLS / "ledger.py"), "append", str(tmp_path),
+             "--actor", "x", "--class", "exposure_budget_checked",
+             "--backfill-ts", yesterday,
+             "--payload", json.dumps({"dimension": "file_mutations", "decision": "allow",
+                                      "delta_requested": 1.0, "window_id": "seed",
+                                      "cap": 30, "committed_so_far": float(i),
+                                      "actor_role": "x"})],
+            capture_output=True, text=True)
+        assert r.returncode == 0, r.stdout + r.stderr
+    # a mutation TODAY (an existing file) must be allowed — yesterday's seeded exposure falls outside today's window.
     existing = tmp_path / "ledger.jsonl"          # a path that exists → Write = file_mutation
-    ev = {"hook_event_name": "PreToolUse", "tool_name": "Write",
+    ev = {"hook_event_name": "PreToolUse",
+          "session_id": "test-session",
+          "tool_use_id": f"toolu_x{_next_tu():04d}", "tool_name": "Write",
           "tool_input": {"command": "", "file_path": str(existing)}}
     env = dict(os.environ, ORG_LEDGER_ROOT=str(tmp_path), ORG_TOOLS_DIR=str(TOOLS))
     for k in ("ORG_WINDOW_SINCE", "ORG_WINDOW", "ORG_NOW_TS"):
@@ -93,7 +123,9 @@ def test_blast_radius_accumulates_and_blocks(tmp_path):
     # and the ledger really grew (proves the write-back, not a fluke)
     r = subprocess.run([sys.executable, str(TOOLS / "ledger.py"), "census", str(tmp_path)],
                        capture_output=True, text=True)
-    assert '"exposure_budget_checked": 2' in r.stdout
+    # **3 件**である。0.34.0 から hold も台帳に残る（従来は deny して終わり、止めたことが
+    # 記録されなかった）。allow 2 + hold 1。
+    assert '"exposure_budget_checked": 3' in r.stdout
 
 
 # ── reversibility pricing (three-perspective review): create is free, destroy is metered ──
@@ -103,7 +135,9 @@ def test_new_file_write_is_not_metered(tmp_path):
     env = {"ORG_CAP_FILE_MUTATIONS": "0"}
     for i in range(10):
         p = tmp_path / f"new_{i}.js"
-        ev = {"hook_event_name": "PreToolUse", "tool_name": "Write",
+        ev = {"hook_event_name": "PreToolUse",
+          "session_id": "test-session",
+          "tool_use_id": f"toolu_x{_next_tu():04d}", "tool_name": "Write",
               "tool_input": {"file_path": str(p), "content": "x"}}
         e = dict(os.environ); e["ORG_LEDGER_ROOT"] = str(tmp_path)
         e["ORG_TOOLS_DIR"] = str(TOOLS); e.update(env)
@@ -116,7 +150,9 @@ def test_overwriting_existing_file_is_metered(tmp_path):
     # a Write to an EXISTING path is a mutation — metered. With cap 0 it blocks.
     existing = tmp_path / "exists.js"
     existing.write_text("original")
-    ev = {"hook_event_name": "PreToolUse", "tool_name": "Write",
+    ev = {"hook_event_name": "PreToolUse",
+          "session_id": "test-session",
+          "tool_use_id": f"toolu_x{_next_tu():04d}", "tool_name": "Write",
           "tool_input": {"file_path": str(existing), "content": "new"}}
     e = dict(os.environ); e["ORG_LEDGER_ROOT"] = str(tmp_path)
     e["ORG_TOOLS_DIR"] = str(TOOLS); e["ORG_CAP_FILE_MUTATIONS"] = "0"
@@ -165,7 +201,9 @@ def test_catastrophic_denylist_does_not_false_positive_on_ordinary_deletes(tmp_p
 
 def test_catastrophic_block_fires_without_a_ledger(tmp_path):
     # A catastrophic command is never a budget question — it must block even when no org/ledger exists.
-    ev = {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "rm -rf /"}}
+    ev = {"hook_event_name": "PreToolUse",
+          "session_id": "test-session",
+          "tool_use_id": f"toolu_x{_next_tu():04d}", "tool_name": "Bash", "tool_input": {"command": "rm -rf /"}}
     env = dict(os.environ, ORG_TOOLS_DIR=str(TOOLS))   # note: NO ORG_LEDGER_ROOT
     for k in ("ORG_LEDGER_ROOT", "ORG_ALLOW_CATASTROPHIC"):
         env.pop(k, None)
@@ -256,7 +294,9 @@ def fire_spawn(prompt, require_seam=True, root=None, opt_out=False):
     # the gate is now DEFAULT-ON; opt_out sets ORG_REQUIRE_SEAM=0 to disable it for an ungated dev run.
     if opt_out:
         env["ORG_REQUIRE_SEAM"] = "0"
-    ev = {"hook_event_name": "PreToolUse", "tool_name": "Agent",
+    ev = {"hook_event_name": "PreToolUse",
+          "session_id": "test-session",
+          "tool_use_id": f"toolu_x{_next_tu():04d}", "tool_name": "Agent",
           "tool_input": {"prompt": prompt}}
     r = subprocess.run([sys.executable, str(HOOK)], input=json.dumps(ev),
                        capture_output=True, text=True, env=env)
@@ -350,7 +390,9 @@ def test_iteration_cap_holds_a_spawn_over_the_cycle_budget(tmp_path):
               f"2026-07-27T0{i}:00:00Z")
     env = {"ORG_ROLE": "eng", "ORG_MAX_CYCLES": "2", "ORG_REQUIRE_SEAM": "0",
            "ORG_NOW_TS": "2026-07-27T05:00:00Z"}
-    ev = {"hook_event_name": "PreToolUse", "tool_name": "Task",
+    ev = {"hook_event_name": "PreToolUse",
+          "session_id": "test-session",
+          "tool_use_id": f"toolu_x{_next_tu():04d}", "tool_name": "Task",
           "tool_input": {"prompt": "INDEPENDENT: do a thing"}}
     e = dict(os.environ, ORG_LEDGER_ROOT=str(tmp_path), ORG_TOOLS_DIR=str(TOOLS), **env)
     r = subprocess.run([sys.executable, str(HOOK)], input=json.dumps(ev),
@@ -364,7 +406,9 @@ def test_iteration_cap_inactive_without_env(tmp_path):
         _seed(tmp_path, "cycle_started", {"role": "eng", "candidate_id": f"c{i}"},
               f"2026-07-27T0{i}:00:00Z")
     env = {"ORG_ROLE": "eng", "ORG_REQUIRE_SEAM": "0"}
-    ev = {"hook_event_name": "PreToolUse", "tool_name": "Task",
+    ev = {"hook_event_name": "PreToolUse",
+          "session_id": "test-session",
+          "tool_use_id": f"toolu_x{_next_tu():04d}", "tool_name": "Task",
           "tool_input": {"prompt": "INDEPENDENT: do a thing"}}
     e = dict(os.environ, ORG_LEDGER_ROOT=str(tmp_path), ORG_TOOLS_DIR=str(TOOLS), **env)
     r = subprocess.run([sys.executable, str(HOOK)], input=json.dumps(ev),
@@ -526,3 +570,46 @@ def test_no_hold_outside_an_orgforge_repo(tmp_path, monkeypatch):
     monkeypatch.chdir(repo)
     assert h._integration_bypass("Bash", {"command": "git merge feat/x"}) is None
     assert h._gh_bypass("Bash", {"command": "gh issue create --title x"}) is None
+
+
+# ── H3: 迂回の記録に失敗したら通さない ──────────────────────────────────────
+def test_bypass_that_cannot_be_recorded_is_denied(tmp_path):
+    """**宣言は記録されるから許される。** 宣言したと言えば許されるのではない。
+
+    以前は `except: pass` かつ戻り値も見ていなかったので、記録に失敗した迂回が
+    痕跡なしで通った。
+    """
+    repo = _org_repo(tmp_path)
+    led = repo / ".orgforge" / "ledger"; led.mkdir(parents=True, exist_ok=True)
+    shutil.copy(REPO / "template" / "ledger-schema.yaml", repo / "ledger-schema.yaml")
+    ev = {"hook_event_name": "PreToolUse", "session_id": "s",
+          "tool_use_id": f"toolu_b{_next_tu():04d}", "tool_name": "Bash",
+          "tool_input": {"command": "git merge feat/x"}, "cwd": str(repo)}
+    env = dict(os.environ, ORG_LEDGER_ROOT=str(led), ORG_TOOLS_DIR=str(TOOLS),
+               ORG_ALLOW_MANUAL_MERGE="1")
+
+    # 正常時は通り、宣言が記録される
+    r = subprocess.run([sys.executable, str(HOOK)], input=json.dumps(ev),
+                       capture_output=True, text=True, env=env, cwd=str(repo))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "bypass_declared" in (led / "ledger.jsonl").read_text(encoding="utf-8")
+
+    # 台帳を壊すと **通さない**
+    with open(led / "ledger.jsonl", "a", encoding="utf-8") as f:
+        f.write('{"seq": 2, "torn"')
+    ev["tool_use_id"] = f"toolu_b{_next_tu():04d}"
+    r = subprocess.run([sys.executable, str(HOOK)], input=json.dumps(ev),
+                       capture_output=True, text=True, env=env, cwd=str(repo))
+    assert r.returncode == 2, r.stdout + r.stderr
+    assert "記録できなかったので通さない" in (r.stdout + r.stderr)
+
+
+def test_reservation_is_persisted_before_the_call_is_allowed(tmp_path):
+    """**書けた判断だけが allow になる。** 台帳が壊れていれば metered action は通らない。"""
+    shutil.copy(REPO / "template" / "ledger-schema.yaml", tmp_path / "ledger-schema.yaml")
+    assert fire(tmp_path, "rm /tmp/a", env_extra={"ORG_CAP_DESTRUCTIVE_OPS": "9"})[0] == 0
+    with open(tmp_path / "ledger.jsonl", "a", encoding="utf-8") as f:
+        f.write('{"seq": 9, "torn"')
+    code, out = fire(tmp_path, "rm /tmp/b", env_extra={"ORG_CAP_DESTRUCTIVE_OPS": "9"})
+    assert code == 2, out
+    assert "ledger_unhealthy" in out or "fail-safe" in out

@@ -1212,11 +1212,184 @@ def cmd_schema(a):
     os.replace(tmp_p, org_p)
     _fsync_dir(os.path.dirname(os.path.abspath(org_p)))
     print(f"\n足した: {', '.join(added)}\n"
+          f"  **--fix の exit 0 を preflight 成功と読まないこと。** 修復したあとに"
+          f"通常の診断（--fix なし）が exit 0 を返すことを確かめる:\n"
+          f'    python3 "{os.path.join(here, "ledger.py")}" schema\n'
+          f"  衝突が残っていれば --fix は 0 を返しても差分は残っている。\n"
           f"  **クラス宣言は足すだけ**で、既存のものは書き換えていない — org が実態に合わせて"
           f"変えた宣言はそのままである。\n"
           + ("  **validation 規則は deep-add した** — org が自分で足した厳格規則は残っている。"
              "同じ path で値が違うものは上書きせず、衝突として報告した。\n"
              if any("validation" in x for x in added) else ""))
+    return 0
+
+
+
+def cmd_reserve_exposure(a):
+    """**書けた判断だけが allow になる。** cap の検査と予約を1つの writer 操作にする。
+
+    ## なぜ二段構成では足りないか
+
+    0.33.x までは organ が「集計して判断して LEDGER-EVENT を印字」し、hook が「その後で
+    append（失敗は無視）」していた。そこには3つの穴がある:
+
+      1. 集計と判断が lock の外なので、**並列の hook が同じ committed を読んで両方 allow**
+         してから順に append できる。合計が cap を超える。
+      2. append の失敗を無視するので、allow したのに曝露が記録されない。**次の呼び出しは
+         committed=0 を見る**ので、cap は記憶を失った per-action 検査に退化する。
+      3. hold は deny して終わるので、**止めたことが記録に残らない**。
+
+    ここでは lock の中で
+    schema snapshot → 履歴検証 → 冪等性照合 → 現在の曝露を算出 → allow/hold 判断 →
+    予約 event の append + fsync
+    を一操作として行い、**予約が永続化された後にだけ allow を返す**。
+
+    ## caller から受け取らないもの
+
+    - `committed_so_far` — writer が数える。caller が渡せるなら、少なく申告して cap を通れる。
+    - 時刻 — writer が付ける。`--backfill-ts` も隠し `--ts` も **この操作には定義しない**。
+      通常台帳の backfill 権限は identity の側（H1）に残すが、cap 予約に持ち込んではいけない。
+
+    ## 冪等キー
+
+    `(session_id, tool_use_id, rule, event_class)`。`tool_use_id` 単独では、別 session・別 rule の
+    衝突を防げない。**欠落していれば metered action を deny する** — 同一性を確かめられないなら、
+    hook の再実行を二重計上しないという保証が成り立たない。
+    """
+    for k in ("session_id", "tool_use_id", "rule"):
+        if not (getattr(a, k, None) or "").strip():
+            print(json.dumps({"decision": "deny", "reason": f"missing_{k}",
+                              "detail": f"--{k.replace('_', '-')} が無い。冪等キーは "
+                                        f"(session_id, tool_use_id, rule, event_class) で、"
+                                        f"欠けていると hook の再実行を二重計上しない保証が"
+                                        f"成り立たない。metered action は通さない。"},
+                             ensure_ascii=False))
+            return 3
+
+    nk = f"reserve|{a.session_id}|{a.tool_use_id}|{a.rule}|exposure_budget_checked"
+    os.makedirs(a.root, exist_ok=True)
+    with _LedgerLock(a.root) as lk:
+        if lk.error:
+            print(json.dumps({"decision": "deny", "reason": "lock_failed",
+                              "detail": lk.error}, ensure_ascii=False))
+            return 4
+
+        snap, serr = load_schema_snapshot()
+        if serr:
+            print(json.dumps({"decision": "deny", "reason": "schema_unreadable",
+                              "detail": serr}, ensure_ascii=False))
+            return 4
+
+        head, herr = _head_from_log(a.root)
+        if herr:
+            print(json.dumps({"decision": "deny", "reason": "ledger_unhealthy",
+                              "detail": herr}, ensure_ascii=False))
+            return 4
+
+        try:
+            hist = _read_events(a.root)
+        except Exception as e:
+            print(json.dumps({"decision": "deny", "reason": "ledger_unreadable",
+                              "detail": str(e)}, ensure_ascii=False))
+            return 4
+
+        # 冪等性 — 同じ (session, tool_use, rule) の予約が既にあるなら、その判断を返す。
+        # hook が再実行されても二重計上しない。
+        for e in hist:
+            if e.get("class") != "exposure_budget_checked":
+                continue
+            if (e.get("payload") or {}).get("_nk") != nk:
+                continue
+            prior = e["payload"]
+            print(json.dumps({"decision": prior.get("decision"), "reason": "idempotent_replay",
+                              "seq": e.get("seq"), "committed_so_far": prior.get("committed_so_far"),
+                              "delta_requested": prior.get("delta_requested"),
+                              "cap": prior.get("cap")}, ensure_ascii=False))
+            return 0 if prior.get("decision") == "allow" else 10
+
+        # **writer が数える。** caller の申告は受け取らない。
+        voided = set()
+        try:
+            voided = set(corrected_seqs(hist))
+        except Exception:
+            pass
+        committed = 0.0
+        for e in hist:
+            if e.get("class") != "exposure_budget_checked" or e.get("seq") in voided:
+                continue
+            p = e.get("payload") or {}
+            if p.get("dimension") != a.dimension or p.get("decision") != "allow":
+                continue
+            if a.window_since and str(e.get("ts", "")) < a.window_since:
+                continue
+            try:
+                committed += float(p.get("delta_requested") or 0)
+            except (TypeError, ValueError):
+                # 壊れた曝露記録は 0 として数えず、**deny する** — 合計が実際より小さく見える。
+                print(json.dumps({"decision": "deny", "reason": "malformed_prior_exposure",
+                                  "detail": f"seq={e.get('seq')} の delta_requested が数値でない"
+                                            f"（{p.get('delta_requested')!r}）。合計が実際より"
+                                            f"小さく見えるので通さない。"}, ensure_ascii=False))
+                return 4
+
+        would_be = committed + a.delta
+        decision = "allow" if would_be <= a.cap else "hold"
+        payload = {"window_id": a.window_since or "all", "dimension": a.dimension,
+                   "committed_so_far": committed, "delta_requested": a.delta, "cap": a.cap,
+                   "actor_role": a.actor, "decision": decision,
+                   "caused_by_event": a.caused_by,
+                   "session_id": a.session_id, "tool_use_id": a.tool_use_id, "rule": a.rule,
+                   "_nk": nk}
+
+        bad, warns = validate_event("exposure_budget_checked", payload, snap)
+        if bad:
+            print(json.dumps({"decision": "deny", "reason": "schema_rejected",
+                              "detail": bad}, ensure_ascii=False))
+            return 4
+        for w in warns:
+            print(f"reserve-exposure: 注意 — {w}", file=sys.stderr)
+
+        ev = {"id": "e" + hashlib.sha256(
+                  f"{head['seq'] + 1}:exposure_budget_checked:"
+                  f"{json.dumps(payload, sort_keys=True, ensure_ascii=False)}".encode()
+              ).hexdigest()[:12],
+              "seq": head["seq"] + 1, "ts": _now_iso(), "actor": a.actor,
+              "class": "exposure_budget_checked", "payload": payload,
+              "schema_id": "orgforge-ledger", "schema_version": LEDGER_SCHEMA_VERSION,
+              "schema_sha256": snap["digest"], "prev_hash": head["hash"]}
+        ev["hash"] = _hash(head["hash"], ev)
+
+        log, headp = _paths(a.root)
+        try:
+            with open(log, "a", encoding="utf-8") as f:
+                f.write(json.dumps(ev, ensure_ascii=False) + "\n")
+                f.flush()
+                os.fsync(f.fileno())
+            tmp = headp + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump({"seq": ev["seq"], "hash": ev["hash"]}, f)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, headp)
+            _fsync_dir(a.root)
+        except Exception as e:
+            # **書けなかったら allow を返さない。** hold の記録に失敗した場合も deny である
+            # （記録できない hold を allow に読み替えるのが、いちばん危ない誤りである）。
+            print(json.dumps({"decision": "deny", "reason": "reservation_not_persisted",
+                              "detail": f"予約を永続化できなかった（{e}）。"
+                                        f"**書けた判断だけが allow になる。**"},
+                             ensure_ascii=False))
+            return 4
+
+    out = {"decision": decision, "reason": "reserved", "seq": ev["seq"],
+           "committed_so_far": committed, "delta_requested": a.delta, "cap": a.cap,
+           "would_be": would_be}
+    print(json.dumps(out, ensure_ascii=False))
+    if decision == "hold":
+        print(f"HOLD: {a.dimension} committed {committed} + requested {a.delta} = {would_be} "
+              f"> cap {a.cap}。**hold は記録済み（seq={ev['seq']}）** — 止めたことが残る。",
+              file=sys.stderr)
+        return 10
     return 0
 
 
@@ -1454,6 +1627,22 @@ def main(argv):
                    help="実時点を後から補う場合の時刻（ISO8601 UTC）。通常は渡さない — "
                         "時刻は writer が付ける。未来や遠い過去は拒否される")
     q.add_argument("--ts", dest="ts_legacy", default=None, help=argparse.SUPPRESS)
+    # cap 予約は writer 側の専用操作。**時刻の引数を定義しない** — cap 予約に backfill を
+    # 持ち込むと、窓の外に予約を置いて上限を迂回できる。
+    rx = sub.add_parser("reserve-exposure",
+                        help="cap を検査して予約を1操作で書く（書けた判断だけが allow）")
+    rx.add_argument("root", nargs="?", default=None)
+    rx.add_argument("--dimension", required=True)
+    rx.add_argument("--delta", type=float, required=True)
+    rx.add_argument("--cap", type=float, required=True)
+    rx.add_argument("--actor", required=True)
+    rx.add_argument("--window-since", dest="window_since")
+    rx.add_argument("--caused-by", dest="caused_by")
+    # 冪等キー。**欠けていれば metered action を deny する。**
+    rx.add_argument("--session-id", dest="session_id", required=True)
+    rx.add_argument("--tool-use-id", dest="tool_use_id", required=True)
+    rx.add_argument("--rule", required=True)
+    rx.set_defaults(fn=cmd_reserve_exposure)
     s = sub.add_parser("schema",
                        help="org の schema とテンプレートの差分を診断する（--fix で埋める）")
     s.add_argument("root", nargs="?", default=None)

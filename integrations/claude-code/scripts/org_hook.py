@@ -10,7 +10,11 @@ and either allow (exit 0) or BLOCK (exit 2 + reason on stderr, or a deny-JSON on
 
 Both harnesses converge on the same PreToolUse contract (verified 2026-07 against code.claude.com
 /docs/en/hooks and learn.chatgpt.com/docs/hooks):
-  - stdin: JSON with at least {hook_event_name, tool_name, tool_input, cwd, session_id}
+  - stdin: JSON with at least {hook_event_name, tool_name, tool_input, cwd, session_id,
+    tool_use_id}. `tool_use_id` is the per-call identity the cap reservation keys on; subagent
+    invocations also carry {agent_id, agent_type}. Whether the same tool call can fire PreToolUse
+    more than once is NOT documented — so the reservation is keyed idempotently rather than
+    assuming it fires once.
   - to BLOCK: exit 2 with the reason on stderr, OR print
       {"hookSpecificOutput": {"hookEventName": "PreToolUse",
                               "permissionDecision": "deny", "permissionDecisionReason": "..."}}
@@ -100,6 +104,10 @@ def _deny(reason):
     sys.exit(2)
 
 
+SESSION_ID = ""      # PreToolUse の stdin から。冪等キーの一部
+TOOL_USE_ID = ""     # 同上。**欠けていれば metered action は deny される**
+
+
 def _allow():
     sys.exit(0)
 
@@ -127,6 +135,37 @@ def _append_emitted(output):
                            capture_output=True, encoding="utf-8", errors="replace", timeout=30)
         except Exception:
             pass   # a failed write-back must never turn an allow into a crash
+
+
+
+def _record_bypass(what, tool_input):
+    """迂回の宣言を台帳に残す。**記録できなければ deny する。**
+
+    以前は `except: pass` で、しかも戻り値も見ていなかった。**記録に失敗した迂回は、
+    迂回の痕跡が無いまま通る** — 逃げ道を「宣言すれば通る」形にした意味が消える
+    （宣言は記録されるから許されるのであって、宣言したと言えば許されるのではない）。
+
+    時刻は writer が付ける（`--ts` を渡さない）。
+
+    返り値: None なら記録できた。文字列なら失敗の理由。
+    """
+    if not LEDGER_ROOT:
+        return "ORG_LEDGER_ROOT が無いので迂回を記録できない"
+    payload = {"what": what,
+               "command": ((tool_input or {}).get("command") or "")[:400],
+               "declared_by": os.environ.get("ORG_ROLE") or "unknown"}
+    try:
+        r = subprocess.run([sys.executable, os.path.join(TOOLS_DIR, "ledger.py"), "append",
+                            LEDGER_ROOT, "--actor", "system:org_hook",
+                            "--class", "bypass_declared",
+                            "--payload", json.dumps(payload, ensure_ascii=False)],
+                           capture_output=True, encoding="utf-8", errors="replace", timeout=30)
+    except Exception as e:
+        return f"台帳に追記できなかった: {e}"
+    if r.returncode != 0:
+        return (f"台帳が bypass_declared を受け付けなかった（exit {r.returncode}）: "
+                f"{((r.stdout or '') + (r.stderr or '')).strip()[:300]}")
+    return None
 
 
 def _run_organ(argv):
@@ -581,9 +620,17 @@ def rule_blast_radius(tool_name, ti):
         return None
     dimension, delta = dim
     cap = _cap_for(dimension)   # env override → constitution.enforcement.caps → default (docs/11 §0)
-    return ["guardrails.py", "cap", LEDGER_ROOT, "--dimension", dimension,
+    # **writer 側の1操作に委ねる。** 以前は organ が「集計 → 判断 → LEDGER-EVENT 印字」し、
+    # hook が「その後 append（失敗は無視）」していた。そこには3つの穴があった:
+    #   並列の hook が同じ committed を読んで両方 allow できる（合計が cap を超える）／
+    #   append 失敗を無視するので次の呼び出しが committed=0 を見る（cap が記憶を失う）／
+    #   hold は deny して終わるので止めたことが残らない。
+    # reserve-exposure は lock の中で 検査と予約を一操作にし、**書けた判断だけが allow** になる。
+    return ["ledger.py", "reserve-exposure", LEDGER_ROOT, "--dimension", dimension,
             "--delta", str(delta), "--cap", cap, "--actor", "harness-agent",
-            "--window-since", _window_since()]
+            "--window-since", _window_since(),
+            "--session-id", SESSION_ID, "--tool-use-id", TOOL_USE_ID,
+            "--rule", "blast_radius"]
 
 
 # ── Agent spawn discipline (docs/06 §2.1.1) ──────────────────────────────────
@@ -798,6 +845,23 @@ def main():
         _allow()
     tool_name = event.get("tool_name", "")
     tool_input = event.get("tool_input", {})
+    # 冪等キーの材料。**(session_id, tool_use_id, rule, event_class) で一意にする** —
+    # tool_use_id 単独では別 session・別 rule の衝突を防げない。
+    # 欠けていれば metered action は writer 側で deny される（同一性を確かめられないなら、
+    # hook の再実行を二重計上しない保証が成り立たない）。
+    global SESSION_ID, TOOL_USE_ID
+    # 2026-07 に code.claude.com/docs/en/hooks で確認: PreToolUse の stdin は
+    # `tool_use_id`（"Unique identifier for this tool call"）と `session_id` を snake_case で
+    # 持つ。subagent 実行時は `agent_id` / `agent_type` も入る。
+    SESSION_ID = str(event.get("session_id") or "")
+    TOOL_USE_ID = str(event.get("tool_use_id") or "")
+    # **subagent の識別を session に含める。** 親と子が同じ session_id を共有するなら、
+    # 別の agent が同じ tool_use_id を持ちうるかはドキュメントに書かれていない（不明）。
+    # 書かれていないことを「衝突しない」と読まない — 識別子に足しておけば、衝突しても
+    # 別の予約として数えられる（過大計上より、二重計上の見落としのほうが危ない）。
+    _agent = str(event.get("agent_id") or "")
+    if _agent:
+        SESSION_ID = f"{SESSION_ID}/{_agent}"
 
     # CATASTROPHIC denylist — a hard block that does NOT depend on the ledger or the cap. The cap is a
     # daily budget (bounds many cuts); it cannot stop ONE unrecoverable cut (`rm -rf /`, `mkfs`, `dd`
@@ -825,18 +889,13 @@ def main():
         if byp and LEDGER_ROOT:
             # **迂回そのものを記録する。** 宣言を許すが、記録に残らない迂回は許さない —
             # そうしないと宣言が常用され、迂回が見えないまま高速化する。
-            payload = {"what": "manual merge into a protected branch",
-                       "command": ((tool_input or {}).get("command") or "")[:400],
-                       "declared_by": os.environ.get("ORG_ROLE") or "unknown"}
-            try:
-                subprocess.run([sys.executable, os.path.join(TOOLS_DIR, "ledger.py"), "append",
-                                LEDGER_ROOT, "--actor", "system:org_hook",
-                                "--class", "bypass_declared",
-                                "--payload", json.dumps(payload, ensure_ascii=False),
-                                "--ts", _now_ts()],
-                               capture_output=True, encoding="utf-8", errors="replace", timeout=30)
-            except Exception:
-                pass   # 記録の失敗が allow を crash に変えてはいけない
+            # **記録できなければ通さない。** 宣言は記録されるから許されるのであって、
+            # 宣言したと言えば許されるのではない。
+            err = _record_bypass("manual merge into a protected branch", tool_input)
+            if err:
+                _deny(f"org guardrail: 迂回の宣言を記録できなかったので通さない — {err}\n"
+                      f"  ORG_ALLOW_MANUAL_* は「宣言が台帳に残る」ことと引き換えの逃げ道で"
+                      f"ある。残らないなら、逃げ道は成立しない。")
     else:
         byp = _integration_bypass(tool_name, tool_input)
         if byp:
@@ -846,18 +905,13 @@ def main():
     if os.environ.get("ORG_ALLOW_MANUAL_GH") == "1":
         ghb = _gh_bypass(tool_name, tool_input)
         if ghb and LEDGER_ROOT:
-            payload = {"what": "manual gh issue write",
-                       "command": ((tool_input or {}).get("command") or "")[:400],
-                       "declared_by": os.environ.get("ORG_ROLE") or "unknown"}
-            try:
-                subprocess.run([sys.executable, os.path.join(TOOLS_DIR, "ledger.py"), "append",
-                                LEDGER_ROOT, "--actor", "system:org_hook",
-                                "--class", "bypass_declared",
-                                "--payload", json.dumps(payload, ensure_ascii=False),
-                                "--ts", _now_ts()],
-                               capture_output=True, encoding="utf-8", errors="replace", timeout=30)
-            except Exception:
-                pass
+            # **記録できなければ通さない。** 宣言は記録されるから許されるのであって、
+            # 宣言したと言えば許されるのではない。
+            err = _record_bypass("manual gh issue write", tool_input)
+            if err:
+                _deny(f"org guardrail: 迂回の宣言を記録できなかったので通さない — {err}\n"
+                      f"  ORG_ALLOW_MANUAL_* は「宣言が台帳に残る」ことと引き換えの逃げ道で"
+                      f"ある。残らないなら、逃げ道は成立しない。")
     else:
         ghb = _gh_bypass(tool_name, tool_input)
         if ghb:
@@ -878,10 +932,11 @@ def main():
         if code == 10:
             _deny(f"org guardrail HELD this {tool_name} call: {output.strip()[:400]}")
         if code == 0:
-            # allow — but record the allowed exposure so the NEXT call's aggregate check sees it
-            # (closes the emit->append loop; without this the cap never accumulates). Only the
-            # allow decision is written; a held call was already denied above and never happens.
-            _append_emitted(output)
+            # **writer 側の操作は既に書いている。** reserve-exposure は予約を永続化してから
+            # allow を返すので、hook が後から append する必要はない（二重計上になる）。
+            # 従来の organ（LEDGER-EVENT を印字するだけのもの）は、ここで host が書く。
+            if argv[:2] != ["ledger.py", "reserve-exposure"]:
+                _append_emitted(output)
             continue        # keep checking other rules
         # ANY other code (2 = interpreter couldn't run the script, 99 = our sentinel, a crash,
         # a timeout) means the guardrail did NOT return a clean allow. Fail-SAFE: block, never
