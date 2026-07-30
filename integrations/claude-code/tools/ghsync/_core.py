@@ -160,3 +160,23 @@ def _slug(text, maxlen=32):
     # too little ASCII to be meaningful (non-Latin title) — deterministic short hash of the full title
     import hashlib
     return "t" + hashlib.sha256(text.encode("utf-8")).hexdigest()[:8]
+
+
+def banner():
+    """実行しているバージョンと cwd を stderr に1行（org_cycle と同じ理由 — docs/11）。"""
+    ver = "?"
+    for c in (os.path.join(os.path.dirname(HERE), ".claude-plugin", "plugin.json"),
+              os.path.join(HERE, "..", "integrations", "claude-code",
+                           ".claude-plugin", "plugin.json")):
+        try:
+            with open(c, encoding="utf-8") as f:
+                ver = json.load(f).get("version", "?")
+            break
+        except Exception:
+            continue
+    # **機械可読な出力を汚さない。** stderr に書いていても、消費側が 2>&1 で混ぜると
+    # JSON が壊れる（実地でテストが JSONDecodeError で落ちた）。人間向けの補助なので、
+    # --json や ORG_QUIET のときは黙る — 「便利のために壊す」のは筋が通らない。
+    if "--json" in sys.argv or os.environ.get("ORG_QUIET"):
+        return
+    print(f"[orgforge {ver} @ {os.getcwd()}]", file=sys.stderr)

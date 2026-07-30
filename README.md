@@ -158,7 +158,7 @@ The whole cycle, command by command, is in [`QUICKSTART.md`](QUICKSTART.md) §8.
 
 ## Status & honesty
 
-v0.26. This is a **framing + template**, distilled from published organizational theory and the
+v0.27. This is a **framing + template**, distilled from published organizational theory and the
 current agent-engineering literature. The parts (principal-agent theory, harness/loop engineering,
 runtime substrates like AIOS, automated agent design like ADAS/DGM) already exist; the contribution
 here is **the top-down organizational decomposition that places them** — and, per the research in

@@ -202,6 +202,21 @@ python3 "${CLAUDE_PLUGIN_ROOT}/tools/org_cycle.py" gc
 決めてよいことではない）。`.orgforge/wt/` の外（scratchpad 等）に作られた検証用 worktree も
 git が把握している限り拾う — 配管が作った場所しか見ないと孤児が永久に残る。
 
+### 3a-3b. rework を発注したら記録する — `rework`
+
+```
+python3 "${CLAUDE_PLUGIN_ROOT}/tools/org_cycle.py" rework --issue <N> \
+  --after reject|refuted --by <あなたの役割> --reason "<maker に直させることを1行で>" --round <何周目か>
+```
+
+**これを打たないと `show` の rework 警告が沈黙する** — 警告は台帳の `rework_requested` を数える
+ので、記録が無ければ閾値に届かない。実地では reject/refuted **28件**に対し記録が無く（1件は
+4回 reject で記録0件）、警告が黙っていた。**道具は数えられないものを数えない。**
+
+発注は「判定を受け取る → 検証 → `decide` → **発注** → 記録」の順になり、発注した subagent の
+通知が来ると記録が流れる。`verify` が reject/refuted のとき、判定の記録と**同じ場所**でこの
+コマンドを出すので、記録のコマンドが目の前にある状態で発注できる。
+
 ### 3a-4. 済んだ判定を遡って記録する — `record`
 
 ```

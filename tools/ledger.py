@@ -698,6 +698,31 @@ def cmd_cat(a):
     return 0
 
 
+
+def _banner():
+    """実行しているバージョンと cwd を stderr に1行（docs/11 — 古いパスの流用に気づくため）。"""
+    ver = "?"
+    here = os.path.dirname(os.path.abspath(__file__))
+    for c in (os.path.join(here, "..", ".claude-plugin", "plugin.json"),
+              os.path.join(here, "..", "integrations", "claude-code",
+                           ".claude-plugin", "plugin.json")):
+        try:
+            with open(c, encoding="utf-8") as f:
+                ver = json.load(f).get("version", "?")
+            break
+        except Exception:
+            continue
+    # **機械可読な出力を汚さない。** stderr に書いていても、消費側が 2>&1 で混ぜると JSON が
+    # 壊れる（実地でテストが JSONDecodeError で落ちた）。view / census / digest は JSON を返す
+    # サブコマンドなので、`--json` の有無に関わらず黙る。人間向けの補助のために、機械が読む
+    # 出力を壊すのは筋が通らない。
+    _MACHINE = ("view", "census", "digest", "cat")
+    if (os.environ.get("ORG_QUIET") or "--json" in sys.argv
+            or any(m in sys.argv[1:2] for m in _MACHINE)):
+        return
+    print(f"[orgforge {ver} @ {os.getcwd()}]", file=sys.stderr)
+
+
 def main(argv):
     p = argparse.ArgumentParser(prog="ledger", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -733,6 +758,7 @@ def main(argv):
     q.add_argument("--class", dest="cls"); q.add_argument("--actor")
 
     a = p.parse_args(argv[1:])
+    _banner()
     # root は省略可能: 省略時はカレントから自動発見する（.envrc 不要 — tools/discover.py）
     if hasattr(a, "root"):
         a.root = resolve_root(a.root)

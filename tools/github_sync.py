@@ -85,6 +85,7 @@ sys.path.insert(0, __file__.rsplit("/", 1)[0])
 
 from ghsync.backlog import (STAGES, cmd_claim, cmd_release, cmd_create, cmd_stage,
                             cmd_ready, cmd_needs_human, cmd_split_check, cmd_candidate_id)
+from ghsync._core import banner
 from ghsync.record import cmd_log, cmd_decide, DECISIONS
 from ghsync.branch import cmd_branch
 from ghsync.coverage import cmd_coverage_check
@@ -140,6 +141,12 @@ def main(argv):
     q.add_argument("--by", help="the role that decided (gate, skeptic, registrar, …)")
     q.add_argument("--phase", help="the SDLC phase this judgment gates")
     q.add_argument("--evidence", help="what was consulted — test output, CI run, repro_lint verdict, files read")
+    q.add_argument("--claimed",
+                   help="maker / gate / skeptic が**報告した**こと（原文に近い形で）。"
+                        "条件節（「〜には無い」「未測定」など）は落とさず運ぶこと")
+    q.add_argument("--verified",
+                   help="**監督が自分で実行して確かめた**こと（コマンドと出力）。"
+                        "報告の要約ではない — 走らせていないなら --claimed 側に書く")
     q.add_argument("--alternatives", help="the options considered and why they were rejected")
     q.add_argument("--standard", help="the acceptance standard applied (the bar, not a vibe)")
     q.add_argument("--risk", help="a known risk knowingly accepted by this decision")
@@ -172,6 +179,7 @@ def main(argv):
     q.add_argument("--manifest", default="coverage-manifest.md",
                    help="path to the founding coverage manifest (docs/11 §0a fixes the name)")
     a = p.parse_args(argv[1:])
+    banner()
     # --repo は省略可能: 省略時は git remote origin から発見する（.envrc 不要）。
     # バックログ Issue の所在はチェックアウトを見れば分かる事実であって、operator が
     # 書き写す設定ではない — 書き写しは手順であり、飛ばされ、別マシンでずれる。

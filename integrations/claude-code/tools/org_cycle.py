@@ -36,8 +36,9 @@ import sys
 
 sys.path.insert(0, __file__.rsplit("/", 1)[0])
 
+from orgcycle._core import banner
 from orgcycle.cycle import cmd_begin, cmd_complete, cmd_plan
-from orgcycle.judge import cmd_verify, cmd_record
+from orgcycle.judge import cmd_verify, cmd_record, cmd_rework
 from orgcycle.ship import cmd_handback, cmd_integrate
 from orgcycle.inspect import cmd_show, cmd_gc, cmd_touched
 
@@ -84,6 +85,15 @@ def main(argv):
     q = sub.add_parser("gc", help="溜まった worktree を片付ける（未コミットのものは残す）")
     q.add_argument("--base", default="develop")
     q.add_argument("--all", action="store_true", help="未統合のものも対象にする")
+
+    q = sub.add_parser("rework", help="reject/refuted を受けて rework を発注したことを記録する")
+    q.add_argument("--issue", required=True, type=int)
+    q.add_argument("--after", required=True, choices=("reject", "refuted"),
+                   help="どちらの判定を受けての rework か")
+    q.add_argument("--by", required=True, help="発注した役割（監督）")
+    q.add_argument("--reason", required=True, help="maker に直させることを1行で")
+    q.add_argument("--round", default="1", help="何周目か（冪等キーに入る）")
+    q.add_argument("--to", help="誰に発注したか")
 
     q = sub.add_parser("record", help="済んだ判定を遡って台帳に記録する（backfill 印が付く）")
     q.add_argument("--issue", required=True, type=int)
@@ -141,8 +151,9 @@ def main(argv):
                    help="何も確立しなかった理由（明示的な否定。docs/11 §4d）")
     q.add_argument("--candidate-id", dest="candidate_id")
     a = p.parse_args(argv[1:])
+    banner()
     return {"begin": cmd_begin, "complete": cmd_complete, "plan": cmd_plan,
-            "verify": cmd_verify, "integrate": cmd_integrate, "handback": cmd_handback, "gc": cmd_gc, "record": cmd_record, "show": cmd_show, "touched": cmd_touched}[a.cmd](a)
+            "verify": cmd_verify, "integrate": cmd_integrate, "handback": cmd_handback, "gc": cmd_gc, "record": cmd_record, "rework": cmd_rework, "show": cmd_show, "touched": cmd_touched}[a.cmd](a)
 
 
 if __name__ == "__main__":

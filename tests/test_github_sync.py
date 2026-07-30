@@ -712,3 +712,56 @@ def test_split_check_does_not_flag_a_single_concern(monkeypatch):
     monkeypatch.setattr(GS, "gh", fake)
     rc, out = _quiet(GS.cmd_split_check, _ns(repo="o/r", issue=7))
     assert "壊れ方が" not in out and "入った後に" not in out, out
+
+
+# ── 0.27.0: 監督の記録も機械で検査する（4層目にだけ検査が無かった）──────────
+def _cv(**kw):
+    base = dict(repo="o/r", issue=5, event="design_decided", verdict="pass",
+                why="what was weighed and what decided it — a real account here",
+                by="supervisor", phase=None, evidence="npm test → 27 passed",
+                alternatives=None, standard=None, risk=None, event_id="ev-cv",
+                claimed=None, verified=None)
+    base.update(kw)
+    return _ns(**base)
+
+
+def test_verified_without_a_trace_of_running_is_flagged(monkeypatch, capsys):
+    """「確認した」と書くだけでは確かめたことにならない。
+
+    実地でこの org は「確かめていないことを確かめたかのように述べる」を8回検出した。
+    その失敗様式が**検出する側（監督）**に現れた。
+    """
+    fake = CommentGh(); monkeypatch.setattr(GS, "gh", fake)
+    GS.cmd_decide(_cv(claimed="maker が client.ts を読んだと報告", verified="確認した"))
+    err = capsys.readouterr().err
+    assert "痕跡" in err, err
+
+
+def test_dropped_condition_in_the_summary_is_flagged(monkeypatch, capsys):
+    """--claimed の条件節が --verified で触れられていないなら警告する。
+
+    実地の #32: maker は「このブランチにまだ存在せず」と正直に書いたが、監督の要約が
+    その条件を落とし、それが gate への指示に流れて reject 事由になった。
+    """
+    fake = CommentGh(); monkeypatch.setattr(GS, "gh", fake)
+    GS.cmd_decide(_cv(claimed="src/db/client.ts はこのブランチに存在せず feat/issue-11 側にある",
+                      verified="npm test → 27 passed"))
+    err = capsys.readouterr().err
+    assert "条件節" in err, err
+
+
+def test_carrying_the_condition_through_is_silent(monkeypatch, capsys):
+    """条件を運んでいれば黙る。語尾の違い（存在せず / 存在しない）で誤検出しないこと。"""
+    fake = CommentGh(); monkeypatch.setattr(GS, "gh", fake)
+    GS.cmd_decide(_cv(claimed="client.ts はこのブランチに存在せず feat/issue-11 側にある",
+                      verified="git ls-files src/db/client.ts → 出力なし（存在しないことを確認）"))
+    err = capsys.readouterr().err
+    assert "条件節" not in err, err
+
+
+def test_legacy_calls_without_claimed_verified_still_pass(monkeypatch, capsys):
+    """--claimed / --verified を渡さない旧来の呼び出しは通す（後方互換）。"""
+    fake = CommentGh(); monkeypatch.setattr(GS, "gh", fake)
+    rc = GS.cmd_decide(_cv())
+    assert rc == 0
+    assert "痕跡" not in capsys.readouterr().err

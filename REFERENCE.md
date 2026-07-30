@@ -65,6 +65,7 @@ irreversible patterns draw down a budget.
 | `ORG_REQUIRE_SEAM` | The spawn gate is **on by default**: an `Agent`/`Task` spawn is blocked unless its prompt carries a seam contract or an `INDEPENDENT:` declaration, and a declared `owns:` territory must not collide with a live sibling's claim (concurrent-write prevention). Set to `0`/`false`/`off` to disable it for an ungated dev run. | *(on)* |
 | `ORG_MAX_CYCLES` | Per-window cap on a role's loop cycles (each `Agent`/`Task` spawn = one cycle). When set, a spawn that would exceed it is **held** — the enforcement-layer runaway kill ("$3-5, not $180"). Needs `ORG_ROLE`. | *(unset → no cycle cap)* |
 | `ORG_MAX_TOKENS` | Per-window cap on a role's cumulative reported tokens (from `cycle_completed`). Same enforcement as `ORG_MAX_CYCLES`. | *(unset → no token cap)* |
+| `ORG_QUIET` | `1` で「実行中のバージョンと cwd」の1行（stderr）を抑制する。`view`/`census`/`digest` と内部呼び出しでは自動で抑制されるので、通常は不要 | *(off — 1行出す)* |
 | `ORG_HOOK_FAIL_OPEN` | `1` allows a tool call when the guardrail organ errors, instead of blocking. **Dev only** — the safe default is fail-closed. | *(off / fail-safe)* |
 | `ORG_ALLOW_CATASTROPHIC` | `1` disables the catastrophic denylist (the hard block on `rm -rf /`-class, `mkfs`, `dd`-to-disk, fork bombs). **Disposable sandbox only** — never in an environment with real data. | *(off / catastrophic blocked)* |
 | `ORG_NOW_TS` | Pins the hook's "now" (append ts + window boundary). Mainly for tests; leave unset in production so the real clock is used. | *(real UTC now)* |
@@ -205,6 +206,13 @@ python3 tools/org_cycle.py  integrate --issue N [--test "npm test"] [--plan]
                             # マージ → 統合後テスト → integration_admitted → Issue へ log
 python3 tools/org_cycle.py  gc        [--base develop] [--all]
                             # 統合済みの worktree だけ片付ける（未統合・未コミットは残す）
+python3 tools/org_cycle.py  rework    --issue N --after reject|refuted --by WHO --reason TXT
+                            [--round N] [--to ROLE]
+                            # reject/refuted を受けて rework を発注したことを記録する。
+                            # **これを打たないと `show` の rework 警告が沈黙する** — 台帳に
+                            # 材料が無いので閾値に届かない（実地で reject/refuted 28件に対し
+                            # 記録が無く、警告が黙っていた）。verify が reject 時にこのコマンドを
+                            # 判定の記録と同じ場所に出す
 python3 tools/org_cycle.py  record    --issue N --event E --verdict V --by WHO --why TXT
                             # 済んだ判定を遡って台帳に記録（backfilled 印が付く）
 python3 tools/org_cycle.py  touched   --target T --op OP --by WHO --authority WHY
@@ -308,6 +316,9 @@ github_sync.py log    --repo R --issue N --event E [--phase P] [--detail T] --ev
                       [--command "<verbatim>"] [--result "<real output>"] [--files F]
                       [--next-step S] [--blocked-by B]
 github_sync.py decide --repo R --issue N --event <judgment> --verdict V --why "<the reasoning>"
+                              # --claimed（報告されたこと）と --verified（監督が自分で走らせて確かめたこと）を分けて書く。
+                              # --verified に実行の痕跡が無い / --claimed の条件節が --verified で触れられていないと警告
+                              # （実地で「このブランチには無い」が要約で消え、gate の reject 事由になった）
                       [--by ROLE] [--phase P] [--evidence E] [--alternatives A]
                       [--standard S] [--risk K] --event-id <ledger id>
 github_sync.py ready  --repo R [--kind task|objective|any]   # tasks only by default (objectives are parents)

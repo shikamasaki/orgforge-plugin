@@ -759,3 +759,77 @@ def test_show_warns_on_repeated_rework_but_not_on_many_rounds():
     seg = src[src.index("周回:"):]
     assert "len(reworks) > 3" in seg, "rework の回数で判定していない"
     assert "len(rounds) > 5" not in seg, "判定回数で警告すると、丁寧に見た Issue まで警告される"
+
+
+# ── 0.27.0: 監督の記録漏れを塞ぐ ────────────────────────────────────────
+def test_rework_has_a_dedicated_command():
+    """rework_requested を記録する専用コマンドが無いことが記録漏れの一因だった。
+
+    実地で reject/refuted 28件に対し rework_requested が台帳に無かった（#32 は4回 reject で
+    記録0件）。監督は `ledger.py append --payload '{...}'` を手で組む必要があり、しかも発注は
+    「判定 → 検証 → decide → **発注** → 記録」の順で、発注した subagent の通知が来ると流れる。
+    副作用として show の rework 警告（0.26.0）が沈黙していた。
+    """
+    p = subprocess.run([sys.executable, str(TOOLS / "org_cycle.py"), "rework", "--help"],
+                       capture_output=True, text=True, timeout=60)
+    assert p.returncode == 0, p.stderr
+    for flag in ("--after", "--reason", "--by"):
+        assert flag in p.stdout, f"{flag} が無い"
+
+
+def test_verify_offers_the_rework_command_on_reject():
+    """判定の記録と**同じ場所**に rework の発注コマンドを置く（順序が逆転する）。"""
+    src = _cycle_src("judge")
+    seg = src[src.index("def cmd_verify"):]
+    assert "rework --issue" in seg
+    assert "show` の rework 警告が沈黙する" in seg or "rework 警告が沈黙" in seg
+
+
+def test_banner_shows_version_and_cwd():
+    """どのコピーを動かしているかが見えないと、古いパスを流用しても気づけない。
+
+    実地で 0.26.0 のリリース後も 0.25.2 のパスを打ち、さらに `cd` が持続しない前提の
+    コマンドの exit=1 を「塞がった証拠」と読みかけた。
+    """
+    for tool in ("org_cycle.py", "github_sync.py", "ledger.py"):
+        src = (TOOLS / tool).read_text(encoding="utf-8")
+        assert "banner" in src.lower(), f"{tool} が版と cwd を出さない"
+    p = subprocess.run([sys.executable, str(TOOLS / "org_cycle.py"), "plan",
+                        "--role", "r", "--issue", "1"],
+                       capture_output=True, text=True, timeout=60)
+    assert "[orgforge " in p.stderr, p.stderr[:200]
+    assert os.getcwd() in p.stderr or "@" in p.stderr
+
+
+def test_banner_never_pollutes_machine_readable_output(tmp_path):
+    """人間向けの1行が、機械が読む出力を壊してはいけない。
+
+    banner を足した直後、`ledger view`（JSON を返す）の出力に混ざって JSONDecodeError で
+    テストが落ちた。stderr に書いていても、消費側が 2>&1 で混ぜれば同じである。
+    **便利のために壊すのは筋が通らない** — view / census / digest では黙る。
+    """
+    led = tmp_path / "l"; led.mkdir()
+    subprocess.run([sys.executable, str(TOOLS / "ledger.py"), "append",
+                    "--actor", "e", "--class", "cycle_started",
+                    "--payload", json.dumps({"role": "e", "candidate_id": "X"})],
+                   capture_output=True, text=True,
+                   env=dict(os.environ, ORG_LEDGER_ROOT=str(led)), timeout=60)
+    for sub in ("view", "census"):
+        args = [sys.executable, str(TOOLS / "ledger.py"), sub, str(led)]
+        if sub == "view":
+            args.append("work_in_progress")
+        p = subprocess.run(args, capture_output=True, text=True, timeout=60)
+        merged = p.stdout + p.stderr
+        assert "[orgforge " not in merged, f"{sub} の出力に banner が混ざった"
+        json.loads(p.stdout)          # 混ざっていれば例外になる
+
+
+def test_internal_calls_suppress_the_banner():
+    """内部呼び出し（_run）は stdout+stderr を混ぜて返すので、banner を出させない。
+
+    `_branch_for` は先頭行を取るので今は無事だが、混ざりうる構造そのものを消す
+    （0.22.1 で「静かに壊れる」経路を1つ踏んだばかりである）。
+    """
+    src = _cycle_src("_core")
+    seg = src[src.index("def _run("):src.index("def _raw(")]
+    assert "ORG_QUIET" in seg, "_run が banner を抑制していない"

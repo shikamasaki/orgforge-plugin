@@ -274,16 +274,64 @@ def cmd_verify(a):
           f"  --verdict <{role} が返した verdict> --by {role} \\\n"
           f"  --why \"<{role} の why をそのまま>\" \\\n"
           f"  --evidence \"<{role} の evidence をそのまま>\" \\\n"
+          f"  --claimed \"<{role} が報告したこと。条件節（「〜には無い」「未測定」）は落とさず>\" \\\n"
+          f"  --verified \"<**あなたが自分で走らせて**確かめたこと。コマンドと出力>\" \\\n"
           + (f"  --standard \"<...>\" --alternatives \"<...>\" \\\n" if role == "gate" else "")
           + f"  --risk \"<...>\"\n"
           f"（0.21.0 以降、`decide` が Issue と台帳の**両方**に1コマンドで書く。台帳を先に"
           f"通すので、統制が拒否するなら Issue にも記録されない）\n", file=sys.stderr)
+    # ① reject/refuted を受けたら rework の発注も記録する。**判定の記録と同じ場所に置く** —
+    # 発注は「判定を受け取る → 検証 → decide → 発注 → 記録」の順で、発注した subagent の通知が
+    # 来ると記録が流れる。記録のコマンドが目の前にある状態で発注すれば順序が逆転する。
+    # 実地で reject/refuted 28件に対し rework_requested が台帳に無く、show の警告が沈黙した。
+    bad = "reject" if role == "gate" else "refuted"
+    print(f"===== {bad} だった場合 — rework の発注も記録する =====\n"
+          f'python3 "{os.path.join(HERE, "org_cycle.py")}" rework --issue {a.issue} '
+          f"--after {bad} --by <あなたの役割> \\\n"
+          f'  --reason "<{role} の指摘のうち、maker に直させることを1行で>" '
+          f"--round {len(rounds) + 1 if 'rounds' in dir() else '<何周目か>'}\n"
+          f"（これを打たないと `show` の rework 警告が沈黙する — 台帳に材料が入らないので"
+          f"閾値に届かない。**道具は数えられないものを数えない**）\n", file=sys.stderr)
     print(f"— この出力を {role} subagent に渡すこと。本文に貼っても、ファイルに落として"
           f"参照させてもよい\n"
           f"  （seam ガードは本文に契約が無ければ、プロンプトが指すファイルを自分で読んで"
           f"検証する）。\n"
           f"配管はここまで。verdict / why / risk は {role} が決める。", file=sys.stderr)
     return 0
+
+
+
+def cmd_rework(a):
+    """reject / refuted を受けて rework を発注したことを記録する。
+
+    **専用コマンドが無かったことが記録漏れの一因である。** 実地で reject/refuted 28件に対し
+    `rework_requested` が記録されていなかった（#32 は4回 reject で記録0件）。監督は
+    `ledger.py append --class rework_requested --payload '{...}'` を手で組む必要があり、
+    しかも発注は「判定を受け取る → 検証 → decide → **発注** → 記録」の順で、発注した subagent の
+    通知が来ると記録が流れる。
+
+    副作用として `show` の rework 警告（0.26.0）が沈黙していた — 台帳に材料が無いので閾値に
+    届かない。**道具の誤検出ではなく、監督が材料を入れていなかった。**
+    """
+    payload = {"deliverable": str(a.issue), "issue": a.issue,
+               "verdict": "rework", "reason": a.reason,
+               "from_verdict": a.after, "to_role": a.to or ""}
+    rc = _execute([
+        (f"rework_requested #{a.issue}（{a.after} を受けて）",
+         lambda: _ledger("append", "--actor", a.by, "--class", "rework_requested",
+                         "--natural-key", f"rework-{a.issue}-{a.round}",
+                         "--payload", json.dumps(payload, ensure_ascii=False))),
+        (f"log → #{a.issue}",
+         lambda: _gh_sync("log", "--issue", str(a.issue), "--event", "progress_recorded",
+                          "--detail", f"rework を発注（{a.after} を受けて）: {a.reason}",
+                          "--command", f"org_cycle.py rework --issue {a.issue} "
+                                       f"--after {a.after} --round {a.round}",
+                          "--result", a.reason[:2000])),
+    ], f"record rework #{a.issue}")
+    if rc == 0:
+        print(f"\n  これで `show --issue {a.issue}` の rework 警告が正しく数えられる"
+              f"（台帳に材料が入っていないと、閾値に届かず沈黙する）。")
+    return rc
 
 
 def cmd_record(a):

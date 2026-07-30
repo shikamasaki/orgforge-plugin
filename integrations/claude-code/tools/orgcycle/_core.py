@@ -20,8 +20,15 @@ sys.path.insert(0, HERE)
 
 
 def _run(args, capture=True):
-    """python3 <tool> ... を実行。(code, out) を返す。"""
-    p = subprocess.run([sys.executable] + args, capture_output=capture, text=True, timeout=60)
+    """python3 <tool> ... を実行。(code, out) を返す。
+
+    戻り値は stdout+stderr を混ぜたものなので、**呼ばれた側の banner が混ざる**。
+    `_branch_for` は先頭行を取るので今は無事だが、混ざりうる構造そのものを消す
+    （0.22.1 で「静かに壊れる」経路を1つ踏んだばかりである）。
+    """
+    env = dict(os.environ, ORG_QUIET="1")
+    p = subprocess.run([sys.executable] + args, capture_output=capture, text=True,
+                       timeout=60, env=env)
     return p.returncode, ((p.stdout or "") + (p.stderr or "")) if capture else ""
 
 
@@ -278,3 +285,30 @@ def _agents_dir():
             if os.path.isdir(d):
                 return d
     return None
+
+
+def banner():
+    """実行しているバージョンと cwd を stderr に1行出す。
+
+    **どのコピーを動かしているかが見えないと、古いパスを流用しても気づけない。**
+    実地で 0.26.0 のリリース後も 0.25.2 のパスを打っており（直前に使ったものを流用した）、
+    さらに `cd` が持続しない前提のコマンドの exit=1 を「塞がった証拠」と読みかけた。
+    可変値を流用したときに、次の行で気づける材料を置く。
+    """
+    ver = "?"
+    for c in (os.path.join(os.path.dirname(HERE), ".claude-plugin", "plugin.json"),
+              os.path.join(HERE, "..", ".claude-plugin", "plugin.json"),
+              os.path.join(HERE, "..", "integrations", "claude-code",
+                           ".claude-plugin", "plugin.json")):
+        try:
+            with open(c, encoding="utf-8") as f:
+                ver = json.load(f).get("version", "?")
+            break
+        except Exception:
+            continue
+    # **機械可読な出力を汚さない。** stderr に書いていても、消費側が 2>&1 で混ぜると
+    # JSON が壊れる（実地でテストが JSONDecodeError で落ちた）。人間向けの補助なので、
+    # --json や ORG_QUIET のときは黙る — 「便利のために壊す」のは筋が通らない。
+    if "--json" in sys.argv or os.environ.get("ORG_QUIET"):
+        return
+    print(f"[orgforge {ver} @ {os.getcwd()}]", file=sys.stderr)

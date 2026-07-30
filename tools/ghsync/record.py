@@ -180,6 +180,72 @@ def _reasoning_digest(*fields):
     return hashlib.sha256(norm.encode("utf-8")).hexdigest()[:32]
 
 
+
+# 「確かめていないことを、確かめたかのように述べる」— この org が実地で8回検出した失敗様式が、
+# **検出する側（監督）**に現れた。実地の #32:
+#   maker の報告 : 「src/db/client.ts は**このブランチにまだ存在せず** feat/issue-11 側にありました」
+#   監督の要約   : 「maker は推測せず src/db/client.ts の loadEnv() を読んで変数を確定させた」
+#   落ちた条件   : 「**このブランチには無い**」
+# maker は正直に条件を書いていた。**監督が要約で落とした**。その要約が gate への指示にも流れ、
+# gate は「そのファイルは存在しない」を reject 事由にした。
+#
+# 台帳は理由のハッシュしか持たないので、台帳側では書き分けを検査できない。検査は
+# **decide の入口**に置く（Issue コメントに落ちる前に見る）。
+# 条件節の**種類**ごとに同義の表現を束ねる。語尾だけ違う表現（「存在せず」と「存在しない」）を
+# 別物として扱うと、条件を正しく運んでいるのに警告が出る（実装当初そうなった）。
+_HEDGE_GROUPS = {
+    "不在": ("には無い", "にはない", "存在せず", "存在しない", "存在しま", "無かった", "なかった",
+             "not present", "does not exist", "missing"),
+    "未測定": ("未測定", "測っていない", "測定していない", "not measured", "unmeasured"),
+    "未検証": ("確認していない", "確かめていない", "未検証", "未実行", "検証していない",
+               "unverified", "not verified", "not run"),
+    "推測": ("のはず", "だと思われ", "推測", "かもしれ", "可能性がある", "assumed", "presumably",
+             "probably", "likely"),
+    "条件付き": ("の場合は", "であれば", "のときは", "if ", "when "),
+    "未完了": ("予定", "できていない", "していません", "まだ", "todo", "pending"),
+}
+# 「実際に走らせた」痕跡。**コマンド名を書けば通る**形式化を招くのは承知の上で、
+# 何も無い状態より遥かに良い（実地で cycle_completed の薄い --result を拒否したとき、
+# 監督は実際に測り直した。拒否が形式的な壁ではなく行動を変えた実例である）。
+# 完全には塞げない — それはこの検査の限界として記録する（docs/11）。
+_RAN = ("npm ", "npx ", "git ", "psql", "python3", "node ", "pytest", "cargo ", "go test",
+        "supabase", "curl ", "exit=", "exit code", "passed", "failed", "$ ", "→", "->")
+
+
+def _claim_verify_defect(a):
+    """監督の記録が「誰が確かめたか」を書き分けているかを見る。
+
+    返り値: 警告文のリスト（**拒否はしない** — 1件を除く）。判断は監督の仕事だが、
+    条件節を落としたことに**気づける材料**は要る。
+    """
+    warns = []
+    claimed = (getattr(a, "claimed", None) or "").strip()
+    verified = (getattr(a, "verified", None) or "").strip()
+    if not claimed and not verified:
+        return warns          # 旧来の --why / --evidence だけの呼び出しは通す（後方互換）
+
+    # (a) --verified に実行の痕跡が無い ＝ 「確かめた」と書いただけ
+    if verified and not any(k in verified for k in _RAN):
+        warns.append(
+            "--verified に**実際に走らせた痕跡**（コマンド・出力・exit）が無い。"
+            "「確認した」と書くだけでは、確かめたことにならない — この org が8回検出した"
+            "失敗様式そのものである。走らせていないなら --claimed 側に書くこと。")
+
+    # (b) --claimed に条件節があるのに --verified が触れていない ＝ 要約で条件を落とした
+    # 種類ごとに見る: claimed に「不在」の条件があるなら、verified も「不在」に触れていればよい
+    untouched = []
+    for kind, words in _HEDGE_GROUPS.items():
+        if any(w in claimed for w in words) and not any(w in verified for w in words):
+            untouched.append(kind)
+    if untouched:
+        warns.append(
+            f"--claimed に条件節がある（{', '.join(untouched[:3])}）のに、--verified が"
+            f"触れていない。**要約で条件が落ちると、それが下流の判定に流れる** — 実地では"
+            f"「このブランチには無い」が消えて gate の reject 事由になった。"
+            f"条件をそのまま運ぶか、自分で確かめて結果を書くこと。")
+    return warns
+
+
 def _reasoning_defect(why, verdict, event):
     """Return a defect phrase if `why` is not actual reasoning, else None.
 
@@ -233,6 +299,9 @@ def cmd_decide(a):
               f"For a progress milestone use `log`.", file=sys.stderr)
         return 2
     why = (a.why or "").strip()
+    # 監督の書き分けを見る（拒否ではなく警告。判断は監督の仕事）
+    for w in _claim_verify_defect(a):
+        print(f"注意: {w}", file=sys.stderr)
     bad = _reasoning_defect(why, a.verdict, a.event)
     if bad:
         print(f"decide: --why {bad} With human review retired, this text is the only account of why "
@@ -260,6 +329,10 @@ def cmd_decide(a):
     elif a.phase:
         parts.append(f"**Phase:** `{a.phase}`")
     parts.append(f"\n**Why (the reasoning):**\n{why}")
+    if getattr(a, "claimed", None):
+        parts.append(f"\n**Claimed (何が報告されたか — 原文に近い形で):**\n{a.claimed}")
+    if getattr(a, "verified", None):
+        parts.append(f"\n**Verified (監督が自分で確かめたこと — コマンドと出力):**\n{a.verified}")
     if getattr(a, "evidence", None):
         parts.append(f"\n**Evidence consulted:**\n{a.evidence}")
     if getattr(a, "alternatives", None):
