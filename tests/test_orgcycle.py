@@ -720,3 +720,42 @@ def test_repro_lint_admits_it_has_no_baseline():
     seg = src[src.index("HELD: {len(failed)} required artifact"):]
     assert "baseline が無い" in seg and "判定していない" in seg
     assert "if baseline is None:" in src
+
+
+# ── 0.26.0: 範囲外の発見を Issue に積み増さない ──────────────────────────
+def test_skeptic_charter_splits_in_scope_from_out_of_scope():
+    """skeptic は仕事として必ず何かを見つける。範囲を切らないと Issue が終わらない。
+
+    実地では8周 rework した Issue の**4回目以降の発見が、すべて spec の MUST に無いもの**
+    だった。実在の欠陥でも、それは次の Issue の仕事。
+    """
+    d = _cycle_mod("_core")._agents_dir()
+    if not d:
+        return
+    body = pathlib.Path(d, "skeptic.md").read_text(encoding="utf-8")
+    assert "Issue 化を推奨" in body, "範囲外の発見の扱いが書かれていない"
+    assert "refuted` の根拠にする" in body or "refuted の根拠" in body
+    # 判断が難しいものは skeptic に決めさせない
+    assert "supervisor に返す" in body or "監督" in body
+
+
+def test_verify_asks_skeptic_for_out_of_scope_separately():
+    """「返すもの」にも out_of_scope を入れる（憲章だけ直すとプロンプトと食い違う）。"""
+    src = _cycle_src("judge")
+    assert "out_of_scope" in src
+    assert "verdict` には数えず" in src or "verdict には数えず" in src
+
+
+def test_spec_template_states_when_done():
+    """完了の判定を spec 側に書く — maker / gate / skeptic の3者が同じ条件を見る。"""
+    body = (TOOLS.parent / "template" / "SPEC.md").read_text(encoding="utf-8")
+    assert "完了の判定" in body
+    assert "別 Issue にする" in body
+
+
+def test_show_warns_on_repeated_rework_but_not_on_many_rounds():
+    """rework の回数で見る。判定を重ねること自体は悪くない（#7 は7周・rework 2回で収束）。"""
+    src = _cycle_src("inspect")
+    seg = src[src.index("周回:"):]
+    assert "len(reworks) > 3" in seg, "rework の回数で判定していない"
+    assert "len(rounds) > 5" not in seg, "判定回数で警告すると、丁寧に見た Issue まで警告される"

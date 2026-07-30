@@ -119,6 +119,20 @@ def cmd_show(a):
                  else "実装の欠陥" if txt else "不明")
             kinds.append(k)
         print(f"  周回:     {len(rounds)} 周 — 直近3回: {' / '.join(kinds)}")
+        # ③ rework が積み増している = 「直すべきものが増え続けている」signal。
+        # 実地の #27 は8回 rework し、**4回目以降の発見はすべて spec の MUST に無いもの**だった。
+        # 「不可逆 N 件」と同じ扱い — **止めない。材料を出す。**
+        reworks = [e for e in judged
+                   if e["class"] == "rework_requested" and e.get("seq") not in voided]
+        # 判定回数ではなく **rework の回数**で見る。#7 は7周かかったが rework は2回で収束した —
+        # 判定を重ねること自体は悪くない（gate が丁寧に見た結果でもある）。問題は
+        # 「直して、また直して」が積み増すことなので、そこを数える。
+        if len(reworks) > 3:
+            print(f"            ⚠ rework {len(reworks)} 回 / 判定 {len(rounds)} 回 — 3回を超えている。"
+                  f"**Issue の切り方か、完了の定義を見直す価値がある。**\n"
+                  f"              実地の #27 は8回 rework し、4回目以降の発見はすべて spec の "
+                  f"MUST に無いものだった（範囲外の欠陥は別 Issue にする — template/SPEC.md の"
+                  f"「完了の判定」）")
         # 4（要望書の提案4）については、**実装を見送った。**
         # 「直近の rework が MUST のどれに対応しているか」を語彙の重なりで判定してみたが、
         # 実データで誤検出した: 完了済みの #7（MUST どおりの一様性の話）に「スコープ外」と

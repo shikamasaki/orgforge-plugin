@@ -83,6 +83,11 @@
   pass — the SAME command the gate uses — e.g. `cd app && npm test`. "19 tests pass" is not runnable; a
   command is.>`
 - `<the concrete test/evidence that proves each MUST — e.g. "an 11th join is rejected at the cap">`
+- **完了の判定:** 上の MUST が RED→GREEN になった時点で完了とする。**着手後に見つかった
+  範囲外の欠陥は、この Issue で直さず別 Issue にする。** 直すべきものが増え続ける Issue は、
+  gate が毎回「どこを見るか」から始めることになり、収束しない — 実地では8周 rework した Issue の
+  4回目以降の発見が、すべてこの MUST に書かれていないものだった。範囲外の欠陥は skeptic が
+  「Issue 化を推奨」として返し、スコープを切るかどうかは監督が決める（`agents/skeptic.md`）。
 - Reproducibility (docs/11 §4a): the deliverable's repo must clone-and-run the same (lockfile,
   pinned toolchain, one-command setup+test, idempotent migrations, `.env.example`, green CI) — the
   gate runs `repro_lint` against it.

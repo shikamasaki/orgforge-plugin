@@ -132,7 +132,11 @@ The sections that carry the environment-independence (do not skimp on these):
   `depends_on` (#Issue + required state + the exact seam consumed), `owns` (disjoint from siblings),
   `boundary` (the adjacent work that is NOT this task's), `tools/sources`. Take these from
   `ARCHITECTURE.md`'s seam contracts.
-- **Verification** — the exact DoD command whose green output means done (the same command the gate runs).
+- **Verification** — the exact DoD command whose green output means done (the same command the gate runs)、
+  および **完了の判定**: 「上の MUST が RED→GREEN になった時点で完了。着手後に見つかった範囲外の
+  欠陥は、この Issue で直さず別 Issue にする」。**この1行が無いと Issue が収束しない** — 実地では
+  8周 rework した Issue の4回目以降の発見が、すべて MUST に書かれていないものだった。
+  maker・gate・skeptic の3者が同じ完了条件を見るために、spec 側に書く。
 - **Out of scope** — including prior deaths, so a fresh maker does not re-derive a known dead end:
 
 !`python3 "${CLAUDE_PLUGIN_ROOT}/tools/ledger.py" view nearby_deaths 2>/dev/null || echo "（まだ死が記録されていない — 初回 founding では正常）"`
