@@ -711,9 +711,12 @@ def test_unset_timestamp_is_refused(tmp_path):
     assert "UNSET" in out
     code, out = _app(tmp_path, "progress_recorded", {}, extra=("--ts", "2026-07-30"))
     assert code == 2, "日付だけの形も拒否されるべき"
-    # 正しい形は通る（backfill のため残す）
-    code, out = _app(tmp_path, "progress_recorded", {},
-                     extra=("--ts", "2026-07-30T12:00:00Z"))
+    # 正しい形は通る（hook が渡す経路。**固定日付を書かない** — 時間が経つと未来判定で
+    # 壊れる。実際にこのテストが 0.33.2 でそう壊れた）
+    import datetime as _dt
+    recent = (_dt.datetime.now(_dt.timezone.utc)
+              - _dt.timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    code, out = _app(tmp_path, "progress_recorded", {}, extra=("--ts", recent))
     assert code == 0, out
 
 
@@ -754,3 +757,93 @@ def test_schema_skew_is_diagnosed_and_fixable(tmp_path):
     import yaml
     assert "correction" in yaml.safe_load(fixed)["event_classes"]
     assert run("ledger.py", "schema", cwd=str(org))[0] == 0      # 差分なしになる
+
+
+# ══ 0.33.2 — Phase 0 の残件（lock の fail-open / ts の実在性 / H8 の nested）════
+# **0.33.1 で「lock は fail-closed」と CHANGELOG に書いたが、コードに ORG_LEDGER_ALLOW_UNLOCKED
+# は存在せず、self.error も設定されていなかった。** 置換が一致せず適用されていなかったのに、
+# 実測せずに達成と報告した。ロックの fail-closed は **故障注入で検査できなければ主張できない。**
+
+def test_lock_failure_refuses_the_append(tmp_path):
+    """故障注入でロックできないとき、必ず非ゼロで止まる。"""
+    env = dict(os.environ, ORG_LEDGER_FORCE_LOCK_FAIL="1")
+    env.pop("ORG_LEDGER_ALLOW_UNLOCKED", None)
+    r = subprocess.run([sys.executable, str(TOOLS / "ledger.py"), "append", str(tmp_path),
+                        "--actor", "w", "--class", "progress_recorded", "--payload", "{}"],
+                       capture_output=True, text=True, env=env)
+    assert r.returncode == 4, r.stdout + r.stderr
+    assert "ロックできない" in (r.stdout + r.stderr)
+    assert not (tmp_path / "ledger.jsonl").exists(), "拒否したのに書いている"
+
+
+def test_unlocked_escape_is_explicit_and_says_what_it_cannot_verify(tmp_path):
+    """逃げ道は明示の環境変数だけ。そして保証できないことを言う。"""
+    env = dict(os.environ, ORG_LEDGER_FORCE_LOCK_FAIL="1", ORG_LEDGER_ALLOW_UNLOCKED="1")
+    r = subprocess.run([sys.executable, str(TOOLS / "ledger.py"), "append", str(tmp_path),
+                        "--actor", "w", "--class", "progress_recorded", "--payload", "{}"],
+                       capture_output=True, text=True, env=env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    both = r.stdout + r.stderr
+    assert "ロックせずに append" in both
+    assert "確かめられない" in both
+
+
+def test_backfill_ts_must_be_a_real_moment(tmp_path):
+    """形が合っているだけでは足りない。`2026-99-99T99:99:99Z` が通っていた。"""
+    code, out = _app(tmp_path, "progress_recorded", {},
+                     extra=("--backfill-ts", "2026-99-99T99:99:99Z"))
+    assert code == 2
+    assert "実在しない日時" in out
+
+
+def test_backfill_ts_refuses_future_and_distant_past(tmp_path):
+    """未来と遠すぎる過去を拒否する — どちらも cap の時間窓を迂回できる。"""
+    code, out = _app(tmp_path, "progress_recorded", {},
+                     extra=("--backfill-ts", "2099-01-01T00:00:00Z"))
+    assert code == 2 and "未来である" in out
+    code, out = _app(tmp_path, "progress_recorded", {},
+                     extra=("--backfill-ts", "2000-01-01T00:00:00Z"))
+    assert code == 2 and "遠すぎる過去" in out
+
+
+def test_normal_append_needs_no_timestamp(tmp_path):
+    """通常経路は時刻を渡さない（writer が付ける）。"""
+    assert _app(tmp_path, "progress_recorded", {})[0] == 0
+    ev = _evs(tmp_path)[0]
+    assert ev["ts"] != "UNSET" and ev["ts"].endswith("Z")
+
+
+def test_unknown_validator_type_fails_closed(tmp_path, monkeypatch):
+    """schema の型名の typo が「検査の無効化」になってはいけない。"""
+    alt = tmp_path / "typo-schema.yaml"
+    alt.write_text((TEMPLATE / "ledger-schema.yaml").read_text(encoding="utf-8")
+                   .replace("correction:          { corrects: list }",
+                            "correction:          { corrects: lst }"), encoding="utf-8")
+    monkeypatch.setenv("ORG_LEDGER_SCHEMA", str(alt))
+    code, out = _app(tmp_path, "correction", {"corrects": [1], "kind": "probe"}, actor="sup")
+    assert code == 2
+    assert "未知の型名" in out
+
+
+def test_schema_diagnoses_nested_validation_gaps(tmp_path):
+    """H8: validation の **中身** の欠落も診断する。ブロックの有無だけでは足りない。
+
+    実測: org 側で verdict_provisional の required を削っても「差分なし」と判定した。
+    """
+    org = tmp_path / "org"; (org / ".orgforge" / "ledger").mkdir(parents=True)
+    (org / "constitution.yaml").write_text("enforcement: {}\n", encoding="utf-8")
+    full = (TEMPLATE / "ledger-schema.yaml").read_text(encoding="utf-8")
+    stale = re.sub(r"\n    verdict_provisional:  \[role, lineage, verdict, for_event,\n[^\n]*\n",
+                   "\n", full, count=1)
+    assert stale != full, "テストの前提が崩れている（required の行が見つからない）"
+    (org / "ledger-schema.yaml").write_text(stale, encoding="utf-8")
+
+    code, out = run("ledger.py", "schema", cwd=str(org))
+    assert code == 1, out
+    assert "validation 規則の欠落" in out
+    assert "verdict_provisional" in out
+    # --fix で埋まり、差分なしになる
+    assert run("ledger.py", "schema", "--fix", cwd=str(org))[0] == 0
+    assert run("ledger.py", "schema", cwd=str(org))[0] == 0
+    # atomic write なので .tmp が残らない
+    assert not list(org.glob("*.tmp"))

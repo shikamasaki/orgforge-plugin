@@ -537,7 +537,9 @@ def _check_type(name, val):
         return isinstance(val, str)
     if name == "map":
         return isinstance(val, dict)
-    return True                       # 未知の型名は検査しない（schema 側の書き間違い）
+    # **未知の型名は通さない。** 黙って True を返すと、schema の typo が「検査の無効化」になる —
+    # `list` を `lst` と書いた瞬間にその検査が消え、消えたことに気づく経路が無い。
+    return None                       # 呼び側が「schema 側の誤り」として拒否する
 
 
 def validate_event(cls, payload, snap):
@@ -585,7 +587,15 @@ def validate_event(cls, payload, snap):
             return (f"{cls}.{f} = {payload[f]!r} は許された値ではない: "
                     f"{'|'.join(map(str, allowed))}"), []
     for f, tname in (snap["types"].get(cls) or {}).items():
-        if f in payload and not _check_type(tname, payload[f]):
+        if f not in payload:
+            continue
+        r = _check_type(tname, payload[f])
+        if r is None:
+            return (f"ledger-schema.yaml の validation.types.{cls}.{f} が未知の型名 "
+                    f"{tname!r} を指している（list | int | str | map | int_or_str）。\n"
+                    f"  **schema の書き間違いを黙って通さない** — 通すと、その検査は消えたまま"
+                    f"になり、消えたことに気づく経路が無い。"), []
+        if not r:
             return (f"{cls}.{f} の型が違う（{tname} を期待、"
                     f"{type(payload[f]).__name__} が来た）"), []
 
@@ -616,6 +626,42 @@ def _now_iso():
     return _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+
+def _check_backfill_ts(ts):
+    """backfill の時刻を検証する。**形が合っているだけでは足りない。**
+
+    0.33.1 は正規表現だけで見ていたので、`2026-99-99T99:99:99Z` が通った（実測）。
+    実日時として parse し、**未来と、遠すぎる過去を拒否する** — 順序を偽れると cap の
+    時間窓を迂回できる。
+
+    権限（誰が backfill してよいか）は identity_assurance の側の問題で、ここでは扱えない。
+    **扱えないことを言う**のがこの関数の役目でもある。
+    """
+    import datetime as _dt
+    if not isinstance(ts, str) or not re.match(
+            r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", ts):
+        return (f"--backfill-ts {ts!r} は ISO8601 の UTC 形式ではない"
+                f"（YYYY-MM-DDTHH:MM:SSZ）。")
+    try:
+        when = _dt.datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=_dt.timezone.utc)
+    except ValueError as e:
+        return (f"--backfill-ts {ts!r} は実在しない日時である（{e}）。\n"
+                f"  形が合っているだけでは足りない — 2026-99-99T99:99:99Z のような値が"
+                f"通っていた。")
+    now = _dt.datetime.now(_dt.timezone.utc)
+    if when > now + _dt.timedelta(minutes=5):
+        return (f"--backfill-ts {ts} は未来である（いま {now.strftime('%Y-%m-%dT%H:%M:%SZ')}）。\n"
+                f"  backfill は **実時点を後から補う**ためのもので、先に日付を打つ手段ではない。"
+                f"未来の時刻は窓で絞る cap を迂回できる。")
+    if when < now - _dt.timedelta(days=int(os.environ.get("ORG_BACKFILL_MAX_DAYS", "90"))):
+        return (f"--backfill-ts {ts} は遠すぎる過去である"
+                f"（{os.environ.get('ORG_BACKFILL_MAX_DAYS', '90')} 日より前）。\n"
+                f"  古い時点に書くと、いま起きたことが過去の窓に入り、cap の集計から外れる。\n"
+                f"  正当な理由があるなら ORG_BACKFILL_MAX_DAYS で明示的に広げること。")
+    return None
+
+
 def _canonical(ev):
     """The bytes the hash covers: id,seq,ts,actor,class,payload in a fixed, sorted-key form.
     Canonical JSON (sorted keys, no incidental whitespace) so the hash is reproducible."""
@@ -641,28 +687,52 @@ class _LedgerLock:
     def __init__(self, root):
         self.path = os.path.join(root, "LOCK")
         self.fh = None
+        self.locked = False
         self.error = None          # ロックできなかった理由。呼び側が append を止める
 
     def __enter__(self):
         os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
-        self.fh = open(self.path, "a+")
         try:
+            self.fh = open(self.path, "a+")
+        except Exception as e:
+            self.error = f"LOCK ファイルを開けない（{e}）: {self.path}"
+            return self
+        # **ロックできないなら書かない。** 警告して続行すると、並列 append が同じ seq を
+        # 計算して鎖が壊れる（実測: 12並列で全件 seq=1）。逃げ道は明示の環境変数だけにし、
+        # **その保証（逐次実行）は道具の側では確かめられない**ことを言う。
+        # 故障注入用に ORG_LEDGER_FORCE_LOCK_FAIL=1 を見る — ロックの fail-closed を
+        # 検査できなければ、「fail-closed である」と言えない。
+        try:
+            if os.environ.get("ORG_LEDGER_FORCE_LOCK_FAIL") == "1":
+                raise OSError("ORG_LEDGER_FORCE_LOCK_FAIL=1（故障注入）")
             import fcntl
             fcntl.flock(self.fh.fileno(), fcntl.LOCK_EX)
-        except Exception:
-            # fcntl が無い環境（Windows 等）。**ロックできないことを黙らない。**
-            print("ledger: このプラットフォームでは append をロックできない — "
-                  "並列 append は seq を衝突させる。逐次で実行すること。", file=sys.stderr)
+            self.locked = True
+        except Exception as e:
+            if os.environ.get("ORG_LEDGER_ALLOW_UNLOCKED") == "1":
+                print(f"ledger: ロックせずに append している"
+                      f"（ORG_LEDGER_ALLOW_UNLOCKED=1、理由: {e}）。\n"
+                      f"  **並列で走らせないこと。** 逐次実行の保証は道具では確かめられない。",
+                      file=sys.stderr)
+            else:
+                self.error = (
+                    f"append をロックできない（{e}）。\n"
+                    f"  ロック無しの並列 append は同じ seq を計算し、鎖を壊す"
+                    f"（実測: 12並列で全件 seq=1）。\n"
+                    f"  逐次実行を保証できる場合のみ ORG_LEDGER_ALLOW_UNLOCKED=1 で外せる — "
+                    f"**その保証は道具の側では確かめられない。**")
         return self
 
     def __exit__(self, *exc):
         try:
-            import fcntl
-            fcntl.flock(self.fh.fileno(), fcntl.LOCK_UN)
+            if self.locked:
+                import fcntl
+                fcntl.flock(self.fh.fileno(), fcntl.LOCK_UN)
         except Exception:
             pass
         try:
-            self.fh.close()
+            if self.fh:
+                self.fh.close()
         except Exception:
             pass
         return False
@@ -868,15 +938,15 @@ def cmd_append(a):
         # **ts は writer が付ける。** クライアントが決められるなら順序を偽れるので、cap の
         # 時間窓を迂回できる。`--ts` は過去の記録を補う backfill のためだけに残し、
         # **"UNSET" と不正な形は受け取らない** — 窓で絞る view や sensor が黙って落とす。
-        ts = a.ts or _now_iso()
-        if not re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", ts):
-            print(f"append: --ts {ts!r} は ISO8601 の UTC 形式ではない"
-                  f"（YYYY-MM-DDTHH:MM:SSZ）。\n"
-                  f"  時刻は writer が付けるので、通常は --ts を渡さないこと。"
-                  f"渡すのは実時点を後から補う backfill のときだけである。\n"
-                  f"  **\"UNSET\" は受け取らない** — 窓で絞る view と sensor が黙って落とし、"
-                  f"cap の時間窓を迂回できる。", file=sys.stderr)
-            return 2
+        # `--ts` は 0.33.2 で `--backfill-ts` に分離した。旧名は受け取るが、**意図を確かめる** —
+        # 通常経路で時刻を指定できると、順序を偽って cap の時間窓を迂回できる。
+        given = a.ts or getattr(a, "ts_legacy", None)
+        ts = given or _now_iso()
+        if given:
+            err = _check_backfill_ts(given)
+            if err:
+                print(f"append: {err}", file=sys.stderr)
+                return 2
         ev = {"id": eid, "seq": seq, "ts": ts, "actor": a.actor,
               "class": a.cls, "payload": payload,
               "schema_id": "orgforge-ledger",
@@ -949,6 +1019,27 @@ def cmd_schema(a):
     pc = set((plug.get("event_classes") or {}).keys())
     oc = set((org.get("event_classes") or {}).keys())
     missing = sorted(pc - oc)
+    # **validation の中身も比べる。** 「ブロックの有無」だけを見ていたので、org 側で
+    # `verdict_provisional` の required を削っても「差分なし」と判定した（監査が実証）。
+    # 検証規則が欠けていることは、クラスが欠けていることと同じくらい静かに効く。
+    pv, ov = plug.get("validation") or {}, org.get("validation") or {}
+    vgaps = []
+    for sect in ("required", "require_any", "enums", "types"):
+        pd, od = pv.get(sect) or {}, ov.get(sect) or {}
+        for cls_, spec in pd.items():
+            if cls_ not in od:
+                vgaps.append(f"validation.{sect}.{cls_} が無い")
+            elif isinstance(spec, list) and isinstance(od.get(cls_), list):
+                lost = sorted(set(spec) - set(od[cls_]))
+                if lost:
+                    vgaps.append(f"validation.{sect}.{cls_} に {', '.join(lost)} が無い")
+            elif isinstance(spec, dict) and isinstance(od.get(cls_), dict):
+                lost = sorted(set(spec) - set(od[cls_]))
+                if lost:
+                    vgaps.append(f"validation.{sect}.{cls_} に {', '.join(lost)} が無い")
+    for cls_ in (pv.get("additional_properties_false") or []):
+        if cls_ not in (ov.get("additional_properties_false") or []):
+            vgaps.append(f"validation.additional_properties_false に {cls_} が無い")
     # 実データで使われているか — 使われているものは **記録が止まる** ので緊急度が違う
     used = set()
     try:
@@ -960,8 +1051,9 @@ def cmd_schema(a):
     print(f"org schema : {org_p}")
     print(f"テンプレート: {plug_p}")
     print(f"  org {len(oc)} クラス / テンプレート {len(pc)} クラス")
-    if not missing and (org.get("validation") is not None or plug.get("validation") is None):
-        print("  差分なし — この org の schema は最新である。")
+    if not missing and not vgaps:
+        print("  差分なし — この org の schema は最新である"
+              "（クラス宣言と validation 規則の両方）。")
         return 0
 
     if missing:
@@ -969,8 +1061,14 @@ def cmd_schema(a):
         for c in missing:
             mark = "  ← 実データで使用中。**このクラスの記録が止まる**" if c in used else ""
             print(f"    {c}{mark}")
-    if org.get("validation") is None and plug.get("validation") is not None:
-        print("\n**validation ブロックが無い** — required / enum / 型の検証が働かない。")
+    if vgaps:
+        print(f"\n**validation 規則の欠落: {len(vgaps)}**")
+        for g in vgaps[:20]:
+            print(f"    {g}")
+        if len(vgaps) > 20:
+            print(f"    …他 {len(vgaps) - 20} 件")
+        print("  検証規則が欠けていることは、クラスが欠けていることと同じくらい静かに効く — "
+              "拒否されるべき記録が通る。")
 
     if not a.fix:
         print(f"\n埋めるには --fix を付けて実行すること:\n"
@@ -997,11 +1095,18 @@ def cmd_schema(a):
             break
         dst = dst.replace(anchor, "\n" + m.group(1).rstrip() + "\n" + anchor, 1)
         added.append(c)
-    if org.get("validation") is None and plug.get("validation") is not None:
+    if vgaps:
         m = re.search(r"\n(validation:\n(?:(?:  |\n).*\n)*)", src)
         if m:
-            dst = dst.replace("\nevent_classes:", "\n" + m.group(1) + "\nevent_classes:", 1)
-            added.append("validation ブロック")
+            if re.search(r"\nvalidation:\n(?:(?:  |\n).*\n)*", dst):
+                # **丸ごと差し替える。** nested の欠落を1つずつ足すのは、YAML の構造を
+                # 文字列操作で YAML を編集することになり壊しやすい。validation は検証規則の集合で、
+                # org が独自に緩めているなら診断で見えるので、置き換えて構わない。
+                dst = re.sub(r"\nvalidation:\n(?:(?:  |\n).*\n)*", "\n" + m.group(1), dst, count=1)
+                added.append(f"validation 規則（{len(vgaps)} 件の欠落を差し替え）")
+            else:
+                dst = dst.replace("\nevent_classes:", "\n" + m.group(1) + "\nevent_classes:", 1)
+                added.append("validation ブロック")
     # **書く前に、YAML として読めることと event_classes が1つだけであることを確かめる。**
     # 重複した event_classes は後のものが前を上書きし、**クラス宣言が丸ごと消える**
     # （実際にこの修復スクリプトの初版がそれをやった）。
@@ -1019,9 +1124,21 @@ def cmd_schema(a):
     except Exception as e:
         print(f"修復後の schema が YAML として読めない — 書き込まない: {e}", file=sys.stderr)
         return 3
-    open(org_p, "w", encoding="utf-8").write(dst)
+    # **atomic write。** 直接上書きすると、修復途中で止まったときに schema を壊す — org の
+    # 形式定義が壊れれば、その org は何も書けなくなる。temp → fsync → rename → fsync(dir)。
+    tmp_p = org_p + ".tmp"
+    with open(tmp_p, "w", encoding="utf-8") as f:
+        f.write(dst)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp_p, org_p)
+    _fsync_dir(os.path.dirname(os.path.abspath(org_p)))
     print(f"\n足した: {', '.join(added)}\n"
-          f"  既存の宣言は書き換えていない。org が実態に合わせて変えた宣言はそのままである。")
+          f"  **クラス宣言は足すだけ**で、既存のものは書き換えていない — org が実態に合わせて"
+          f"変えた宣言はそのままである。\n"
+          + ("  **validation 規則はブロック全体を差し替えた** — 検証規則を org 側で緩めていた"
+             "場合、それは元に戻る。緩めていたことは診断に出ていたはずである。\n"
+             if any("validation" in x for x in added) else ""))
     return 0
 
 
@@ -1253,7 +1370,12 @@ def main(argv):
     q.add_argument("--actor", required=True)
     q.add_argument("--class", dest="cls", required=True)
     q.add_argument("--payload", required=True)
-    q.add_argument("--ts")
+    # **通常の append で時刻を指定させない。** 時刻は writer が付ける（順序を偽れないように）。
+    # 実時点を後から補う backfill だけが別経路で、**意図を名前に出す**。
+    q.add_argument("--backfill-ts", dest="ts", default=None, metavar="TS",
+                   help="実時点を後から補う場合の時刻（ISO8601 UTC）。通常は渡さない — "
+                        "時刻は writer が付ける。未来や遠い過去は拒否される")
+    q.add_argument("--ts", dest="ts_legacy", default=None, help=argparse.SUPPRESS)
     s = sub.add_parser("schema",
                        help="org の schema とテンプレートの差分を診断する（--fix で埋める）")
     s.add_argument("root", nargs="?", default=None)

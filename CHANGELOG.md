@@ -6,6 +6,36 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 0.33.2 — the lock was still fail-open
+
+0.33.1's changelog described a fail-closed lock and an `ORG_LEDGER_ALLOW_UNLOCKED` escape hatch.
+**Neither existed in the code.** The edit that was supposed to add them did not match its target and
+was silently skipped, `self.error` was initialised but never set, and the escape variable appeared
+nowhere outside the changelog — so an append continued after failing to lock. H3's atomicity was
+about to be built on top of that.
+
+### Fixed
+- **A failed lock now refuses the append (exit 4)** and writes nothing. `ORG_LEDGER_ALLOW_UNLOCKED=1`
+  is the only escape, and it states plainly that the serial-execution guarantee it depends on cannot
+  be verified by the tool. `ORG_LEDGER_FORCE_LOCK_FAIL=1` injects the failure, because **fail-closed
+  behaviour that cannot be fault-injected cannot be claimed** — that is what went wrong here.
+- **`--ts` is gone from the normal append path.** Backfilling a real past moment is now
+  `--backfill-ts`, so the intent is in the name. `--ts` is still accepted (hidden) because the
+  PreToolUse hook passes it and must keep recording.
+- **Timestamps are parsed as real moments**, not regex-matched. `2026-99-99T99:99:99Z` passed before.
+  Future timestamps and anything older than 90 days (`ORG_BACKFILL_MAX_DAYS`) are refused — both
+  move an event outside the rolling window a cap is summed over.
+- **H8 compares the contents of `validation`, not just its presence.** Deleting
+  `required.verdict_provisional` from an org's schema was reported as "no difference". Missing rules
+  are as quiet as missing classes: records that should be refused get through. `--fix` replaces the
+  whole `validation` block and says so — unlike class declarations, which are only added.
+- **`schema --fix` writes atomically** (temp → fsync → rename → fsync(dir)). A direct overwrite
+  interrupted halfway leaves the org unable to write anything at all.
+- **An unknown validator type name fails closed.** `{ corrects: lst }` silently disabled that check;
+  a schema typo must not be a way to switch validation off.
+- A test from 0.33.1 pinned a literal timestamp (`2026-07-30T12:00:00Z`) and started failing as soon
+  as that moment became the future. Tests that assert on time must compute it relative to now.
+
 ## 0.33.1 — Phase 0, the parts 0.33.0 claimed but did not do
 
 The audit re-ran 0.33.0 and found six items I had reported as done that were not. An empty
