@@ -6,6 +6,48 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 0.36.0 — H4a: a halt that actually stops things
+
+`halt_tripped` existed in the schema and was displayed on the board. **Nothing enforced it** — the
+hook never read it, so a tripped halt was a warning, not a state.
+
+### Added
+- **`ledger.py trip-halt`** — a writer-only operation. It writes the `<ledger-root>/HALT` latch
+  **first**, then the ledger event, and returns non-zero if either fails.
+- **The hook checks for an active halt on every gated call** and denies. It reads the *record*, not a
+  declaration: a declaration can be removed, a hash-chained record cannot.
+- **A recovery allowlist**, deliberately narrow: observation (`git status`, `cat`, `ls`), verification
+  (`ledger verify`, `halt-status`, `repro_lint check`) and safe repair (`schema --fix`, appending a
+  `correction`). **Ordinary work stops** — `npm test`, `git commit`, `git push`, any Write or Edit. A
+  halt whose allowlist covers normal work is not a halt.
+- `ledger.py halt-status` — readable while halted, since a halted org that cannot be diagnosed cannot
+  be recovered.
+
+### The fail-open this closes
+"Don't declare a halt you couldn't record" is right as bookkeeping and **wrong as control** — it
+leaves the situation unstopped. So:
+
+- A failed halt write **returns non-zero**, so the caller must not let that action through.
+- The latch is written before the ledger, so **the next call still stops** even when the ledger append
+  fails. Fault-injected (`ORG_LEDGER_FORCE_APPEND_FAIL=1`): the trip returns 4, the ledger holds no
+  `halt_tripped`, and the following call is denied via `source: latch_only` — which also flags that a
+  halt may have failed to record.
+- Deleting the latch by hand does **not** clear a halt that is in the ledger.
+- **An unreadable ledger counts as halted.** Not knowing whether you are stopped is the worst
+  fail-open available.
+
+### Fixed — found while building this
+**The halt check must not import the ledger into the hook process.** `from ledger import active_halt`
+runs that module's top level inside the hook, so a replaced or broken `ledger.py` containing
+`sys.exit(0)` made the hook **exit 0 and allow, printing nothing at all**. Measured. The check now
+asks a separate process. A control decision must not execute inside the thing it is deciding about.
+
+### Not implemented: release
+`halt_released` is declared and writer-only, but **no operation writes it**. Releasing requires an
+approver independent of whoever tripped it, and that depends on authenticated identity (H1). Deciding
+"who may release" from a self-declared actor would let whoever stopped the org quietly restart it.
+Sequence: H4a (this) → H1 (identity/receipts) → H4b (authenticated release).
+
 ## 0.35.0 — Codex plugin packaging, and what a Codex install actually guarantees
 
 orgforge was not a Codex plugin: it was a `hooks.json` you copied into `.codex/`, pointing at

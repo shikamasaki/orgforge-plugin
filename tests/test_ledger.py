@@ -1175,3 +1175,106 @@ def test_idempotency_key_is_a_hash_not_a_delimited_join(tmp_path):
     assert _reserve(tmp_path, 1, 9, "c", sess="a|b", rule="")[0] == 3    # rule 空 → deny
     assert _reserve(tmp_path, 1, 9, "c", sess="a|b", rule="x")[0] == 0   # 別キーとして通る
     assert len(_decisions(tmp_path)) == 2
+
+
+# ══ H4a — 単調な halt: 止まっている状態は警告ではない ═════════════════════════
+
+def _trip(root, reason="検査のため", by="registrar", trigger="test", env=None):
+    args = ["ledger.py", "trip-halt", str(root), "--trigger", trigger,
+            "--reason", reason, "--tripped-by", by]
+    if env:
+        r = subprocess.run([sys.executable, str(TOOLS / args[0])] + args[1:],
+                           capture_output=True, text=True, env=dict(os.environ, **env))
+        return r.returncode, r.stdout + r.stderr
+    return run(*args)
+
+
+def test_halt_is_writer_only(tmp_path):
+    """halt は generic append では書けない — 検査に使う記録は検査する側だけが書ける。"""
+    code, out = _app(tmp_path, "halt_tripped",
+                     {"trigger": "t", "scope": "global", "reason": "r", "tripped_by": "x"},
+                     actor="attacker")
+    assert code == 2, out
+    assert "writer 専用" in out
+    assert _evs(tmp_path) == []
+
+
+def test_trip_halt_writes_the_ledger_and_the_latch(tmp_path):
+    """台帳とラッチの両方に書く（ラッチは台帳が読めないときの第二経路）。"""
+    code, out = _trip(tmp_path)
+    assert code == 0, out
+    d = json.loads(out.splitlines()[0])
+    assert d["halted"] is True and d["latch_written"] is True
+    assert (tmp_path / "HALT").is_file()
+    assert [e["class"] for e in _evs(tmp_path)] == ["halt_tripped"]
+
+
+def test_trip_halt_requires_a_reason(tmp_path):
+    """なぜ止めたのかが無い halt は、解除の判断ができない。"""
+    code, out = run("ledger.py", "trip-halt", str(tmp_path), "--trigger", "t",
+                    "--reason", "  ", "--tripped-by", "x")
+    assert code == 2
+    assert json.loads(out.splitlines()[0])["reason"] == "missing_reason"
+
+
+def test_halt_persistence_failure_returns_nonzero_and_still_latches(tmp_path):
+    """**halt を記録できなければ、その呼び出し自体を非ゼロで返す。**
+
+    「記録できないなら宣言しない」は記録としては正しいが、制御としては fail-open になる —
+    止めるべき状況で止まらない。ラッチを先に書くので、次回の呼び出しは止まる。
+    """
+    code, out = _trip(tmp_path, env={"ORG_LEDGER_FORCE_APPEND_FAIL": "1"})
+    assert code == 4, out
+    d = json.loads(out.splitlines()[0])
+    assert d["reason"] == "halt_not_persisted"
+    assert d["latch_written"] is True
+    assert (tmp_path / "HALT").is_file()
+    assert _evs(tmp_path) == []          # 台帳には入っていない
+    # **それでも次回は止まる**（ラッチが第二経路として働く）
+    code, out = run("ledger.py", "halt-status", str(tmp_path))
+    assert code == 10, out
+    assert json.loads(out.splitlines()[0])["source"] == "latch_only"
+
+
+def test_halt_status_is_readable_while_halted(tmp_path):
+    """観測は halt 中でも通る（止まった org を診断できないと復旧できない）。"""
+    assert _trip(tmp_path)[0] == 0
+    code, out = run("ledger.py", "halt-status", str(tmp_path))
+    assert code == 10
+    d = json.loads(out.splitlines()[0])
+    assert d["halted"] is True and d["source"] == "ledger"
+    assert d["reason"] and d["tripped_by"] == "registrar"
+
+
+def test_deleting_the_latch_does_not_clear_the_halt(tmp_path):
+    """ラッチは台帳の代わりではない — 手で消しても台帳の halt が残る。"""
+    assert _trip(tmp_path)[0] == 0
+    (tmp_path / "HALT").unlink()
+    code, out = run("ledger.py", "halt-status", str(tmp_path))
+    assert code == 10, out
+    assert json.loads(out.splitlines()[0])["source"] == "ledger"
+
+
+def test_unreadable_ledger_counts_as_halted(tmp_path):
+    """止まっているか分からないなら止める（いちばん危ない fail-open を避ける）。"""
+    assert _trip(tmp_path)[0] == 0
+    with open(tmp_path / "ledger.jsonl", "a", encoding="utf-8") as f:
+        f.write('{"seq": 9, "torn"')
+    code, out = run("ledger.py", "halt-status", str(tmp_path))
+    assert code == 10, out
+    assert json.loads(out.splitlines()[0])["source"] == "unreadable"
+
+
+def test_release_is_not_implementable_yet(tmp_path):
+    """H4a では解除を実装しない — trip した主体と独立した承認が identity に依存する。"""
+    code, out = run("ledger.py", "--help")
+    assert "trip-halt" in out
+    assert "release" not in out.lower(), "解除の操作が生えている（H4b / H1 依存のはず）"
+    # generic append でも書けない
+    assert _trip(tmp_path)[0] == 0
+    code, out = _app(tmp_path, "halt_released",
+                     {"releases_seq": 1, "reason": "r", "released_by": "x",
+                      "recovery_verified": True}, actor="registrar")
+    assert code == 2
+    assert "writer 専用" in out
+    assert run("ledger.py", "halt-status", str(tmp_path))[0] == 10   # まだ止まっている

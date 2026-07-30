@@ -1480,6 +1480,166 @@ def cmd_reserve_exposure(a):
     return 0
 
 
+
+HALT_LATCH = "HALT"          # <ledger-root>/HALT — 台帳が読めなくても止まる第二経路
+
+
+def active_halt(root):
+    """いま halt しているか。(halt_event | None, error | None) を返す。
+
+    **2つの経路を見る。**
+
+      1. 台帳の `halt_tripped`（正）— 対応する `halt_released` が無いものが active
+      2. `<root>/HALT` ラッチ（保険）— 台帳が読めないときにも止まるため
+
+    台帳を読めないときは **halt とみなす**（error を返す）。読めないことを「halt していない」と
+    読むのは、いちばん危ない fail-open である — 止まっているかどうか分からないなら、止める。
+
+    ラッチは台帳の代わりではない。手でラッチを消しても台帳の halt は残るので、hook は止め続ける。
+    逆に台帳が読めなくてもラッチがあれば止まる。**どちらかが止めていれば止まる。**
+    """
+    latch = os.path.join(root, HALT_LATCH) if root else None
+    latched = bool(latch and os.path.exists(latch))
+    try:
+        evs = read_events(root)
+    except Exception as e:
+        # 読めないなら止める。ラッチの有無に関わらず。
+        return ({"reason": f"台帳を読めないので halt とみなす: {e}", "source": "unreadable"},
+                str(e))
+    released = set()
+    for e in evs:
+        if e.get("class") == "halt_released":
+            s = (e.get("payload") or {}).get("releases_seq")
+            if isinstance(s, int):
+                released.add(s)
+    for e in reversed(evs):
+        if e.get("class") == "halt_tripped" and e.get("seq") not in released:
+            return {**(e.get("payload") or {}), "seq": e.get("seq"),
+                    "actor": e.get("actor"), "source": "ledger"}, None
+    if latched:
+        # 台帳に active な halt が無いのにラッチがある。**ラッチを信じて止める** —
+        # halt を書けなかった（fail-open になりかけた）痕跡である可能性がある。
+        return ({"reason": "HALT ラッチが存在するが、台帳に対応する halt_tripped が無い。"
+                          "halt の記録に失敗した痕跡かもしれない。手で確かめること。",
+                 "source": "latch_only"}, None)
+    return None, None
+
+
+def cmd_trip_halt(a):
+    """halt を発動する。**記録できなければ、その呼び出し自体を deny する。**
+
+    「記録できないなら宣言しない」は記録としては正しいが、**制御としては fail-open** になる —
+    止めるべき状況で止まらない。だから:
+
+      1. 先に `<root>/HALT` ラッチを書く（台帳より先。台帳が壊れていても止まる）
+      2. 台帳に `halt_tripped` を書く
+      3. どちらかが失敗したら **非ゼロで返す** — 呼び出し側はその行為を通してはいけない
+
+    ラッチが残って台帳が空になった場合、`active_halt` は `latch_only` として halt を報告する。
+    **止まりすぎる方向の失敗**であり、それが正しい向きである。
+    """
+    if not (a.reason or "").strip():
+        print(json.dumps({"halted": False, "reason": "missing_reason",
+                          "detail": "--reason が必要。なぜ止めたのかが記録されない halt は、"
+                                    "解除の判断ができない。"}, ensure_ascii=False))
+        return 2
+    os.makedirs(a.root, exist_ok=True)
+    latch_path = os.path.join(a.root, HALT_LATCH)
+    latch_ok = False
+    try:
+        # **ラッチを先に書く。** 台帳の追記に失敗しても、次の呼び出しは止まる。
+        with open(latch_path, "w", encoding="utf-8") as f:
+            json.dump({"trigger": a.trigger, "scope": a.scope, "reason": a.reason,
+                       "tripped_by": a.tripped_by}, f, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
+        _fsync_dir(a.root)
+        latch_ok = True
+    except Exception as e:
+        print(f"trip-halt: HALT ラッチを書けなかった（{e}）。", file=sys.stderr)
+
+    payload = {"trigger": a.trigger, "scope": a.scope, "reason": a.reason,
+               "tripped_by": a.tripped_by, "latch_written": latch_ok}
+    with _LedgerLock(a.root) as lk:
+        if lk.error:
+            print(json.dumps({"halted": latch_ok, "reason": "lock_failed",
+                              "latch_written": latch_ok, "detail": lk.error},
+                             ensure_ascii=False))
+            return 4
+        snap, serr = load_schema_snapshot()
+        if serr:
+            print(json.dumps({"halted": latch_ok, "reason": "schema_unreadable",
+                              "latch_written": latch_ok, "detail": serr}, ensure_ascii=False))
+            return 4
+        bad, _w = validate_event("halt_tripped", payload, snap, writer_op="halt_tripped")
+        if bad:
+            print(json.dumps({"halted": latch_ok, "reason": "schema_rejected",
+                              "latch_written": latch_ok, "detail": bad}, ensure_ascii=False))
+            return 4
+        head, herr = _head_from_log(a.root)
+        if herr:
+            # 台帳が壊れていても **ラッチは書けている** ので、次の呼び出しは止まる。
+            print(json.dumps({"halted": latch_ok, "reason": "ledger_unhealthy",
+                              "latch_written": latch_ok, "detail": herr},
+                             ensure_ascii=False))
+            return 4
+        ev = {"id": "e" + hashlib.sha256(
+                  f"{head['seq'] + 1}:halt_tripped:"
+                  f"{json.dumps(payload, sort_keys=True, ensure_ascii=False)}".encode()
+              ).hexdigest()[:12],
+              "seq": head["seq"] + 1, "ts": _now_iso(), "actor": a.tripped_by,
+              "class": "halt_tripped", "payload": payload,
+              "schema_id": "orgforge-ledger", "schema_version": LEDGER_SCHEMA_VERSION,
+              "schema_sha256": snap["digest"], "prev_hash": head["hash"]}
+        ev["hash"] = _hash(head["hash"], ev)
+        log, headp = _paths(a.root)
+        try:
+            # 故障注入。**halt が書けなかったときに何が起きるか**を検査できなければ、
+            # 「記録できない halt は fail-open にならない」とは言えない。
+            if os.environ.get("ORG_LEDGER_FORCE_APPEND_FAIL") == "1":
+                raise OSError("ORG_LEDGER_FORCE_APPEND_FAIL=1（故障注入）")
+            with open(log, "a", encoding="utf-8") as f:
+                f.write(json.dumps(ev, ensure_ascii=False) + "\n")
+                f.flush()
+                os.fsync(f.fileno())
+            tmp = headp + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump({"seq": ev["seq"], "hash": ev["hash"]}, f)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, headp)
+            _fsync_dir(a.root)
+        except Exception as e:
+            print(json.dumps({"halted": latch_ok, "reason": "halt_not_persisted",
+                              "latch_written": latch_ok,
+                              "detail": f"台帳に halt を書けなかった（{e}）。"
+                                        f"ラッチ={'あり' if latch_ok else 'なし'}。"},
+                             ensure_ascii=False))
+            return 4
+    print(json.dumps({"halted": True, "reason": "tripped", "seq": ev["seq"],
+                      "latch_written": latch_ok}, ensure_ascii=False))
+    print(f"HALT tripped (seq={ev['seq']}): {a.reason}\n"
+          f"  gated な行為はすべて止まる。観測・検証・安全な修復だけが通る。\n"
+          f"  **解除は H4a では実装していない** — trip した主体と独立した承認が要り、それは"
+          f"identity の認証（H1）に依存する。\n"
+          f"  いま解除するには、台帳に halt_released を書ける仕組みが必要である"
+          f"（writer 専用として宣言済み、操作は未実装）。", file=sys.stderr)
+    return 0
+
+
+def cmd_halt_status(a):
+    """halt しているかを報告する。**観測は halt 中でも通る。**"""
+    h, err = active_halt(a.root)
+    if h is None:
+        print(json.dumps({"halted": False}, ensure_ascii=False))
+        return 0
+    print(json.dumps({"halted": True, "source": h.get("source"),
+                      "seq": h.get("seq"), "reason": h.get("reason"),
+                      "tripped_by": h.get("tripped_by"), "trigger": h.get("trigger"),
+                      "scope": h.get("scope")}, ensure_ascii=False))
+    return 10
+
+
 def cmd_verify(a):
     """Replay the whole chain from GENESIS — the external watchdog's core primitive. Reports
     the FIRST break (edited line, reordered seq, or forged hash). Exit 1 if the chain is broken."""
@@ -1734,6 +1894,17 @@ def main(argv):
     rx.add_argument("--tool-use-id", dest="tool_use_id", required=True)
     rx.add_argument("--rule", required=True)
     rx.set_defaults(fn=cmd_reserve_exposure)
+    # HALT。**writer 専用の操作。** 記録できなければ非ゼロで返す（呼び出し側は通さない）。
+    th = sub.add_parser("trip-halt", help="halt を発動する（ラッチ→台帳の順に書く）")
+    th.add_argument("root", nargs="?", default=None)
+    th.add_argument("--trigger", required=True, help="何が halt を引き起こしたか")
+    th.add_argument("--scope", default="global", choices=("global", "role"))
+    th.add_argument("--reason", required=True, help="なぜ止めたのか（解除の判断に使う）")
+    th.add_argument("--tripped-by", dest="tripped_by", required=True)
+    th.set_defaults(fn=cmd_trip_halt)
+    hs = sub.add_parser("halt-status", help="halt しているかを報告する（観測なので halt 中も通る）")
+    hs.add_argument("root", nargs="?", default=None)
+    hs.set_defaults(fn=cmd_halt_status)
     s = sub.add_parser("schema",
                        help="org の schema とテンプレートの差分を診断する（--fix で埋める）")
     s.add_argument("root", nargs="?", default=None)

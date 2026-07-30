@@ -841,6 +841,108 @@ def rule_iteration_cap(tool_name, ti):
 RULES = [rule_blast_radius, rule_iteration_cap]
 
 
+
+# ── HALT: 止まっている状態は、警告ではない（H4a）─────────────────────────────
+# **復旧のために通すもの。** すべてを deny すると、止まった org を診断も修復もできない。
+# 観測（読み取り）・検証・安全な修復に限り、**通常の作業は止める**。
+_RECOVERY_READONLY = re.compile(
+    r"^\s*(?:"
+    r"git\s+(?:status|log|diff|show|branch\s*$|rev-parse|remote\s+-v|fsck)\b"
+    r"|(?:cat|head|tail|less|wc|grep|rg|find|ls|stat|file|du|df)\b"
+    r"|python3?\s+\S*(?:ledger|status|guardrails|org_lint|repro_lint)\.py\s+"
+    r"(?:verify|halt-status|schema|census|digest|view|status|check|cat)\b"
+    r"|gh\s+(?:issue|pr)\s+(?:view|list)\b"
+    r"|echo\b|pwd\b|env\b|which\b"
+    r")", re.I)
+# 安全な修復 — 台帳の健全性を戻す操作だけ。**halt の解除はここに入れない**（H4b / H1 依存）。
+_RECOVERY_REPAIR = re.compile(
+    r"^\s*python3?\s+\S*ledger\.py\s+(?:schema\s+--fix|append\s+.*--class\s+correction)\b",
+    re.I)
+
+
+def _halt_recovery_allowed(tool_name, tool_input):
+    """halt 中でも通す行為か。**観測・検証・安全な修復に限る。**
+
+    通常の作業は止める — 止まっているとは、作業が進まないことである。ここを広く取ると
+    「halt したが実行は止まらない」に戻る。
+    """
+    if tool_name not in ("Bash", "Shell"):
+        return False           # Write / Edit / ApplyPatch は halt 中は通さない
+    cmd = ((tool_input or {}).get("command") or "").strip()
+    if not cmd:
+        return False
+    return bool(_RECOVERY_READONLY.match(cmd) or _RECOVERY_REPAIR.match(cmd))
+
+
+def _check_halt(tool_name, tool_input):
+    """active な halt があれば deny する。**毎回台帳を読む。**
+
+    宣言（環境変数や設定）ではなく **記録** で止める。宣言を読むだけなら、宣言を消せば動く。
+    台帳が読めないときは halt とみなす — 止まっているか分からないなら止める。
+    """
+    if not LEDGER_ROOT:
+        return
+    # **import せずに、別プロセスで聞く。** `ledger.py` を import すると、そのモジュールの
+    # トップレベルが hook プロセスの中で走る — 壊れた（あるいは差し替えられた）ledger.py が
+    # `sys.exit(0)` を持っていれば、**hook がそこで allow として終了する**（実測でそうなった）。
+    # 統制の判定を、判定対象と同じプロセスで動かしてはいけない。
+    try:
+        r = subprocess.run([sys.executable, os.path.join(TOOLS_DIR, "ledger.py"),
+                            "halt-status", LEDGER_ROOT],
+                           capture_output=True, encoding="utf-8", errors="replace", timeout=30)
+    except Exception as e:
+        # 「確かめられない」は評価できなかった case — 開発用の逃げ道（ORG_HOOK_FAIL_OPEN）が
+        # 効く側である。**読めた結果が halt なら効かせない**（下で _deny する）。
+        if FAIL_OPEN:
+            print(f"org_hook: halt の状態を確かめられない（{e}）(fail-open) — allowing",
+                  file=sys.stderr)
+            return
+        _deny(f"org guardrail: halt の状態を確かめられない（{e}）。\n"
+              f"  **止まっているか分からないなら止める。** ledger.py を実行できることを"
+              f"確認すること。")
+        return
+    if r.returncode not in (0, 10):
+        if FAIL_OPEN:
+            print(f"org_hook: halt-status が exit {r.returncode} (fail-open) — allowing",
+                  file=sys.stderr)
+            return
+        _deny(f"org guardrail: halt の状態を確かめられない（halt-status が exit "
+              f"{r.returncode}）。**止まっているか分からないなら止める。**\n"
+              f"  {((r.stdout or '') + (r.stderr or '')).strip()[:300]}")
+        return
+    halt = None
+    if r.returncode == 10:
+        for line in (r.stdout or "").splitlines():
+            line = line.strip()
+            if line.startswith("{"):
+                try:
+                    cand = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(cand, dict) and cand.get("halted"):
+                    halt = cand
+                    break
+        if halt is None:
+            _deny(f"org guardrail: halt-status が halt を報告したが（exit 10）、"
+                  f"内容を読めなかった。**判断が読めないなら止める。**\n"
+                  f"  {(r.stdout or '').strip()[:300]}")
+            return
+    if not halt:
+        return
+    if _halt_recovery_allowed(tool_name, tool_input):
+        print(f"org_hook: HALT 中だが、観測・検証・安全な修復として通す: "
+              f"{((tool_input or {}).get('command') or '')[:80]}", file=sys.stderr)
+        return
+    _deny(f"org guardrail HALTED: この org は停止している。**gated な行為は通らない。**\n"
+          f"  理由: {halt.get('reason')}\n"
+          f"  発動: {halt.get('tripped_by') or '?'} / trigger={halt.get('trigger') or '?'} "
+          f"/ 出所={halt.get('source')}"
+          + (f" / seq={halt['seq']}" if halt.get("seq") else "") + "\n"
+          f"  通るのは観測・検証・安全な修復だけである（git status / ledger verify / "
+          f"ledger halt-status / schema --fix など）。\n"
+          f"  **解除は自動では行われない。** 何が起きたかを確かめ、復旧を検証してから解除する。")
+
+
 def main():
     raw = sys.stdin.read()
     try:
@@ -923,6 +1025,10 @@ def main():
         ghb = _gh_bypass(tool_name, tool_input)
         if ghb:
             _deny(f"org guardrail HELD this {tool_name}: {ghb}")
+
+    # **HALT の検査。** 台帳を要する他の検査より前に置く — 止まっている org では、
+    # cap の予約を試すことにも意味が無い（そして予約は台帳に書く＝止まっているのに書く）。
+    _check_halt(tool_name, tool_input)
 
     if not LEDGER_ROOT:
         # no ledger configured => the org has no state to judge against. Fail-safe: allow, but

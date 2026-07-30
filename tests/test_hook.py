@@ -615,7 +615,9 @@ def test_reservation_is_persisted_before_the_call_is_allowed(tmp_path):
         f.write('{"seq": 9, "torn"')
     code, out = fire(tmp_path, "rm /tmp/b", env_extra={"ORG_CAP_DESTRUCTIVE_OPS": "9"})
     assert code == 2, out
-    assert "ledger_unhealthy" in out or "fail-safe" in out
+    # 0.36.0 から、読めない台帳は **halt とみなして** 止める（止まっているか分からないなら
+    # 止める）。cap の予約より前に halt を見るので、そちらの理由で deny される。
+    assert ("ledger_unhealthy" in out or "fail-safe" in out or "HALTED" in out), out
 
 
 # ── 0.34.1: hook は structured result を読む（終了コードだけを信じない）────────
@@ -713,3 +715,129 @@ def test_codex_plugin_version_matches_the_claude_plugin():
     cc = json.loads((REPO / "integrations" / "claude-code" / ".claude-plugin" / "plugin.json")
                     .read_text(encoding="utf-8"))["version"]
     assert cx == cc, f"codex={cx} / claude-code={cc}"
+
+
+# ── H4a: halt 中は gated action が通らない ────────────────────────────────────
+def _halted_org(tmp_path, force=None):
+    shutil.copy(REPO / "template" / "ledger-schema.yaml", tmp_path / "ledger-schema.yaml")
+    led = tmp_path / ".orgforge" / "ledger"; led.mkdir(parents=True)
+    env = dict(os.environ, **(force or {}))
+    r = subprocess.run([sys.executable, str(TOOLS / "ledger.py"), "trip-halt", str(led),
+                        "--trigger", "test", "--reason", "H4a の検査", "--tripped-by", "registrar"],
+                       capture_output=True, text=True, env=env)
+    return led, r
+
+
+def _fire_at(led, command, tool_name="Bash", cwd=None):
+    ev = {"hook_event_name": "PreToolUse", "session_id": "s",
+          "tool_use_id": f"toolu_h{_next_tu():04d}", "tool_name": tool_name,
+          "tool_input": ({"command": command} if tool_name in ("Bash", "Shell")
+                         else {"file_path": command, "content": "x"})}
+    env = dict(os.environ, ORG_LEDGER_ROOT=str(led), ORG_TOOLS_DIR=str(TOOLS))
+    r = subprocess.run([sys.executable, str(HOOK)], input=json.dumps(ev),
+                       capture_output=True, text=True, env=env, cwd=cwd)
+    return r.returncode, r.stdout + r.stderr
+
+
+def test_halt_blocks_a_gated_action(tmp_path):
+    """halt は警告ではない — gated な行為が通らない。"""
+    led, r = _halted_org(tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    code, out = _fire_at(led, "rm file.txt")
+    assert code == 2, out
+    assert "HALTED" in out
+    assert "H4a の検査" in out          # 理由が示される
+
+
+@pytest.mark.parametrize("cmd", [
+    "git status", "git log --oneline -5", "cat README.md", "ls -la",
+    "python3 tools/ledger.py verify", "python3 tools/ledger.py halt-status",
+    "python3 tools/ledger.py schema --fix",
+])
+def test_recovery_actions_pass_while_halted(tmp_path, cmd):
+    """観測・検証・安全な修復は通る — すべて deny だと復旧できない。"""
+    led, _ = _halted_org(tmp_path)
+    code, out = _fire_at(led, cmd)
+    assert code == 0, f"{cmd} が halt 中に通らない: {out}"
+
+
+@pytest.mark.parametrize("cmd,tool", [
+    ("npm test", "Bash"), ("npm run build", "Bash"), ("git commit -m x", "Bash"),
+    ("git push", "Bash"), ("python3 manage.py migrate", "Bash"),
+])
+def test_ordinary_work_is_stopped_while_halted(tmp_path, cmd, tool):
+    """**通常の作業は止まる。** allowlist を広く取ると「halt したが止まらない」に戻る。"""
+    led, _ = _halted_org(tmp_path)
+    code, out = _fire_at(led, cmd, tool_name=tool)
+    assert code == 2, f"{cmd} が halt 中に通った: {out}"
+    assert "HALTED" in out
+
+
+def test_writes_are_stopped_while_halted(tmp_path):
+    """Write / Edit は halt 中は通さない（観測でも修復でもない）。"""
+    led, _ = _halted_org(tmp_path)
+    target = tmp_path / "some.js"; target.write_text("x", encoding="utf-8")
+    code, out = _fire_at(led, str(target), tool_name="Write")
+    assert code == 2, out
+    assert "HALTED" in out
+
+
+def test_halt_that_failed_to_persist_still_stops_the_next_call(tmp_path):
+    """**これが指摘された fail-open の経路である。**
+
+    halt の台帳への記録が失敗しても、ラッチが第二経路として次回の呼び出しを止める。
+    """
+    led, r = _halted_org(tmp_path, force={"ORG_LEDGER_FORCE_APPEND_FAIL": "1"})
+    assert r.returncode == 4, r.stdout + r.stderr        # 呼び出し自体は非ゼロ
+    assert (led / "HALT").is_file()
+    # 台帳には入っていない（記録は失敗した）が、ラッチがあるので止まる
+    assert not (led / "ledger.jsonl").exists() or not (led / "ledger.jsonl").read_text().strip()
+    code, out = _fire_at(led, "rm file.txt")
+    assert code == 2, out
+    assert "HALTED" in out
+
+
+def test_unreadable_ledger_stops_gated_actions(tmp_path):
+    """止まっているか分からないなら止める。"""
+    led, _ = _halted_org(tmp_path)
+    with open(led / "ledger.jsonl", "a", encoding="utf-8") as f:
+        f.write('{"seq": 9, "torn"')
+    code, out = _fire_at(led, "rm file.txt")
+    assert code == 2, out
+
+
+def test_no_halt_means_ordinary_gating(tmp_path):
+    """halt していないときは、従来どおり cap の予約で判断する。"""
+    shutil.copy(REPO / "template" / "ledger-schema.yaml", tmp_path / "ledger-schema.yaml")
+    led = tmp_path / ".orgforge" / "ledger"; led.mkdir(parents=True)
+    code, out = _fire_at(led, "rm file.txt")
+    assert code == 0, out
+    assert "HALTED" not in out
+
+
+def test_halt_check_does_not_import_the_ledger_into_the_hook(tmp_path):
+    """**統制の判定を、判定対象と同じプロセスで動かさない。**
+
+    `from ledger import active_halt` はそのモジュールのトップレベルを hook の中で走らせる。
+    差し替えられた（あるいは壊れた）ledger.py が `sys.exit(0)` を持っていれば、
+    **hook はそこで allow として終了する** — 実測でそうなった。別プロセスで聞くこと。
+    """
+    shutil.copy(REPO / "template" / "ledger-schema.yaml", tmp_path / "ledger-schema.yaml")
+    fake = tmp_path / "tools"; fake.mkdir()
+    # トップレベルで exit(0) する ledger.py。import すれば hook を巻き込んで終了させる。
+    (fake / "ledger.py").write_text("import sys\nsys.exit(0)\n", encoding="utf-8")
+    ev = {"hook_event_name": "PreToolUse", "session_id": "s",
+          "tool_use_id": f"toolu_i{_next_tu():04d}", "tool_name": "Bash",
+          "tool_input": {"command": "rm -rf ./x"}}
+    env = dict(os.environ, ORG_LEDGER_ROOT=str(tmp_path), ORG_TOOLS_DIR=str(fake))
+    env.pop("ORG_HOOK_FAIL_OPEN", None)      # 逃げ道を切って、素の挙動を見る
+    r = subprocess.run([sys.executable, str(HOOK)], input=json.dumps(ev),
+                       capture_output=True, text=True, env=env)
+    both = r.stdout + r.stderr
+    # **hook が allow として静かに終わっていないこと。** import していた版では exit 0 で、
+    # 何のメッセージも出さずに通っていた。
+    # **本質は「hook が allow として静かに終わらない」こと。** import していた版では、
+    # 差し替えられた ledger.py の sys.exit(0) が hook プロセスを exit 0 で終わらせ、
+    # メッセージも出なかった。どの層で止まるかは副次的である。
+    assert r.returncode == 2, f"壊れた ledger.py で通った: {both!r}"
+    assert both.strip(), "何も言わずに終わっている"
