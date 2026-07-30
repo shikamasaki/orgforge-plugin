@@ -26,7 +26,69 @@ envelope:
     verification: external_watchdog_replays_hash_chain   # docs/05 §2.4, docs/08 §5
 
 # ── Event classes: the org's complete factual vocabulary ────────────────────
+# ── 検証の軸（Writer Phase 0 / 0.33.1）─────────────────────────────────────
+# **3つを分けて扱う。** 全クラスを一度に closed-world にすると、schema の乖離が
+# 「組織全体の記録停止」に変わる — それは fail-closed ではなく、既知の移行不備による
+# 可用性事故である。
+#
+#   validation:
+#     required: [..]                  宣言したクラスだけ、必須 field の欠落を拒否
+#     <field>: a|b|c                  宣言済み field は **存在する場合に** enum / 型を検証
+#     additional_properties: false    厳格化したいクラスだけ、未宣言 field を拒否
+#
+# 未宣言 field は既定で許可し、census に記録する（乖離を見えるようにするが止めない）。
+# 統制イベント（admission / verdict / cap 予約）は最初から厳格側に置く。
+# `progress_recorded` は実態が宣言と乖離しているので、**実態を schema に反映してから**
+# 別の migration で厳格化する（実データ43件中 fraction は0件、宣言に無い milestone が38件）。
+#
+# required は **実データを数えて決めている** — 宣言が実態と違えば、検査は嘘になる。
+validation:
+  required:
+    admission_decided:    [verdict]
+    refutation_attempted: [verdict]
+    verdict_provisional:  [role, lineage, verdict, for_event,
+                           review_subject_id, reasoning_sha256]
+    judges_disagreed:     [for_event]
+    phase_started:        [phase, role]
+    phase_admitted:       [phase, verdict]
+    correction:           [corrects, kind]
+  # **相関キーはどれか1つあればよい。** deliverable / candidate_id / claim_id / issue はどれも
+  # 正当な相関キーで（`_same_work` が union-find で束ねる）、どれを使うかは経路によって違う。
+  # 1つに固定すると正当な書き込みを弾く（実際に統制のテストを弾いた）。
+  # **1つも無い判定は拒否する** — 何についての判定か分からない記録は、検査に使えない。
+  require_any:
+    admission_decided:    [deliverable, candidate_id, issue]
+    refutation_attempted: [deliverable, claim_id, candidate_id, issue]
+    verdict_provisional:  [deliverable, issue]
+    judges_disagreed:     [deliverable, issue]
+    phase_started:        [deliverable, candidate_id]
+    phase_admitted:       [deliverable, candidate_id]
+    result_deployed:      [deliverable, claim_id, candidate_id, issue]
+  # 未宣言 field を拒否するクラス（closed world）。統制の中核だけに絞る。
+  additional_properties_false: [verdict_provisional, judges_disagreed]
+  # enum。**存在する場合に**検証する（欠けているかは required が見る）。
+  enums:
+    verdict_provisional:
+      role:    [gate, skeptic]
+      lineage: [same-harness, cross-harness]
+    admission_decided:
+      verdict: [admit, reject, park]
+    refutation_attempted:
+      verdict: [refuted, survives]
+    correction:
+      kind:    [probe, mistake, backfill, superseded]
+    phase_admitted:
+      verdict: [pass, fail]
+  # 型。同上、存在する場合に検証する。
+  types:
+    correction:          { corrects: list }
+    admission_decided:   { from_seqs: list, agreed_by: list }
+    verdict_provisional: { issue: int_or_str }
+
+
+
 event_classes:
+
   # metabolism (Organ 4)
   # candidate_id: WHICH backlog item this cycle is working (docs/09). Ties the cycle to the
   # candidate_submitted it drains, so "in flight" is per-item, not just a per-role count — and so a
@@ -169,7 +231,8 @@ event_classes:
                           authority: "NONE on its own — a single lineage's verdict is material, not a decision",
                           one_per: "(issue, for_event, lineage) — a lineage may not rewrite its verdict to
                                     manufacture agreement; correct via `correction`" }
-  judges_disagreed:     { issue, for_event, same_harness: verdict, cross_harness: verdict,
+  judges_disagreed:     { issue, deliverable, role, for_event,
+                          same_harness: verdict, cross_harness: verdict,
                           note: "NOT an anomaly — this is the POINT of separating lineage. Never deleted;
                                  counted. Whichever side says no, stands (the strict side wins)." }
   # ── SDLC phase mold (docs/11) — the forced, non-skippable phase chain, reproducibility's spine ──

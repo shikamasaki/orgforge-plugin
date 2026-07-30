@@ -6,6 +6,56 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 0.33.1 — Phase 0, the parts 0.33.0 claimed but did not do
+
+The audit re-ran 0.33.0 and found six items I had reported as done that were not. An empty
+`progress_recorded {}` passed both append and verify, and `--ts UNSET` was still accepted.
+
+### Fixed
+- **Field validation was only "is it a known class" and "is the payload a map".** Now three
+  separate axes, deliberately not one switch:
+  - `validation.required` — checked **only for classes that declare it**. Control events
+    (`admission_decided`, `verdict_provisional`, `phase_admitted`, `correction`, …) declare it;
+    `progress_recorded` does not, because its real payload has drifted from its declaration
+    (43 events, none carrying the declared `fraction`, 38 carrying an undeclared `milestone`).
+    Making every class closed-world at once would turn schema drift into **an org-wide recording
+    outage** — that is not fail-closed, it is a known-migration availability incident.
+  - `validation.require_any` — the correlation key may be any of `deliverable` / `candidate_id` /
+    `claim_id` / `issue`; which one is used depends on the path. Pinning it to one rejected
+    legitimate writes (it broke the separation-of-duties tests). A judgment with **none** of them
+    is still refused.
+  - Declared fields are enum/type-checked **when present**; undeclared fields warn and pass, except
+    in the classes listed under `additional_properties_false`.
+- **`--ts UNSET` and malformed timestamps are refused.** The writer stamps the time; `--ts` remains
+  only for backfilling a real past moment, and must be `YYYY-MM-DDTHH:MM:SSZ`. A window-filtered
+  view silently drops `UNSET`, which is how a cap's time window gets bypassed.
+- **TOCTOU between validation and the recorded digest.** Validation ran before the lock while the
+  digest was read inside it, so a different schema could be used for each. Both now come from one
+  snapshot taken inside the lock.
+- **`verify` now compares each event's recorded `schema_sha256`** against the schema being read and
+  reports drift. Re-validation can only speak for the *current* schema; without this, what an event
+  was validated against at write time was simply lost.
+- **A platform without `fcntl` no longer writes.** It warned and continued, which is how 12 parallel
+  appends all computed `seq=1`. `ORG_LEDGER_ALLOW_UNLOCKED=1` is the explicit escape, and it says
+  plainly that the tool cannot verify the serial-execution guarantee it depends on.
+- `_fsync_dir` failure is reported instead of swallowed — durability on such a filesystem is
+  best-effort, and calling it "persisted" would be wrong.
+
+### Added — H8 schema rollout skew
+`ledger.py schema` diagnoses an org's `ledger-schema.yaml` against the plugin template, names which
+missing classes are **in live use**, and `--fix` adds what is missing without rewriting existing
+declarations. Needed because orgs own their copy: this repo's live org was four classes behind, two
+of them in use (`correction` ×12, `asset_touched` ×3), so introducing "undeclared classes cannot be
+written" would have stopped it from recording corrections. `--fix` refuses to write if the result
+would contain two `event_classes` blocks — the first version of this repair did exactly that, and
+YAML's later-wins rule silently dropped 65 class declarations.
+
+### Note on the live org
+After the skew fix, validation refuses exactly two of 1364 real events, and both are known defects it
+should refuse: a `correction` written earlier this session with the wrong payload shape (already
+superseded), and the pre-0.32.3 provisional verdict with no `review_subject_id`. No sound record is
+blocked. Existing events are never retroactively validated.
+
 ## 0.33.0 — Ledger writer, Phase 0
 
 Makes the ledger's write path survive concurrency and crashes, and validates new events against the

@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 import pathlib
+import re
 import subprocess
 import sys
 
@@ -321,7 +322,10 @@ def test_judgment_without_correlation_key_is_rejected(tmp_path):
     env = _led(tmp_path)
     p = _append(env, "maker1", "admission_decided", {"verdict": "admit"})
     assert p.returncode != 0, "対象を特定できない判定が通った"
-    assert "特定できない" in p.stderr
+    # 0.33.1 で schema 検証（require_any）が同じことを、より具体的に言うようになった —
+    # どのキーが要るかを挙げる。台帳側の相関キー検査も残っているので、どちらが先に拾っても
+    # 拒否される（二重の防御）。
+    assert "相関キーが無い" in p.stderr or "特定できない" in p.stderr
 
 
 def test_self_admission_is_caught_when_written_as_deliverable(tmp_path):
@@ -633,3 +637,120 @@ def test_legacy_events_remain_readable_but_unvalidated(tmp_path):
     # 続けて v1 を足せる（混在が壊れない）
     assert _app(tmp_path, payload={**_PR, "candidate_id": "c2"})[0] == 0
     assert run("ledger.py", "verify", str(tmp_path))[0] == 0
+
+
+# ══ 0.33.1 — Phase 0 の残件（検証軸の分離 / TOCTOU / ts / lock / skew）═════════
+# 監査が 0.33.0 で「実装した」と報告した条件のうち未達だったもの。**空の payload が通り、
+# --ts UNSET も通っていた。** 3軸に分けて閉じる。
+
+_ADM = {"deliverable": "42", "verdict": "admit"}
+
+
+def test_required_only_applies_to_declared_classes(tmp_path):
+    """軸1: required を宣言したクラスだけ必須 field を検証する。
+
+    全クラスを一度に closed-world にすると、schema の乖離が「組織全体の記録停止」に変わる —
+    それは fail-closed ではなく、既知の移行不備による可用性事故である。
+    """
+    # required 未宣言のクラスは、空でも通る（既存 43 件を止めない）
+    code, out = _app(tmp_path, "progress_recorded", {})
+    assert code == 0, out
+    # 統制イベントは必須欠落で拒否
+    code, out = _app(tmp_path, "admission_decided", {}, actor="gate")
+    assert code == 2
+    assert "必須 field が無い" in out
+
+
+def test_correlation_key_is_any_of_not_a_fixed_one(tmp_path):
+    """相関キーは deliverable / candidate_id / issue のどれか1つでよい。
+
+    1つに固定すると正当な書き込みを弾く（実際に統制のテストを弾いた）。
+    """
+    for key in ("deliverable", "candidate_id", "issue"):
+        code, out = _app(tmp_path, "admission_decided",
+                         {key: "c1", "verdict": "admit", "gate": "g"}, actor=f"gate-{key}")
+        assert code == 0, f"{key} だけでは通らなかった: {out}"
+    # 1つも無ければ拒否
+    code, out = _app(tmp_path, "admission_decided", {"verdict": "admit"}, actor="gate-none")
+    assert code != 0
+    assert "相関キーが無い" in out or "特定できない" in out
+
+
+def test_enum_and_type_are_checked_when_present(tmp_path):
+    """軸2: 宣言済み field は **存在する場合に** enum / 型を検証する。"""
+    code, out = _app(tmp_path, "admission_decided",
+                     {**_ADM, "verdict": "totally-bogus"}, actor="gate")
+    assert code == 2
+    assert "許された値ではない" in out
+    code, out = _app(tmp_path, "correction",
+                     {"corrects": 5, "kind": "probe"}, actor="sup")     # list であるべき
+    assert code == 2
+    assert "型が違う" in out
+
+
+def test_undeclared_fields_warn_but_pass_except_in_strict_classes(tmp_path):
+    """軸3: 未宣言 field は既定で許可し、警告する。厳格クラスだけ拒否。"""
+    code, out = _app(tmp_path, "admission_decided",
+                     {**_ADM, "some_new_field": "x"}, actor="gate")
+    assert code == 0, out
+    assert "宣言の無い field" in out
+    # verdict_provisional は additional_properties: false
+    code, out = _app(tmp_path, "verdict_provisional",
+                     {"issue": 7, "deliverable": "7", "role": "gate",
+                      "lineage": "same-harness", "verdict": "admit", "for_event":
+                      "admission_decided", "review_subject_id": "s", "reasoning_sha256": "d",
+                      "not_declared": "x"}, actor="gate")
+    assert code == 2
+    assert "宣言の無い field" in out
+
+
+def test_unset_timestamp_is_refused(tmp_path):
+    """`--ts UNSET` が通っていた。cap の時間窓を迂回できる。"""
+    code, out = _app(tmp_path, "progress_recorded", {}, extra=("--ts", "UNSET"))
+    assert code == 2
+    assert "UNSET" in out
+    code, out = _app(tmp_path, "progress_recorded", {}, extra=("--ts", "2026-07-30"))
+    assert code == 2, "日付だけの形も拒否されるべき"
+    # 正しい形は通る（backfill のため残す）
+    code, out = _app(tmp_path, "progress_recorded", {},
+                     extra=("--ts", "2026-07-30T12:00:00Z"))
+    assert code == 0, out
+
+
+def test_schema_drift_is_reported_by_verify(tmp_path, monkeypatch):
+    """記録時の schema digest を照合する。形式が入れ替わったことを検出できる。"""
+    assert _app(tmp_path, "progress_recorded", {})[0] == 0
+    alt = tmp_path / "alt-schema.yaml"
+    alt.write_text((TEMPLATE / "ledger-schema.yaml").read_text(encoding="utf-8")
+                   + "\n  a_brand_new_class: { x }\n", encoding="utf-8")
+    monkeypatch.setenv("ORG_LEDGER_SCHEMA", str(alt))
+    code, out = run("ledger.py", "verify", str(tmp_path))
+    assert code == 0, out                      # 鎖は無事
+    assert "形式が入れ替わっている" in out      # しかし drift は報告される
+
+
+def test_schema_skew_is_diagnosed_and_fixable(tmp_path):
+    """H8: org の schema がテンプレートより古いことを診断し、--fix で埋める。
+
+    実測: ある org の schema は4クラス古く、うち2つ（correction 12件、asset_touched 3件）は
+    実データで使われていた。配らずに検査を入れれば、その org は訂正を書けなくなる。
+    """
+    org = tmp_path / "org"; (org / ".orgforge" / "ledger").mkdir(parents=True)
+    full = (TEMPLATE / "ledger-schema.yaml").read_text(encoding="utf-8")
+    # correction の宣言を削って「古い org」を作る
+    stale = re.sub(r"\n  correction:.*?(?=\n  [a-z_]+:)", "\n", full, count=1, flags=re.S)
+    (org / "ledger-schema.yaml").write_text(stale, encoding="utf-8")
+    (org / "constitution.yaml").write_text("enforcement: {}\n", encoding="utf-8")
+
+    code, out = run("ledger.py", "schema", cwd=str(org))
+    assert code == 1, out
+    assert "correction" in out
+    code, out = run("ledger.py", "schema", "--fix", cwd=str(org))
+    assert code == 0, out
+    # **event_classes が2つになっていないこと** — YAML は後の定義で前を上書きし、
+    # クラス宣言が丸ごと消える（この修復の初版が実際にそれをやった）。
+    fixed = (org / "ledger-schema.yaml").read_text(encoding="utf-8")
+    assert fixed.count("\nevent_classes:") == 1
+    import yaml
+    assert "correction" in yaml.safe_load(fixed)["event_classes"]
+    assert run("ledger.py", "schema", cwd=str(org))[0] == 0      # 差分なしになる

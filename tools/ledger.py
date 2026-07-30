@@ -487,51 +487,127 @@ def schema_digest():
         return hashlib.sha256(f.read()).hexdigest()[:32]
 
 
-def _known_classes():
-    """schema が宣言しているイベントクラス。読めなければ None（呼び側が fail-closed する）。"""
+def load_schema_snapshot():
+    """schema を **1回だけ読み、解析結果と digest を1つの snapshot にする**。
+
+    検証と digest 取得が別々に schema を読むと、その間に差し替えられる（TOCTOU）。
+    lock 内でこの snapshot を1つ作り、検証・digest の両方に同じものを使う。
+
+    返り値: (snapshot, error)。error があれば新規 append を拒否する（fail-closed）。
+    """
     path = _schema_path()
     if not path or not os.path.isfile(path):
-        return None
+        return None, ("ledger-schema.yaml が見つからない。**検証できないまま書かない** — "
+                      "検証済みでないものが validated として台帳に残る方が悪い。")
+    try:
+        with open(path, "rb") as f:
+            raw = f.read()
+    except Exception as e:
+        return None, f"ledger-schema.yaml を読めない: {e}"
     try:
         import yaml
-        with open(path, encoding="utf-8") as f:
-            doc = yaml.safe_load(f) or {}
-    except Exception:
-        return None
+        doc = yaml.safe_load(raw.decode("utf-8")) or {}
+    except Exception as e:
+        return None, f"ledger-schema.yaml を解析できない: {e}"
     ec = doc.get("event_classes")
     if not isinstance(ec, dict):
-        return None
-    return set(ec.keys())
+        return None, "ledger-schema.yaml に event_classes が無い（または map でない）。"
+    v = doc.get("validation") or {}
+    return {
+        "path": path,
+        "digest": hashlib.sha256(raw).hexdigest()[:32],
+        "classes": set(ec.keys()),
+        "fields": {k: set(s.keys()) for k, s in ec.items() if isinstance(s, dict)},
+        "required": v.get("required") or {},
+        "require_any": v.get("require_any") or {},
+        "closed": set(v.get("additional_properties_false") or []),
+        "enums": v.get("enums") or {},
+        "types": v.get("types") or {},
+    }, None
 
 
-def _validate_new_event(cls, payload):
-    """新規 append の検証。**既存イベントには遡って適用しない** — さもないと移行できない。
+def _check_type(name, val):
+    if name == "list":
+        return isinstance(val, list)
+    if name == "int_or_str":
+        return isinstance(val, (int, str)) and not isinstance(val, bool)
+    if name == "int":
+        return isinstance(val, int) and not isinstance(val, bool)
+    if name == "str":
+        return isinstance(val, str)
+    if name == "map":
+        return isinstance(val, dict)
+    return True                       # 未知の型名は検査しない（schema 側の書き間違い）
 
-    返り値は None（通過）か、拒否理由の文字列。
+
+def validate_event(cls, payload, snap):
+    """新規 append の検証。**3つの軸を分けて扱う。**
+
+      1. required を宣言したクラスだけ、必須 field の欠落を拒否
+      2. 宣言済み field は **存在する場合に** enum / 型を検証
+      3. additional_properties_false のクラスだけ、未宣言 field を拒否
+
+    全クラスを一度に closed-world にすると、schema の乖離が「組織全体の記録停止」に変わる。
+    それは fail-closed ではなく、既知の移行不備による可用性事故である。
+
+    返り値: (error, warnings)。error があれば拒否、warnings は記録して通す。
     """
-    known = _known_classes()
-    if known is None:
-        return ("ledger-schema.yaml を読めないので、新規 append の検証ができない。\n"
-                "  **検証できないまま書かない** — 検証済みでないものが validated として"
-                "台帳に残る方が悪い。schema の場所と PyYAML を確認すること。")
-    if cls not in known:
-        near = sorted(k for k in known if k[:4] == cls[:4])
+    if cls not in snap["classes"]:
+        near = sorted(k for k in snap["classes"] if k[:4] == cls[:4])
         return (f"未知のイベントクラス {cls!r}（ledger-schema.yaml の event_classes に無い）。"
                 + (f"\n  近いもの: {', '.join(near)}" if near else "")
                 + "\n  クラスを増やすなら schema に宣言してから書くこと — 宣言の無いクラスは"
-                  "projection にも sensor にも乗らず、書いても読まれない。")
+                  "projection にも sensor にも乗らず、書いても読まれない。"), []
     if not isinstance(payload, dict):
-        return f"payload は map でなければならない（{type(payload).__name__} が来た）。"
-    return None
+        return f"payload は map でなければならない（{type(payload).__name__} が来た）。", []
+
+    given = {k for k in payload if k != "_nk"}
+
+    # ① required（宣言したクラスだけ）
+    req = snap["required"].get(cls) or []
+    missing = [k for k in req if k not in payload or payload[k] in (None, "")]
+    if missing:
+        return (f"{cls} に必須 field が無い: {', '.join(missing)}\n"
+                f"  （ledger-schema.yaml validation.required.{cls}）\n"
+                f"  統制イベントは中身が無ければ検査に使えない — 空の記録は"
+                f"「記録されている」という見た目だけを作る。"), []
+
+    # ①' 相関キー — **どれか1つあればよい。** どれを使うかは経路で違う（union-find で束ねる）。
+    #    1つも無い判定は「何についての判定か分からない」ので、検査に使えない。
+    anyof = snap["require_any"].get(cls) or []
+    if anyof and not any(payload.get(k) not in (None, "") for k in anyof):
+        return (f"{cls} に相関キーが無い: {' / '.join(anyof)} のどれか1つが必要。\n"
+                f"  何についての判定か分からない記録は、検査にも projection にも使えない。"), []
+
+    # ② enum / 型（**存在する場合に**検証する）
+    for f, allowed in (snap["enums"].get(cls) or {}).items():
+        if f in payload and payload[f] not in allowed:
+            return (f"{cls}.{f} = {payload[f]!r} は許された値ではない: "
+                    f"{'|'.join(map(str, allowed))}"), []
+    for f, tname in (snap["types"].get(cls) or {}).items():
+        if f in payload and not _check_type(tname, payload[f]):
+            return (f"{cls}.{f} の型が違う（{tname} を期待、"
+                    f"{type(payload[f]).__name__} が来た）"), []
+
+    # ③ 未宣言 field — 既定は許可し、乖離として記録する
+    declared = snap["fields"].get(cls, set())
+    unknown = sorted(given - declared)
+    if unknown and cls in snap["closed"]:
+        return (f"{cls} に宣言の無い field がある: {', '.join(unknown)}\n"
+                f"  このクラスは additional_properties: false（統制の中核）。"
+                f"field を増やすなら schema に宣言してから書くこと。"), []
+    warns = ([f"{cls} に宣言の無い field: {', '.join(unknown)} — 書けるが、projection にも "
+              f"sensor にも乗らない。schema と実態が乖離している"] if unknown else [])
+    return None, warns
 
 
 
 def _now_iso():
     """writer 側の時刻。**"UNSET" を書かない。**
 
-    受け入れ条件8: timestamp は writer が付ける。クライアントが決められるなら、順序を偽れる。
-    実データには `ts: "UNSET"` のイベントが残っており（不正な timestamp が受理されていた）、
-    窓で絞る view や sensor はそれを黙って落とすか、境界の外に置く。
+    受け入れ条件: timestamp は writer が付ける。クライアントが決められるなら順序を偽れるので、
+    cap の時間窓を迂回できる。実データには `ts: "UNSET"` のイベントが残っており、窓で絞る
+    view や sensor はそれを黙って落とすか、境界の外に置く。
 
     イベント `id` は (seq, class, payload) からのみ導出されるので、ここに時計が入っても
     append の決定性は損なわれない — 同じ論理イベントは同じ id になる。
@@ -565,6 +641,7 @@ class _LedgerLock:
     def __init__(self, root):
         self.path = os.path.join(root, "LOCK")
         self.fh = None
+        self.error = None          # ロックできなかった理由。呼び側が append を止める
 
     def __enter__(self):
         os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
@@ -592,15 +669,24 @@ class _LedgerLock:
 
 
 def _fsync_dir(path):
-    """ディレクトリの fsync。rename の永続化はこれが無いと保証されない。"""
+    """ディレクトリの fsync。rename の永続化はこれが無いと保証されない。
+
+    **失敗を黙らない。** 一部の FS では不可なので append 自体は止めないが、その台帳の
+    durability は best-effort である、と言わないままにしてはいけない — 電源断で HEAD の
+    rename が失われうる状態を「永続化した」と読まれる。
+    """
     try:
         fd = os.open(path, os.O_RDONLY)
         try:
             os.fsync(fd)
         finally:
             os.close(fd)
-    except Exception:
-        pass                     # 一部の FS は不可。落とすほどのことではない
+        return True
+    except Exception as e:
+        print(f"ledger: 注意 — ディレクトリの fsync ができなかった（{e}）。"
+              f"この FS では HEAD の rename の永続化は best-effort である"
+              f"（log 自体は fsync 済みで、HEAD は log から再構築できる）。", file=sys.stderr)
+        return False
 
 
 def _head_from_log(root):
@@ -695,11 +781,7 @@ def cmd_append(a):
             print(f"append: --{k.replace('_', '-')} は受け取らない — schema の版は writer が"
                   f"決める（downgrade 防止）。", file=sys.stderr)
             return 2
-    # 新規 append だけを検証する。既存イベントに遡って適用すると移行できない。
-    bad = _validate_new_event(a.cls, payload)
-    if bad:
-        print(f"append: {bad}", file=sys.stderr)
-        return 2
+
     # ── idempotency (docs/11 §0 reproducibility): if a natural key is given, this event is a
     # RETRY of a logical event that must be counted once. A replayed/re-fired cycle (a hook that
     # re-fires PreToolUse, a resumed session, a crash-retry) must NOT double-append — else the
@@ -717,7 +799,24 @@ def cmd_append(a):
     # 書く → HEAD を更新する、が分かれていると並列 append が同じ seq を計算する
     # （実測: 12並列で12件すべて seq=1）。
     os.makedirs(a.root, exist_ok=True)
-    with _LedgerLock(a.root):
+    with _LedgerLock(a.root) as lk:
+        if lk.error:
+            print(f"append: {lk.error}", file=sys.stderr)
+            return 4
+        # **schema は lock 内で1回だけ読む。** 検証と digest 取得が別々に読むと、その間に
+        # 差し替えられる（TOCTOU）。解析結果と digest を1つの snapshot にして両方に使う。
+        snap, serr = load_schema_snapshot()
+        if serr:
+            print(f"append: {serr}\n"
+                  f"  schema の場所と PyYAML を確認すること。", file=sys.stderr)
+            return 2
+        # 新規 append だけを検証する。既存イベントに遡って適用すると移行できない。
+        bad, warns = validate_event(a.cls, payload, snap)
+        if bad:
+            print(f"append: {bad}", file=sys.stderr)
+            return 2
+        for w in warns:
+            print(f"append: 注意 — {w}", file=sys.stderr)
         # **健全性の検査を先に置く。** `_read_events` は破損で例外を投げるので、そこに入る前に
         # log を検査して、拒否理由を人が読める形で出す。トレースバックは「壊れている」ことを
         # 伝える手段としては弱く、呼び出し側（hook / organ）も扱えない。
@@ -766,14 +865,23 @@ def cmd_append(a):
         eid = "e" + hashlib.sha256(
             f"{seq}:{a.cls}:{json.dumps(payload, sort_keys=True, ensure_ascii=False)}".encode()
         ).hexdigest()[:12]
-        # ts は writer が付ける（受け入れ条件8）。クライアントの --ts は移行のため残すが、
-        # 与えられなければ writer の時計を使う — "UNSET" を書かない。
+        # **ts は writer が付ける。** クライアントが決められるなら順序を偽れるので、cap の
+        # 時間窓を迂回できる。`--ts` は過去の記録を補う backfill のためだけに残し、
+        # **"UNSET" と不正な形は受け取らない** — 窓で絞る view や sensor が黙って落とす。
         ts = a.ts or _now_iso()
+        if not re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", ts):
+            print(f"append: --ts {ts!r} は ISO8601 の UTC 形式ではない"
+                  f"（YYYY-MM-DDTHH:MM:SSZ）。\n"
+                  f"  時刻は writer が付けるので、通常は --ts を渡さないこと。"
+                  f"渡すのは実時点を後から補う backfill のときだけである。\n"
+                  f"  **\"UNSET\" は受け取らない** — 窓で絞る view と sensor が黙って落とし、"
+                  f"cap の時間窓を迂回できる。", file=sys.stderr)
+            return 2
         ev = {"id": eid, "seq": seq, "ts": ts, "actor": a.actor,
               "class": a.cls, "payload": payload,
               "schema_id": "orgforge-ledger",
               "schema_version": LEDGER_SCHEMA_VERSION,
-              "schema_sha256": schema_digest() or "",
+              "schema_sha256": snap["digest"],
               "prev_hash": head["hash"]}
         if a.cls in REQUIRES_PRIOR and not REQUIRES_PRIOR[a.cls](ev, hist):
             why = REQUIRES_PRIOR_WHY.get(a.cls, "a required prior event does not exist")
@@ -802,6 +910,121 @@ def cmd_append(a):
     return 0
 
 
+
+def cmd_schema(a):
+    """org の ledger-schema.yaml とプラグインのテンプレートの差分を診断し、必要なら埋める。
+
+    ## なぜこれが要るか（H8: schema rollout skew）
+
+    org は自分の `ledger-schema.yaml` を持つ（org が自分の形式を所有するため）。プラグインが
+    新しいイベントクラスを増やしても、**org のコピーは古いまま**になる。そこに「宣言の無い
+    クラスは書けない」検査を入れると、**更新直後に org の記録が止まる**。
+
+    実測: ある org の schema はプラグインより4クラス古く、うち2つ（`correction` 12件、
+    `asset_touched` 3件）は実データで使われていた。schema を配らずに検査を入れれば、
+    その org は訂正を書けなくなる。
+
+    **これは fail-closed ではなく、既知の移行不備による可用性事故である。** だから
+    「検査を入れる前に診断できること」「明示的に移行できること」を道具として持つ。
+    """
+    here = os.path.dirname(os.path.abspath(__file__))    # ledger.py はローカルに here を作る流儀
+    plug_p = os.path.join(here, "..", "template", "ledger-schema.yaml")
+    if not os.path.isfile(plug_p):
+        plug_p = os.path.join(here, "template", "ledger-schema.yaml")
+    org_p = _schema_path()
+    if not org_p or not os.path.isfile(org_p):
+        print("org の ledger-schema.yaml が見つからない。", file=sys.stderr)
+        return 2
+    if os.path.abspath(org_p) == os.path.abspath(plug_p):
+        print("この org はプラグインのテンプレートを直接使っている — skew は起こらない。")
+        return 0
+    try:
+        import yaml
+        plug = yaml.safe_load(open(plug_p, encoding="utf-8")) or {}
+        org = yaml.safe_load(open(org_p, encoding="utf-8")) or {}
+    except Exception as e:
+        print(f"schema を解析できない: {e}", file=sys.stderr)
+        return 2
+
+    pc = set((plug.get("event_classes") or {}).keys())
+    oc = set((org.get("event_classes") or {}).keys())
+    missing = sorted(pc - oc)
+    # 実データで使われているか — 使われているものは **記録が止まる** ので緊急度が違う
+    used = set()
+    try:
+        for e in read_events(a.root):
+            used.add(e.get("class"))
+    except Exception:
+        pass
+
+    print(f"org schema : {org_p}")
+    print(f"テンプレート: {plug_p}")
+    print(f"  org {len(oc)} クラス / テンプレート {len(pc)} クラス")
+    if not missing and (org.get("validation") is not None or plug.get("validation") is None):
+        print("  差分なし — この org の schema は最新である。")
+        return 0
+
+    if missing:
+        print(f"\n**org に無いクラス: {len(missing)}**")
+        for c in missing:
+            mark = "  ← 実データで使用中。**このクラスの記録が止まる**" if c in used else ""
+            print(f"    {c}{mark}")
+    if org.get("validation") is None and plug.get("validation") is not None:
+        print("\n**validation ブロックが無い** — required / enum / 型の検証が働かない。")
+
+    if not a.fix:
+        print(f"\n埋めるには --fix を付けて実行すること:\n"
+              f'    python3 "{os.path.join(here, "ledger.py")}" schema --fix\n'
+              f"  **既存の宣言は書き換えない。** 足りないものを足すだけである — org が自分で"
+              f"変えた宣言（実態に合わせた形）を上書きしてはいけない。")
+        return 1
+
+    # ── --fix: 足りないクラスと validation を **追加するだけ** ──────────────
+    src = open(plug_p, encoding="utf-8").read()
+    dst = open(org_p, encoding="utf-8").read()
+    added = []
+    for c in missing:
+        m = re.search(rf"\n((?:  #[^\n]*\n)*  {re.escape(c)}:.*?)(?=\n  [a-z_]+:|\n  # ──|\n[a-z_]+:)",
+                      src, re.S)
+        if not m:
+            print(f"  警告: {c} の宣言をテンプレートから取り出せなかった（手で足すこと）",
+                  file=sys.stderr)
+            continue
+        # event_classes の末尾に足す（既存の宣言には触らない）
+        anchor = "\ntriggers:"
+        if anchor not in dst:
+            print("  警告: 挿入位置（triggers:）が見つからない", file=sys.stderr)
+            break
+        dst = dst.replace(anchor, "\n" + m.group(1).rstrip() + "\n" + anchor, 1)
+        added.append(c)
+    if org.get("validation") is None and plug.get("validation") is not None:
+        m = re.search(r"\n(validation:\n(?:(?:  |\n).*\n)*)", src)
+        if m:
+            dst = dst.replace("\nevent_classes:", "\n" + m.group(1) + "\nevent_classes:", 1)
+            added.append("validation ブロック")
+    # **書く前に、YAML として読めることと event_classes が1つだけであることを確かめる。**
+    # 重複した event_classes は後のものが前を上書きし、**クラス宣言が丸ごと消える**
+    # （実際にこの修復スクリプトの初版がそれをやった）。
+    if dst.count("\nevent_classes:") != 1:
+        print(f"append: 修復後に event_classes が {dst.count(chr(10) + 'event_classes:')} 個ある — "
+              f"書き込まない。YAML は後の定義で前を上書きするので、クラス宣言が丸ごと消える。",
+              file=sys.stderr)
+        return 3
+    try:
+        import yaml as _y
+        chk = _y.safe_load(dst) or {}
+        if len(chk.get("event_classes") or {}) < len(oc):
+            print("append: 修復後のクラス数が減っている — 書き込まない。", file=sys.stderr)
+            return 3
+    except Exception as e:
+        print(f"修復後の schema が YAML として読めない — 書き込まない: {e}", file=sys.stderr)
+        return 3
+    open(org_p, "w", encoding="utf-8").write(dst)
+    print(f"\n足した: {', '.join(added)}\n"
+          f"  既存の宣言は書き換えていない。org が実態に合わせて変えた宣言はそのままである。")
+    return 0
+
+
 def cmd_verify(a):
     """Replay the whole chain from GENESIS — the external watchdog's core primitive. Reports
     the FIRST break (edited line, reordered seq, or forged hash). Exit 1 if the chain is broken."""
@@ -816,6 +1039,7 @@ def cmd_verify(a):
     prev = "GENESIS"
     expect_seq = 1
     validated = legacy = 0
+    vsnap, drift = None, set()
     for ev in events:
         if ev["seq"] != expect_seq:
             print(f"BROKEN: seq gap/disorder at line — expected seq {expect_seq}, got {ev['seq']}",
@@ -839,7 +1063,19 @@ def cmd_verify(a):
                       f"（この writer は v{LEDGER_SCHEMA_VERSION} まで）。"
                       f"新しい版で書かれた台帳を古い道具で読んでいる。", file=sys.stderr)
                 return 1
-            bad = _validate_new_event(ev.get("class"), ev.get("payload"))
+            if vsnap is None:
+                vsnap, verr = load_schema_snapshot()
+                if verr:
+                    print(f"BROKEN: schema を読めないので v{v} の検証ができない — {verr}",
+                          file=sys.stderr)
+                    return 1
+            # **記録時の digest を照合する。** 記録された schema_sha256 と、いま読んでいる
+            # schema の digest が違うなら、形式が入れ替わっている。検証が「いまの schema に
+            # 沿っているか」しか言えないなら、記録時に何で検証したのかは失われる。
+            rec = ev.get("schema_sha256")
+            if rec and rec != vsnap["digest"]:
+                drift.add(rec)
+            bad, _w = validate_event(ev.get("class"), ev.get("payload"), vsnap)
             if bad:
                 print(f"BROKEN: seq {ev['seq']} が v{v} の検証を通らない — {bad}",
                       file=sys.stderr)
@@ -851,6 +1087,12 @@ def cmd_verify(a):
         expect_seq += 1
     if validated or legacy:
         # **2つの保証を混ぜない。** schema 検証済みかと actor 認証済みかは独立した性質である。
+        if drift:
+            print(f"注意: {len(drift)} 種類の schema digest で記録されたイベントがある "
+                  f"（いまの schema は {vsnap['digest'][:12]}…）。\n"
+                  f"  形式が入れ替わっている — 再検証は **いまの schema** に対して行われた。"
+                  f"記録時に何で検証したのかは、その版の schema が無ければ再現できない。",
+                  file=sys.stderr)
         print(f"validation_assurance: validated:v{LEDGER_SCHEMA_VERSION} {validated} 件 / "
               f"legacy_unvalidated {legacy} 件"
               + ("\n  legacy は読めるが、schema 検証済みとしては扱わない"
@@ -1012,6 +1254,11 @@ def main(argv):
     q.add_argument("--class", dest="cls", required=True)
     q.add_argument("--payload", required=True)
     q.add_argument("--ts")
+    s = sub.add_parser("schema",
+                       help="org の schema とテンプレートの差分を診断する（--fix で埋める）")
+    s.add_argument("root", nargs="?", default=None)
+    s.add_argument("--fix", action="store_true", help="足りないクラス／validation を追加する")
+    s.set_defaults(fn=cmd_schema)
     q.add_argument("--natural-key", dest="natural_key",
                    help="idempotency key: if a prior event of this class carries the same key, "
                         "this append is a no-op (docs/11 §0 — replay/retry must count once)")
