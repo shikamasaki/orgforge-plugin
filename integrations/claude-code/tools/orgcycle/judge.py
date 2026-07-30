@@ -14,6 +14,7 @@ import sys
 
 from ._core import (
     HERE,
+    review_subject,
     _agents_dir,
     _events_for,
     _execute,
@@ -129,6 +130,14 @@ def _issue_decision_comments(issue, event):
 def cmd_verify(a):
     """gate / skeptic を起動するための材料を組み立てて印字する。判定はしない。"""
     role = a.role
+    # **記録のためだけに judge を回さない。** subject は git と受け入れ基準から決まるので、
+    # 材料を組む前に答えられる。
+    if getattr(a, "print_subject", False):
+        sid, parts = review_subject(a.issue, role, getattr(a, "phase", None))
+        print(sid)
+        for k, v in parts.items():
+            print(f"  {k:20}= {v or '(なし)'}", file=sys.stderr)
+        return 0
     charter, cpath = _role_charter(role)
     if charter is None:
         print(f"agents/{role}.md が見つからない（探した先: {cpath}）。\n"
@@ -275,11 +284,26 @@ def cmd_verify(a):
                f"gate が refute することも**拒否する** — あなたの独立性は記録の時点で"
                f"機械的に検査される。")
 
+    # **判定対象の同一性を、判定の前に固定する。** judge が subject を書けるなら、別の成果物を
+    # 見た2件を「同じものを見た」と申告して一致を作れる（監査が実証: revision A と B の admit で
+    # joint が生成された）。verify が観測し、judge は運ぶだけ。
+    _sid, _sparts = review_subject(a.issue, role, getattr(a, "phase", None))
+    out.append(f"\n## 判定対象（review_subject_id — **変更しないこと**）\n\n"
+               f"    {_sid}\n\n"
+               + "\n".join(f"    {k:20}= {v or '(なし)'}" for k, v in _sparts.items())
+               + "\n\nこの id は監督が記録に載せる。**あなたが作る値ではない。**"
+                 " 別の血統の judge にも同じ id が渡っており、"
+                 "**2件の id が一致しない限り admission は生成されない** —"
+                 " 別の revision を見た2つの通過は、一致ではない。")
+
     _lineage, _hcfg = _judge_lineage(role)
     # cross-harness では stdout は **判定** の置き場所にする（intake にそのまま渡せる形）。
     # 材料は stderr に回す — 監督が読めることは残す。
     print("\n".join(out), file=sys.stderr if _lineage == "cross-harness" else sys.stdout)
     # 監督向け（stderr）— subagent が返した値を流し込むコマンド。**判定は埋めない。**
+    print(f"\n[review_subject_id] {_sid}\n"
+          f"  記録のときにこの値を --subject に渡すこと。**judge に作らせない。**",
+          file=sys.stderr)
     print(f"\n===== 監督（あなた）が打つコマンド — {role} が返した値を入れる =====\n"
           f'python3 "{os.path.join(HERE, "github_sync.py")}" decide --issue {a.issue} '
           f"--event {ev} \\\n"

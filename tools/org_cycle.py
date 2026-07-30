@@ -67,6 +67,13 @@ def main(argv):
     q = sub.add_parser("verify", help="gate/skeptic を起動する材料を組み立てる（判定はしない）")
     q.add_argument("--issue", required=True, type=int)
     q.add_argument("--role", required=True, choices=("gate", "skeptic"))
+    # phase は review_subject の一部（どのフェーズの判定か）。
+    q.add_argument("--phase", default=None,
+                   help="判定するフェーズ（review_subject_id に入る）")
+    # 記録のためだけに judge を起動させない。cross-harness の org では verify が実際に
+    # headless judge を回すので、subject を知るのに数分待つのは筋が悪い（実測）。
+    q.add_argument("--print-subject", action="store_true",
+                   help="review_subject_id だけを出して終わる（judge は起動しない）")
 
     q = sub.add_parser("touched", help="本番資産への変更を台帳に残す（DDL・権限・インフラ）")
     q.add_argument("--target", required=True, help='何に対してか（例 supabase:<project>）')

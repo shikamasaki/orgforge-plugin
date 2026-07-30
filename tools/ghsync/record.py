@@ -460,34 +460,122 @@ def cmd_provisional(a):
     digest = _reasoning_digest(why, a.evidence, a.alternatives, a.standard, a.risk)
     payload = {"issue": a.issue, "deliverable": str(a.issue), "role": a.role,
                "lineage": a.lineage, "verdict": a.verdict, "for_event": event,
-               "reasoning_sha256": digest}
+               "review_subject_id": a.subject, "reasoning_sha256": digest,
+               # 条件7+8: digest の照合対象を永続化する。台帳に散文は置かないが、
+               # **どこを見れば原文があるか**は残す（Issue コメントの marker）。
+               "reasoning_ref": f"issue:{a.issue}#provisional-{a.lineage}-{digest[:12]}"}
     if getattr(a, "phase", None):
         payload["phase"] = a.phase
     if getattr(a, "risk", None):
         payload["risk_accepted"] = True
 
-    # **同じ血統の二度目は拒否する。** 同じ judge が verdict を書き換えて一致を作れるなら、
-    # 一致の要求は意味を失う（受け入れ条件4: 重複を拒否する）。訂正が必要なら `correction`。
+    # **同じ血統の二度目の扱い。** 0.32.1 は verdict が違うときだけ拒否したので、同じ verdict で
+    # 理由を変えた別の provisional を積めた（監査指摘）。どれと一致したのかが運用次第になる。
+    #   - 完全に同じ再実行（同 subject・同 verdict・同 digest）→ no-op
+    #   - それ以外の再判定 → 拒否。訂正は correction 経由
     prior = _provisional_for(a.issue, event, a.lineage)
-    if prior and prior["verdict"] != a.verdict:
-        print(f"provisional: #{a.issue} の {a.lineage} の判定は既に "
-              f"{prior['verdict']!r}（seq={prior['seq']}）である。\n"
-              f"  **同じ血統が verdict を書き換えて一致を作れてはいけない。**\n"
-              f"  判定が誤りだったなら correction を打つこと（append-only なので消せない）:\n"
+    if prior:
+        same = (prior["verdict"] == a.verdict and prior.get("subject") == a.subject
+                and prior.get("digest") == digest)
+        if same:
+            print(f"provisional: #{a.issue} の {a.lineage} の判定は既に同一内容で "
+                  f"seq={prior['seq']} にある（冪等 no-op）。")
+            return 0
+        what = []
+        if prior["verdict"] != a.verdict:
+            what.append(f"verdict {prior['verdict']!r} → {a.verdict!r}")
+        if prior.get("subject") != a.subject:
+            what.append(f"subject {str(prior.get('subject'))[:12]}… → {a.subject[:12]}…")
+        if prior.get("digest") != digest:
+            what.append("why/evidence が違う")
+        print(f"provisional: #{a.issue} の {a.lineage} には既に判定がある"
+              f"（seq={prior['seq']}）。変わっているのは: {', '.join(what)}\n"
+              f"  **同じ血統が判定を積み替えて一致を作れてはいけない。**\n"
+              f"  先の判定を無効化してから入れ直すこと（append-only なので消せない）:\n"
               f'    python3 "{os.path.join(HERE, "ledger.py")}" append --class correction '
-              f"--actor <あなたの役割> \\\\\n"
-              f'      --payload \'{{"corrects_seq": {prior["seq"]}, "reason": "…"}}\'',
+              f"--actor <あなたの役割> \\\n"
+              f'      --payload \'{{"corrects": [{prior["seq"]}], "kind": "superseded", '
+              f'"corrected_by": "<あなたの役割>", "reason": "<なぜ差し替えるのか>"}}\'\n'
+              f"  kind は probe | mistake | backfill | superseded のいずれか"
+              f"（対象が実判定なら superseded、試験で書いたものなら probe）。",
               file=sys.stderr)
         return 4
 
+    # 冪等キーは **判定の同一性**で作る。`_reasoning_digest` は散文だけを束ねる（tamper
+    # evidence の対象は散文なので正しい）ため、同じ理由で verdict を変えた判定が同一キーに
+    # なってしまう。verdict と subject を含めて、差し替えが no-op に落ちないようにする。
     rc = _ledger_append(a.by or a.role, "verdict_provisional", payload,
-                        f"verdict_provisional-{a.issue}-{a.lineage}-{digest[:12]}")
+                        f"verdict_provisional-{a.issue}-{a.lineage}-{a.verdict}"
+                        f"-{a.subject[:8]}-{digest[:12]}")
     if rc != 0:
         return 4
     print(f"recorded provisional {a.role}={a.verdict} ({a.lineage}) on #{a.issue}.")
+    # **条件8: digest の照合対象を永続化する。** 台帳は reasoning_sha256 しか持たないので、
+    # 散文を Issue に置かないと「後で照合する対象」が存在しない。台帳を先に通してから投影する
+    # （拒否されるなら外に見える記録を作らない — decide と同じ順序）。
+    if not getattr(a, "repo", None):
+        print(f"  注意: GitHub repo が無いので Issue に投影していない。\n"
+              f"  **reasoning_sha256 ={digest[:12]}… の照合対象がどこにも残らない** — "
+              f"台帳は digest しか持たないので、後から散文と突き合わせられない。",
+              file=sys.stderr)
+    else:
+        marker = f"<!-- orgforge:provisional:{a.lineage}:{digest[:12]} -->"
+        parts = [
+            f"### 🧪 verdict_provisional — `{a.verdict}` ({a.lineage})",
+            f"**Judged by:** `{a.role}` / lineage `{a.lineage}`",
+            f"**単独では権威を持たない。** 2血統が同じ対象で一致したときにだけ "
+            f"{event} が生成される。",
+            f"\n**review_subject_id:** `{a.subject}`",
+            f"\n**Why (the reasoning):**\n{why}",
+        ]
+        if (a.evidence or "").strip():
+            parts.append(f"\n**Evidence consulted:**\n{a.evidence}")
+        if (a.alternatives or "").strip():
+            parts.append(f"\n**Alternatives considered:**\n{a.alternatives}")
+        if (a.standard or "").strip():
+            parts.append(f"\n**Standard applied:** {a.standard}")
+        if (a.risk or "").strip():
+            parts.append(f"\n**Known risk accepted:** {a.risk}")
+        parts.append(f"\n`reasoning_sha256: {digest}` — 台帳の receipt が同じ digest を持つ。"
+                     f"再ハッシュが一致しなければ、この記録は書き換えられている。")
+        parts.append(f"\n{marker}")
+        code, out = gh(["issue", "comment", str(a.issue), "--repo", a.repo,
+                        "--body", "\n".join(parts)])
+        if code != 0:
+            print(f"  注意: 台帳には入ったが、Issue に投影できなかった: {out[:300]}\n"
+                  f"  **reasoning_sha256 の照合対象が残っていない。** 同じ引数で再実行すれば、"
+                  f"台帳は冪等 no-op になり Issue だけが埋まる。", file=sys.stderr)
 
+    # **通過でない判定は、そもそも一致を作る話ではない。** park / reject / refuted は片方でも
+    # 出れば否として扱われる（厳しい側に倒す）ので、もう一方を待つ必要も subject を比べる必要も
+    # ない。ここを分けないと park に対して「別の対象を見ている」という無関係な警告が出る（実測）。
     other = "cross-harness" if a.lineage == "same-harness" else "same-harness"
     peer = _provisional_for(a.issue, event, other)
+
+    # 否（park / reject / refuted）は単独で成立する — 相手を待たず、subject も比べない。
+    # ただし **相手が通過していたなら、それは食い違いである**。早期に返して記録を飛ばすと、
+    # 「admit の後から reject が来た」経路で judges_disagreed が残らない（実測で捕まえた）。
+    if a.verdict != pass_v:
+        if peer and peer["verdict"] == pass_v:
+            print(f"\n  ★ 2血統が食い違った — {other}={peer['verdict']}"
+                  f"（seq={peer['seq']}）に対して {a.lineage}={a.verdict}。\n"
+                  f"  **厳しい側に倒す。** admission は生成しない（既にあるなら訂正が必要）。",
+                  file=sys.stderr)
+            _ledger_append(a.by or a.role, "judges_disagreed",
+                           {"issue": a.issue, "role": a.role, "for_event": event,
+                            a.lineage.replace("-", "_"): a.verdict,
+                            other.replace("-", "_"): peer["verdict"]},
+                           f"judges_disagreed-{a.issue}-{event}-{digest[:12]}")
+            ret = 5
+        else:
+            print(f"\n  {a.verdict} は通過ではないので、admission は生成しない"
+                  f"（片方でも否なら否）。")
+            ret = 0
+        print(f"  否として確定させるなら decide で記録すること:\n"
+              f'    python3 "{os.path.join(HERE, "github_sync.py")}" decide --issue {a.issue} '
+              f"--event {event} --verdict {a.verdict} --by {a.role} --why \"…\"",
+              file=sys.stderr if ret else sys.stdout)
+        return ret
     if not peer:
         print(f"\n  もう一方の血統（{other}）の判定はまだ無い。**admission はまだ生成されない。**\n"
               f"  順序は問わない — こちらを先に置いても構わない。\n"
@@ -496,6 +584,24 @@ def cmd_provisional(a):
         return 0
 
     # 2件揃った。**一致だけが admission を生成する。**
+    # **subject が違う2判定は一致させない。** 別の revision を見た2つの通過は一致ではない
+    # （監査実証: revision A の admit と revision B の admit で joint が生成された）。
+    if peer.get("subject") != a.subject:
+        print(f"\n  ★ 2血統が **別の対象** を見ている — admission は生成しない。\n"
+              f"    {a.lineage:14} subject = {a.subject}\n"
+              f"    {other:14} subject = {peer.get('subject') or '(なし)'}\n"
+              f"  base_sha / reviewed_tree_sha / 受け入れ基準のいずれかが違う。"
+              f"**同じものを見ていない2つの通過は、一致ではない。**\n"
+              f"  同じ木で両方を回し直すこと:\n"
+              f'    python3 "{os.path.join(HERE, "org_cycle.py")}" verify '
+              f"--issue {a.issue} --role {a.role}"
+              + (f" --phase {a.phase}" if getattr(a, "phase", None) else "")
+              + (f"\n  （0.32.1 以前の provisional には subject が無い。"
+                 f"その判定は一致に参加できないので、回し直す）"
+                 if not peer.get("subject") else ""),
+              file=sys.stderr)
+        return 6
+
     if peer["verdict"] != a.verdict:
         print(f"\n  ★ 2血統が食い違った — {a.lineage}={a.verdict} / "
               f"{other}={peer['verdict']}（seq={peer['seq']}）。\n"
@@ -513,15 +619,23 @@ def cmd_provisional(a):
               f"--event {event} --verdict {bad} --by {a.role} --why \"…\"", file=sys.stderr)
         return 5
 
-    if a.verdict != pass_v:
-        # 否で一致した。admission は「通した」ときにだけ生成する。
-        print(f"\n  2血統が {a.verdict} で一致した。否は decide でそのまま記録すること。")
-        return 0
-
+    # **両方の reasoning を持ち越す。** 0.32.1 は2件目の digest しか載せず、1件目の
+    # why/evidence が joint から辿れなかった（監査指摘）。joint の reasoning_sha256 は
+    # **2つの digest から決定的に作る** — どちらか一方の digest ではない。
+    mine = _provisional_for(a.issue, event, a.lineage)
+    pair = {a.lineage: {"seq": mine["seq"], "reasoning_sha256": digest,
+                        "reasoning_ref": payload["reasoning_ref"]},
+            other: {"seq": peer["seq"], "reasoning_sha256": peer.get("digest"),
+                    "reasoning_ref": peer.get("ref")}}
+    joint_digest = hashlib.sha256(
+        json.dumps({k: v["reasoning_sha256"] for k, v in sorted(pair.items())},
+                   sort_keys=True).encode("utf-8")).hexdigest()
     joint = {"issue": a.issue, "deliverable": str(a.issue), "verdict": a.verdict,
-             "lineage": "joint", "agreed_by": ["same-harness", "cross-harness"],
-             "from_seqs": sorted([peer["seq"], _provisional_for(a.issue, event, a.lineage)["seq"]]),
-             "reasoning_sha256": digest}
+             "lineage": "joint", "agreed_by": sorted([a.lineage, other]),
+             "review_subject_id": a.subject,
+             "from_seqs": sorted([peer["seq"], mine["seq"]]),
+             "reasoning_by_lineage": pair,
+             "reasoning_sha256": joint_digest}
     if getattr(a, "phase", None):
         joint["phase"] = a.phase
     rc = _ledger_append(a.by or a.role, event, joint,
@@ -536,7 +650,18 @@ def cmd_provisional(a):
 
 
 def _provisional_for(issue, event, lineage):
-    """その Issue・その event・その血統の暫定判定を返す（訂正済みは無視）。"""
+    """その Issue・その event・その血統の **有効な** 暫定判定を返す。
+
+    無効化の扱いは `correction` の kind に従う:
+
+      probe / mistake  — 実判定ではない。`corrected_seqs` が既定で除外する
+      superseded       — 実判定だが後続に置き換えられた。**ここで除外する** —
+                         `corrected_seqs` は superseded を消さない（時系列の解決が扱う領域と
+                         して分けられている）ので、置き換えの解決はこの関数の責任である。
+                         これを見落とすと、案内した correction を打っても判定を差し替えられない
+                         （0.32.1 の実態。append は成功するので効いたように見える）。
+      backfill         — 後から書いた実判定。無効ではない
+    """
     try:
         sys.path.insert(0, HERE)
         from discover import ledger_root
@@ -553,7 +678,7 @@ def _provisional_for(issue, event, lineage):
             evs.append(json.loads(line))
         except Exception:
             continue
-    voided = corrected_seqs(evs)
+    voided = set(corrected_seqs(evs)) | set(corrected_seqs(evs, kinds=("superseded",)))
     want, hit = str(issue).lstrip("#"), None
     for e in evs:
         if e.get("class") != "verdict_provisional" or e.get("seq") in voided:
@@ -561,7 +686,9 @@ def _provisional_for(issue, event, lineage):
         pl = e.get("payload") or {}
         if (str(pl.get("issue", "")).lstrip("#") == want
                 and pl.get("for_event") == event and pl.get("lineage") == lineage):
-            hit = {"verdict": pl.get("verdict"), "seq": e.get("seq"), "actor": e.get("actor")}
+            hit = {"verdict": pl.get("verdict"), "seq": e.get("seq"), "actor": e.get("actor"),
+                   "subject": pl.get("review_subject_id"),
+                   "digest": pl.get("reasoning_sha256"), "ref": pl.get("reasoning_ref")}
     return hit
 
 

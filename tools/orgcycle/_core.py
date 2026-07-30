@@ -3,6 +3,7 @@
 ここに置くのは「どのサブコマンドからも使う」ものだけ。特定のサブコマンド専用の
 ヘルパは、そのサブコマンドのモジュールに置く（core が肥大すると分割の意味が消える）。"""
 
+import hashlib
 import json
 import os
 import re
@@ -312,3 +313,63 @@ def banner():
     if "--json" in sys.argv or os.environ.get("ORG_QUIET"):
         return
     print(f"[orgforge {ver} @ {os.getcwd()}]", file=sys.stderr)
+
+
+def review_subject(issue, role, phase=None, cwd=None):
+    """**判定対象の同一性**を1つの digest に束ねる。`verify` が一度だけ生成する。
+
+    0.32.1 の一致要求は (issue, role, lineage, verdict) だけで一致を判定していた。そのため
+    **同一ハーネスが revision A を admit し、別ハーネスが revision B を admit しても joint が
+    生成された**（監査が実証）。judge が別の成果物を見ていたなら、それは一致ではない。
+
+    束ねるもの:
+
+        issue                その Issue
+        role                 gate か skeptic か（判定の種類）
+        phase                どのフェーズの判定か
+        base_sha             分岐元（何からの差分を見ているのか）
+        reviewed_tree_sha    **実際にレビューされた木**。commit ではなく tree にする —
+                             同じ内容の commit を作り直しても対象は変わらない
+        requirements_digest  受け入れ基準の内容。**基準が変われば別の判定である**
+
+    `dirty` は隠さない。作業ツリーに未コミットの変更があるなら、reviewed_tree_sha は
+    **その時点の index/worktree** を指すべきで、「clean だったふり」をしてはいけない。
+
+    judge にこの値を作らせない。judge が subject を書けるなら、別の成果物を見た2件を
+    「同じものを見た」と申告して一致を作れる。**verify が観測し、judge は運ぶだけ。**
+    """
+    def _git(*args):
+        try:
+            r = subprocess.run(["git", *args], capture_output=True, text=True,
+                               timeout=30, cwd=cwd)
+            return r.stdout.strip() if r.returncode == 0 else ""
+        except Exception:
+            return ""
+
+    tree = _git("rev-parse", "HEAD^{tree}")
+    dirty = ""
+    st = _git("status", "--porcelain")
+    if st:
+        # 未コミットの変更があるなら、その内容も対象の一部である。
+        dirty = hashlib.sha256(
+            (st + "\n" + _git("diff", "HEAD")).encode("utf-8")).hexdigest()[:16]
+    base = ""
+    for ref in ("origin/develop", "develop", "origin/main", "main"):
+        base = _git("merge-base", "HEAD", ref)
+        if base:
+            break
+
+    req_digest = ""
+    for name in ("REQUIREMENTS.md",):
+        p = os.path.join(cwd or ".", name)
+        if os.path.isfile(p):
+            with open(p, "rb") as f:
+                req_digest = hashlib.sha256(f.read()).hexdigest()[:16]
+            break
+
+    parts = {"issue": str(issue), "role": role, "phase": phase or "",
+             "base_sha": base, "reviewed_tree_sha": tree, "dirty": dirty,
+             "requirements_digest": req_digest}
+    sid = hashlib.sha256(
+        json.dumps(parts, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+    return sid, parts

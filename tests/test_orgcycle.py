@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 import pathlib
+import re
 import subprocess
 import sys
 
@@ -1229,10 +1230,11 @@ def _xh_org(tmp_path, lineage="cross-harness"):
     return tmp_path
 
 
-def _prov(tmp_path, lineage, verdict, issue=7, role="gate", why=None, extra=()):
+def _prov(tmp_path, lineage, verdict, issue=7, role="gate", why=None, extra=(),
+          subject="subject-A"):
     return run("github_sync.py", "provisional",
                "--issue", str(issue), "--role", role, "--lineage", lineage,
-               "--verdict", verdict,
+               "--verdict", verdict, "--subject", subject,
                "--why", why or f"{lineage} の {role} として実際に見て決めた。"
                                f"再導出した範囲と、決め手になった箇所を書いている。",
                "--evidence", "実行したコマンドと出力の要旨", *extra,
@@ -1354,8 +1356,173 @@ def test_xh_pass_requires_evidence(tmp_path):
     org = _xh_org(tmp_path)
     code, out = run("github_sync.py", "provisional",
                     "--issue", "7", "--role", "gate", "--lineage", "same-harness",
-                    "--verdict", "admit",
+                    "--verdict", "admit", "--subject", "subject-A",
                     "--why", "十分に長い理由を書いているが evidence が空である場合を試す。",
                     cwd=str(org))
     assert code == 2
     assert "evidence" in out
+
+
+# ══ 0.32.2: 判定対象の同一性と、訂正からの脱出経路 ═════════════════════════════
+# 監査が 0.32.1 で見つけたもの: (a) 案内していた correction の payload 形が実物と違い、
+# 打っても無効化されないので拒否から抜け出せない、(b) 別の revision を見た2判定が一致扱いに
+# なる、(c) joint が片方の reasoning しか持たない、(d) 同じ verdict なら重複を積める。
+#
+# **条件5+6 が核心である** — 0.32.0/0.32.1 で2回、拒否だけ確かめて脱出を確かめなかった。
+
+def test_xh_different_subjects_do_not_agree(tmp_path):
+    """条件3: 別の対象を見た2つの通過は一致ではない。"""
+    org = _xh_org(tmp_path)
+    assert _prov(org, "same-harness", "admit", subject="rev-A")[0] == 0
+    c, o = _prov(org, "cross-harness", "admit", subject="rev-B")
+    assert c == 6, o
+    assert "別の対象" in o
+    assert _events(org, "admission_decided") == []
+
+
+def test_xh_same_subject_agrees(tmp_path):
+    """条件3の対: 同じ対象なら一致し、joint に subject が載る。"""
+    org = _xh_org(tmp_path)
+    assert _prov(org, "same-harness", "admit", subject="rev-A")[0] == 0
+    assert _prov(org, "cross-harness", "admit", subject="rev-A")[0] == 0
+    adm = _events(org, "admission_decided")
+    assert len(adm) == 1
+    assert adm[0]["payload"]["review_subject_id"] == "rev-A"
+
+
+def test_xh_exact_retry_is_noop_but_rejudge_is_refused(tmp_path):
+    """条件4: 完全に同じ再実行だけが no-op。理由を変えた再判定は拒否。"""
+    org = _xh_org(tmp_path)
+    why = "同一性の検査のために、十分な長さの理由をここに書いておく。決め手はこの箇所である。"
+    assert _prov(org, "same-harness", "admit", why=why)[0] == 0
+    # 完全に同じ → no-op（重複して積まれない）
+    c, o = _prov(org, "same-harness", "admit", why=why)
+    assert c == 0, o
+    assert len(_events(org, "verdict_provisional")) == 1
+    # 同じ verdict だが理由が違う → 拒否（0.32.1 はこれを通していた）
+    c, o = _prov(org, "same-harness", "admit",
+                 why="同じ verdict のまま理由だけを差し替えた場合。これは重複として積めてはいけない。")
+    assert c == 4, o
+    assert len(_events(org, "verdict_provisional")) == 1
+
+
+def test_xh_correction_command_shown_actually_works(tmp_path):
+    """条件5+6: 拒否メッセージが案内する correction を **実際に打って、効くこと**。
+
+    0.32.1 は `corrects_seq`/`reason` を案内していたが、実物は `corrects: [seq]`/`kind` を
+    要求する。append は成功するのに無効化されないので、判定を差し替える経路が無かった。
+    エラー文に "correction" が含まれることだけを見るテストでは捕まえられない。
+    """
+    org = _xh_org(tmp_path)
+    assert _prov(org, "same-harness", "reject")[0] == 0
+    c, o = _prov(org, "same-harness", "admit")     # 差し替えを試みる → 拒否
+    assert c == 4
+
+    # 案内された行をそのまま取り出して打つ
+    m = re.search(r"--payload '(\{.*?\})'", o, re.S)
+    assert m, f"correction の payload が案内に含まれていない:\n{o}"
+    payload = m.group(1)
+    code, lout = run("ledger.py", "append", "--class", "correction",
+                     "--actor", "supervisor", "--payload", payload,
+                     cwd=str(org))
+    assert code == 0, f"案内されたコマンドが通らない: {lout}"
+
+    # **効いていること** — 無効化されたので、新しい判定が入る
+    c, o = _prov(org, "same-harness", "admit")
+    assert c == 0, f"correction を打っても差し替えられない:\n{o}"
+    provs = _events(org, "verdict_provisional")
+    assert len(provs) == 2                                  # 元の reject と、新しい admit
+    # そして cross-harness が揃えば joint になる（脱出経路が最後まで通る）
+    assert _prov(org, "cross-harness", "admit")[0] == 0
+    assert len(_events(org, "admission_decided")) == 1
+
+
+def test_xh_joint_carries_both_lineages_reasoning(tmp_path):
+    """条件7: joint が両血統の reasoning_sha256 と ref を持つ。"""
+    org = _xh_org(tmp_path)
+    assert _prov(org, "same-harness", "admit", why="同一ハーネス側の judge の理由。独立に再導出した範囲と、判定の決め手になった箇所を書いている。")[0] == 0
+    assert _prov(org, "cross-harness", "admit", why="別ハーネス側の judge の理由。独立に見た範囲と、判定の決め手になった具体的な箇所を書いている。")[0] == 0
+    pl = _events(org, "admission_decided")[0]["payload"]
+    by = pl["reasoning_by_lineage"]
+    assert set(by) == {"same-harness", "cross-harness"}
+    for lin in by:
+        assert by[lin]["reasoning_sha256"]
+        assert by[lin]["reasoning_ref"]
+        assert by[lin]["seq"]
+    # 両者の digest は異なり、joint の digest はそのどちらでもない（2つから作る）
+    ds = {by[l]["reasoning_sha256"] for l in by}
+    assert len(ds) == 2
+    assert pl["reasoning_sha256"] not in ds
+
+
+def test_review_subject_binds_tree_and_requirements(tmp_path):
+    """review_subject が木と受け入れ基準に依存すること（judge が作れない値であること）。"""
+    sys.path.insert(0, str(TOOLS))
+    from orgcycle._core import review_subject
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    (tmp_path / "a.txt").write_text("one", encoding="utf-8")
+    (tmp_path / "REQUIREMENTS.md").write_text("MUST: A", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
+                    "commit", "-qm", "one"], cwd=tmp_path, check=True)
+    s1, p1 = review_subject(7, "gate", "implement", cwd=str(tmp_path))
+    # 受け入れ基準が変われば別の判定である
+    (tmp_path / "REQUIREMENTS.md").write_text("MUST: A and B", encoding="utf-8")
+    s2, p2 = review_subject(7, "gate", "implement", cwd=str(tmp_path))
+    assert s1 != s2
+    assert p1["requirements_digest"] != p2["requirements_digest"]
+    # role が違えば別の判定である
+    s3, _ = review_subject(7, "skeptic", "implement", cwd=str(tmp_path))
+    assert s3 != s2
+
+
+def test_non_pass_verdict_does_not_enter_agreement(tmp_path):
+    """park / reject は通過ではないので、subject 比較や相手待ちに進まない。
+
+    実測: #34 の park に対して「別の対象を見ている」という無関係な警告が出た。
+    否は片方でも出れば否なので、一致を作る話に入る前に終えるべきである。
+    """
+    org = _xh_org(tmp_path)
+    c, o = _prov(org, "same-harness", "park")
+    assert c == 0, o
+    assert "通過ではない" in o
+    assert "別の対象" not in o
+    assert _events(org, "admission_decided") == []
+
+
+def test_print_subject_does_not_launch_a_judge(tmp_path, monkeypatch):
+    """--print-subject は subject だけ出して終わる（cross-harness でも judge を起動しない）。
+
+    実測: 記録のために subject を知ろうとして verify を打ち、headless judge が走って
+    2分でタイムアウトした。記録の手順が判定の実行を要求してはいけない。
+    """
+    org = _xh_org(tmp_path)
+    subprocess.run(["git", "init", "-q"], cwd=org, check=True)
+    (org / "a.txt").write_text("x", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=org, check=True)
+    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
+                    "commit", "-qm", "x"], cwd=org, check=True)
+    # PATH から codex を外す — 起動しようとしたなら落ちるので、起動していないことが分かる
+    monkeypatch.setenv("PATH", "/nonexistent")
+    code, out = run("org_cycle.py", "verify", "--issue", "7", "--role", "gate",
+                    "--print-subject", cwd=str(org))
+    assert code == 0, out
+    assert re.search(r"^[0-9a-f]{64}$", out.strip().splitlines()[0])
+
+
+@pytest.mark.parametrize("first,second", [("admit", "reject"), ("reject", "admit")])
+def test_xh_disagreement_recorded_in_either_order(tmp_path, first, second):
+    """食い違いは **どちらが先でも** 記録される。
+
+    0.32.2 で park/reject を早期に返すようにしたとき、admit → reject の順では
+    judges_disagreed が残らなくなった。片方の順序だけ確かめると通ってしまう形である。
+    """
+    org = _xh_org(tmp_path)
+    assert _prov(org, "same-harness", first)[0] == 0
+    c, o = _prov(org, "cross-harness", second)
+    assert c == 5, o
+    assert _events(org, "admission_decided") == []
+    dis = _events(org, "judges_disagreed")
+    assert len(dis) == 1, o
+    assert dis[0]["payload"]["same_harness"] == first
+    assert dis[0]["payload"]["cross_harness"] == second

@@ -6,6 +6,47 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 0.32.2
+
+The same independent audit re-ran against 0.32.1: conditions 1, 2, 3, 5, 6 and 7 held, but
+**condition 4 (stale/corrected verdicts) did not**. Four defects, all in the "the check refuses
+correctly but there is no way out" family this project has now hit three times.
+
+### Fixed
+- **The `correction` command printed on rejection did not work.** It named `corrects_seq` / `reason`;
+  the ledger requires `corrects: [seq]` / `kind`. The append succeeded, nothing was invalidated, and
+  the next verdict was still refused — so a rejected lineage could never be replaced. Compounding it,
+  `corrected_seqs` deliberately excludes only `probe`/`mistake`, leaving `superseded` for time-order
+  resolution to handle; `_provisional_for` did not resolve it. Both are fixed, and the test now
+  **executes the printed command and asserts the escape works end to end** (reject → correction →
+  new verdict → joint) rather than asserting the word "correction" appears.
+  The same wrong payload shape was used on this repo's own ledger earlier in the session; that entry
+  has been superseded with a correctly-shaped one.
+- **Verdicts about different artefacts counted as agreement.** Identity was
+  `(issue, role, lineage, verdict)` only, so admitting revision A in one lineage and revision B in
+  the other produced a joint admission. `verify` now generates a `review_subject_id` —
+  a digest of issue, role, phase, base sha, reviewed tree sha, dirty-worktree state and the
+  requirements digest — once, and the judge carries it rather than making it. Two verdicts with
+  different subjects do not agree (exit 6), and pre-0.32.2 verdicts carry no subject, so they
+  cannot participate.
+- **The joint record carried only the second judge's reasoning.** It now holds
+  `reasoning_by_lineage` (seq + digest + a `reasoning_ref` per lineage) and its own digest is derived
+  from both, so neither account can go missing. `provisional` also projects the reasoning onto the
+  Issue, so the digest has something to be checked against; ledger-only orgs are told that it does not.
+- **A lineage could stack another verdict of the same value with different reasoning.** Only an exact
+  retry (same subject, same verdict, same digest) is now a no-op; any other re-judgement is refused
+  and must go through `correction`.
+- `park` / `reject` no longer enter agreement handling at all — a non-pass verdict stands on its own,
+  so it no longer draws an irrelevant "different subject" warning.
+- `verify --print-subject` returns the subject without launching a judge. Obtaining it previously
+  meant running the headless judge (measured: a 2-minute timeout) — a recording step must not require
+  executing a judgement.
+
+### Still not fixed (unchanged from 0.32.1)
+Ledger actor spoofing, unlocked concurrent append, unpersisted organ emits, and the absent halt state
+machine. `lineage` remains evidence that an independent review happened, not an authenticated
+boundary. The authenticated single-writer design is the next change, staged separately.
+
 ## 0.32.1
 
 An independent 4-lens audit (resilience engineering / STPA / adversarial code review / SRE) of

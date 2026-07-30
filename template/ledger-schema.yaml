@@ -116,7 +116,10 @@ event_classes:
                           predicted_outcome, evidence: [ref], issue, reasoning_sha256,
                           lineage: "same-harness|cross-harness|joint — `joint` means generated from two
                                     agreeing verdict_provisional records, not placed by one judge",
-                          agreed_by, from_seqs,
+                          agreed_by, from_seqs, review_subject_id,
+                          reasoning_by_lineage: "per-lineage {seq, reasoning_sha256, reasoning_ref} —
+                                                 the joint digest is derived from BOTH, so neither
+                                                 side's account can go missing",
                           distinct_actor: "actor != the actor of cycle_started/cycle_completed for this candidate" }
   refutation_attempted: { skeptic, claim_id, verdict: refuted|survives, checklist_ref, issue,
                           reasoning_sha256, lineage,
@@ -130,7 +133,12 @@ event_classes:
   # 置き、2件が一致した時点で道具が admission_decided{lineage: joint} を組み立てる。段2で verdict を
   # 作るのは配管であって判断ではない（一致という事実の関数）。**不一致なら道具は admit を作れない。**
   verdict_provisional:  { role: gate|skeptic, lineage: same-harness|cross-harness,
-                          verdict, for_event, issue, deliverable, reasoning_sha256,
+                          verdict, for_event, issue, deliverable, reasoning_sha256, reasoning_ref,
+                          review_subject_id: "digest of (issue, role, phase, base_sha,
+                                              reviewed_tree_sha, dirty, requirements_digest) — generated
+                                              ONCE by `verify`, never by the judge. Two verdicts with
+                                              different subjects looked at different artefacts and
+                                              therefore do NOT agree",
                           authority: "NONE on its own — a single lineage's verdict is material, not a decision",
                           one_per: "(issue, for_event, lineage) — a lineage may not rewrite its verdict to
                                     manufacture agreement; correct via `correction`" }

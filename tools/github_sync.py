@@ -139,6 +139,11 @@ def main(argv):
     pv.add_argument("--lineage", required=True, choices=("same-harness", "cross-harness"))
     pv.add_argument("--verdict", required=True,
                     help="gate: admit|reject|park / skeptic: survives|refuted")
+    # **judge に作らせない値。** verify が観測して出したものをそのまま渡す。
+    # 別の対象を見た2判定を「同じものを見た」と申告して一致を作られないための鍵。
+    pv.add_argument("--subject", required=True,
+                    help="review_subject_id — verify が出した値。judge が作るものではない")
+    pv.add_argument("--repo", help="owner/name（Issue への投影に使う。省略時は自動発見）")
     pv.add_argument("--why", required=True, help="何を見て、どこで決まったか（言い換えは不可）")
     pv.add_argument("--evidence", default="", help="通過させるなら必須 — 参照したもの")
     pv.add_argument("--alternatives", default="")
@@ -211,7 +216,15 @@ def main(argv):
     # provisional は台帳だけに書く（Issue へのコメントは admission が生成されてから）。
     # GitHub remote が無い ledger-only の org でも 2血統の判定は記録できるべきなので、
     # repo 解決より前に返す。
-    if a.cmd == "provisional":
+    # provisional は台帳が主で、Issue への投影は付随（reasoning の照合対象を残すため）。
+    # **ledger-only の org でも2血統の判定は記録できなければならない** — GitHub が無いことを
+    # 理由に判定を落とすと、その org は cross-harness を使えない。repo が無ければ投影を省き、
+    # 「照合対象が残らない」ことを cmd_provisional が言う。
+    if a.cmd == "provisional" and getattr(a, "repo", None) is None:
+        import os as _os
+        sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+        import discover as _d
+        a.repo = _d.backlog_repo()          # 無ければ None のまま進む
         return cmd_provisional(a)
     if getattr(a, "repo", None) is None:
         import os as _os
