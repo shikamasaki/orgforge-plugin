@@ -6,6 +6,7 @@ linking) without touching GitHub. The one thing we assert is that the org builds
 makes the right decisions from their results — the reproducible, testable part."""
 import importlib.util
 import json
+import os
 import pathlib
 import sys
 import pytest
@@ -804,3 +805,226 @@ def test_integration_admitted_passes_after_an_admit(monkeypatch, tmp_path):
     fake = CommentGh(); monkeypatch.setattr(GS, "gh", fake)
     rc = GS.cmd_decide(_cv(issue=42, event="integration_admitted", verdict="pass"))
     assert rc == 0, "admit 済みの統合が弾かれた"
+
+
+# ══ H1 — 判断した主体・記録した主体・確定した主体を分ける ══════════════════════
+# **`actor` は3つを混ぜていた。** 監督が judge の判定を代理で記録する運用では、観測される
+# actor は常に監督なので、actor 同士を比べる職務分離は「監督が監督を承認していない」しか
+# 言えない。decision_by は **検証済み receipt からのみ** 確定する。
+
+import subprocess as _sp
+
+
+def _h1_org(tmp_path):
+    """receipt を検証できる使い捨て org。subject が動かないよう作業ツリーを固定する。"""
+    org = tmp_path / "org"
+    (org / ".orgforge" / "ledger").mkdir(parents=True)
+    (org / ".orgforge" / "trust").mkdir(parents=True)
+    import shutil as _sh
+    _sh.copy(REPO / "template" / "ledger-schema.yaml", org / "ledger-schema.yaml")
+    (org / "constitution.yaml").write_text(
+        "enforcement:\n  judges:\n    lineage: cross-harness\n", encoding="utf-8")
+    (org / "REQUIREMENTS.md").write_text("MUST: A\n", encoding="utf-8")
+    # **台帳と trust store を追跡から外す** — 実行で中身が変わると subject が動き、
+    # receipt と一致しなくなる（review_subject が作業ツリー全体を束ねる設計の帰結）。
+    (org / ".gitignore").write_text(".orgforge/\n", encoding="utf-8")
+    for c in (["init", "-q"], ["config", "user.email", "t@t"], ["config", "user.name", "t"],
+              ["add", "-A"], ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "i"]):
+        _sp.run(["git", *c], cwd=org, check=True, capture_output=True)
+    return org
+
+
+def _h1_env(org):
+    return dict(os.environ, ORG_TRUST_STORE=str(org / ".orgforge" / "trust" / "keys.json"),
+                ORG_LEDGER_ROOT=str(org / ".orgforge" / "ledger"))
+
+
+def _tool(org, script, *args, env=None):
+    return _sp.run([sys.executable, str(REPO / "tools" / script), *args],
+                   cwd=org, capture_output=True, text=True, env=env or _h1_env(org))
+
+
+_H1_WHY = ("gate の判定理由。独立に再導出した範囲と、判定の決め手になった具体的な箇所を"
+           "書いている。")
+
+
+def _h1_setup(tmp_path, keys=(("k-gate", "gate-signer"),)):
+    org = _h1_org(tmp_path)
+    for kid, sid in keys:
+        r = _tool(org, "identity.py", "keygen", "--key-id", kid, "--signer-id", sid)
+        assert r.returncode == 0, r.stdout + r.stderr
+    sys.path.insert(0, str(REPO / "tools"))
+    from orgcycle._core import review_subject
+    from ghsync.record import _reasoning_digest
+    subj = review_subject(7, "gate", "implement", cwd=str(org))[0]
+    dig = _reasoning_digest(_H1_WHY, "見た証跡", "", "", "")
+    import hashlib as _h
+    reqd = _h.sha256((org / "REQUIREMENTS.md").read_bytes()).hexdigest()[:16]
+    return org, subj, dig, reqd
+
+
+def _h1_receipt(org, subj, dig, reqd, key_id="k-gate", role="gate",
+                lineage="same-harness", verdict="admit", issue="7", out="r.json"):
+    r = _tool(org, "identity.py", "receipt", "--org-id", "org-A", "--ledger-id", "led-A",
+              "--subject", subj, "--issue", issue, "--role", role, "--phase", "implement",
+              "--lineage", lineage, "--verdict", verdict, "--requirements-digest", reqd,
+              "--reasoning-sha256", dig, "--issued-at", "2026-07-30T12:00:00Z",
+              "--key-id", key_id)
+    assert r.returncode == 0, r.stdout + r.stderr
+    p = org / out
+    p.write_text(r.stdout.strip(), encoding="utf-8")
+    return p
+
+
+def _h1_prov(org, subj, receipt=None, role="gate", lineage="same-harness",
+             verdict="admit", issue="7", env=None):
+    args = ["provisional", "--issue", issue, "--role", role, "--lineage", lineage,
+            "--verdict", verdict, "--subject", subj, "--why", _H1_WHY,
+            "--evidence", "見た証跡"]
+    if receipt:
+        args += ["--receipt", str(receipt)]
+    return _tool(org, "github_sync.py", *args, env=env)
+
+
+def _h1_events(org, cls="verdict_provisional"):
+    f = org / ".orgforge" / "ledger" / "ledger.jsonl"
+    if not f.exists():
+        return []
+    return [json.loads(l) for l in f.read_text(encoding="utf-8").splitlines()
+            if l.strip() and json.loads(l)["class"] == cls]
+
+
+def test_decision_by_comes_from_a_verified_receipt(tmp_path):
+    """`decision_by` は receipt からのみ。CLI に申告する引数は存在しない。"""
+    org, subj, dig, reqd = _h1_setup(tmp_path)
+    rc = _h1_receipt(org, subj, dig, reqd)
+    r = _h1_prov(org, subj, rc)
+    assert r.returncode == 0, r.stdout + r.stderr
+    pl = _h1_events(org)[0]["payload"]
+    assert pl["decision_by"] == "gate-signer"
+    assert pl["identity_assurance"] == "attested"     # authenticated ではない（共有鍵）
+    assert pl["signer_id"] == "gate-signer" and pl["key_id"] == "k-gate"
+    # CLI で decision_by を申告する経路が無いこと
+    h = _tool(org, "github_sync.py", "provisional", "--help")
+    assert "--decision-by" not in h.stdout
+
+
+def test_recorded_by_is_observed_and_decision_by_survives_proxy_recording(tmp_path):
+    """**代理記録でも判断者の identity は失われない。**
+
+    監督が別 session で記録しても `decision_by` は judge のまま。それが「代理記録と認証は
+    両立する」の中身である。
+    """
+    org, subj, dig, reqd = _h1_setup(tmp_path)
+    rc = _h1_receipt(org, subj, dig, reqd)
+    env = dict(_h1_env(org), ORG_SESSION_ID="supervisor-session-99")
+    r = _h1_prov(org, subj, rc, env=env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    pl = _h1_events(org)[0]["payload"]
+    assert pl["decision_by"] == "gate-signer"          # judge のまま
+    assert pl["recorded_by"] == "session:supervisor-session-99"
+    assert pl["recorder_assurance"] == "observed"
+
+
+def test_receipt_cannot_be_replayed_into_another_judgment(tmp_path):
+    """別の issue / subject / 血統への再利用を拒否する。"""
+    org, subj, dig, reqd = _h1_setup(tmp_path)
+    rc = _h1_receipt(org, subj, dig, reqd)
+    for kw in ({"issue": "9"}, {"lineage": "cross-harness"}, {"verdict": "reject"}):
+        r = _h1_prov(org, subj, rc, **kw)
+        assert r.returncode == 4, f"{kw} で通った: {r.stdout + r.stderr}"
+        assert "一致しない" in (r.stdout + r.stderr)
+    assert _h1_events(org) == []
+
+
+def test_tampering_with_a_receipt_is_refused(tmp_path):
+    """束縛した値を書き換えると署名が合わない。"""
+    org, subj, dig, reqd = _h1_setup(tmp_path)
+    rc = _h1_receipt(org, subj, dig, reqd)
+    d = json.loads(rc.read_text(encoding="utf-8"))
+    d["signer_id"] = "someone-else"
+    rc.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    r = _h1_prov(org, subj, rc)
+    assert r.returncode == 4
+    both = r.stdout + r.stderr
+    assert "署名が一致しない" in both or "一致しない" in both
+
+
+def test_a_revoked_key_is_refused(tmp_path):
+    """失効した鍵の receipt は受け付けない。"""
+    org, subj, dig, reqd = _h1_setup(tmp_path)
+    rc = _h1_receipt(org, subj, dig, reqd)
+    assert _tool(org, "identity.py", "revoke", "--key-id", "k-gate",
+                 "--reason", "検査").returncode == 0
+    r = _h1_prov(org, subj, rc)
+    assert r.returncode == 4
+    assert "失効している" in (r.stdout + r.stderr)
+
+
+def test_unreadable_trust_store_does_not_record_the_judgment(tmp_path):
+    """**読めないことを「信頼できる」と読まない。** 判断の主体を確かめられないなら記録しない。"""
+    org, subj, dig, reqd = _h1_setup(tmp_path)
+    rc = _h1_receipt(org, subj, dig, reqd)
+    env = dict(_h1_env(org), ORG_TRUST_STORE="/nonexistent/keys.json")
+    r = _h1_prov(org, subj, rc, env=env)
+    assert r.returncode == 4
+    assert "trust store" in (r.stdout + r.stderr)
+    assert _h1_events(org) == []
+
+
+def test_without_a_receipt_identity_stays_claimed(tmp_path):
+    """receipt が無ければ `claimed` のまま — **昇格しない。**"""
+    org, subj, dig, reqd = _h1_setup(tmp_path)
+    r = _h1_prov(org, subj, None, role="skeptic", verdict="survives", issue="11")
+    assert r.returncode == 0, r.stdout + r.stderr
+    pl = _h1_events(org)[0]["payload"]
+    assert pl["identity_assurance"] == "claimed"
+    assert pl["decision_by"] == "skeptic"          # legacy actor 相当（申告）
+
+
+def test_same_signer_on_both_lineages_is_not_independent_review(tmp_path):
+    """**署名されていても、同じ signer が両方を作れるなら独立レビューではない。**
+
+    一致は成立するが、`reviewer_independence = same_signer` として記録され、警告される。
+    独立性の証拠として数えてはいけない。
+    """
+    org, subj, dig, reqd = _h1_setup(tmp_path)
+    r1 = _h1_receipt(org, subj, dig, reqd, lineage="same-harness", out="r1.json")
+    r2 = _h1_receipt(org, subj, dig, reqd, lineage="cross-harness", out="r2.json")
+    assert _h1_prov(org, subj, r1, lineage="same-harness").returncode == 0
+    r = _h1_prov(org, subj, r2, lineage="cross-harness")
+    assert r.returncode == 0, r.stdout + r.stderr
+    both = r.stdout + r.stderr
+    assert "同じ signer が両方に署名している" in both
+    adm = _h1_events(org, "admission_decided")
+    assert len(adm) == 1
+    assert adm[0]["payload"]["reviewer_independence"] == "same_signer"
+
+
+def test_distinct_signers_are_recorded_as_independent(tmp_path):
+    """血統ごとに別の signer なら `distinct_signer`。"""
+    org, subj, dig, reqd = _h1_setup(tmp_path,
+                                     keys=(("k-gate", "gate-signer"), ("k-two", "second-signer")))
+    r1 = _h1_receipt(org, subj, dig, reqd, key_id="k-gate", lineage="same-harness", out="r1.json")
+    r2 = _h1_receipt(org, subj, dig, reqd, key_id="k-two", lineage="cross-harness", out="r2.json")
+    assert _h1_prov(org, subj, r1, lineage="same-harness").returncode == 0
+    assert _h1_prov(org, subj, r2, lineage="cross-harness").returncode == 0
+    adm = _h1_events(org, "admission_decided")
+    assert adm and adm[0]["payload"]["reviewer_independence"] == "distinct_signer"
+
+
+def test_separation_of_duties_compares_decision_by_not_recorded_by(tmp_path):
+    """**職務分離は `decision_by` 同士を比べる。** recorded_by を比べると代理記録が全て違反になる。"""
+    sys.path.insert(0, str(REPO / "tools"))
+    import importlib
+    led = importlib.import_module("ledger")
+    hist = [{"class": "cycle_completed", "actor": "supervisor",
+             "payload": {"deliverable": "7", "decision_by": "maker-alice",
+                         "recorded_by": "session:sup"}}]
+    ev = {"class": "admission_decided", "actor": "supervisor",
+          "payload": {"deliverable": "7", "verdict": "admit",
+                      "decision_by": "maker-alice", "recorded_by": "session:sup"}}
+    assert led._distinct_actor_violation(ev, hist), "maker が自分の仕事を admit できている"
+    # 判断者が別なら通る（記録者が同じでも）
+    ev["payload"]["decision_by"] = "gate-signer"
+    assert led._distinct_actor_violation(ev, hist) is None, "代理記録が違反扱いになっている"

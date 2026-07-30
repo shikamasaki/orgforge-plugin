@@ -151,6 +151,11 @@ def main(argv):
     pv.add_argument("--risk", default="")
     pv.add_argument("--phase", default=None)
     pv.add_argument("--by", default=None, help="記録者（既定は --role）")
+    # **judge の署名 receipt。** これがあるときだけ decision_by が確定する（H1）。
+    # ファイルパスか JSON 文字列。CLI で decision_by を申告する引数は **用意しない**。
+    pv.add_argument("--receipt", default=None,
+                    help="判断の receipt（ファイルか JSON）。検証できたときだけ decision_by が "
+                         "attested になる。無ければ claimed のまま — 独立性の強制には使えない")
     pv.set_defaults(fn=cmd_provisional)
 
     q = sub.add_parser("decide")

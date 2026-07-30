@@ -337,13 +337,20 @@ def _distinct_actor_violation(ev, hist):
                 f"  相関キーが無いと maker と gate が同一 actor かを照合できず、この統制は"
                 f"無言で無効になる（{why}）\n"
                 f"  対象の Issue 番号か candidate_id を payload に入れて再実行すること。")
-    actor = ev.get("actor")
+    # **職務分離は `decision_by` 同士を比べる（H1）。** `recorded_by` を比べてはいけない —
+    # 代理記録では常に同じ主体になるので、比べると正当な運用が全て違反になる。
+    # `decision_by` が無い（0.36.x 以前 / receipt 無し）イベントは、legacy の `actor` を
+    # **claimed 属性として**使う。昇格はしない — 比較できることと、認証されていることは別。
+    def _who(e):
+        return (e.get("payload") or {}).get("decision_by") or e.get("actor")
+
+    actor = _who(ev)
     for e in hist:
         if e["class"] not in conflicting:
             continue
         # 識別子は束ねて照合する — 書き手が deliverable で書いても candidate_id で書いても
         # 同じ仕事として相関する（片方しか見ないと、キーを変えた瞬間に統制が消える）。
-        if _same_work(e["payload"], ev["payload"], hist) and e.get("actor") == actor:
+        if _same_work(e["payload"], ev["payload"], hist) and _who(e) == actor:
             shared = sorted(_correlation_ids(e["payload"]) & ids)
             if shared:
                 what = ", ".join(shared)

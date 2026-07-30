@@ -1278,3 +1278,37 @@ def test_release_is_not_implementable_yet(tmp_path):
     assert code == 2
     assert "writer 専用" in out
     assert run("ledger.py", "halt-status", str(tmp_path))[0] == 10   # まだ止まっている
+
+
+def test_schema_has_no_duplicate_top_level_keys():
+    """**YAML は後勝ちなので、重複したトップレベルキーは前を黙って消す。**
+
+    実際に、`identity` ブロックを「`validation:` の直前」に挿入したとき、その `validation:` が
+    説明コメントの見出し行だったため本物と重複し、**検証規則が丸ごと無効になった**
+    （しかも YAML として読めるので気づきにくい）。docs/11 の「修復が壊すのは最悪の形」の再演。
+    """
+    for f in (TEMPLATE / "ledger-schema.yaml",
+              REPO / "integrations" / "claude-code" / "template" / "ledger-schema.yaml",
+              REPO / "integrations" / "codex" / "template" / "ledger-schema.yaml"):
+        if not f.is_file():
+            continue
+        keys = [l.split(":")[0] for l in f.read_text(encoding="utf-8").splitlines()
+                if l and not l[0].isspace() and ":" in l and not l.startswith("#")]
+        dupes = sorted({k for k in keys if keys.count(k) > 1})
+        assert not dupes, f"{f.name} にトップレベルキーの重複: {dupes}"
+
+
+def test_identity_declares_four_separate_assurance_axes():
+    """**assurance を単一の強弱値に潰さない。**
+
+    署名されていても、同じ process / 同じ鍵が両方の血統を作れるなら独立レビューではない。
+    """
+    import yaml
+    d = yaml.safe_load((TEMPLATE / "ledger-schema.yaml").read_text(encoding="utf-8"))
+    ax = d["identity"]["assurance_axes"]
+    assert set(ax) == {"identity_assurance", "recorder_assurance",
+                       "workload_isolation", "reviewer_independence"}
+    assert "authenticated" in ax["identity_assurance"]
+    assert "claimed" in ax["identity_assurance"]
+    # legacy actor は claimed のまま昇格しない
+    assert d["identity"]["legacy_actor"] == "claimed"

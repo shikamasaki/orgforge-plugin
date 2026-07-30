@@ -458,9 +458,44 @@ def cmd_provisional(a):
 
     event = {"gate": "admission_decided", "skeptic": "refutation_attempted"}[a.role]
     digest = _reasoning_digest(why, a.evidence, a.alternatives, a.standard, a.risk)
+
+    # ── identity（H1）─────────────────────────────────────────────────────
+    # **`decision_by` は検証済み receipt からのみ設定する。** CLI で申告できるなら、誰の判断
+    # とでも言える。receipt が無ければ `claimed` のままにし、**独立性の強制には使わない**。
+    # `recorded_by` は観測する（代理記録を許す — judge が直接書く必要は無い）。
+    sys.path.insert(0, HERE)
+    from identity import (verify_receipt, observed_recorder, PROTOCOL_VERSION)
+    decision_by, ident = None, {"identity_assurance": "claimed"}
+    if getattr(a, "receipt", None):
+        try:
+            rc = json.loads(open(a.receipt, encoding="utf-8").read()) \
+                if os.path.isfile(a.receipt) else json.loads(a.receipt)
+        except Exception as e:
+            print(f"provisional: --receipt を読めない（{e}）。", file=sys.stderr)
+            return 2
+        expect = {"review_subject_id": a.subject, "issue": a.issue, "role": a.role,
+                  "lineage": a.lineage, "verdict": a.verdict,
+                  "reasoning_sha256": digest}
+        decision_by, ident, rerr = verify_receipt(rc, expect)
+        if rerr:
+            print(f"provisional: receipt を検証できないので判定を記録しない — {rerr}\n"
+                  f"  **判断の主体を確かめられないなら、その判断として記録しない。**\n"
+                  f"  receipt 無しで記録するなら --receipt を外すこと（その場合 decision_by は"
+                  f"`claimed` になり、独立性の強制には使えない）。", file=sys.stderr)
+            return 4
+    recorded_by, rec_assurance = observed_recorder()
     payload = {"issue": a.issue, "deliverable": str(a.issue), "role": a.role,
                "lineage": a.lineage, "verdict": a.verdict, "for_event": event,
                "review_subject_id": a.subject, "reasoning_sha256": digest,
+               # **3つの主体を分ける（H1）。** decision_by は receipt からのみ。
+               # recorded_by は観測（代理記録を許す）。committed_by は writer が付ける。
+               "decision_by": decision_by or (a.by or a.role),
+               "recorded_by": recorded_by,
+               "identity_assurance": ident.get("identity_assurance", "claimed"),
+               "recorder_assurance": rec_assurance,
+               "workload_isolation": ident.get("workload_isolation", "none"),
+               **({"signer_id": ident["signer_id"], "key_id": ident["key_id"]}
+                  if ident.get("signer_id") else {}),
                # 条件7+8: digest の照合対象を永続化する。台帳に散文は置かないが、
                # **どこを見れば原文があるか**は残す（Issue コメントの marker）。
                "reasoning_ref": f"issue:{a.issue}#provisional-{a.lineage}-{digest[:12]}"}
@@ -630,8 +665,30 @@ def cmd_provisional(a):
     joint_digest = hashlib.sha256(
         json.dumps({k: v["reasoning_sha256"] for k, v in sorted(pair.items())},
                    sort_keys=True).encode("utf-8")).hexdigest()
+    # **独立性は別軸である（H1）。** 署名されていても、同じ signer / 同じ鍵が両方の血統を
+    # 作れるなら独立レビューではない。一致は成立するが、**その一致が何を意味するか**は変わる。
+    from identity import reviewer_independence
+    mine_assurance = {"signer_id": ident.get("signer_id"), "key_id": ident.get("key_id"),
+                      "workload_isolation": ident.get("workload_isolation") or "none",
+                      "identity_assurance": ident.get("identity_assurance") or "claimed"}
+    independence = reviewer_independence(decision_by, mine_assurance, peer.get("assurance"))
+    if independence == "same_signer" and mine_assurance.get("signer_id"):
+        print(f"\n  ★ 2血統が一致したが、**同じ signer が両方に署名している**"
+              f"（{mine_assurance['signer_id']}）。\n"
+              f"  署名されていても、同じ鍵が両方の血統を作れるなら **独立レビューではない**。\n"
+              f"  admission は生成するが、reviewer_independence = same_signer として記録する —\n"
+              f"  **独立性の証拠として数えないこと。** 血統ごとに別の signer を使うか、\n"
+              f"  Authenticated Mode（隔離 writer / 鍵の保護）を待つこと。", file=sys.stderr)
     joint = {"issue": a.issue, "deliverable": str(a.issue), "verdict": a.verdict,
              "lineage": "joint", "agreed_by": sorted([a.lineage, other]),
+             "reviewer_independence": independence,
+             "decision_by": f"system:joint({decision_by or (a.by or a.role)},"
+                            f"{peer.get('decision_by') or '?'})",
+             "recorded_by": recorded_by,
+             "identity_assurance": min(
+                 (mine_assurance.get("identity_assurance") or "claimed",
+                  (peer.get("assurance") or {}).get("identity_assurance") or "claimed"),
+                 key=lambda x: ["claimed", "observed", "attested", "authenticated"].index(x)),
              "review_subject_id": a.subject,
              "from_seqs": sorted([peer["seq"], mine["seq"]]),
              "reasoning_by_lineage": pair,
@@ -688,7 +745,12 @@ def _provisional_for(issue, event, lineage):
                 and pl.get("for_event") == event and pl.get("lineage") == lineage):
             hit = {"verdict": pl.get("verdict"), "seq": e.get("seq"), "actor": e.get("actor"),
                    "subject": pl.get("review_subject_id"),
-                   "digest": pl.get("reasoning_sha256"), "ref": pl.get("reasoning_ref")}
+                   "digest": pl.get("reasoning_sha256"), "ref": pl.get("reasoning_ref"),
+                   # identity（H1）— 独立性の判定に使う
+                   "decision_by": pl.get("decision_by"),
+                   "assurance": {"signer_id": pl.get("signer_id"), "key_id": pl.get("key_id"),
+                                 "workload_isolation": pl.get("workload_isolation") or "none",
+                                 "identity_assurance": pl.get("identity_assurance") or "claimed"}}
     return hit
 
 

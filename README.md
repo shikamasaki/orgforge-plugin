@@ -182,7 +182,7 @@ operation, not as unattended production control.**
 
 ## Status & honesty
 
-v0.36.0. This is a **framing + template**, distilled from published organizational theory and the
+v0.37.0. This is a **framing + template**, distilled from published organizational theory and the
 current agent-engineering literature. The parts (principal-agent theory, harness/loop engineering,
 runtime substrates like AIOS, automated agent design like ADAS/DGM) already exist; the contribution
 here is **the top-down organizational decomposition that places them** — and, per the research in

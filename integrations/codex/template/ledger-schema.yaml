@@ -31,7 +31,37 @@ envelope:
 # 「組織全体の記録停止」に変わる — それは fail-closed ではなく、既知の移行不備による
 # 可用性事故である。
 #
-#   validation:
+#   # ── Identity: 3つの主体と、4つの独立した保証軸（H1）─────────────────────────
+# **`actor` は3つの概念を混ぜていた。** 判断した主体、記録した主体、確定した主体は別物である。
+# 監督が gate の判定を代理で記録する運用（実際の運用形）では、観測される actor は常に監督に
+# なるので、`actor` 同士を比べる職務分離は「監督が監督を承認していない」しか言えなくなる。
+#
+#   decision_by    判断を形成した principal。**署名 receipt からのみ確定する。**
+#                  CLI の自己申告では設定できない — 申告できるなら、誰の判断とでも言える。
+#   recorded_by    判断を転記・提出した principal。hook / session から **観測** する。
+#                  代理記録を許す（judge が直接 append する必要は無い）。
+#   committed_by   台帳に確定させた writer の principal。**隔離された writer が自分で付ける。**
+#
+# **職務分離は `decision_by` 同士だけを比べる。** `recorded_by` を比べてはいけない —
+# 代理記録では常に同じ主体になるので、比べると正当な運用が全て違反になる。
+#
+# ## 保証は単一の強弱値ではない
+#
+# 4つを別の軸として持つ。潰すと「署名されているから独立している」という誤読を生む —
+# **同じ process、あるいは同じ鍵が両方の血統を作れるなら、独立レビューではない。**
+identity:
+  assurance_axes:
+    identity_assurance:    [claimed, observed, attested, authenticated]
+    recorder_assurance:    [claimed, observed]
+    workload_isolation:    [none, separate_process, separate_uid, separate_host]
+    reviewer_independence: [same_signer, distinct_signer, distinct_workload]
+  # Compatibility Mode: decision_by は receipt が無ければ `claimed` のまま。
+  #   → 独立レビューが **行われた証拠**にはなるが、**独立性の強制には使えない**。
+  # Authenticated Mode: 隔離 writer + 限定された経路 + 鍵の保護 + principal ごとの認可が
+  #   揃って初めて `authenticated` と呼ぶ。**別プロセスで問い合わせることは信頼境界ではない** —
+  #   同じ利用者が writer や鍵を差し替えられる限り、認証済みではない。
+  legacy_actor: claimed    # 0.36.x 以前の `actor` は claimed 属性として保持し、昇格させない
+
 #     required: [..]                  宣言したクラスだけ、必須 field の欠落を拒否
 #     <field>: a|b|c                  宣言済み field は **存在する場合に** enum / 型を検証
 #     additional_properties: false    厳格化したいクラスだけ、未宣言 field を拒否
@@ -238,6 +268,9 @@ event_classes:
   # the gate. Without it a maker could self-admit and the chain would launder the forgery.
   admission_decided:    { gate, candidate_id, verdict: admit|reject|park, standard_ref,
                           predicted_outcome, evidence: [ref], issue, reasoning_sha256,
+                          decision_by, recorded_by, committed_by,
+                          identity_assurance, recorder_assurance, workload_isolation,
+                          reviewer_independence, signer_id, key_id,
                           lineage: "same-harness|cross-harness|joint — `joint` means generated from two
                                     agreeing verdict_provisional records, not placed by one judge",
                           agreed_by, from_seqs, review_subject_id,
@@ -248,6 +281,22 @@ event_classes:
   refutation_attempted: { skeptic, claim_id, verdict: refuted|survives, checklist_ref, issue,
                           reasoning_sha256, lineage,
                           distinct_actor: "actor != the maker's and != the admitting gate's" }
+  # ── 判断の receipt（H1）─────────────────────────────────────────────────────
+  # judge が自分の判断に署名したもの。**監督はこれを運ぶだけ**で、判断者の identity は失われない。
+  # したがって「代理記録」と「認証」は両立する — 必要なのは judge による直接の追記ではなく、
+  # **改変不能な判断 receipt** である。
+  #
+  # receipt は下の全てを束縛する。**別の org・別の subject・別の血統への再利用は拒否する** —
+  # 束縛していない値は、後から差し替えられる。
+  judgment_receipt:     { receipt_id, org_id, ledger_id, review_subject_id,
+                          issue, role, phase, lineage, verdict,
+                          requirements_digest, reasoning_sha256,
+                          signer_id, key_id, issued_at,
+                          schema_version, protocol_version, signature,
+                          authority: "decision_by is set from a VERIFIED receipt only — never from a
+                                      CLI flag. A receipt bound to another org/subject/lineage is
+                                      refused, so it cannot be replayed into a different judgment." }
+
   # ── judge の血統（スイスチーズ層。docs/03 §3, docs/11）──────────────────────
   # 同一ハーネスの subagent は親のモデルを継ぐので、`role-settings.yaml` が別系統を宣言しても
   # 血統は分かれない。constitution の `enforcement.judges.lineage: cross-harness` を宣言した org は
@@ -258,6 +307,10 @@ event_classes:
   # 作るのは配管であって判断ではない（一致という事実の関数）。**不一致なら道具は admit を作れない。**
   verdict_provisional:  { role: gate|skeptic, lineage: same-harness|cross-harness,
                           verdict, for_event, issue, deliverable, reasoning_sha256, reasoning_ref,
+                          decision_by, recorded_by, committed_by,
+                          identity_assurance, recorder_assurance, workload_isolation,
+                          signer_id, key_id,
+
                           review_subject_id: "digest of (issue, role, phase, base_sha,
                                               reviewed_tree_sha, dirty, requirements_digest) — generated
                                               ONCE by `verify`, never by the judge. Two verdicts with
@@ -268,6 +321,10 @@ event_classes:
                                     manufacture agreement; correct via `correction`" }
   judges_disagreed:     { issue, deliverable, role, for_event,
                           same_harness: verdict, cross_harness: verdict,
+                          decision_by, recorded_by, committed_by,
+                          identity_assurance, recorder_assurance, workload_isolation,
+                          signer_id, key_id,
+
                           note: "NOT an anomaly — this is the POINT of separating lineage. Never deleted;
                                  counted. Whichever side says no, stands (the strict side wins)." }
   # ── SDLC phase mold (docs/11) — the forced, non-skippable phase chain, reproducibility's spine ──

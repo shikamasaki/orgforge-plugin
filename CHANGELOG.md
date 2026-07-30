@@ -6,6 +6,57 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 0.37.0 — H1: three principals, four assurance axes (Compatibility Mode)
+
+`actor` conflated three things: who formed the judgment, who transcribed it, and who committed it.
+In the real operating pattern the supervisor records a judge's verdict, so the observed actor is
+always the supervisor — and separation of duties comparing `actor` to `actor` could only ever say
+"the supervisor did not approve the supervisor".
+
+### Added
+- **Three principals, recorded separately.**
+  `decision_by` is set **only from a verified receipt** — there is no CLI flag for it, because a flag
+  means claiming to be anyone. `recorded_by` is *observed* from the session (proxy recording is
+  fine — a judge need not append its own verdict). `committed_by` is the writer's own principal.
+- **Separation of duties now compares `decision_by`**, never `recorded_by`. Comparing the recorder
+  would make every legitimate proxy recording a violation.
+- **`tools/identity.py`** — `keygen` / `revoke` / `receipt`. A judge signs its own judgment; the
+  supervisor merely carries it. The receipt binds org, ledger, review subject, issue, role, phase,
+  lineage, verdict, requirements digest, reasoning digest, signer, key, issue time and both versions.
+  A receipt bound to a different org / subject / lineage / issue **cannot be replayed**.
+- **Four assurance axes, deliberately not collapsed** into one strong/weak value:
+  `identity_assurance`, `recorder_assurance`, `workload_isolation`, `reviewer_independence`.
+  Collapsing them invites reading "it's signed" as "it's independent".
+- **Agreement across lineages now records `reviewer_independence`.** When the same signer signed both
+  lineages the joint admission is still generated, but it is marked `same_signer` and warns:
+  **a signature does not make two lineages independent if one key can produce both.**
+
+### What this is NOT
+This is **Compatibility Mode**. The trust store holds shared HMAC secrets, so whoever can verify can
+also sign, and the same user can replace the writer or the keys. Therefore `identity_assurance`
+reaches `attested` and **never `authenticated`**, and legacy `actor` values stay `claimed` — they are
+not promoted. Asking a separate process (0.36.0) prevents a `SystemExit` from propagating; **it is not
+a trust boundary.** `authenticated` is earned only with an isolated writer, a restricted channel,
+protected keys and per-principal authorization.
+
+**Compatibility Mode results are evidence that an independent review happened. They must not be used
+to enforce independence.**
+
+### Acceptance tests
+Same signer on both lineages, receipt replay, subject tampering, a revoked key, proxy recording, and
+an unreadable trust store — each is a test, and each was run against a live org first.
+
+### Fixed
+- Inserting the `identity` block before `validation:` landed it before a **comment heading** that read
+  `validation:`, producing two top-level `validation` keys — and YAML's later-wins rule silently
+  dropped every validation rule while still parsing. The same failure mode docs/11 already records
+  ("a repair that breaks things is the worst shape"), repeated. A test now fails on any duplicate
+  top-level key in the schema.
+
+### Next
+H4b: authenticated release of a halt — an approver independent of whoever tripped it, which needs
+identity to be authenticated rather than attested.
+
 ## 0.36.0 — H4a: a halt that actually stops things
 
 `halt_tripped` existed in the schema and was displayed on the board. **Nothing enforced it** — the
