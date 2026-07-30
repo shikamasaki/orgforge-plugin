@@ -521,6 +521,7 @@ def load_schema_snapshot():
         "required": v.get("required") or {},
         "require_any": v.get("require_any") or {},
         "closed": set(v.get("additional_properties_false") or []),
+        "writer_only": set(v.get("writer_only") or []),
         "enums": v.get("enums") or {},
         "types": v.get("types") or {},
     }, None
@@ -537,12 +538,18 @@ def _check_type(name, val):
         return isinstance(val, str)
     if name == "map":
         return isinstance(val, dict)
+    if name == "number":
+        # bool は int の subclass なので除く。NaN / inf は「数」として扱わない —
+        # 合計に混ぜると比較が壊れ、上限の判定が意味を失う。
+        if isinstance(val, bool) or not isinstance(val, (int, float)):
+            return False
+        return val == val and val not in (float("inf"), float("-inf"))
     # **未知の型名は通さない。** 黙って True を返すと、schema の typo が「検査の無効化」になる —
     # `list` を `lst` と書いた瞬間にその検査が消え、消えたことに気づく経路が無い。
     return None                       # 呼び側が「schema 側の誤り」として拒否する
 
 
-def validate_event(cls, payload, snap):
+def validate_event(cls, payload, snap, writer_op=None):
     """新規 append の検証。**3つの軸を分けて扱う。**
 
       1. required を宣言したクラスだけ、必須 field の欠落を拒否
@@ -562,6 +569,15 @@ def validate_event(cls, payload, snap):
                   "projection にも sensor にも乗らず、書いても読まれない。"), []
     if not isinstance(payload, dict):
         return f"payload は map でなければならない（{type(payload).__name__} が来た）。", []
+
+    # **writer 専用のクラスは、その writer 操作からしか書けない。** 検査に使う記録を通常の
+    # append で書けると、検査そのものが無効になる（実測: 負の曝露を1件入れると上限が消えた）。
+    if cls in snap["writer_only"] and writer_op != cls:
+        return (f"{cls} は writer 専用のクラスで、generic append では書けない"
+                f"（ledger-schema.yaml validation.writer_only）。\n"
+                f"  検査に使う記録は、検査する側だけが書ける必要がある — この記録を自由に"
+                f"書けると、検査そのものが無効になる。\n"
+                f"  上限の予約なら `ledger.py reserve-exposure` を使うこと。"), []
 
     given = {k for k in payload if k != "_nk"}
 
@@ -841,6 +857,14 @@ def cmd_append(a):
     # `schema_enforcement_started` のような「スキーマ境界そのものを記録する」イベントが
     # payload に持って自然な値で、downgrade の的にはならない（版ではないので）。
     # 禁止を広く取りすぎると、記録したい事実が書けなくなる（実際に自分の epoch 記録が弾かれた）。
+    # **`_nk` は payload に書かせない。** 冪等キーは道具が付ける印であって、caller が名指しする
+    # ものではない。名指しできると、既存の記録と同じキーを主張して no-op を作れる
+    # （＝書いたつもりで書かれていない、あるいは他人の記録を自分のものとして読ませる）。
+    if isinstance(payload, dict) and "_nk" in payload:
+        print("append: payload に '_nk' を含めてはいけない — 冪等キーは道具が付ける。"
+              "caller が名指しできると、既存の記録と同じキーを主張して no-op を作れる。",
+              file=sys.stderr)
+        return 2
     for k in ("schema_version", "schema_sha256"):
         if isinstance(payload, dict) and k in payload:
             print(f"append: payload に {k!r} を含めてはいけない — schema の版は writer が"
@@ -881,7 +905,7 @@ def cmd_append(a):
                   f"  schema の場所と PyYAML を確認すること。", file=sys.stderr)
             return 2
         # 新規 append だけを検証する。既存イベントに遡って適用すると移行できない。
-        bad, warns = validate_event(a.cls, payload, snap)
+        bad, warns = validate_event(a.cls, payload, snap)   # writer_op なし = writer 専用は拒否
         if bad:
             print(f"append: {bad}", file=sys.stderr)
             return 2
@@ -1266,7 +1290,31 @@ def cmd_reserve_exposure(a):
                              ensure_ascii=False))
             return 3
 
-    nk = f"reserve|{a.session_id}|{a.tool_use_id}|{a.rule}|exposure_budget_checked"
+    # **入力の検証を先に。** 負・NaN・inf の delta は上限の判定を壊す（負なら合計を減らせる）。
+    for name, val, ok in (
+            ("--delta", a.delta, lambda v: v == v and v > 0 and v != float("inf")),
+            ("--cap", a.cap, lambda v: v == v and v >= 0 and v != float("inf"))):
+        try:
+            if not ok(float(val)):
+                raise ValueError
+        except (TypeError, ValueError):
+            print(json.dumps({"decision": "deny", "reason": "invalid_request",
+                              "detail": f"{name}={val!r} は使えない。delta は有限かつ正、"
+                                        f"cap は有限かつ非負でなければならない — 負や NaN を"
+                                        f"通すと合計を減らして上限を迂回できる。"},
+                             ensure_ascii=False))
+            return 3
+
+    # 冪等キーは **canonical tuple の hash**。区切り文字で連結すると、値に区切り文字が
+    # 入ったときに別のキーと衝突する（"a|b" + "c" と "a" + "b|c" が同じになる）。
+    nk = "reserve:" + hashlib.sha256(json.dumps(
+        ["exposure_budget_checked", a.session_id, a.tool_use_id, a.rule],
+        ensure_ascii=False, separators=(",", ":")).encode("utf-8")).hexdigest()[:32]
+    # 要求内容の digest。**同じキーで内容が違う要求は再実行ではない。**
+    req_digest = hashlib.sha256(json.dumps(
+        {"dimension": a.dimension, "delta": float(a.delta), "cap": float(a.cap),
+         "window_since": a.window_since or "", "actor": a.actor},
+        sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")).hexdigest()[:32]
     os.makedirs(a.root, exist_ok=True)
     with _LedgerLock(a.root) as lk:
         if lk.error:
@@ -1301,6 +1349,20 @@ def cmd_reserve_exposure(a):
             if (e.get("payload") or {}).get("_nk") != nk:
                 continue
             prior = e["payload"]
+            # **exact retry だけが再実行である。** 同じキーで内容が違う要求を通すと、
+            # delta=1 の allow を根拠に delta=100 が通る（実測でそうなった）。
+            if prior.get("request_digest") != req_digest:
+                print(json.dumps(
+                    {"decision": "deny", "reason": "idempotency_key_reused_with_different_request",
+                     "detail": f"同じ冪等キー（session/tool_use/rule）が seq={e.get('seq')} で"
+                               f"別の要求に使われている。dimension / delta / cap / window / actor の"
+                               f"どれかが違う要求は再実行ではない。",
+                     "prior": {"dimension": prior.get("dimension"),
+                               "delta_requested": prior.get("delta_requested"),
+                               "cap": prior.get("cap")},
+                     "now": {"dimension": a.dimension, "delta": a.delta, "cap": a.cap}},
+                    ensure_ascii=False))
+                return 3
             print(json.dumps({"decision": prior.get("decision"), "reason": "idempotent_replay",
                               "seq": e.get("seq"), "committed_so_far": prior.get("committed_so_far"),
                               "delta_requested": prior.get("delta_requested"),
@@ -1323,7 +1385,11 @@ def cmd_reserve_exposure(a):
             if a.window_since and str(e.get("ts", "")) < a.window_since:
                 continue
             try:
-                committed += float(p.get("delta_requested") or 0)
+                dv = float(p.get("delta_requested"))
+                # **負・NaN・inf の過去の曝露を数えない。** 数えると合計を減らせる／比較が壊れる。
+                if not (dv == dv) or dv < 0 or dv in (float("inf"), float("-inf")):
+                    raise ValueError(f"delta_requested={dv!r}")
+                committed += dv
             except (TypeError, ValueError):
                 # 壊れた曝露記録は 0 として数えず、**deny する** — 合計が実際より小さく見える。
                 print(json.dumps({"decision": "deny", "reason": "malformed_prior_exposure",
@@ -1339,9 +1405,10 @@ def cmd_reserve_exposure(a):
                    "actor_role": a.actor, "decision": decision,
                    "caused_by_event": a.caused_by,
                    "session_id": a.session_id, "tool_use_id": a.tool_use_id, "rule": a.rule,
-                   "_nk": nk}
+                   "request_digest": req_digest, "_nk": nk}
 
-        bad, warns = validate_event("exposure_budget_checked", payload, snap)
+        bad, warns = validate_event("exposure_budget_checked", payload, snap,
+                                    writer_op="exposure_budget_checked")
         if bad:
             print(json.dumps({"decision": "deny", "reason": "schema_rejected",
                               "detail": bad}, ensure_ascii=False))
@@ -1360,10 +1427,19 @@ def cmd_reserve_exposure(a):
         ev["hash"] = _hash(head["hash"], ev)
 
         log, headp = _paths(a.root)
+        # 途中で失敗したら、書いた分を切り戻す位置。**deny したのに曝露が残る**と、次の予約が
+        # それを数える（過大計上）。それは安全側だが正確ではなく、上限が実際より早く尽きる。
+        prior_size = os.path.getsize(log) if os.path.exists(log) else 0
         try:
+            # 故障注入。**書けなかったら allow にならない**ことを検査できなければ、
+            # 「書けた判断だけが allow になる」とは言えない（fail-closed は故障注入で示す）。
+            if os.environ.get("ORG_LEDGER_FORCE_APPEND_FAIL") == "1":
+                raise OSError("ORG_LEDGER_FORCE_APPEND_FAIL=1（故障注入）")
             with open(log, "a", encoding="utf-8") as f:
                 f.write(json.dumps(ev, ensure_ascii=False) + "\n")
                 f.flush()
+                if os.environ.get("ORG_LEDGER_FORCE_FSYNC_FAIL") == "1":
+                    raise OSError("ORG_LEDGER_FORCE_FSYNC_FAIL=1（故障注入）")
                 os.fsync(f.fileno())
             tmp = headp + ".tmp"
             with open(tmp, "w", encoding="utf-8") as f:
@@ -1373,6 +1449,17 @@ def cmd_reserve_exposure(a):
             os.replace(tmp, headp)
             _fsync_dir(a.root)
         except Exception as e:
+            # 書きかけを切り戻す。lock の中なので、他の書き手は割り込んでいない。
+            try:
+                if os.path.exists(log) and os.path.getsize(log) > prior_size:
+                    with open(log, "r+b") as f:
+                        f.truncate(prior_size)
+                        f.flush()
+                        os.fsync(f.fileno())
+            except Exception as te:
+                print(f"reserve-exposure: 書きかけを切り戻せなかった（{te}）。"
+                      f"台帳に未確定の行が残っている可能性がある — `ledger verify` で確認すること。",
+                      file=sys.stderr)
             # **書けなかったら allow を返さない。** hold の記録に失敗した場合も deny である
             # （記録できない hold を allow に読み替えるのが、いちばん危ない誤りである）。
             print(json.dumps({"decision": "deny", "reason": "reservation_not_persisted",
@@ -1443,7 +1530,11 @@ def cmd_verify(a):
             rec = ev.get("schema_sha256")
             if rec and rec != vsnap["digest"]:
                 drift.add(rec)
-            bad, _w = validate_event(ev.get("class"), ev.get("payload"), vsnap)
+            # **verify では writer_only を検査しない。** これは「誰が書いたか」の検査で、
+            # append の時点でしか行えない（経路は記録に残らない）。既に書かれた予約を
+            # 「generic append では書けない」と拒否すると、正しい台帳が壊れていると報告される。
+            bad, _w = validate_event(ev.get("class"), ev.get("payload"), vsnap,
+                                     writer_op=ev.get("class"))
             if bad:
                 print(f"BROKEN: seq {ev['seq']} が v{v} の検証を通らない — {bad}",
                       file=sys.stderr)

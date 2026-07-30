@@ -6,6 +6,53 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 0.34.1 — three trust-boundary paths the atomic lock did not cover
+
+0.34.0 made the reservation atomic, and the existing tests passed. Three ways around it remained,
+none of which those tests could see, because they all sit on the boundary rather than inside it.
+
+### Fixed
+- **A reservation could be forged by a generic append.** Appending `exposure_budget_checked` with
+  `delta_requested: -100` and then reserving `delta = 50` against `cap = 5` produced an allow with
+  `committed = -99`, and the chain verified clean. `exposure_budget_checked` is now declared
+  `writer_only`: only `reserve-exposure` can write it. **A record used by a check must be writable
+  only by the checker** — otherwise the check is decorative. (`verify` deliberately does *not* apply
+  this rule, since which path wrote an event is not recorded and can only be checked at append time.)
+- **An idempotent replay was not required to be the same request.** Reserving `delta = 1` and then
+  `delta = 100` under the same key returned the first allow. Reservations now carry a
+  `request_digest` over (dimension, delta, cap, window, actor); a differing request under the same
+  key is refused as a conflict. The key itself is the hash of a canonical tuple rather than a
+  delimiter-joined string, which collides when a value contains the delimiter.
+- **The hook trusted the exit code and ignored the structured result.** A writer printing
+  `{"decision":"deny"}` and exiting 0 was allowed through. Only `exit 0` **and**
+  `decision == "allow"` now passes; missing JSON, unparseable JSON, any other decision, or a decision
+  that contradicts the exit code all deny. `ORG_HOOK_FAIL_OPEN` still applies when the result is
+  *unreadable* (an environment problem) but not when a readable result says hold or deny.
+- `_nk` is refused in any caller-supplied payload — the idempotency marker is the tool's, and a
+  caller able to name it can claim an existing record's key and manufacture a no-op.
+- `delta` must be finite and positive, `cap` finite and non-negative. Prior exposure that is
+  negative, NaN or infinite denies rather than being counted, since counting it makes the running
+  total smaller than it is.
+- The reservation's own fields (`session_id`, `tool_use_id`, `rule`, `request_digest`) are declared in
+  the schema, with `required`, types and `additional_properties: false`. They were being written
+  while warning that they were undeclared.
+- Append and fsync failures are fault-injectable (`ORG_LEDGER_FORCE_APPEND_FAIL` /
+  `ORG_LEDGER_FORCE_FSYNC_FAIL`) and never become an allow. A partial write is truncated back, so a
+  denied reservation does not leave exposure behind for the next call to count.
+
+### Fixed — found while doing the above
+- **Weight-0 operations were being denied.** Deleting a regenerable target (`node_modules`, build
+  output) is priced at 0 deliberately, and a reservation requires `delta > 0`, so the guard turned
+  "this is free" into "this is blocked". Unmetered operations now skip the reservation entirely.
+- The deny message lost the word `HELD` when the decision moved from the organ to the writer.
+  Whoever reads the log — supervisor or test — looks for that word; the name of "it was stopped"
+  should not change because its source did.
+
+### Migration
+An org's existing `exposure_budget_checked` events predate the version stamp and are `legacy`, so the
+new stricter rules do not apply retroactively — this repo's live org has 1071 of them and still
+verifies clean. New reservations are validated.
+
 ## 0.34.0 — H3: only a decision that was written becomes an allow
 
 The blast-radius cap used to work in two stages: an organ summed committed exposure, decided, and

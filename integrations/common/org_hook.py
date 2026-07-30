@@ -619,6 +619,13 @@ def rule_blast_radius(tool_name, ti):
     if not dim:
         return None
     dimension, delta = dim
+    # **weight 0 は「計量しない」という判断である。** 再生成可能な対象（node_modules /
+    # build 出力 / .orgforge/wt/）は削除しても曝露にならない、と `_is_regenerable_target` が
+    # 決めている。予約は delta > 0 を要求する（負や 0 を通すと合計を動かせない／減らせる）ので、
+    # **計量しないものは予約自体を行わない** — 0 を予約しようとして deny されるのは、
+    # 「無料の操作を止める」という真逆の結果になる（実測でそうなった）。
+    if not delta or float(delta) <= 0:
+        return None
     cap = _cap_for(dimension)   # env override → constitution.enforcement.caps → default (docs/11 §0)
     # **writer 側の1操作に委ねる。** 以前は organ が「集計 → 判断 → LEDGER-EVENT 印字」し、
     # hook が「その後 append（失敗は無視）」していた。そこには3つの穴があった:
@@ -929,14 +936,53 @@ def main():
         if not argv:
             continue
         code, output = _run_organ(argv)
+        is_reservation = argv[:2] == ["ledger.py", "reserve-exposure"]
+        if is_reservation:
+            # **終了コードだけを信じない。** 予約は structured result を返すので、
+            # `exit 0 かつ decision == "allow"` の組でしか通さない。
+            # 実測: deny を印字して exit 0 する writer に対して、hook は allow していた。
+            # JSON が無い・読めない・decision が allow 以外・code と矛盾 — すべて deny。
+            verdict = None
+            for line in output.splitlines():
+                line = line.strip()
+                if not line.startswith("{"):
+                    continue
+                try:
+                    cand = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(cand, dict) and "decision" in cand:
+                    verdict = cand
+                    break
+            if verdict is None:
+                # **判断が読めないのは「評価できなかった」case である。** ここは
+                # ORG_HOOK_FAIL_OPEN（開発用の逃げ道）が効く側 — writer を起動できない、
+                # 出力が壊れている、といった環境の問題である。
+                # 一方、**読めた結果が hold / deny なら、それは評価できている**ので
+                # FAIL_OPEN では通さない（下の分岐）。
+                if FAIL_OPEN:
+                    print(f"org_hook: 上限の予約が structured result を返さなかった"
+                          f"（exit {code}）: {output.strip()[:200]} (fail-open) — allowing",
+                          file=sys.stderr)
+                    continue
+                _deny(f"org guardrail HELD this {tool_name} call: "
+                      f"上限の予約が structured result を返さなかった"
+                      f"（exit {code}）。**判断が読めないなら通さない。**\n"
+                      f"  {output.strip()[:300]}")
+            decision = verdict.get("decision")
+            if code == 0 and decision == "allow":
+                continue        # 予約は writer が既に永続化している
+            # 語彙を揃える。監督（と検査）が探すのは "HELD" である — 判断の出所が
+            # organ から writer に移っても、止まったことの呼び名は変えない。
+            _deny(f"org guardrail HELD this {tool_name} call: 上限の予約が allow を"
+                  f"返さなかった (exit {code}, decision={decision!r}, "
+                  f"reason={verdict.get('reason')!r})。\n"
+                  f"  {verdict.get('detail') or ''}"[:600])
         if code == 10:
             _deny(f"org guardrail HELD this {tool_name} call: {output.strip()[:400]}")
         if code == 0:
-            # **writer 側の操作は既に書いている。** reserve-exposure は予約を永続化してから
-            # allow を返すので、hook が後から append する必要はない（二重計上になる）。
             # 従来の organ（LEDGER-EVENT を印字するだけのもの）は、ここで host が書く。
-            if argv[:2] != ["ledger.py", "reserve-exposure"]:
-                _append_emitted(output)
+            _append_emitted(output)
             continue        # keep checking other rules
         # ANY other code (2 = interpreter couldn't run the script, 99 = our sentinel, a crash,
         # a timeout) means the guardrail did NOT return a clean allow. Fail-SAFE: block, never

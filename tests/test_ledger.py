@@ -91,8 +91,10 @@ def test_phase_design_starts_after_requirements_admitted(tmp_path):
 # ── idempotency (docs/11 §0) — a natural-keyed event counts once under replay/retry ──
 def test_append_natural_key_is_idempotent(tmp_path):
     args = ("ledger.py", "append", str(tmp_path), "--actor", "h",
-            "--class", "exposure_budget_checked",
-            "--payload", '{"dimension":"file_mutations","allow":true}',
+            # exposure_budget_checked は writer 専用になったので generic append では書けない
+            # （0.34.1）。冪等性の検査は class に依存しないので、通常のクラスで行う。
+            "--class", "progress_recorded",
+            "--payload", '{"role":"maker","candidate_id":"c1","phase":"implement"}',
             "--natural-key", "call-abc")
     c1, _ = run(*args, "--ts", "2026-07-16T00:00:00Z")
     c2, out2 = run(*args, "--ts", "2026-07-16T00:01:00Z")   # retry, same key, later ts
@@ -104,9 +106,10 @@ def test_append_natural_key_is_idempotent(tmp_path):
 
 
 def test_append_different_natural_keys_both_land(tmp_path):
+    # exposure_budget_checked は writer 専用（0.34.1）。冪等キーの検査は class に依存しない。
     base = ("ledger.py", "append", str(tmp_path), "--actor", "h",
-            "--class", "exposure_budget_checked",
-            "--payload", '{"dimension":"file_mutations","allow":true}')
+            "--class", "progress_recorded",
+            "--payload", '{"role":"maker","candidate_id":"c1","phase":"implement"}')
     run(*base, "--natural-key", "call-1", "--ts", "2026-07-16T00:00:00Z")
     run(*base, "--natural-key", "call-2", "--ts", "2026-07-16T00:01:00Z")
     events = [l for l in (tmp_path / "ledger.jsonl").read_text().splitlines() if l.strip()]
@@ -1067,3 +1070,108 @@ def test_malformed_prior_exposure_denies(tmp_path):
     code, out = _reserve(tmp_path, 1, 9, "t1")
     assert code == 4
     assert json.loads(out.splitlines()[0])["reason"] == "malformed_prior_exposure"
+
+
+# ══ 0.34.1 — 信頼境界の3経路（既存テストでは捕まらなかったもの）════════════════
+
+def test_exposure_events_cannot_be_forged_by_generic_append(tmp_path):
+    """**上限の予約は writer 専用。** generic append で書けると上限そのものが無効になる。
+
+    実測: `delta_requested: -100` を append したあと、cap=5 に対して delta=50 が allow され、
+    鎖も intact だった。検査に使う記録は、検査する側だけが書ける必要がある。
+    """
+    code, out = _app(tmp_path, "exposure_budget_checked",
+                     {"window_id": "all", "dimension": "destructive_ops",
+                      "committed_so_far": 0, "delta_requested": -100, "cap": 5,
+                      "actor_role": "x", "decision": "allow"}, actor="attacker")
+    assert code == 2, out
+    assert "writer 専用" in out
+    assert _evs(tmp_path) == []
+    # そして予約は正常に働く
+    assert _reserve(tmp_path, 50, 5, "t0")[0] == 10        # cap 5 < 50 → hold
+
+
+def test_caller_cannot_supply_the_idempotency_marker(tmp_path):
+    """`_nk` は道具が付ける印。caller が名指しできると no-op を作れる。"""
+    code, out = _app(tmp_path, "progress_recorded", {"_nk": "forged"})
+    assert code == 2
+    assert "_nk" in out
+
+
+def test_same_key_with_a_different_request_is_refused(tmp_path):
+    """**exact retry だけが再実行。** delta=1 の allow を根拠に delta=100 が通っていた。"""
+    assert _reserve(tmp_path, 1, 5, "t1")[0] == 0
+    code, out = _reserve(tmp_path, 100, 5, "t1")
+    assert code == 3, out
+    d = json.loads(out.splitlines()[0])
+    assert d["decision"] == "deny"
+    assert d["reason"] == "idempotency_key_reused_with_different_request"
+    # 同じ内容なら no-op
+    code, out = _reserve(tmp_path, 1, 5, "t1")
+    assert code == 0
+    assert json.loads(out.splitlines()[0])["reason"] == "idempotent_replay"
+
+
+@pytest.mark.parametrize("delta,cap", [(-5, 5), (0, 5), ("nan", 5), ("inf", 5), (1, -1)])
+def test_invalid_magnitudes_are_refused(tmp_path, delta, cap):
+    """delta は有限かつ正、cap は有限かつ非負。負や NaN は合計と比較を壊す。"""
+    code, out = _reserve(tmp_path, delta, cap, f"t{delta}{cap}")
+    assert code == 3, out
+    assert json.loads(out.splitlines()[0])["reason"] == "invalid_request"
+    assert _decisions(tmp_path) == []
+
+
+def test_negative_prior_exposure_denies_rather_than_reducing_the_total(tmp_path):
+    """過去の負の曝露を数えない（数えると合計を減らせる）。"""
+    assert _reserve(tmp_path, 1, 9, "t0")[0] == 0
+    p = tmp_path / "ledger.jsonl"
+    ev = json.loads(p.read_text(encoding="utf-8").splitlines()[0])
+    ev["payload"]["delta_requested"] = -100
+    sys.path.insert(0, str(TOOLS))
+    import importlib
+    led = importlib.import_module("ledger")
+    ev["hash"] = led._hash("GENESIS", ev)
+    p.write_text(json.dumps(ev, ensure_ascii=False) + "\n", encoding="utf-8")
+    (tmp_path / "HEAD").write_text(json.dumps({"seq": 1, "hash": ev["hash"]}), encoding="utf-8")
+    code, out = _reserve(tmp_path, 50, 5, "t1")
+    assert code == 4
+    assert json.loads(out.splitlines()[0])["reason"] == "malformed_prior_exposure"
+
+
+@pytest.mark.parametrize("var", ["ORG_LEDGER_FORCE_APPEND_FAIL", "ORG_LEDGER_FORCE_FSYNC_FAIL"])
+def test_persistence_failure_never_becomes_an_allow(tmp_path, var):
+    """**書けなかったら allow にならない。** 書きかけは切り戻す。"""
+    assert _reserve(tmp_path, 1, 9, "ok")[0] == 0
+    before = (tmp_path / "ledger.jsonl").read_text(encoding="utf-8")
+    env = dict(os.environ, **{var: "1"})
+    r = subprocess.run([sys.executable, str(TOOLS / "ledger.py"), "reserve-exposure",
+                        str(tmp_path), "--dimension", "destructive_ops", "--delta", "1",
+                        "--cap", "9", "--actor", "a", "--session-id", "s",
+                        "--tool-use-id", "t2", "--rule", "r"],
+                       capture_output=True, text=True, env=env)
+    assert r.returncode == 4
+    assert json.loads(r.stdout.splitlines()[0])["reason"] == "reservation_not_persisted"
+    # 書きかけが残っていないこと
+    assert (tmp_path / "ledger.jsonl").read_text(encoding="utf-8") == before
+    assert run("ledger.py", "verify", str(tmp_path))[0] == 0
+
+
+def test_verify_accepts_legitimately_written_reservations(tmp_path):
+    """`verify` は writer_only を検査しない — 経路は append の時点でしか見られない。
+
+    検査すると、**正しく書かれた予約が「generic append では書けない」と拒否され**、
+    健全な台帳が壊れていると報告される。
+    """
+    assert _reserve(tmp_path, 1, 9, "t0")[0] == 0
+    code, out = run("ledger.py", "verify", str(tmp_path))
+    assert code == 0, out
+    assert "chain intact" in out
+
+
+def test_idempotency_key_is_a_hash_not_a_delimited_join(tmp_path):
+    """区切り連結だと、値に区切り文字が入ったときに別のキーと衝突する。"""
+    assert _reserve(tmp_path, 1, 9, "b", sess="a", rule="c")[0] == 0
+    # "a|b|c" と同じ連結になる組み合わせが、別のキーとして扱われること
+    assert _reserve(tmp_path, 1, 9, "c", sess="a|b", rule="")[0] == 3    # rule 空 → deny
+    assert _reserve(tmp_path, 1, 9, "c", sess="a|b", rule="x")[0] == 0   # 別キーとして通る
+    assert len(_decisions(tmp_path)) == 2

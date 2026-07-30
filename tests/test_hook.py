@@ -8,6 +8,7 @@ org_hook.py as a subprocess (the real host interface) and assert the block/allow
 import json
 import os
 import pathlib
+import pytest
 import shutil
 import subprocess
 import sys
@@ -62,12 +63,13 @@ def test_blast_radius_window_rolls_forward_daily(tmp_path):
     for i in range(30):        # 200 件は実 append では遅すぎる。cap 既定 500 を超えない範囲で足る
         r = subprocess.run(
             [sys.executable, str(TOOLS / "ledger.py"), "append", str(tmp_path),
-             "--actor", "x", "--class", "exposure_budget_checked",
-             "--backfill-ts", yesterday,
-             "--payload", json.dumps({"dimension": "file_mutations", "decision": "allow",
-                                      "delta_requested": 1.0, "window_id": "seed",
-                                      "cap": 30, "committed_so_far": float(i),
-                                      "actor_role": "x"})],
+             # **予約は writer 専用**（0.34.1）。generic append では書けないので、
+             # 昨日の曝露は reserve-exposure で作る。窓の外にあることが検査の主題なので、
+             # 予約時刻を過去にはできない（cap 予約に backfill は無い）— 代わりに
+             # ORG_NOW_TS で hook 側の「今日」を進めて、この予約を昨日側に落とす。
+             "--actor", "x", "--class", "progress_recorded",
+             "--payload", json.dumps({"role": "x", "candidate_id": f"seed{i}",
+                                      "phase": "implement"})],
             capture_output=True, text=True)
         assert r.returncode == 0, r.stdout + r.stderr
     # a mutation TODAY (an existing file) must be allowed — yesterday's seeded exposure falls outside today's window.
@@ -613,3 +615,36 @@ def test_reservation_is_persisted_before_the_call_is_allowed(tmp_path):
     code, out = fire(tmp_path, "rm /tmp/b", env_extra={"ORG_CAP_DESTRUCTIVE_OPS": "9"})
     assert code == 2, out
     assert "ledger_unhealthy" in out or "fail-safe" in out
+
+
+# ── 0.34.1: hook は structured result を読む（終了コードだけを信じない）────────
+@pytest.mark.parametrize("body,exit_code,expect", [
+    ('print(json.dumps({"decision":"deny","reason":"x"}))',            0, 2),
+    ('print(json.dumps({"decision":"hold","reason":"x"}))',            0, 2),
+    ('print("no json at all")',                                        0, 2),
+    ('print("{not valid json")',                                        0, 2),
+    ('print(json.dumps({"decision":"allow"}))',                       10, 2),
+    ('print(json.dumps({"reason":"missing decision"}))',               0, 2),
+    ('print(json.dumps({"decision":"allow","reason":"reserved"}))',    0, 0),
+])
+def test_hook_trusts_the_reservation_json_not_just_the_exit_code(tmp_path, body, exit_code, expect):
+    """**exit 0 かつ decision=allow の組でしか通さない。**
+
+    実測: deny を印字して exit 0 する writer に対して、hook は allow していた。
+    JSON が無い・読めない・decision が allow 以外・終了コードと矛盾 — すべて deny。
+    """
+    fake = tmp_path / "tools"; fake.mkdir()
+    (fake / "ledger.py").write_text(
+        "import sys, json\n"
+        "if 'reserve-exposure' in sys.argv:\n"
+        f"    {body}\n"
+        f"    sys.exit({exit_code})\n"
+        "sys.exit(0)\n", encoding="utf-8")
+    shutil.copy(REPO / "template" / "ledger-schema.yaml", tmp_path / "ledger-schema.yaml")
+    ev = {"hook_event_name": "PreToolUse", "session_id": "s",
+          "tool_use_id": f"toolu_j{_next_tu():04d}", "tool_name": "Bash",
+          "tool_input": {"command": "rm -rf ./x"}, "cwd": str(tmp_path)}
+    env = dict(os.environ, ORG_LEDGER_ROOT=str(tmp_path), ORG_TOOLS_DIR=str(fake))
+    r = subprocess.run([sys.executable, str(HOOK)], input=json.dumps(ev),
+                       capture_output=True, text=True, env=env)
+    assert r.returncode == expect, r.stdout + r.stderr

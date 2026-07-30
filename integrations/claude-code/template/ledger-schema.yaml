@@ -52,6 +52,9 @@ validation:
     phase_started:        [phase, role]
     phase_admitted:       [phase, verdict]
     correction:           [corrects, kind]
+    exposure_budget_checked: [window_id, dimension, committed_so_far, delta_requested, cap,
+                              actor_role, decision, session_id, tool_use_id, rule,
+                              request_digest]
   # **相関キーはどれか1つあればよい。** deliverable / candidate_id / claim_id / issue はどれも
   # 正当な相関キーで（`_same_work` が union-find で束ねる）、どれを使うかは経路によって違う。
   # 1つに固定すると正当な書き込みを弾く（実際に統制のテストを弾いた）。
@@ -65,7 +68,16 @@ validation:
     phase_admitted:       [deliverable, candidate_id]
     result_deployed:      [deliverable, claim_id, candidate_id, issue]
   # 未宣言 field を拒否するクラス（closed world）。統制の中核だけに絞る。
-  additional_properties_false: [verdict_provisional, judges_disagreed]
+  additional_properties_false: [verdict_provisional, judges_disagreed, exposure_budget_checked]
+  # **writer 専用のクラス。** generic append では書けない。
+  #
+  # 上限の予約を通常の append で書ける状態は、上限そのものを無効化する — 実測で
+  # `delta_requested: -100` を append したあと、cap=5 に対して delta=50 が allow され、
+  # 鎖も intact だった。**検査に使う記録は、検査する側だけが書ける**必要がある。
+  #
+  # これは identity の認証ではない（H1 は別問題）。同じ UID なら writer を騙れる。
+  # ただし「通常の append 経路で偶然にも意図的にも書けてしまう」ことは、これで塞がる。
+  writer_only: [exposure_budget_checked]
   # enum。**存在する場合に**検証する（欠けているかは required が見る）。
   enums:
     verdict_provisional:
@@ -288,8 +300,15 @@ event_classes:
   # operating events (docs/05) — the recurring checks a 24/7 unattended org needs beyond
   # founding. Each obeys reconcile-by-exception: the silent path emits the event as an audit
   # breadcrumb; only the exception routes up. §2.1–2.3 have running code (tools/guardrails.py).
+  # BLAST-RADIUS-CAP。**writer 専用**（validation.writer_only）— `reserve-exposure` だけが書ける。
+  # 通常の append で書けると、負の曝露を1件入れるだけで上限が無効になる。
+  # session_id / tool_use_id / rule / request_digest は冪等性のためのもの:
+  #   キーは (session_id, tool_use_id, rule, class) の canonical tuple の hash
+  #   request_digest は要求内容（dimension/delta/cap/window/actor）の digest —
+  #   **同じキーで内容が違う要求は再実行ではない**ので、conflict として拒否する
   exposure_budget_checked: { window_id, dimension, committed_so_far, delta_requested, cap,
-                             actor_role, decision: allow|hold, caused_by_event }   # BLAST-RADIUS-CAP
+                             actor_role, decision: allow|hold, caused_by_event,
+                             session_id, tool_use_id, rule, request_digest }
   # ITERATION/SPEND-CAP (docs/10 §1, docs/12 §5 #2): a role's loop cycles + cumulative tokens per window;
   # HOLDs a runaway loop the blast-radius cap can't see (reversible read-think-edit spinning forever).
   iteration_budget_checked: { window_id, role, cycles_so_far, tokens_so_far, max_cycles, max_tokens,
