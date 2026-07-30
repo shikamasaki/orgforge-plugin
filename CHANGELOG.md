@@ -45,8 +45,19 @@ the cap is denied with the **sentinel unchanged** and the `hold` recorded; a tor
 replayed `tool_use_id` does not double-count. Codex was told to try once and stop on refusal — a
 correctly-denied call followed by a workaround would read as the hook never firing.
 
-**Still unverified: the normal (trusted, no-bypass) path.** That requires granting trust in the
-interactive TUI once, and is deliberately not claimed here.
+### Verified on the normal path — trusted, no bypass
+
+The hooks were trusted once in the interactive TUI against v0.35.0's exact content, and the suite
+re-run with no bypass flag: inside the cap the operation ran and left an `allow`; over the cap it was
+denied with the **sentinel unchanged** and the `hold` recorded; a torn ledger denied; a replayed
+`tool_use_id` did not double-count. All reservations are `validated:v1` and the chain replays clean.
+
+**Control:** with the plugin removed, the same over-cap operation **succeeded** and the ledger did not
+grow — so the stops above were this plugin's hook and not something else in the environment.
+Re-installing the identical content kept the trust and enforcement returned.
+
+So a normally-installed, normally-trusted Codex **is** gated. Note that trust is content-bound:
+shipping a change to `hooks/hooks.json` can leave enforcement off until it is trusted again.
 
 ## 0.34.1 — three trust-boundary paths the atomic lock did not cover
 
