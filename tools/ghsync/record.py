@@ -319,22 +319,51 @@ def _reasoning_defect(why, verdict, event):
 def _org_lineage():
     """constitution の `enforcement.judges.lineage` を読む。既定は `same-harness`。
 
-    宣言していない org では何も変わらない。**層を増やすのは選択であって前提ではない。**
-    読めないときも既定に倒す — 設定を読めないことで org を止めるのは筋が違う。
+    **設定を読めないときは止める（fail-closed）。** 0.32.0 は例外を握りつぶして
+    `same-harness` を返していた — cross-harness を宣言した org で YAML が壊れていたり
+    PyYAML が無いと、**強い安全モードが黙って通常モードに落ちる**。それは
+    「信号が壊れているので、壊れていることが分からない」形そのものである。
+
+    宣言されていない org（constitution に judges が無い）は既定で回る。読めなかったのか
+    宣言が無いのかを区別するため、**ファイルの存在と解析の成否を分けて扱う**。
     """
+    env = os.environ.get("ORG_JUDGE_LINEAGE")
+    if env:
+        return env.strip()
     try:
         sys.path.insert(0, HERE)
         from discover import constitution
-        import yaml
         path = constitution()
-        if not path or not os.path.isfile(path):
-            return "same-harness"
+    except Exception as e:
+        raise SystemExit(f"constitution の場所を解決できない: {e}\n"
+                         "  judges.lineage を読めない状態で判定を記録すると、cross-harness を"
+                         "宣言した org が黙って同一血統で通る。\n"
+                         "  org のルートで実行しているか確認すること。")
+    if not path or not os.path.isfile(path):
+        return "same-harness"          # org が constitution を持たない = 宣言が無い
+    try:
+        import yaml
+    except Exception:
+        raise SystemExit("PyYAML が無いので constitution を読めない。\n"
+                         "  judges.lineage が読めないまま判定を記録することは許さない — "
+                         "cross-harness の宣言が黙って消える。\n"
+                         "    python3 -m pip install pyyaml")
+    try:
         with open(path, encoding="utf-8") as f:
             c = yaml.safe_load(f) or {}
-    except Exception:
-        return "same-harness"
-    return str((((c.get("enforcement") or {}).get("judges") or {}).get("lineage")
-                or "same-harness")).strip()
+    except Exception as e:
+        raise SystemExit(f"constitution.yaml を解析できない: {e}\n"
+                         f"  ファイル: {path}\n"
+                         "  **設定を読めないなら止める。** 読めない理由が judges.lineage の行に"
+                         "あるかどうかは、読めない時点では分からない。")
+    if not isinstance(c, dict):
+        raise SystemExit(f"constitution.yaml が map ではない（{type(c).__name__}）: {path}")
+    j = ((c.get("enforcement") or {}).get("judges") or {})
+    v = str(j.get("lineage") or "same-harness").strip()
+    if v not in ("same-harness", "cross-harness"):
+        raise SystemExit(f"judges.lineage が不正: {v!r}（same-harness | cross-harness）\n"
+                         f"  ファイル: {path}")
+    return v
 
 
 def _has_lineage_verdict(issue, event, lineage):
@@ -370,6 +399,188 @@ def _has_lineage_verdict(issue, event, lineage):
         if want in ids and pl.get("lineage") == lineage and pl.get("verdict") in ok:
             return True
     return False
+
+
+def cmd_provisional(a):
+    """ある血統の judge の判定を **暫定** として記録し、2血統が一致したら admission を生成する。
+
+    ## なぜ二段にするのか
+
+    0.32.0 は `admission_decided = admit` を直接記録させ、「もう一方の血統の判定が台帳に無ければ
+    拒否」とした。それでは **空の台帳からどちらの順序でも記録できず、admit が永久に作れない**
+    （実測: 両方向 exit=4、台帳は空のまま）。片側の拒否だけを確かめ、通せることを確かめなかった
+    ためである。
+
+    正しい形は、**単独では権威を持たない判定**を先に置くことである:
+
+      1. `verdict_provisional`  各血統の judge の判定。順序は問わない
+      2. `admission_decided`    2件が一致したときに **道具が組み立てる**
+
+    段2で verdict を作るのは配管であって判断ではない — 一致という事実の関数である。不一致なら
+    道具は admit を作れないので、監督が都合のいい方を採る余地も消える。
+
+    ## この道具が admit を「作る」ことについて
+
+    `verify` が判定を作らないのと矛盾しない。ここで決めているのは *一致しているか* だけで、
+    verdict / why / evidence はすべて judge が書いたものをそのまま持ち越す。**道具が新しい判断を
+    足す箇所は無い。**
+    """
+    # **設定を読めないなら止める。** provisional は cross-harness を前提とするコマンドなので、
+    # 血統設定が読めない状態で判定を積むと、あとで一致を数える側が別の前提で動きうる。
+    # `_org_lineage()` は読めなければ SystemExit する（fail-closed）。
+    lineage_mode = _org_lineage()
+    if lineage_mode != "cross-harness":
+        print(f"provisional は judges.lineage = cross-harness の org のためのものだが、"
+              f"この org は {lineage_mode!r} である。\n"
+              f"  同一血統だけで回すなら、判定は decide でそのまま記録すればよい "
+              f"（一致を数える相手が居ない）。\n"
+              f"  2血統で回すなら constitution の enforcement.judges.lineage を "
+              f"cross-harness にすること。", file=sys.stderr)
+        return 2
+    ok = {"gate": ("admit", "reject", "park"), "skeptic": ("survives", "refuted")}
+    if a.role not in ok:
+        print(f"provisional: --role は gate | skeptic（got {a.role!r}）", file=sys.stderr)
+        return 2
+    if a.verdict not in ok[a.role]:
+        print(f"provisional: {a.role} の verdict は {ok[a.role]}（got {a.verdict!r}）",
+              file=sys.stderr)
+        return 2
+    why = (a.why or "").strip()
+    if len(why) < 40:
+        print(f"provisional: --why が薄い（{len(why)} 文字）。verdict の言い換えではなく、"
+              f"何を見て、どこで決まったかを書くこと。", file=sys.stderr)
+        return 2
+    pass_v = {"gate": "admit", "skeptic": "survives"}[a.role]
+    if a.verdict == pass_v and not (a.evidence or "").strip():
+        print(f"provisional: {pass_v} には --evidence が必要。"
+              f"何も参照していない通過は、判定ではなく判子である。", file=sys.stderr)
+        return 2
+
+    event = {"gate": "admission_decided", "skeptic": "refutation_attempted"}[a.role]
+    digest = _reasoning_digest(why, a.evidence, a.alternatives, a.standard, a.risk)
+    payload = {"issue": a.issue, "deliverable": str(a.issue), "role": a.role,
+               "lineage": a.lineage, "verdict": a.verdict, "for_event": event,
+               "reasoning_sha256": digest}
+    if getattr(a, "phase", None):
+        payload["phase"] = a.phase
+    if getattr(a, "risk", None):
+        payload["risk_accepted"] = True
+
+    # **同じ血統の二度目は拒否する。** 同じ judge が verdict を書き換えて一致を作れるなら、
+    # 一致の要求は意味を失う（受け入れ条件4: 重複を拒否する）。訂正が必要なら `correction`。
+    prior = _provisional_for(a.issue, event, a.lineage)
+    if prior and prior["verdict"] != a.verdict:
+        print(f"provisional: #{a.issue} の {a.lineage} の判定は既に "
+              f"{prior['verdict']!r}（seq={prior['seq']}）である。\n"
+              f"  **同じ血統が verdict を書き換えて一致を作れてはいけない。**\n"
+              f"  判定が誤りだったなら correction を打つこと（append-only なので消せない）:\n"
+              f'    python3 "{os.path.join(HERE, "ledger.py")}" append --class correction '
+              f"--actor <あなたの役割> \\\\\n"
+              f'      --payload \'{{"corrects_seq": {prior["seq"]}, "reason": "…"}}\'',
+              file=sys.stderr)
+        return 4
+
+    rc = _ledger_append(a.by or a.role, "verdict_provisional", payload,
+                        f"verdict_provisional-{a.issue}-{a.lineage}-{digest[:12]}")
+    if rc != 0:
+        return 4
+    print(f"recorded provisional {a.role}={a.verdict} ({a.lineage}) on #{a.issue}.")
+
+    other = "cross-harness" if a.lineage == "same-harness" else "same-harness"
+    peer = _provisional_for(a.issue, event, other)
+    if not peer:
+        print(f"\n  もう一方の血統（{other}）の判定はまだ無い。**admission はまだ生成されない。**\n"
+              f"  順序は問わない — こちらを先に置いても構わない。\n"
+              f'    python3 "{os.path.join(HERE, "org_cycle.py")}" verify '
+              f"--issue {a.issue} --role {a.role}")
+        return 0
+
+    # 2件揃った。**一致だけが admission を生成する。**
+    if peer["verdict"] != a.verdict:
+        print(f"\n  ★ 2血統が食い違った — {a.lineage}={a.verdict} / "
+              f"{other}={peer['verdict']}（seq={peer['seq']}）。\n"
+              f"  **admission は生成しない。** 片方でも否なら否である。\n"
+              f"  食い違いそのものを記録すること — 異常ではなく、血統を分けた目的である:",
+              file=sys.stderr)
+        _ledger_append(a.by or a.role, "judges_disagreed",
+                       {"issue": a.issue, "role": a.role, "for_event": event,
+                        a.lineage.replace("-", "_"): a.verdict,
+                        other.replace("-", "_"): peer["verdict"]},
+                       f"judges_disagreed-{a.issue}-{event}-{digest[:12]}")
+        bad = "reject" if a.role == "gate" else "refuted"
+        print(f"  否として扱うなら、そのまま記録してよい（否は一致を要求しない）:\n"
+              f'    python3 "{os.path.join(HERE, "github_sync.py")}" decide --issue {a.issue} '
+              f"--event {event} --verdict {bad} --by {a.role} --why \"…\"", file=sys.stderr)
+        return 5
+
+    if a.verdict != pass_v:
+        # 否で一致した。admission は「通した」ときにだけ生成する。
+        print(f"\n  2血統が {a.verdict} で一致した。否は decide でそのまま記録すること。")
+        return 0
+
+    joint = {"issue": a.issue, "deliverable": str(a.issue), "verdict": a.verdict,
+             "lineage": "joint", "agreed_by": ["same-harness", "cross-harness"],
+             "from_seqs": sorted([peer["seq"], _provisional_for(a.issue, event, a.lineage)["seq"]]),
+             "reasoning_sha256": digest}
+    if getattr(a, "phase", None):
+        joint["phase"] = a.phase
+    rc = _ledger_append(a.by or a.role, event, joint,
+                        f"{event}-{a.issue}-joint-{digest[:12]}")
+    if rc != 0:
+        return 4
+    print(f"\n  ✓ 2血統が {a.verdict} で一致した — {event} を生成した"
+          f"（from seqs {joint['from_seqs']}）。\n"
+          f"  この admission は **判定ではなく一致の記録** である。"
+          f"verdict / why は judge が書いたものをそのまま持ち越している。")
+    return 0
+
+
+def _provisional_for(issue, event, lineage):
+    """その Issue・その event・その血統の暫定判定を返す（訂正済みは無視）。"""
+    try:
+        sys.path.insert(0, HERE)
+        from discover import ledger_root
+        from ledger import corrected_seqs
+        root = ledger_root()
+    except Exception:
+        return None
+    path = os.path.join(root, "ledger.jsonl") if root else None
+    if not path or not os.path.isfile(path):
+        return None
+    evs = []
+    for line in open(path, encoding="utf-8"):
+        try:
+            evs.append(json.loads(line))
+        except Exception:
+            continue
+    voided = corrected_seqs(evs)
+    want, hit = str(issue).lstrip("#"), None
+    for e in evs:
+        if e.get("class") != "verdict_provisional" or e.get("seq") in voided:
+            continue
+        pl = e.get("payload") or {}
+        if (str(pl.get("issue", "")).lstrip("#") == want
+                and pl.get("for_event") == event and pl.get("lineage") == lineage):
+            hit = {"verdict": pl.get("verdict"), "seq": e.get("seq"), "actor": e.get("actor")}
+    return hit
+
+
+def _ledger_append(actor, cls, payload, natural_key):
+    """台帳に1件追記する。**失敗を黙って飲まない。**"""
+    try:
+        r = subprocess.run([sys.executable, os.path.join(HERE, "ledger.py"), "append",
+                            "--actor", actor, "--class", cls,
+                            "--natural-key", natural_key,
+                            "--payload", json.dumps(payload, ensure_ascii=False)],
+                           capture_output=True, text=True, timeout=30)
+    except Exception as e:
+        print(f"台帳に追記できなかった: {e}", file=sys.stderr)
+        return 4
+    if r.returncode != 0:
+        print(f"台帳が {cls} を受け付けなかった:\n"
+              f"  {((r.stdout or '') + (r.stderr or '')).strip()[:600]}", file=sys.stderr)
+        return 4
+    return 0
 
 
 def cmd_decide(a):
@@ -409,37 +620,32 @@ def cmd_decide(a):
                   file=sys.stderr)
             return 4
 
-    # cross-harness を宣言した org では、admit/survives は **両方の血統の一致** を要求する。
-    # 片方でも reject/refuted なら reject — 厳しい側に倒す。実測: #11 の認可穴と #42 の
-    # Testing Library 欠落は、どちらも同一ハーネスが通したあと別血統が捕まえた。
+    # cross-harness を宣言した org では、admit/survives は **2血統の一致で生成される** —
+    # 直接は記録できない。0.32.0 は「もう一方が台帳に無ければ拒否」としたが、それでは空の
+    # 台帳からどちらの順序でも記録できず、admit が永久に作れなかった（実測: 両方向 exit=4）。
     #
-    # **これを decide が持つ理由**: verify が両方の判定を並べて監督が読むだけなら、監督は
-    # 都合のいい方を採れる。検査を増やしたのに緩くなる（docs/11「検査を呼ぶかどうかを、
-    # 検査される側が決められてはいけない」の、判定を採用する側での形）。
+    # 正しい形は二段である:
+    #   1. `verdict_provisional` — ある血統の judge の判定。**単独では権威を持たない**
+    #   2. `admission_decided`   — 2血統が一致したときに **道具が組み立てる**
+    #
+    # 段2で verdict を作るのは配管であって判断ではない（一致という事実の関数）。不一致なら
+    # 道具は admit を作れないので、監督が都合のいい方を採る余地も消える。
     if a.event in ("admission_decided", "refutation_attempted") \
             and a.verdict in ("admit", "survives") and _org_lineage() == "cross-harness":
         _who = "gate" if a.event == "admission_decided" else "skeptic"
-        if not getattr(a, "lineage", None):
-            print(f"{a.event} = {a.verdict} を記録できない: --lineage が無い。\n"
-                  f"  この org は constitution で judges.lineage = cross-harness を宣言している。\n"
-                  f"  judge は2人いるので、**どちらの血統の判定か**を書かないと一致を数えられない:\n"
-                  f"    --lineage same-harness   （同一ハーネスの {_who} subagent の判定）\n"
-                  f"    --lineage cross-harness  （別ハーネス headless の {_who} の判定）",
-                  file=sys.stderr)
-            return 4
-        other = "cross-harness" if a.lineage == "same-harness" else "same-harness"
-        if not _has_lineage_verdict(a.issue, a.event, other):
-            print(f"{a.event} = {a.verdict} を記録できない: "
-                  f"{other} の {_who} の判定が台帳に無い。\n"
-                  f"  **admit は一致を要求する** — 片方でも否なら否なので、片側だけの admit は"
-                  f"後から見て「通った」と読めてしまう。\n"
-                  f"  もう一方を先に通すこと:\n"
-                  f'    python3 "{os.path.join(HERE, "org_cycle.py")}" verify '
-                  f"--issue {a.issue} --role {_who}\n"
-                  f"  （{other} が否だったなら、admit ではなくその否を記録する。"
-                  f"食い違いは judges_disagreed に残す — **血統を分けた目的**なので消さない）",
-                  file=sys.stderr)
-            return 4
+        print(f"{a.event} = {a.verdict} は直接記録できない（judges.lineage = cross-harness）。\n"
+              f"  この org では admit は **2血統の一致から生成される**もので、"
+              f"judge が単独で置けるものではない。\n"
+              f"  各血統の判定を暫定として記録すること:\n"
+              f'    python3 "{os.path.join(HERE, "github_sync.py")}" provisional '
+              f"--issue {a.issue} --role {_who} \\\n"
+              f"      --lineage same-harness|cross-harness --verdict {a.verdict} "
+              f'--why "…" --evidence "…"\n'
+              f"  2件目を入れた時点で、一致していれば {a.event} が自動で生成される。\n"
+              f"  **否（{'reject' if _who == 'gate' else 'refuted'}）は一致を要求しない** — "
+              f"片方でも否なら否なので、そのまま decide で記録してよい。",
+              file=sys.stderr)
+        return 4
 
     # 監督の書き分けを見る（拒否ではなく警告。判断は監督の仕事）
     for w in _claim_verify_defect(a):

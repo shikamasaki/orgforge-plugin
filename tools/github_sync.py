@@ -86,7 +86,7 @@ sys.path.insert(0, __file__.rsplit("/", 1)[0])
 from ghsync.backlog import (STAGES, cmd_claim, cmd_release, cmd_create, cmd_stage,
                             cmd_ready, cmd_needs_human, cmd_split_check, cmd_candidate_id)
 from ghsync._core import banner
-from ghsync.record import cmd_log, cmd_decide, DECISIONS
+from ghsync.record import cmd_log, cmd_decide, cmd_provisional, DECISIONS
 from ghsync.branch import cmd_branch
 from ghsync.coverage import cmd_coverage_check
 
@@ -130,6 +130,24 @@ def main(argv):
     q.add_argument("--files", help="the files created/changed at this step")
     q.add_argument("--next-step", dest="next_step", help="what happens next (what a fresh session resumes from)")
     q.add_argument("--blocked-by", dest="blocked_by", help="what is blocking, if anything")
+    # 各血統の judge の判定を **暫定** として記録する。2血統が一致したときにだけ
+    # admission_decided / refutation_attempted が生成される（受け入れ条件1〜4）。
+    pv = sub.add_parser("provisional",
+                        help="ある血統の judge の判定を暫定記録し、一致したら admission を生成")
+    pv.add_argument("--issue", type=int, required=True)
+    pv.add_argument("--role", required=True, choices=("gate", "skeptic"))
+    pv.add_argument("--lineage", required=True, choices=("same-harness", "cross-harness"))
+    pv.add_argument("--verdict", required=True,
+                    help="gate: admit|reject|park / skeptic: survives|refuted")
+    pv.add_argument("--why", required=True, help="何を見て、どこで決まったか（言い換えは不可）")
+    pv.add_argument("--evidence", default="", help="通過させるなら必須 — 参照したもの")
+    pv.add_argument("--alternatives", default="")
+    pv.add_argument("--standard", default="")
+    pv.add_argument("--risk", default="")
+    pv.add_argument("--phase", default=None)
+    pv.add_argument("--by", default=None, help="記録者（既定は --role）")
+    pv.set_defaults(fn=cmd_provisional)
+
     q = sub.add_parser("decide")
     q.add_argument("--repo", help="owner/name（省略時は git remote origin から自動発見）"); q.add_argument("--issue", required=True, type=int)
     q.add_argument("--event", required=True, help=f"the judgment class, one of {DECISIONS}")
@@ -190,6 +208,11 @@ def main(argv):
     # --repo は省略可能: 省略時は git remote origin から発見する（.envrc 不要）。
     # バックログ Issue の所在はチェックアウトを見れば分かる事実であって、operator が
     # 書き写す設定ではない — 書き写しは手順であり、飛ばされ、別マシンでずれる。
+    # provisional は台帳だけに書く（Issue へのコメントは admission が生成されてから）。
+    # GitHub remote が無い ledger-only の org でも 2血統の判定は記録できるべきなので、
+    # repo 解決より前に返す。
+    if a.cmd == "provisional":
+        return cmd_provisional(a)
     if getattr(a, "repo", None) is None:
         import os as _os
         _here = _os.path.dirname(_os.path.abspath(__file__))
@@ -205,6 +228,7 @@ def main(argv):
             "branch": cmd_branch, "split-check": cmd_split_check,
             "coverage-check": cmd_coverage_check,
             "candidate-id": cmd_candidate_id, "decide": cmd_decide,
+            "provisional": cmd_provisional,
             "needs-human": cmd_needs_human}[a.cmd](a)
 
 

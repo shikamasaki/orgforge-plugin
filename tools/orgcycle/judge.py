@@ -3,6 +3,7 @@
 **判定ロジックは一切持たない。** verdict / why / risk / どのミューテーションを試すかは
 gate / skeptic が決める。ツールが verdict を決めた瞬間に gate は形骸化する。"""
 
+import hashlib
 import json
 import os
 import shutil
@@ -399,7 +400,15 @@ def _run_headless(role, issue, material, cfg, schema):
               f"same-harness に戻すこと。", file=sys.stderr)
         return 4
 
-    out_json = os.path.join(tempfile.gettempdir(), f"orgforge-{role}-{issue}.json")
+    # **固定パスにしない。** /tmp/orgforge-{role}-{issue}.json だと、並行実行が同じファイルを
+    # 踏み、失敗した回の古い出力を次の回が読む（監査指摘）。材料のダイジェストを名前に入れ、
+    # 同じ材料の再実行だけが同じファイルに当たるようにする。
+    _mat = hashlib.sha256(material.encode("utf-8")).hexdigest()[:12]
+    _dir = os.path.join(tempfile.gettempdir(), "orgforge-judge")
+    os.makedirs(_dir, exist_ok=True)
+    out_json = os.path.join(_dir, f"{role}-{issue}-{_mat}.json")
+    if os.path.exists(out_json):
+        os.remove(out_json)          # 前回の残骸を判定として読まない
     if cli == "codex":
         cmd = [exe, "exec", "--sandbox", "read-only"]
         if model:
@@ -475,20 +484,44 @@ def _judge_lineage(role):
     **既定は `same-harness`。** 別ハーネスを前提にすると、その契約・CLI・認証を持っていない
     環境で org が回らなくなる。複数の血統を並べるのは「スイスチーズ」の層を増やす選択であって、
     org が成立する前提ではない。
+
+    **ただし読めないときは止める（fail-closed）。** 0.32.0 は例外を握りつぶして
+    `same-harness` を返していた — cross-harness を宣言した org で YAML が壊れていると、
+    **強い安全モードが黙って通常モードに落ちる**。判定の血統が分かれていないことに
+    気づく経路が無くなるので、これは沈黙してはいけない側の失敗である。
     """
+    env = os.environ.get("ORG_JUDGE_LINEAGE")
+    if env:
+        return env.strip(), None
     try:
         sys.path.insert(0, HERE)
         from discover import constitution
-        import yaml
         path = constitution()
-        if not path or not os.path.isfile(path):
-            return "same-harness", None
+    except Exception as e:
+        raise SystemExit(f"constitution の場所を解決できない: {e}\n"
+                         "  judges.lineage を読めないまま judge を起動すると、cross-harness を"
+                         "宣言した org が黙って同一血統で判定する。")
+    if not path or not os.path.isfile(path):
+        return "same-harness", None        # constitution が無い = 宣言が無い
+    try:
+        import yaml
+    except Exception:
+        raise SystemExit("PyYAML が無いので constitution を読めない。\n"
+                         "  cross-harness の宣言が黙って消えることは許さない:\n"
+                         "    python3 -m pip install pyyaml")
+    try:
         with open(path, encoding="utf-8") as f:
             c = yaml.safe_load(f) or {}
-    except Exception:
-        return "same-harness", None
+    except Exception as e:
+        raise SystemExit(f"constitution.yaml を解析できない: {e}\n  ファイル: {path}\n"
+                         "  **設定を読めないなら止める。**")
+    if not isinstance(c, dict):
+        raise SystemExit(f"constitution.yaml が map ではない（{type(c).__name__}）: {path}")
     j = ((c.get("enforcement") or {}).get("judges") or {})
     lineage = str(j.get("lineage") or "same-harness").strip()
+    if lineage not in ("same-harness", "cross-harness"):
+        raise SystemExit(f"judges.lineage が不正: {lineage!r}"
+                         f"（same-harness | cross-harness）\n  ファイル: {path}")
     cfg = (j.get("harness") or {}).get(role)
     return lineage, cfg if isinstance(cfg, dict) else None
 

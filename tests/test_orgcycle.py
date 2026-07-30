@@ -8,6 +8,8 @@ import pathlib
 import subprocess
 import sys
 
+import pytest
+
 from conftest import (REPO, TOOLS, TEMPLATE, run, seed, _cycle_src, _gh_src,
                       _cycle_mod, _propose_full, _admitted_claim, _sched,
                       _ledger_with, _led, _append, _status, _write_ledger)
@@ -1212,3 +1214,148 @@ def test_drift_skips_non_judgment_comments(monkeypatch):
     body = "**cycle_completed** — 実装完了。\n**Why:**\n未測定のまま断定した。\n"
     monkeypatch.setattr(drift, "_sh", lambda cmd: json.dumps({"comments": [{"body": body}]}))
     assert drift._issue_reasons(1) == []
+
+
+# ══ 0.32.1: cross-harness の一巡を、実 CLI で空 Ledger から通す ═══════════════
+# **受け入れ条件7。** 0.32.0 はこれを持たず、片側が拒否されることだけを確かめて
+# 「通せるか」を確かめなかったため、admit が永久に作れないデッドロックを push した。
+# 判定関数の単体テストではこれを捕まえられない — 実 CLI を空の台帳から走らせること。
+
+def _xh_org(tmp_path, lineage="cross-harness"):
+    """cross-harness を宣言した空の org を作る。"""
+    (tmp_path / ".orgforge" / "ledger").mkdir(parents=True)
+    (tmp_path / "constitution.yaml").write_text(
+        f"enforcement:\n  judges:\n    lineage: {lineage}\n", encoding="utf-8")
+    return tmp_path
+
+
+def _prov(tmp_path, lineage, verdict, issue=7, role="gate", why=None, extra=()):
+    return run("github_sync.py", "provisional",
+               "--issue", str(issue), "--role", role, "--lineage", lineage,
+               "--verdict", verdict,
+               "--why", why or f"{lineage} の {role} として実際に見て決めた。"
+                               f"再導出した範囲と、決め手になった箇所を書いている。",
+               "--evidence", "実行したコマンドと出力の要旨", *extra,
+               cwd=str(tmp_path))
+
+
+def _events(tmp_path, cls):
+    p = tmp_path / ".orgforge" / "ledger" / "ledger.jsonl"
+    if not p.exists():
+        return []
+    out = []
+    for line in p.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        e = json.loads(line)
+        if e.get("class") == cls:
+            out.append(e)
+    return out
+
+
+@pytest.mark.parametrize("first,second", [("same-harness", "cross-harness"),
+                                          ("cross-harness", "same-harness")])
+def test_xh_admission_from_empty_ledger_either_order(tmp_path, first, second):
+    """受け入れ条件1+3: 空 Ledger から**どちらの順序でも**通り、一致が admission を生む。"""
+    org = _xh_org(tmp_path)
+    c1, o1 = _prov(org, first, "admit")
+    assert c1 == 0, o1
+    # 1件目では admission はまだ無い（受け入れ条件2）
+    assert _events(org, "admission_decided") == []
+    c2, o2 = _prov(org, second, "admit")
+    assert c2 == 0, o2
+    adm = _events(org, "admission_decided")
+    assert len(adm) == 1, f"一致したのに admission が生成されていない: {o2}"
+    pl = adm[0]["payload"]
+    assert pl["verdict"] == "admit" and pl["lineage"] == "joint"
+    assert sorted(pl["agreed_by"]) == ["cross-harness", "same-harness"]
+    assert len(pl["from_seqs"]) == 2
+
+
+def test_xh_single_lineage_does_not_admit(tmp_path):
+    """受け入れ条件2: 片側だけでは admit されない。"""
+    org = _xh_org(tmp_path)
+    assert _prov(org, "same-harness", "admit")[0] == 0
+    assert _events(org, "admission_decided") == []
+    assert len(_events(org, "verdict_provisional")) == 1
+
+
+def test_xh_disagreement_blocks_admission_and_is_recorded(tmp_path):
+    """受け入れ条件4: 不一致は admission を生まず、食い違いそのものが記録される。"""
+    org = _xh_org(tmp_path)
+    assert _prov(org, "same-harness", "admit")[0] == 0
+    c, o = _prov(org, "cross-harness", "reject")
+    assert c == 5, o
+    assert _events(org, "admission_decided") == []
+    dis = _events(org, "judges_disagreed")
+    assert len(dis) == 1
+    assert dis[0]["payload"]["same_harness"] == "admit"
+    assert dis[0]["payload"]["cross_harness"] == "reject"
+
+
+def test_xh_lineage_cannot_rewrite_its_own_verdict(tmp_path):
+    """受け入れ条件4: 同じ血統が verdict を書き換えて一致を作れない。"""
+    org = _xh_org(tmp_path)
+    assert _prov(org, "same-harness", "reject")[0] == 0
+    c, o = _prov(org, "same-harness", "admit")        # 反転を試みる
+    assert c == 4, o
+    assert "correction" in o
+    assert _events(org, "admission_decided") == []
+
+
+def test_xh_other_issue_does_not_satisfy_agreement(tmp_path):
+    """受け入れ条件4: 別 Issue の判定は一致に数えない。"""
+    org = _xh_org(tmp_path)
+    assert _prov(org, "same-harness", "admit", issue=7)[0] == 0
+    assert _prov(org, "cross-harness", "admit", issue=8)[0] == 0
+    assert _events(org, "admission_decided") == []   # #7 も #8 も片側だけ
+
+
+def test_xh_skeptic_and_gate_do_not_cross_satisfy(tmp_path):
+    """受け入れ条件4: gate の判定は skeptic の一致に使えない（for_event で分ける）。"""
+    org = _xh_org(tmp_path)
+    assert _prov(org, "same-harness", "admit", role="gate")[0] == 0
+    assert _prov(org, "cross-harness", "survives", role="skeptic")[0] == 0
+    assert _events(org, "admission_decided") == []
+    assert _events(org, "refutation_attempted") == []
+
+
+def test_broken_constitution_fails_closed_no_downgrade(tmp_path):
+    """受け入れ条件5+6: 設定を読めないなら非ゼロで止まり、same-harness に降格しない。"""
+    org = _xh_org(tmp_path)
+    (org / "constitution.yaml").write_text("enforcement: [not: valid: yaml", encoding="utf-8")
+    c, o = _prov(org, "same-harness", "admit")
+    assert c != 0
+    both = o
+    assert "解析できない" in both or "読めない" in both
+    # **降格していないこと** — 台帳に何も入っていない
+    assert _events(org, "verdict_provisional") == []
+    assert _events(org, "admission_decided") == []
+
+
+def test_bad_lineage_value_fails_closed(tmp_path):
+    """受け入れ条件5: lineage の値が不正なら止まる（黙って既定に倒さない）。"""
+    org = _xh_org(tmp_path, lineage="cross_harness")     # アンダースコアは不正
+    c, o = _prov(org, "same-harness", "admit")
+    assert c != 0
+    assert "lineage" in o
+
+
+def test_same_harness_org_rejects_provisional(tmp_path):
+    """same-harness の org で provisional は使えない（一致を数える相手が居ない）。"""
+    org = _xh_org(tmp_path, lineage="same-harness")
+    c, o = _prov(org, "same-harness", "admit")
+    assert c == 2
+    assert "cross-harness" in o
+
+
+def test_xh_pass_requires_evidence(tmp_path):
+    """通過には evidence が必要 — 何も参照していない通過は判子である。"""
+    org = _xh_org(tmp_path)
+    code, out = run("github_sync.py", "provisional",
+                    "--issue", "7", "--role", "gate", "--lineage", "same-harness",
+                    "--verdict", "admit",
+                    "--why", "十分に長い理由を書いているが evidence が空である場合を試す。",
+                    cwd=str(org))
+    assert code == 2
+    assert "evidence" in out

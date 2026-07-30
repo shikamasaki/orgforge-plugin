@@ -156,9 +156,33 @@ design error; a forced invariant is correct*.
 
 The whole cycle, command by command, is in [`QUICKSTART.md`](QUICKSTART.md) §8.
 
+## What "non-skippable" means — the trust boundary
+
+The enforcement claims in this README hold **against agents running under an enabled `PreToolUse`
+hook**. They do not hold against the host owner, who can disable the hook. That is not a bug to be
+fixed; it is the boundary, and it should be stated rather than implied.
+
+What is inside the trusted base:
+
+| | |
+|---|---|
+| **Trusted** | The host harness, the hook configuration, the local filesystem, and whoever can write to them |
+| **Constrained** | Agents whose tool calls pass through the hook — subagents included, if the harness gates them (verify with `/org-verify-guards`) |
+| **Not a boundary** | The ledger's `actor` field. `ledger.py append --actor` takes the actor from its argument, so one process can sign as both maker and gate, pass `DISTINCT_ACTOR`, and leave the hash chain intact. Separation of duties is therefore **evidence that review happened, not proof of who did it** |
+
+The hash chain makes tampering *detectable*, not impossible. `judges.lineage: cross-harness`
+likewise buys an independent reviewer, not an authenticated one — a second model lineage with its
+own blind spots, recorded as such.
+
+An independent audit of 0.32.0 (resilience engineering / STPA / adversarial review / SRE lenses)
+found several places where multiple defence layers rest on the same local process and the same
+self-declared actor. Those are recorded in CHANGELOG 0.32.1 under "Known limitations recorded, not
+fixed" rather than being written out of the README. **Treat this as research and supervised
+operation, not as unattended production control.**
+
 ## Status & honesty
 
-v0.28. This is a **framing + template**, distilled from published organizational theory and the
+v0.32.1. This is a **framing + template**, distilled from published organizational theory and the
 current agent-engineering literature. The parts (principal-agent theory, harness/loop engineering,
 runtime substrates like AIOS, automated agent design like ADAS/DGM) already exist; the contribution
 here is **the top-down organizational decomposition that places them** — and, per the research in

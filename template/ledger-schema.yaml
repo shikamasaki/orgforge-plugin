@@ -114,10 +114,29 @@ event_classes:
   # the gate. Without it a maker could self-admit and the chain would launder the forgery.
   admission_decided:    { gate, candidate_id, verdict: admit|reject|park, standard_ref,
                           predicted_outcome, evidence: [ref], issue, reasoning_sha256,
+                          lineage: "same-harness|cross-harness|joint — `joint` means generated from two
+                                    agreeing verdict_provisional records, not placed by one judge",
+                          agreed_by, from_seqs,
                           distinct_actor: "actor != the actor of cycle_started/cycle_completed for this candidate" }
   refutation_attempted: { skeptic, claim_id, verdict: refuted|survives, checklist_ref, issue,
-                          reasoning_sha256,
+                          reasoning_sha256, lineage,
                           distinct_actor: "actor != the maker's and != the admitting gate's" }
+  # ── judge の血統（スイスチーズ層。docs/03 §3, docs/11）──────────────────────
+  # 同一ハーネスの subagent は親のモデルを継ぐので、`role-settings.yaml` が別系統を宣言しても
+  # 血統は分かれない。constitution の `enforcement.judges.lineage: cross-harness` を宣言した org は
+  # judge を2人走らせ、**一致だけが admission を生成する**。
+  #
+  # そのため admit/survives は **直接 append できない**。各血統の判定を verdict_provisional として
+  # 置き、2件が一致した時点で道具が admission_decided{lineage: joint} を組み立てる。段2で verdict を
+  # 作るのは配管であって判断ではない（一致という事実の関数）。**不一致なら道具は admit を作れない。**
+  verdict_provisional:  { role: gate|skeptic, lineage: same-harness|cross-harness,
+                          verdict, for_event, issue, deliverable, reasoning_sha256,
+                          authority: "NONE on its own — a single lineage's verdict is material, not a decision",
+                          one_per: "(issue, for_event, lineage) — a lineage may not rewrite its verdict to
+                                    manufacture agreement; correct via `correction`" }
+  judges_disagreed:     { issue, for_event, same_harness: verdict, cross_harness: verdict,
+                          note: "NOT an anomaly — this is the POINT of separating lineage. Never deleted;
+                                 counted. Whichever side says no, stands (the strict side wins)." }
   # ── SDLC phase mold (docs/11) — the forced, non-skippable phase chain, reproducibility's spine ──
   # A deliverable travels requirements → design → implement → test → integrate → deploy → operate. Each phase is
   # ENTERED by phase_started and CLEARED by phase_admitted{verdict:pass}. The chain is enforced by the

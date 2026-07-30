@@ -6,6 +6,51 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 0.32.1
+
+An independent 4-lens audit (resilience engineering / STPA / adversarial code review / SRE) of
+0.32.0 found that the agreement check shipped **deadlocked**. This release is the stop-the-bleeding
+fix for that plus the fail-open it came with. Deeper findings from the same audit (ledger actor
+spoofing, unlocked concurrent append, unpersisted emits, no effective halt state) are **not**
+addressed here.
+
+### Fixed
+- **`cross-harness` orgs could not record an admit at all.** 0.32.0 required the other lineage's
+  verdict to already be in the ledger, so from an empty ledger both orders were rejected
+  (measured: exit 4 either way, nothing recorded). Admission is now produced in two stages:
+  each lineage records a `verdict_provisional` in any order, and the tool generates
+  `admission_decided{lineage: joint}` only when two lineages agree. Building that verdict is
+  plumbing, not judgment — it is a function of the fact that they agreed; verdict/why/evidence
+  are carried through from the judges verbatim.
+  0.32.0 verified only that one side was refused, never that the pair could pass — the tests
+  covered the predicate, not the CLI. `provisional` now has an end-to-end suite that starts from
+  an empty ledger.
+- **Unreadable safety config silently downgraded to `same-harness`.** A broken `constitution.yaml`
+  or a missing PyYAML made a `cross-harness` org judge with one lineage and no way to notice.
+  Reading the lineage now fails closed (non-zero exit, explicit message) in both `judge.py` and
+  `ghsync/record.py`. There is no path that falls back to the weaker mode.
+- A lineage can no longer rewrite its own verdict to manufacture agreement; correcting one
+  requires a `correction` event. Cross-issue and cross-role verdicts do not satisfy agreement.
+- Headless judge output no longer lands on a fixed `/tmp/orgforge-{role}-{issue}.json`, where
+  concurrent runs collided and a failed run's stale file could be read as this run's verdict.
+- `lineage`, `verdict_provisional` and `judges_disagreed` are now declared in `ledger-schema.yaml`.
+- README stated v0.28.
+
+### Known limitations recorded, not fixed
+- `ledger.py append --actor` takes the actor from its argument, so one process can sign as both
+  maker and gate and pass `DISTINCT_ACTOR` with an intact hash chain. **Until that is fixed,
+  `lineage` is evidence that an independent review happened — not an authenticated boundary**,
+  and 0.32's agreement requirement rests on the same assumption.
+- Judgments recorded before 0.32 carry no `lineage`, so they cannot participate in agreement.
+  Only new judgments flow through the two-stage path.
+- Concurrent `append` has no lock: parallel writers can all compute the same `seq`.
+- `LEDGER-EVENT` emits from organs are printed, not durably appended; a failed append does not
+  fail the hook, so blast-radius caps degrade toward fail-open when recording breaks.
+- `halt_tripped` exists in the schema but nothing enforces a halted state.
+- README/docs describe enforcement as inescapable without stating the TCB and threat model.
+  orgforge can constrain agents running under an enabled hook; it cannot constrain the host owner
+  who can disable the hook.
+
 ## 0.32.0
 
 ### Added
