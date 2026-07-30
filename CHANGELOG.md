@@ -6,6 +6,30 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 0.33.3 — the schema repairer weakened org-owned rules
+
+`schema --fix` replaced the whole `validation` block when it found any gap, so a stricter rule an org
+had added for itself (`required.progress_recorded: [milestone]`) was deleted while the template's
+rules were restored. **A repair that weakens the org's own safety settings is a regression, not a
+repair.**
+
+### Fixed
+- **`--fix` now deep-adds.** Only missing dict keys and list elements are added; anything the org
+  added itself is kept. Lists merge as sets, so an org-added element survives.
+- **A differing scalar at the same path is a conflict, not an overwrite.** Whether the org changed it
+  deliberately or the template moved is not something the tool can tell, so it reports and leaves the
+  org's value in place. Diagnosis and repair now derive gaps and conflicts from one computation —
+  computing them separately is how the conflict case ended up neither reported nor repaired.
+- **Block boundaries are found by indentation, not by regex.** `\nkey:\n(?:(?:  |\n).*\n)*`
+  swallowed the comment lines and children that follow the next top-level key: replacing
+  `validation` deleted `event_classes` outright, and the result still parsed as YAML.
+- `used` (which classes are in live use) was dropped while rewriting the diagnosis and raised
+  `NameError` on any org with a skew — caught by the 0.33.1 test.
+
+### Note
+Class declarations are still added as text, never rewritten: their comments carry the reasoning and a
+YAML round-trip would discard it. Only the `validation` block is re-serialised.
+
 ## 0.33.2 — the lock was still fail-open
 
 0.33.1's changelog described a fail-closed lock and an `ORG_LEDGER_ALLOW_UNLOCKED` escape hatch.

@@ -981,6 +981,73 @@ def cmd_append(a):
 
 
 
+
+
+def _yaml_block_span(text, key):
+    """トップレベルの `key:` ブロックの (start, end) を行境界で返す。無ければ None。
+
+    正規表現で `\nkey:\n(?:(?:  |\n).*\n)*` と書くと、**次のトップレベルキーの前にある
+    コメント行や、そのブロックの子行まで飲み込む**。実際に validation の置換が
+    `event_classes:` を丸ごと消した（YAML が読めるので気づきにくい）。
+
+    ブロックの終わりは「インデントの無い次の行」で決める — それが YAML の構造である。
+    """
+    lines = text.split("\n")
+    start = None
+    for i, l in enumerate(lines):
+        if l == f"{key}:" or l.startswith(f"{key}:"):
+            if not l[0].isspace():
+                start = i
+                break
+    if start is None:
+        return None
+    end = len(lines)
+    for j in range(start + 1, len(lines)):
+        l = lines[j]
+        if l and not l[0].isspace():          # 次のトップレベル（コメントも含む）
+            end = j
+            break
+    off = lambda n: sum(len(x) + 1 for x in lines[:n])
+    return off(start), off(end)
+
+
+def _deep_add(dst, src, path=""):
+    """`src` にあって `dst` に無いものだけを足す。**dst 独自のものは必ず残す。**
+
+    設定の修復は「追加」でなければならない。ブロックごと置き換えると、org が自分で足した
+    厳格規則が消える — それは修復ではなく退行である（実測: org の
+    `required.progress_recorded: [milestone]` が置換で失われた）。
+
+    同じ path に違う **スカラー値** があるときは、自動で上書きしない。org が意図して変えたのか、
+    テンプレートが変わったのかは道具では判別できないので、conflict として報告して人に決めさせる。
+
+    返り値: (merged, conflicts)
+    """
+    conflicts = []
+    if isinstance(dst, dict) and isinstance(src, dict):
+        out = dict(dst)
+        for k, sv in src.items():
+            here = f"{path}.{k}" if path else str(k)
+            if k not in out:
+                out[k] = sv
+                continue
+            dv = out[k]
+            if isinstance(dv, dict) and isinstance(sv, dict):
+                out[k], c = _deep_add(dv, sv, here)
+                conflicts += c
+            elif isinstance(dv, list) and isinstance(sv, list):
+                # list は集合として足す（org が足した要素を落とさない）。順序はテンプレート優先。
+                out[k] = sv + [x for x in dv if x not in sv]
+            elif dv != sv:
+                conflicts.append(f"{here}: org={dv!r} / テンプレート={sv!r}")
+        return out, conflicts
+    if isinstance(dst, list) and isinstance(src, list):
+        return src + [x for x in dst if x not in src], conflicts
+    if dst != src:
+        conflicts.append(f"{path}: org={dst!r} / テンプレート={src!r}")
+    return dst, conflicts
+
+
 def cmd_schema(a):
     """org の ledger-schema.yaml とプラグインのテンプレートの差分を診断し、必要なら埋める。
 
@@ -1023,24 +1090,25 @@ def cmd_schema(a):
     # `verdict_provisional` の required を削っても「差分なし」と判定した（監査が実証）。
     # 検証規則が欠けていることは、クラスが欠けていることと同じくらい静かに効く。
     pv, ov = plug.get("validation") or {}, org.get("validation") or {}
+    # **欠落と衝突を1つの計算から出す。** 別々に判定すると、片方だけ検出して片方を見落とす
+    # （実測: 欠落だけを見ていたので、org が型名を変えていた衝突が --fix に入らず報告もされなかった）。
+    _merged, vconf = _deep_add(ov, pv, path="validation")
     vgaps = []
     for sect in ("required", "require_any", "enums", "types"):
         pd, od = pv.get(sect) or {}, ov.get(sect) or {}
         for cls_, spec in pd.items():
             if cls_ not in od:
                 vgaps.append(f"validation.{sect}.{cls_} が無い")
-            elif isinstance(spec, list) and isinstance(od.get(cls_), list):
+            elif isinstance(spec, (list, dict)) and isinstance(od.get(cls_), (list, dict)):
                 lost = sorted(set(spec) - set(od[cls_]))
                 if lost:
-                    vgaps.append(f"validation.{sect}.{cls_} に {', '.join(lost)} が無い")
-            elif isinstance(spec, dict) and isinstance(od.get(cls_), dict):
-                lost = sorted(set(spec) - set(od[cls_]))
-                if lost:
-                    vgaps.append(f"validation.{sect}.{cls_} に {', '.join(lost)} が無い")
+                    vgaps.append(f"validation.{sect}.{cls_} に {', '.join(map(str, lost))} が無い")
     for cls_ in (pv.get("additional_properties_false") or []):
         if cls_ not in (ov.get("additional_properties_false") or []):
             vgaps.append(f"validation.additional_properties_false に {cls_} が無い")
-    # 実データで使われているか — 使われているものは **記録が止まる** ので緊急度が違う
+
+    # **実データで使われているかを言う。** 使われているクラスが欠けているなら、検査を入れた
+    # 瞬間にその記録が止まる — 緊急度が違う。
     used = set()
     try:
         for e in read_events(a.root):
@@ -1051,7 +1119,7 @@ def cmd_schema(a):
     print(f"org schema : {org_p}")
     print(f"テンプレート: {plug_p}")
     print(f"  org {len(oc)} クラス / テンプレート {len(pc)} クラス")
-    if not missing and not vgaps:
+    if not missing and not vgaps and not vconf:
         print("  差分なし — この org の schema は最新である"
               "（クラス宣言と validation 規則の両方）。")
         return 0
@@ -1061,6 +1129,12 @@ def cmd_schema(a):
         for c in missing:
             mark = "  ← 実データで使用中。**このクラスの記録が止まる**" if c in used else ""
             print(f"    {c}{mark}")
+    if vconf:
+        print(f"\n**validation 規則の衝突: {len(vconf)}** — 自動では直さない。")
+        for c in vconf:
+            print(f"    {c}")
+        print("  同じ path に違う値がある。org が意図して変えたのか、テンプレートが変わったのかは"
+              "道具では判別できない。**手で決めること。**")
     if vgaps:
         print(f"\n**validation 規則の欠落: {len(vgaps)}**")
         for g in vgaps[:20]:
@@ -1095,35 +1169,39 @@ def cmd_schema(a):
             break
         dst = dst.replace(anchor, "\n" + m.group(1).rstrip() + "\n" + anchor, 1)
         added.append(c)
-    if vgaps:
-        m = re.search(r"\n(validation:\n(?:(?:  |\n).*\n)*)", src)
-        if m:
-            if re.search(r"\nvalidation:\n(?:(?:  |\n).*\n)*", dst):
-                # **丸ごと差し替える。** nested の欠落を1つずつ足すのは、YAML の構造を
-                # 文字列操作で YAML を編集することになり壊しやすい。validation は検証規則の集合で、
-                # org が独自に緩めているなら診断で見えるので、置き換えて構わない。
-                dst = re.sub(r"\nvalidation:\n(?:(?:  |\n).*\n)*", "\n" + m.group(1), dst, count=1)
-                added.append(f"validation 規則（{len(vgaps)} 件の欠落を差し替え）")
+    conflicts = vconf
+    if vgaps or vconf:
+        # **deep-add でマージする。** ブロックごと差し替えると、org 独自の厳格規則が消える
+        # （実測: org が足した `required.progress_recorded: [milestone]` が --fix で失われた）。
+        # org 所有の安全規則を弱めるのは、修復ではなく退行である。
+        #
+        #   欠けている key / list 要素だけを足す
+        #   org 側の追加規則は必ず残す
+        #   同じ path で値が違うなら **自動で上書きせず conflict として報告する**
+        merged = _merged
+        if conflicts:
+            print(f"\n**衝突: {len(conflicts)}** — 自動では直さない。", file=sys.stderr)
+            for c in conflicts:
+                print(f"    {c}", file=sys.stderr)
+            print("  同じ path に違う値がある。org が意図して変えたのか、テンプレートが"
+                  "変わったのかは道具では判別できない。**手で決めること。**", file=sys.stderr)
+        if merged != ov:
+            # YAML として書き直すのは validation ブロックだけに限る。event_classes は
+            # コメントが規律の説明そのものなので、再 serialize で失いたくない。
+            try:
+                import yaml as _y
+                block = _y.dump({"validation": merged}, sort_keys=False,
+                                allow_unicode=True, default_flow_style=False, width=100)
+            except Exception as e:
+                print(f"validation を書き出せない: {e}", file=sys.stderr)
+                return 3
+            span = _yaml_block_span(dst, "validation")
+            if span is None:
+                dst = dst.replace("\nevent_classes:", "\n" + block + "\nevent_classes:", 1)
             else:
-                dst = dst.replace("\nevent_classes:", "\n" + m.group(1) + "\nevent_classes:", 1)
-                added.append("validation ブロック")
-    # **書く前に、YAML として読めることと event_classes が1つだけであることを確かめる。**
-    # 重複した event_classes は後のものが前を上書きし、**クラス宣言が丸ごと消える**
-    # （実際にこの修復スクリプトの初版がそれをやった）。
-    if dst.count("\nevent_classes:") != 1:
-        print(f"append: 修復後に event_classes が {dst.count(chr(10) + 'event_classes:')} 個ある — "
-              f"書き込まない。YAML は後の定義で前を上書きするので、クラス宣言が丸ごと消える。",
-              file=sys.stderr)
-        return 3
-    try:
-        import yaml as _y
-        chk = _y.safe_load(dst) or {}
-        if len(chk.get("event_classes") or {}) < len(oc):
-            print("append: 修復後のクラス数が減っている — 書き込まない。", file=sys.stderr)
-            return 3
-    except Exception as e:
-        print(f"修復後の schema が YAML として読めない — 書き込まない: {e}", file=sys.stderr)
-        return 3
+                dst = dst[:span[0]] + block + dst[span[1]:]
+            added.append(f"validation 規則（{len(vgaps)} 件を deep-add。org 独自の規則は保存）")
+
     # **atomic write。** 直接上書きすると、修復途中で止まったときに schema を壊す — org の
     # 形式定義が壊れれば、その org は何も書けなくなる。temp → fsync → rename → fsync(dir)。
     tmp_p = org_p + ".tmp"
@@ -1136,8 +1214,8 @@ def cmd_schema(a):
     print(f"\n足した: {', '.join(added)}\n"
           f"  **クラス宣言は足すだけ**で、既存のものは書き換えていない — org が実態に合わせて"
           f"変えた宣言はそのままである。\n"
-          + ("  **validation 規則はブロック全体を差し替えた** — 検証規則を org 側で緩めていた"
-             "場合、それは元に戻る。緩めていたことは診断に出ていたはずである。\n"
+          + ("  **validation 規則は deep-add した** — org が自分で足した厳格規則は残っている。"
+             "同じ path で値が違うものは上書きせず、衝突として報告した。\n"
              if any("validation" in x for x in added) else ""))
     return 0
 

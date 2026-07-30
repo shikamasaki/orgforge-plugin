@@ -847,3 +847,81 @@ def test_schema_diagnoses_nested_validation_gaps(tmp_path):
     assert run("ledger.py", "schema", cwd=str(org))[0] == 0
     # atomic write なので .tmp が残らない
     assert not list(org.glob("*.tmp"))
+
+
+# ══ 0.33.3 — H8 修復器が org 所有の安全規則を消していた ═══════════════════════
+# validation ブロックを丸ごと差し替えていたので、org が自分で足した厳格規則が失われた。
+# **修復が org の安全側の設定を弱めるのは、修復ではなく退行である。**
+
+def _org_with_schema(tmp_path, mutate):
+    org = tmp_path / "org"; (org / ".orgforge" / "ledger").mkdir(parents=True)
+    (org / "constitution.yaml").write_text("enforcement: {}\n", encoding="utf-8")
+    (org / "ledger-schema.yaml").write_text(
+        mutate((TEMPLATE / "ledger-schema.yaml").read_text(encoding="utf-8")), encoding="utf-8")
+    return org
+
+
+def test_fix_preserves_org_own_stricter_rules(tmp_path):
+    """org 独自の厳格規則は --fix で消えない。"""
+    def mut(t):
+        t = t.replace("  required:\n",
+                      "  required:\n    progress_recorded: [milestone]\n", 1)
+        return re.sub(r"\n    verdict_provisional:  \[role, lineage, verdict, for_event,\n[^\n]*\n",
+                      "\n", t, count=1)
+    org = _org_with_schema(tmp_path, mut)
+    assert run("ledger.py", "schema", "--fix", cwd=str(org))[0] == 0
+    import yaml
+    d = yaml.safe_load((org / "ledger-schema.yaml").read_text(encoding="utf-8"))
+    req = d["validation"]["required"]
+    assert req.get("progress_recorded") == ["milestone"], "org 独自の規則が消えた"
+    assert req.get("verdict_provisional"), "テンプレート由来の規則が復旧していない"
+    # **event_classes を壊していないこと** — 置換の範囲が広すぎると丸ごと消える
+    assert len(d["event_classes"]) >= 69
+    assert set(d) >= {"envelope", "event_classes", "validation", "views", "triggers"}
+
+
+def test_fix_preserves_org_added_list_elements(tmp_path):
+    """org が list に足した要素も残す（集合として足す）。"""
+    org = _org_with_schema(tmp_path, lambda t: t.replace(
+        "    admission_decided:    [verdict]",
+        "    admission_decided:    [verdict, standard_ref]", 1).replace(
+        "  require_any:\n", "  require_any:\n    progress_recorded: [candidate_id]\n", 1))
+    run("ledger.py", "schema", "--fix", cwd=str(org))
+    import yaml
+    v = yaml.safe_load((org / "ledger-schema.yaml").read_text(encoding="utf-8"))["validation"]
+    assert "standard_ref" in v["required"]["admission_decided"]
+    assert v["require_any"].get("progress_recorded") == ["candidate_id"]
+
+
+def test_conflicting_scalar_is_reported_not_overwritten(tmp_path):
+    """同じ path に違う値があるとき、自動で上書きせず conflict として報告する。
+
+    org が意図して変えたのか、テンプレートが変わったのかは道具では判別できない。
+    """
+    org = _org_with_schema(tmp_path, lambda t: t.replace(
+        "correction:          { corrects: list }", "correction:          { corrects: map }", 1))
+    code, out = run("ledger.py", "schema", cwd=str(org))
+    assert "衝突" in out
+    assert "corrects" in out
+    run("ledger.py", "schema", "--fix", cwd=str(org))
+    import yaml
+    v = yaml.safe_load((org / "ledger-schema.yaml").read_text(encoding="utf-8"))["validation"]
+    assert v["types"]["correction"]["corrects"] == "map", "org の値が上書きされた"
+
+
+def test_yaml_block_span_stops_at_the_next_top_level_key(tmp_path):
+    """ブロックの範囲は「インデントの無い次の行」で決める。
+
+    正規表現で `\\nkey:\\n(?:(?:  |\\n).*\\n)*` と書くと、次のトップレベルキーの前にある
+    コメント行やその子行まで飲み込む。実際に validation の置換が event_classes を消した。
+    """
+    sys.path.insert(0, str(TOOLS))
+    import importlib
+    led = importlib.import_module("ledger")
+    text = ("validation:\n  a: 1\n\n  # comment inside\n  b: 2\n\n"
+            "# a top-level comment\nevent_classes:\n  x: 1\n")
+    s, e = led._yaml_block_span(text, "validation")
+    got = text[s:e]
+    assert "b: 2" in got
+    assert "event_classes" not in got
+    assert "# a top-level comment" not in got
