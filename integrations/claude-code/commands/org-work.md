@@ -202,6 +202,28 @@ python3 "${CLAUDE_PLUGIN_ROOT}/tools/org_cycle.py" gc
 決めてよいことではない）。`.orgforge/wt/` の外（scratchpad 等）に作られた検証用 worktree も
 git が把握している限り拾う — 配管が作った場所しか見ないと孤児が永久に残る。
 
+### 3b-3. 返ってきた報告が成果物の形になっているかを見る — `intake`
+
+**subagent の報告を判定として読む前に、これを通すこと。**
+
+```
+python3 "${CLAUDE_PLUGIN_ROOT}/tools/org_cycle.py" intake --issue <N> \
+  --role gate|skeptic|maker --report "<返ってきた報告>"
+```
+
+実地で **turn が作業の途中で終わる**ことが1晩に3件あった。`status` は completed で返り、
+`result` は「Now the key attack:」のような宣言1文だけ。`SendMessage` で再開させると続きを
+実行して完走したので、**agent が死んだのではなく報告が成果物の形になる前に turn が終わっている**。
+
+**気づけない形が危ない。** 「Now the key attack:」なら verdict が無いと分かるが、
+**「MUST 2 は防がれました」で切れていたら、それを verdict として読んで admit しかねない**。
+この org が繰り返し検出した「確かめていないことを確かめたかのように述べる」が、報告の切断という
+経路で起きる。
+
+見るのは役割ごとの必須要素だけ（skeptic/gate → verdict と実行の痕跡、maker → コミットと DoD の
+実測出力）。**verdict の中身も妥当性も見ない** — 判定は役割の仕事である。exit 10 なら
+`SendMessage` で続きを促し、**その報告を判定として読まないこと**。
+
 ### 3a-3b. rework を発注したら記録する — `rework`
 
 ```

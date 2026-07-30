@@ -858,3 +858,67 @@ def test_verify_still_hands_over_the_unshot_areas():
     seg = src[src.index("def cmd_verify"):]
     assert 'if role == "skeptic" and prior:' in seg
     assert "標的候補" in seg
+
+
+# ── 0.28.0: 報告の切断 / worktree 運用での --create / seam の案内 ────────────
+def test_intake_catches_a_truncated_report():
+    """subagent の turn が作業の途中で終わることがある（実地で1晩に3件）。
+
+    status は completed で返り、result は「Now the key attack:」のような宣言1文だけ。
+    **気づけない形が危ない** — 「MUST 2 は防がれました」で切れていたら、それを verdict として
+    読んで admit しかねない。
+    """
+    for report, role in (("I verified MUST 1 and 2. Now the key attack:", "skeptic"),
+                         ("MUST 2 で要求されている防御は実装されており、防がれました。", "skeptic"),
+                         ("Now update the call sites.", "maker")):
+        p = subprocess.run([sys.executable, str(TOOLS / "org_cycle.py"), "intake",
+                            "--issue", "27", "--role", role, "--report", report],
+                           capture_output=True, text=True, timeout=60)
+        assert p.returncode == 10, f"不完全な報告を通した: {report!r}"
+        assert "報告が不完全" in p.stderr
+
+
+def test_intake_passes_a_complete_report():
+    """必須要素が揃っていれば通す。途中で 'Now ...' と書いていても完走とみなす。"""
+    for report, role in (
+            ("verdict: survives。npm test → 60 passed。ミューテーション6種を撃った。", "skeptic"),
+            ("実装完了。コミット 7550451。npm test → Tests 60 passed (60)。", "maker"),
+            ("verdict: reject。npm ci が失敗し exit=1。MUST 3 が満たされていない。", "gate")):
+        p = subprocess.run([sys.executable, str(TOOLS / "org_cycle.py"), "intake",
+                            "--issue", "27", "--role", role, "--report", report],
+                           capture_output=True, text=True, timeout=60)
+        assert p.returncode == 0, f"完全な報告を弾いた: {report!r} / {p.stderr[:200]}"
+
+
+def test_branch_create_does_not_move_main_in_a_worktree_org(tmp_path):
+    """worktree で並列運用している org では、メインのブランチを切り替えない。
+
+    実地で --create がメインを develop から離し、気づかなければ develop での統合テストが
+    別 Issue のブランチ上で走っていた。
+    """
+    repo = tmp_path / "r"; repo.mkdir()
+    def g(*a, cwd=repo):
+        return subprocess.run(["git", *a], cwd=cwd, capture_output=True, text=True)
+    g("init", "-q", "-b", "main"); g("config", "user.email", "t@t"); g("config", "user.name", "t")
+    (repo / "s.txt").write_text("x"); g("add", "-A"); g("commit", "-qm", "s"); g("branch", "develop")
+    g("checkout", "-q", "develop")
+    wt = repo / ".orgforge" / "wt" / "issue-1"
+    wt.parent.mkdir(parents=True, exist_ok=True)
+    g("worktree", "add", "-q", "-b", "feat/issue-1", str(wt), "develop")
+
+    r = subprocess.run([sys.executable, str(TOOLS / "github_sync.py"), "branch",
+                        "--issue", "9", "--create", "--repo", "o/n"],
+                       capture_output=True, text=True, cwd=str(repo), timeout=60)
+    cur = g("branch", "--show-current").stdout.strip()
+    assert cur == "develop", f"メインが {cur} に切り替わった（worktree 運用の org）"
+    assert (repo / ".orgforge" / "wt" / "issue-9").is_dir(), "worktree が作られていない"
+
+
+def test_seam_gate_message_leads_with_the_shortest_path():
+    """通る道を、実際に短い順で書く（実地では INDEPENDENT: だけで通した）。"""
+    src = (TOOLS.parent / "integrations" / "common" / "org_hook.py").read_text(encoding="utf-8")
+    i = src.index("carries no seam contract")
+    seg = src[i:i + 1600]
+    assert seg.index("INDEPENDENT") < seg.index("handoff.py"), \
+        "handoff.py が先に読める（実際に通るのは INDEPENDENT: の方が短い）"
+    assert "owns` の宣言を免除する" in seg, "INDEPENDENT: が owns 検査を免除することを言っていない"

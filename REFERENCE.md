@@ -206,6 +206,13 @@ python3 tools/org_cycle.py  integrate --issue N [--test "npm test"] [--plan]
                             # マージ → 統合後テスト → integration_admitted → Issue へ log
 python3 tools/org_cycle.py  gc        [--base develop] [--all]
                             # 統合済みの worktree だけ片付ける（未統合・未コミットは残す）
+python3 tools/org_cycle.py  intake    --issue N --role gate|skeptic|maker --report TXT
+                            # subagent が返した報告が**成果物の形になっているか**を検査する。
+                            # `--report -` で標準入力から読む。exit 10 = 不完全（再開させる）
+                            # skeptic/gate → verdict と実行の痕跡 · maker → コミットと DoD 出力
+                            # **判定はしない** — verdict の中身も妥当性も見ない。
+                            # 実地で turn が作業の途中で終わり、宣言1文だけが status=completed で
+                            # 返った（「MUST 2 は防がれました」で切れれば verdict と読みかねない）
 python3 tools/org_cycle.py  rework    --issue N --after reject|refuted --by WHO --reason TXT
                             [--round N] [--to ROLE]
                             # reject/refuted を受けて rework を発注したことを記録する。
@@ -322,7 +329,12 @@ github_sync.py decide --repo R --issue N --event <judgment> --verdict V --why "<
                       [--by ROLE] [--phase P] [--evidence E] [--alternatives A]
                       [--standard S] [--risk K] --event-id <ledger id>
 github_sync.py ready  --repo R [--kind task|objective|any]   # tasks only by default (objectives are parents)
-github_sync.py branch --repo R --issue N [--create] [--base B]   # the deterministic feat/issue-N-<slug>
+github_sync.py branch --repo R --issue N [--create] [--worktree] [--no-worktree] [--base B]
+                              # the deterministic feat/issue-N-<slug>
+                              # **.orgforge/wt/issue-* がある org では --create が worktree を作る**
+                              # — メインのブランチは動かさない（実地でメインが develop から
+                              #   離れ、develop での統合テストが別 Issue のブランチ上で走りかけた）
+                              # あえてメインで切り替えるなら --no-worktree
 github_sync.py split-check    --repo R --issue N   # exit 10: 起票の SHAPE 検査（警告のみ）
                               # (a) owns が複数 territory (b) depends_on が OPEN
                               # (c) 受入基準が EARS でない

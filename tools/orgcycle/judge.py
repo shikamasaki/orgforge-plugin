@@ -306,6 +306,80 @@ def cmd_verify(a):
 
 
 
+
+# 役割ごとに「報告が成果物の形になっている」ための必須要素。
+# **subagent の turn が作業の途中で終わる**ことがある（実地で1晩に3件）。status は completed で
+# 返り、result は「Now the key attack:」のような宣言1文だけ。SendMessage で再開させると続きを
+# 実行して完走したので、agent が死んだのではなく報告が成果物の形になる前に turn が終わっている。
+#
+# **気づけない形が危ない。** 「MUST 2 は防がれました」で切れていたら、それを verdict として
+# 読んで admit しかねない — この org が繰り返し検出した「確かめていないことを確かめたかのように
+# 述べる」が、**報告の切断**という経路で起きる。
+_INTAKE = {
+    "skeptic": [
+        ("verdict", r"\b(survives|refuted)\b", "verdict が survives / refuted のどちらでもない"),
+        ("evidence", r"(npm |npx |git |psql|python3|node |pytest|exit=|passed|failed)",
+         "実際に走らせた痕跡（コマンド・出力）が無い"),
+    ],
+    "gate": [
+        ("verdict", r"\b(admit|reject|park)\b", "verdict が admit / reject / park のどちらでもない"),
+        ("evidence", r"(npm |npx |git |psql|python3|node |pytest|exit=|passed|failed)",
+         "実際に走らせた痕跡（コマンド・出力）が無い"),
+    ],
+    "maker": [
+        ("commit", r"\b[0-9a-f]{7,40}\b", "コミットハッシュが無い"),
+        ("dod", r"(npm |npx |pytest|passed|failed|Tests?\s)",
+         "DoD コマンドの実測出力が無い"),
+    ],
+}
+# 作業の途中で切れた報告に出やすい語。**これ自体は根拠にしない** — 必須要素が揃っていれば、
+# 途中で "Now ..." と書いていても完走している。欠落と同時に出たときだけ確度が上がる。
+_TRUNCATED = (r"^\s*(now|next|then)\b", r"(しましょう|します)。?\s*$",
+              r"(let me|i'll|i will)\b.*:$", r":\s*$")
+
+
+def cmd_intake(a):
+    """subagent が返した報告が成果物の形になっているかを検査する。
+
+    **判定はしない。** verdict の中身も、その妥当性も見ない — 見るのは「役割として要求される
+    欄が埋まっているか」だけである。埋まっていなければ「報告が不完全。再開させること」と言う。
+    いまは監督が目で気づくかどうかに賭かっている。
+    """
+    text = a.report
+    if a.report == "-":
+        text = sys.stdin.read()
+    role = a.role
+    checks = _INTAKE.get(role)
+    if not checks:
+        print(f"役割 {role!r} の受け入れ検査は定義されていない"
+              f"（定義済み: {', '.join(sorted(_INTAKE))}）。", file=sys.stderr)
+        return 2
+
+    missing = [(k, why) for k, pat, why in checks
+               if not re.search(pat, text, re.I | re.M)]
+    truncated = [p for p in _TRUNCATED if re.search(p, text.strip(), re.I | re.M)]
+
+    print(f"— intake #{a.issue} ({role}) — {len(text)} 文字")
+    if not missing:
+        print(f"  ✓ 必須要素は揃っている（{', '.join(k for k, _, _ in checks)}）")
+        if truncated:
+            print(f"  · 途中で切れたように読める語があるが、必須要素は揃っているので"
+                  f"完走とみなす（{truncated[0]}）")
+        return 0
+
+    print(f"  ✗ **報告が不完全 — 再開させること。**", file=sys.stderr)
+    for k, why in missing:
+        print(f"      {k}: {why}", file=sys.stderr)
+    if truncated:
+        print(f"    作業の途中で turn が終わった可能性が高い"
+              f"（「{text.strip()[-60:]}」で終わっている）。", file=sys.stderr)
+    print(f"    SendMessage で続きを促すこと。**この報告を判定として読まないこと** — "
+          f"実地では「Now the key attack:」の1文だけが返り、status は completed だった。\n"
+          f"    途中の1文を verdict として読めば、確かめていないものを admit する。",
+          file=sys.stderr)
+    return 10
+
+
 def cmd_rework(a):
     """reject / refuted を受けて rework を発注したことを記録する。
 

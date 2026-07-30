@@ -38,7 +38,7 @@ sys.path.insert(0, __file__.rsplit("/", 1)[0])
 
 from orgcycle._core import banner
 from orgcycle.cycle import cmd_begin, cmd_complete, cmd_plan
-from orgcycle.judge import cmd_verify, cmd_record, cmd_rework
+from orgcycle.judge import cmd_verify, cmd_record, cmd_rework, cmd_intake
 from orgcycle.ship import cmd_handback, cmd_integrate
 from orgcycle.inspect import cmd_show, cmd_gc, cmd_touched
 
@@ -85,6 +85,12 @@ def main(argv):
     q = sub.add_parser("gc", help="溜まった worktree を片付ける（未コミットのものは残す）")
     q.add_argument("--base", default="develop")
     q.add_argument("--all", action="store_true", help="未統合のものも対象にする")
+
+    q = sub.add_parser("intake", help="subagent の報告が成果物の形になっているかを検査する")
+    q.add_argument("--issue", required=True, type=int)
+    q.add_argument("--role", required=True, help="gate / skeptic / maker")
+    q.add_argument("--report", required=True,
+                   help="subagent が返した報告（`-` で標準入力から読む）")
 
     q = sub.add_parser("rework", help="reject/refuted を受けて rework を発注したことを記録する")
     q.add_argument("--issue", required=True, type=int)
@@ -153,7 +159,7 @@ def main(argv):
     a = p.parse_args(argv[1:])
     banner()
     return {"begin": cmd_begin, "complete": cmd_complete, "plan": cmd_plan,
-            "verify": cmd_verify, "integrate": cmd_integrate, "handback": cmd_handback, "gc": cmd_gc, "record": cmd_record, "rework": cmd_rework, "show": cmd_show, "touched": cmd_touched}[a.cmd](a)
+            "verify": cmd_verify, "integrate": cmd_integrate, "handback": cmd_handback, "gc": cmd_gc, "record": cmd_record, "rework": cmd_rework, "intake": cmd_intake, "show": cmd_show, "touched": cmd_touched}[a.cmd](a)
 
 
 if __name__ == "__main__":

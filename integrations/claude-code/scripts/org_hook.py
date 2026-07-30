@@ -607,10 +607,20 @@ def spawn_needs_seam_or_independence(tool_name, ti):
         seam_file = _seam_from_referenced_file(prompt_raw)
         has_seam = seam_file is not None
     if not (has_seam or has_indep):
-        return ("this Agent spawn carries neither a seam contract (build it with tools/handoff.py: "
-                "slice + inputs/outputs the child integrates to) nor an explicit independence "
-                "declaration (start the child prompt with 'INDEPENDENT: ...' if its output is never "
-                "merged with a sibling's). Recursive splits drift without an owned seam — docs/06 §2.1.1.")
+        # **通る道を、実際に短い順で書く。** 以前は handoff.py が主で INDEPENDENT: が従に読める
+        # 文面だったが、実地では後者だけで通した（それが正しい経路だった）。急いでいる監督に
+        # 使わない道具の名前を読ませるのは無駄である。
+        return ("this Agent spawn carries no seam contract and no independence declaration. "
+                "Two ways through:\n"
+                "  (A) 出力が兄弟とマージされないなら — 子プロンプトの冒頭に "
+                "`INDEPENDENT: <なぜ独立か>` を1行書く。これで通る。\n"
+                "  (B) 兄弟と統合するなら — seam contract を本文に入れる（`## Your slice` / "
+                "`Inputs you receive:` / `Outputs you MUST produce:`）。"
+                "`tools/handoff.py <role> --slice … --inputs … --outputs … --owns …` が組み立てる。"
+                "ファイルに落として参照させてもよい（ガードが読む）。\n"
+                "  **(A) は `owns` の宣言を免除する。** 並列で複数の子を出すなら、同じ worktree や "
+                "同じファイルに向けていないかは**あなたが確かめること** — ガードは (A) では"
+                "衝突を検査できない（宣言が無いものは照合できない）。docs/06 §2.1.1.")
     # NON-COLLISION: a declared owns territory must not overlap a live sibling claim (concurrent-write
     # drift is PREVENTED here, not detected later by reconcile.py collision).
     if LEDGER_ROOT:

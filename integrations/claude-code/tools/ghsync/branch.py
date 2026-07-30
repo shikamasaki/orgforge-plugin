@@ -89,6 +89,19 @@ def cmd_branch(a):
         return _make_worktree(name, base, a.issue)
     if getattr(a, "create", False):
         import subprocess
+        # **worktree で並列運用している org では、メインリポジトリのブランチを切り替えない。**
+        # 実地で `--create` がメインを develop から離し、気づかなければ develop での統合テストが
+        # 別 Issue のブランチ上で走っていた。`.orgforge/wt/` が既にあるなら worktree 運用と
+        # みなし、worktree を作る（`--worktree` と同じ経路）。
+        wt_dir = os.path.join(os.getcwd(), ".orgforge", "wt")
+        if (not getattr(a, "no_worktree", False)) and os.path.isdir(wt_dir) and any(
+                n.startswith("issue-") for n in os.listdir(wt_dir)):
+            print(f"注意: この org は worktree で並列運用している（{wt_dir} に "
+                  f"{len([n for n in os.listdir(wt_dir) if n.startswith('issue-')])} 個）。\n"
+                  f"  メインリポジトリのブランチは切り替えず、worktree を作る — メインが "
+                  f"develop から離れると、develop での統合テストが別 Issue のブランチ上で走る。\n"
+                  f"  メインで切り替えたいなら --no-worktree を付けること。", file=sys.stderr)
+            return _make_worktree(name, base, a.issue)
         try:
             p = subprocess.run(["git", "checkout", "-b", name, base],
                                capture_output=True, text=True, timeout=30)
@@ -101,7 +114,10 @@ def cmd_branch(a):
                     return 2
                 print(f"branch {name} already existed — switched to it (idempotent).", file=sys.stderr)
             else:
-                print(f"created and switched to {name} off {base}.", file=sys.stderr)
+                print(f"created and switched to {name} off {base}.\n"
+                      f"  ⚠ **メインリポジトリのブランチを切り替えた。** develop での統合テストを"
+                      f"走らせる前に `git checkout {base}` で戻すこと"
+                      f"（並列運用するなら --worktree を使う）。", file=sys.stderr)
         except Exception as e:
             print(f"git not available: {e}", file=sys.stderr)
             return 2

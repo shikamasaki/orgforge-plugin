@@ -153,6 +153,8 @@ def main(argv):
     q.add_argument("--event-id", dest="event_id", help="the ledger event's id — keys the idempotent dedup")
     q = sub.add_parser("branch")
     q.add_argument("--repo", help="owner/name（省略時は git remote origin から自動発見）"); q.add_argument("--issue", required=True, type=int)
+    q.add_argument("--no-worktree", dest="no_worktree", action="store_true",
+                   help="worktree 運用の org でも、あえてメインリポジトリのブランチを切り替える")
     q.add_argument("--create", action="store_true",
                    help="also `git checkout -b <name> <base>` in the current repo (idempotent). "
                         "並列で maker を走らせるなら --worktree を使うこと — checkout は"
