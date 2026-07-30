@@ -601,8 +601,22 @@ def cmd_check(a):
                   f"ブロックはしないが、これは期限のない免除ではない。返済すること。")
         if failed:
             print(f"\nHELD: {len(failed)} required artifact(s) missing for the {phase} gate: "
-                  f"{', '.join(failed)}. これらは baseline に無い＝この変更で新たに悪化した、"
-                  f"または最初から満たすべきもの。(docs/11 §4a)")
+                  f"{', '.join(failed)}.", end="")
+            if baseline is None:
+                # **baseline を読んでいないのに「baseline に無い」と断定してはいけない。**
+                # 実地で gate がこの断定を額面どおり受け取り、既存の負債を「この変更による
+                # 悪化」と読んで判定を止めた（対象の Issue は、まさにその2件を緑にする作業
+                # だった）。道具が見ていない領域について、道具は黙るのではなく
+                # 「見ていない」と言うべきである — そう言えば gate は正しく動ける。
+                bp = getattr(a, "baseline", None) or os.path.join(a.repo, BASELINE_FILE)
+                print(f"\n  **baseline が無い**（探した先: {bp}）ので、"
+                      f"**この変更による悪化か、採用前からの既存の負債かは判定していない。**\n"
+                      f"  判定に使うなら、まず基準を取ること: `repro_lint.py baseline {a.repo}`\n"
+                      f"  （既存リポジトリに後付けした org は、採用時点の失敗を"
+                      f"「既知の負債」として記録してから締める — docs/11 §4e の drain-then-ratchet）")
+            else:
+                print(f" これらは baseline に無い＝この変更で新たに悪化した、"
+                      f"または最初から満たすべきもの。(docs/11 §4a)")
         else:
             print(f"\nOK: {phase} ゲートに必要な成果物は揃っている"
                   + ("（既知の負債を除く）。" if debt_still_open else "。"))

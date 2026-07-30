@@ -233,32 +233,46 @@ def cmd_verify(a):
                        "> admit しなければ、この学びは次の Issue に渡らない。"
                        "実地では同じ失敗を3回繰り返した。")
 
-    out.append(f"\n## 記録（**判定はあなたが決める。この雛形は値を埋めていない**）\n")
-    out.append("```")
-    out.append(f'python3 "{os.path.join(HERE, "github_sync.py")}" '
-               f'decide --issue {a.issue} --event {ev} \\')
-    out.append(f'  --verdict <{verdicts}> --by {role} \\')
-    out.append('  --why "<何を天秤にかけ、何が決め手になったか>" \\')
-    out.append('  --evidence "<実際に走らせたコマンドと、その実出力>" \\')
+    # subagent に渡すのは「返すもの」の指定。**記録するコマンドは載せない** —
+    # subagent には ORG_GITHUB_REPO も台帳のパスも渡っておらず、載せると指示と権限が
+    # 食い違う。実地で7回、判定を出した後に「記録は監督に委ねます」と止まり、一度は
+    # 判定そのものが失われかけた。記録は監督の仕事で、subagent は判定に集中する。
+    fields = [("verdict", f"`{verdicts}` のいずれか1つ"),
+              ("why", "何を天秤にかけ、何が決め手になったか。verdict の言い換えは不可"),
+              ("evidence", "実際に走らせたコマンドと、その**実出力**（失敗も含む）")]
     if role == "gate":
-        out.append('  --alternatives "<採らなかった選択肢と、その理由>" \\')
-        out.append('  --standard "<適用した基準>" \\')
-    out.append('  --risk "<承知の上で残す穴 / 排除しきれなかった失敗モード>"')
-    out.append("# 出力される reasoning_sha256= を、次の ledger 受領証の payload に入れること")
-    out.append(f"# deliverable は **Issue 番号 {a.issue}** のまま。関数名や機能名に書き換えないこと —")
-    out.append("# 後続の照合が識別子の揺れで記録を見失う（実地で起きた）。呼び名は --why に書く。")
-    out.append(f'python3 "{os.path.join(HERE, "ledger.py")}" '
-               f'append --actor {role} --class {ev} \\')
-    out.append(f'  --payload \'{{"verdict":"<...>","deliverable":"{a.issue}",'
-               f'"reasoning_sha256":"<...>","issue":{a.issue},'
-               f'"risk_accepted":<true|false>}}\'')
-    out.append('# risk_accepted: --risk に穴を書いたうえで通すなら true。')
-    out.append('# リスクを書けば通せる構造なので、書き得にしないために台帳側で数えられる形にする')
-    out.append('# （Issue コメントだけだと集計できない）。'
-               + ('skeptic はその穴を潰しに行くこと。' if role == 'gate' else ''))
-    out.append("```")
+        fields += [("standard", "適用した基準（SPEC の MUST / seam contract / 機械バー）"),
+                   ("alternatives", "採らなかった選択肢と、その理由")]
+    else:
+        fields += [("mutations", "撃ったミューテーションの一覧（検出された／生存した）— "
+                                 "次の周回が同じ場所を撃ち直さないために要る")]
+    fields += [("risk", "承知の上で残す穴 / 排除しきれなかった失敗モード。無いなら「無い」と明示")]
+
+    out.append("\n## 返すもの（**判定はあなたが決める。記録は監督が行う**）\n")
+    for k, desc in fields:
+        out.append(f"- **{k}** — {desc}")
+    out.append("\n> **記録コマンドは打たなくてよい。** あなたには `ORG_GITHUB_REPO` も台帳の"
+               "パスも渡っていない。上の項目を揃えて返せば、監督が Issue と台帳の両方に"
+               "1コマンドで記録する。\n"
+               "> **欠けたまま返してはいけない** — 監督は記録できず、判定が失われる"
+               "（実地で一度、判定が台帳に入らないまま失われかけた）。\n"
+               f"> なお台帳は、maker が自分の成果物を admit することも、maker や admit した "
+               f"gate が refute することも**拒否する** — あなたの独立性は記録の時点で"
+               f"機械的に検査される。")
+
     print("\n".join(out))
-    print(f"\n— この出力を {role} subagent に渡すこと。本文に貼っても、ファイルに落として"
+    # 監督向け（stderr）— subagent が返した値を流し込むコマンド。**判定は埋めない。**
+    print(f"\n===== 監督（あなた）が打つコマンド — {role} が返した値を入れる =====\n"
+          f'python3 "{os.path.join(HERE, "github_sync.py")}" decide --issue {a.issue} '
+          f"--event {ev} \\\n"
+          f"  --verdict <{role} が返した verdict> --by {role} \\\n"
+          f"  --why \"<{role} の why をそのまま>\" \\\n"
+          f"  --evidence \"<{role} の evidence をそのまま>\" \\\n"
+          + (f"  --standard \"<...>\" --alternatives \"<...>\" \\\n" if role == "gate" else "")
+          + f"  --risk \"<...>\"\n"
+          f"（0.21.0 以降、`decide` が Issue と台帳の**両方**に1コマンドで書く。台帳を先に"
+          f"通すので、統制が拒否するなら Issue にも記録されない）\n", file=sys.stderr)
+    print(f"— この出力を {role} subagent に渡すこと。本文に貼っても、ファイルに落として"
           f"参照させてもよい\n"
           f"  （seam ガードは本文に契約が無ければ、プロンプトが指すファイルを自分で読んで"
           f"検証する）。\n"

@@ -107,6 +107,23 @@ first `create` would then race on label creation.
 
 !`REPO="$(python3 "${CLAUDE_PLUGIN_ROOT}/tools/discover.py" repo 2>/dev/null)"; if [ -n "$REPO" ]; then fail=0; for spec in ready:1d76db in-progress:fbca04 blocked:b60205 needs-human:d93f0b done:0e8a16 kind:objective:0e8a16 kind:task:bfd4f2 mandate:fbca04 self:c5def5; do name="orgforge:${spec%:*}"; color="${spec##*:}"; if gh label create "$name" --repo "$REPO" --color "$color" --force >/dev/null 2>&1; then echo "  $name"; else echo "  FAILED $name"; fail=$((fail+1)); fi; done; if [ "$fail" -eq 0 ]; then echo "labels ensured on $REPO"; else echo "WARNING: $fail label(s) FAILED on $REPO — fix gh auth / repo access BEFORE /org-decompose, or the first create races on label creation"; fi; else echo "no GitHub remote discoverable — ledger-only org, skipping labels. Add a remote (gh repo create --source=.) to enable the cross-environment backlog."; fi`
 
+## 5b. 機械バーの現状を baseline として記録する（docs/11 §4e）
+
+`repro_lint` は「この変更で新たに悪化したか」を baseline との差で見る。**baseline が無いと
+比較のしようがなく**、既存の失敗も新規の悪化も同じ HELD として出る。実地では gate がそれを
+「この変更による悪化」と読んで判定を止めた（対象の Issue は、まさにその項目を緑にする作業
+だった）。0.25.2 以降、baseline が無ければツールは「判定していない」と明示するが、
+**基準を1回取っておくほうが根本的**である。
+
+新規リポジトリなら失敗は0件か少数で、それが正しい出発点になる（空の baseline は「負債ゼロで
+始めた」という記録であり、以後の悪化が全部見える）。既存コードに後付けするなら
+`/org-adopt` が同じことをする。
+
+!`echo 'baseline を記録: python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/repro_lint.py" baseline .'`
+
+記録された内容は「期限のない免除」ではない — `repro_lint check` は返済済みの項目を検出して
+「baseline から外して締め直せ」と言う（drain-then-ratchet）。
+
 ## 6. Verify the org spec lints, and the guardrails actually bite
 
 An org whose spec doesn't lint is not initialized — it just has files. **Expected here:** exactly one

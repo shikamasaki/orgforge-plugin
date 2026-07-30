@@ -164,8 +164,10 @@ def test_verify_injects_charter_and_leaves_verdict_unfilled():
     # gh が無い/認証が無い環境では Issue を読めず 3 で落ちるのが正しい挙動
     if p.returncode == 0:
         assert "admission control" in out, "agents/gate.md の憲章が注入されていない"
-        assert "<admit|reject|park>" in out, "verdict が placeholder になっていない"
-        for filled in ('--verdict admit', '--verdict "admit"'):
+        # 0.25.2: subagent 向けは「返すもの」の指定、監督向けは値を入れる欄。
+        # どちらも **verdict を決めない** — ツールが verdict を決めた瞬間に gate は形骸化する。
+        assert "admit|reject|park" in out, "verdict の選択肢が示されていない"
+        for filled in ('--verdict admit', '--verdict "admit"', '--verdict reject'):
             assert filled not in out, f"配管が verdict を決めている: {filled}"
     else:
         assert p.returncode in (2, 3), out
@@ -674,3 +676,47 @@ def test_verify_hands_the_unshot_areas_to_skeptic():
     src = _cycle_src("judge")
     assert "撃っていない" in src and "Known risk accepted" in src
     assert "標的候補" in src
+
+
+# ── 0.25.2: 指示と権限の食い違いを解消（subagent は記録しない）──────────────
+def test_verify_does_not_tell_subagent_to_record():
+    """subagent に打てないコマンドを渡さない。
+
+    実地で gate と skeptic が計7回、判定を出した後に「記録は監督に委ねます」と述べて止まり、
+    一度は判定そのものが台帳に入らず失われかけた。subagent には ORG_GITHUB_REPO も台帳の
+    パスも渡っていないのに「二重に記録せよ」と指示していた — **指示と権限の食い違い**。
+    """
+    src = _cycle_src("judge")
+    seg = src[src.index("def cmd_verify"):]
+    # subagent 向け（stdout）の節には記録コマンドを載せない
+    assert "返すもの（**判定はあなたが決める。記録は監督が行う**）" in seg
+    assert "記録コマンドは打たなくてよい" in seg
+    # 監督向け（stderr）には、値を流し込むコマンドを出す — 配管が判定を運べないと本末転倒
+    assert "監督（あなた）が打つコマンド" in seg
+    assert "file=sys.stderr" in seg
+
+
+def test_agent_charters_do_not_demand_recording():
+    """agents/*.md 側も「判定を返すまで」に揃えること（片方だけ直すと食い違いが残る）。"""
+    d = _cycle_mod("_core")._agents_dir()
+    if not d:
+        return
+    for role in ("gate", "skeptic"):
+        body = pathlib.Path(d, f"{role}.md").read_text(encoding="utf-8")
+        assert "記録は監督" in body, f"{role}.md がまだ subagent に記録を求めている"
+        assert "$ORG_GITHUB_REPO" not in body, \
+            f"{role}.md が渡っていない環境変数を参照している"
+
+
+def test_repro_lint_admits_it_has_no_baseline():
+    """baseline を読んでいないなら「判定していない」と言う。
+
+    実地で gate がこの断定（「baseline に無い＝この変更で新たに悪化した」）を額面どおり
+    受け取り、既存の負債を新規の悪化と読んで判定を止めた — 対象の Issue は、まさにその
+    項目を緑にする作業だった。道具が見ていない領域については、道具は「見ていない」と
+    言うべきである。
+    """
+    src = (TOOLS / "repro_lint.py").read_text(encoding="utf-8")
+    seg = src[src.index("HELD: {len(failed)} required artifact"):]
+    assert "baseline が無い" in seg and "判定していない" in seg
+    assert "if baseline is None:" in src
