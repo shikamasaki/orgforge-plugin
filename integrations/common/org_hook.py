@@ -455,6 +455,103 @@ def _window_since():
 # the default cap is not one command away from catastrophe. It is deliberately narrow (only the
 # unambiguously catastrophic, root-scoped / whole-disk forms) to avoid false positives; the cap handles
 # the ordinary irreversible ops. Override for a sandbox with ORG_ALLOW_CATASTROPHIC=1 (never in prod).
+
+# 統合を organ の外で行う経路。**呼ばなかったことを検出できるのは hook だけである** —
+# `integrate` は gate の admit と skeptic の survives を確認するが、呼ばれなければ何も起きない。
+# 運用では、質の高い maker 報告を受けた監督が `git merge` で develop に入れ、gate も skeptic も
+# 通らないまま2件が統合された。台帳は後から正しく拒否したが、拒否が来たのはコードが入った後。
+# **検査を呼ぶかどうかを、検査される側が決められてはいけない。**
+_PROTECTED_BRANCHES = ("develop", "main", "master")
+_MERGE_VERBS = (("git", "merge"), ("git", "rebase"), ("git", "cherry-pick"))
+
+
+def _integration_bypass(tool_name, ti):
+    """保護ブランチへの直接統合か。hold の理由（と打つべきコマンド）を返す。
+
+    **hold のメッセージに打つべきコマンドを貼るのが決定的である。** 迂回は速さのためではなく
+    「道具の名前を思い出すコスト」を払わなかったために起きる。コマンドが目の前にあれば迂回する
+    理由が消える。逆に hold だけしてコマンドを出さないと、宣言（`ORG_ALLOW_MANUAL_MERGE`）を
+    覚えて常用され、**迂回が記録に残らないまま高速化する** — それは今より悪い。
+    """
+    if tool_name != "Bash":
+        return None
+    cmd = (ti or {}).get("command") or ""
+    toks = _tokenize(cmd)
+    if not any(_has_seq(toks, v) for v in _MERGE_VERBS):
+        return None
+    # 現在のブランチが保護対象なら hold（マージ先は checkout 中のブランチ）
+    try:
+        cur = subprocess.run(["git", "branch", "--show-current"],
+                             capture_output=True, text=True, timeout=10).stdout.strip()
+    except Exception:
+        cur = ""
+    if cur not in _PROTECTED_BRANCHES:
+        return None
+    # org が無いリポジトリでは黙る（この規律は orgforge の org にだけ適用する）
+    if not os.path.isdir(os.path.join(os.getcwd(), ".orgforge")):
+        return None
+
+    tools_dir = os.environ.get("ORG_TOOLS_DIR") or ""
+    oc = os.path.join(tools_dir, "org_cycle.py") if tools_dir else "org_cycle.py"
+    return (f"{cur} への直接の統合。**統合は `org_cycle integrate` を通すこと** — "
+            f"gate の admit と skeptic の survives が台帳にあるかを確認する:\n"
+            f"    python3 \"{oc}\" integrate --issue <N> --plan   # まず何を統合するか見る\n"
+            f"    python3 \"{oc}\" integrate --issue <N>          # 前提を確認して統合する\n"
+            f"  `integrate` は前提が無ければ exit 4 で止まり、マージ手順に入らない。"
+            f"統合後のテスト・`integration_admitted` の記録・Issue への log もまとめて行う。\n"
+            f"  **意図的に手で統合する場合**は `ORG_ALLOW_MANUAL_MERGE=1` を付けること。"
+            f"その宣言は台帳に `bypass_declared` として残る — 塞げないことを記録する形にしてある。")
+
+
+
+# Issue を organ の外で作る/閉じる経路。運用では6件を `gh issue create` で作り、
+# `dept` / `objective` / `parent` / 冪等キーを全部落とし、5件を `gh issue close` で閉じて
+# `cycle_completed` を1件も残さなかった（`domain_model` の必須項目が丸ごと飛んだ）。
+# **読み取り（view / list）は止めない。**
+_GH_WRITE = {
+    ("issue", "create"): ("Issue の作成", "create --kind task --dept <役> --objective <id> "
+                                          "--parent <objective#> --title … --body …"),
+    ("issue", "close"): ("Issue のクローズ", None),
+    ("issue", "edit"): ("Issue のラベル/本文の変更", None),
+    ("issue", "reopen"): ("Issue の再オープン", None),
+}
+
+
+def _gh_bypass(tool_name, ti):
+    """organ を通さない Issue の書き換えか。理由（と打つべきコマンド）を返す。"""
+    if tool_name != "Bash":
+        return None
+    cmd = (ti or {}).get("command") or ""
+    toks = _tokenize(cmd)
+    if not _has_token(toks, "gh"):
+        return None
+    if not os.path.isdir(os.path.join(os.getcwd(), ".orgforge")):
+        return None
+    for (a, b), (what, gs_args) in _GH_WRITE.items():
+        if not _has_seq(toks, ("gh", a)) or not _has_token(toks, b):
+            continue
+        tools_dir = os.environ.get("ORG_TOOLS_DIR") or ""
+        gs = os.path.join(tools_dir, "github_sync.py") if tools_dir else "github_sync.py"
+        oc = os.path.join(tools_dir, "org_cycle.py") if tools_dir else "org_cycle.py"
+        if gs_args:
+            how = f'    python3 "{gs}" {gs_args}'
+        else:
+            how = (f'    python3 "{oc}" complete --role <役> --issue <N> --outputs … '
+                   f"--command … --result … \\\n"
+                   f"        (--domain-model-updated … | --domain-model-none …)\n"
+                   f"  ラベル/ステージだけを変えるなら:\n"
+                   f'    python3 "{gs}" stage --issue <N> --stage ready|in-progress|blocked|done')
+        return (f"{what} を organ の外で行っている。**organ を通すこと** — "
+                f"`dept` / `objective` / `parent` / 冪等キーが付き、台帳に記録が残る:\n"
+                f"{how}\n"
+                f"  organ を通さないと、`ready` が完了した Issue を返し続け、"
+                f"起票が objective に紐づかず、`cycle_completed` の `domain_model` が飛ぶ"
+                f"（すべて運用で起きた）。\n"
+                f"  読み取り（`gh issue view` / `gh issue list`）は止めていない。"
+                f"手で書き換えるなら `ORG_ALLOW_MANUAL_GH=1` を付けること（台帳に残る）。")
+    return None
+
+
 def _catastrophic_reason(tool_name, ti):
     if tool_name not in ("Bash", "Shell", "Terminal"):
         return None
@@ -720,6 +817,51 @@ def main():
     seam_reason = spawn_needs_seam_or_independence(tool_name, tool_input)
     if seam_reason:
         _deny(f"org guardrail HELD this {tool_name} spawn: {seam_reason}")
+
+    # 保護ブランチへの直接統合を hold（台帳の有無に依存しない形状検査）。宣言があれば通すが、
+    # **通したことを台帳に残す** — 迂回が記録に残らないまま常用されるのを防ぐ。
+    if os.environ.get("ORG_ALLOW_MANUAL_MERGE") == "1":
+        byp = _integration_bypass(tool_name, tool_input)
+        if byp and LEDGER_ROOT:
+            # **迂回そのものを記録する。** 宣言を許すが、記録に残らない迂回は許さない —
+            # そうしないと宣言が常用され、迂回が見えないまま高速化する。
+            payload = {"what": "manual merge into a protected branch",
+                       "command": ((tool_input or {}).get("command") or "")[:400],
+                       "declared_by": os.environ.get("ORG_ROLE") or "unknown"}
+            try:
+                subprocess.run([sys.executable, os.path.join(TOOLS_DIR, "ledger.py"), "append",
+                                LEDGER_ROOT, "--actor", "system:org_hook",
+                                "--class", "bypass_declared",
+                                "--payload", json.dumps(payload, ensure_ascii=False),
+                                "--ts", _now_ts()],
+                               capture_output=True, encoding="utf-8", errors="replace", timeout=30)
+            except Exception:
+                pass   # 記録の失敗が allow を crash に変えてはいけない
+    else:
+        byp = _integration_bypass(tool_name, tool_input)
+        if byp:
+            _deny(f"org guardrail HELD this {tool_name}: {byp}")
+
+    # 同じ形で、organ を通さない Issue の書き換えも hold する
+    if os.environ.get("ORG_ALLOW_MANUAL_GH") == "1":
+        ghb = _gh_bypass(tool_name, tool_input)
+        if ghb and LEDGER_ROOT:
+            payload = {"what": "manual gh issue write",
+                       "command": ((tool_input or {}).get("command") or "")[:400],
+                       "declared_by": os.environ.get("ORG_ROLE") or "unknown"}
+            try:
+                subprocess.run([sys.executable, os.path.join(TOOLS_DIR, "ledger.py"), "append",
+                                LEDGER_ROOT, "--actor", "system:org_hook",
+                                "--class", "bypass_declared",
+                                "--payload", json.dumps(payload, ensure_ascii=False),
+                                "--ts", _now_ts()],
+                               capture_output=True, encoding="utf-8", errors="replace", timeout=30)
+            except Exception:
+                pass
+    else:
+        ghb = _gh_bypass(tool_name, tool_input)
+        if ghb:
+            _deny(f"org guardrail HELD this {tool_name}: {ghb}")
 
     if not LEDGER_ROOT:
         # no ledger configured => the org has no state to judge against. Fail-safe: allow, but

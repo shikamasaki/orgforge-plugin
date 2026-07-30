@@ -384,7 +384,15 @@ python3 "${CLAUDE_PLUGIN_ROOT}/tools/org_cycle.py" integrate --issue <N> [--test
   10件失敗して切り分けに時間を使った（8件が worktree 走査の偽陽性）— 衝突は統合後に分かるより
   前に分かるほうが安い。
 
-  **gate の admit と skeptic の survives が台帳に無ければ止まる**（exit 4）。Issue にコメントが
+  **gate の admit と skeptic の survives が台帳に無ければ止まる**（exit 4）。
+
+  **`git merge` で直接 develop に入れることはできない。** 保護ブランチ（`develop`/`main`/
+  `master`）上での `merge`/`rebase`/`cherry-pick` は PreToolUse が hold する — `integrate` は
+  呼ばれなければ何も検査しないので、**呼ばなかったことを検出できるのはフックだけ**である。
+  同じ理由で `gh issue create|close|edit` も hold する（organ を通さないと `dept`/`objective`/
+  `parent`/冪等キーが付かず、`cycle_completed` の `domain_model` が飛ぶ）。
+  壊れて詰まったときは `ORG_ALLOW_MANUAL_MERGE=1` / `ORG_ALLOW_MANUAL_GH=1` で通せるが、
+  **通した事実は台帳に `bypass_declared` として残る。**Issue にコメントが
   あっても台帳に無ければ「記録されていない」— 実地では refutation_attempted が台帳に1件も無い
   まま統合され、`integration_admitted` も記録されなかった。二重記録の片側だけが落ちるのが
   実際の失敗形なので、ここは台帳を見る。マージするかどうかは判定しない（前提の照合だけ）。

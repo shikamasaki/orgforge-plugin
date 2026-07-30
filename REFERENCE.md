@@ -65,6 +65,8 @@ irreversible patterns draw down a budget.
 | `ORG_REQUIRE_SEAM` | The spawn gate is **on by default**: an `Agent`/`Task` spawn is blocked unless its prompt carries a seam contract or an `INDEPENDENT:` declaration, and a declared `owns:` territory must not collide with a live sibling's claim (concurrent-write prevention). Set to `0`/`false`/`off` to disable it for an ungated dev run. | *(on)* |
 | `ORG_MAX_CYCLES` | Per-window cap on a role's loop cycles (each `Agent`/`Task` spawn = one cycle). When set, a spawn that would exceed it is **held** — the enforcement-layer runaway kill ("$3-5, not $180"). Needs `ORG_ROLE`. | *(unset → no cycle cap)* |
 | `ORG_MAX_TOKENS` | Per-window cap on a role's cumulative reported tokens (from `cycle_completed`). Same enforcement as `ORG_MAX_CYCLES`. | *(unset → no token cap)* |
+| `ORG_ALLOW_MANUAL_MERGE` | `1` で保護ブランチ（`develop`/`main`/`master`）への直接の `git merge`/`rebase`/`cherry-pick` を通す。**通した事実は台帳に `bypass_declared` として残る** — 統合は `org_cycle integrate` を通すのが既定（gate の admit と skeptic の survives を確認する） | *(off — hold する)* |
+| `ORG_ALLOW_MANUAL_GH` | `1` で `gh issue create|close|edit|reopen` を通す（同様に台帳に残る）。読み取り（`view`/`list`）と `gh pr *` は元から止めない | *(off — hold する)* |
 | `ORG_QUIET` | `1` で「実行中のバージョンと cwd」の1行（stderr）を抑制する。`view`/`census`/`digest` と内部呼び出しでは自動で抑制されるので、通常は不要 | *(off — 1行出す)* |
 | `ORG_HOOK_FAIL_OPEN` | `1` allows a tool call when the guardrail organ errors, instead of blocking. **Dev only** — the safe default is fail-closed. | *(off / fail-safe)* |
 | `ORG_ALLOW_CATASTROPHIC` | `1` disables the catastrophic denylist (the hard block on `rm -rf /`-class, `mkfs`, `dd`-to-disk, fork bombs). **Disposable sandbox only** — never in an environment with real data. | *(off / catastrophic blocked)* |

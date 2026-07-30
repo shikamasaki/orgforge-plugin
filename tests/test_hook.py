@@ -443,3 +443,86 @@ def test_force_push_and_history_rewrites_stay_metered():
                 "git push --delete origin old", "git reset --hard HEAD~1"):
         dim, w = h._asset_dimension("Bash", {"command": cmd})
         assert w > 0, f"force 系が無料になった: {cmd}"
+
+
+# ── 0.30.0: organ を迂回する経路を hold する ────────────────────────────────
+def _hook():
+    import importlib.util, pathlib
+    p = pathlib.Path(__file__).resolve().parent.parent / "integrations" / "common" / "org_hook.py"
+    spec = importlib.util.spec_from_file_location("org_hook_byp", p)
+    m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+    return m
+
+
+def _org_repo(tmp_path, branch="develop"):
+    repo = tmp_path / "r"; repo.mkdir()
+    def g(*a):
+        return subprocess.run(["git", *a], cwd=repo, capture_output=True, text=True)
+    g("init", "-q", "-b", "main"); g("config", "user.email", "t@t"); g("config", "user.name", "t")
+    (repo / ".orgforge").mkdir()
+    (repo / "s.txt").write_text("x"); g("add", "-A"); g("commit", "-qm", "s")
+    g("branch", "develop"); g("checkout", "-q", branch)
+    return repo
+
+
+def test_direct_merge_into_a_protected_branch_is_held(tmp_path, monkeypatch):
+    """`integrate` は呼ばれなければ何も検査しない。
+
+    運用では、質の高い maker 報告を受けた監督が `git merge` で develop に入れ、gate も
+    skeptic も通らないまま2件が統合された。台帳は後から正しく拒否したが、拒否が来たのは
+    コードが入った後。**検査を呼ぶかどうかを、検査される側が決められてはいけない。**
+    """
+    h = _hook()
+    repo = _org_repo(tmp_path, "develop")
+    monkeypatch.chdir(repo)
+    for cmd in ("git merge --no-ff feat/issue-42", "git rebase feat/x",
+                "git cherry-pick abc1234"):
+        r = h._integration_bypass("Bash", {"command": cmd})
+        assert r is not None, f"保護ブランチへの直接統合が通った: {cmd}"
+        assert "org_cycle" in r and "integrate" in r, "打つべきコマンドが示されていない"
+
+
+def test_merge_on_a_feature_branch_is_allowed(tmp_path, monkeypatch):
+    """feature ブランチ側で develop を取り込むのは正常な作業。止めない。"""
+    h = _hook()
+    repo = _org_repo(tmp_path, "main")
+    subprocess.run(["git", "checkout", "-q", "-b", "feat/issue-9"], cwd=repo,
+                   capture_output=True, text=True)
+    monkeypatch.chdir(repo)
+    assert h._integration_bypass("Bash", {"command": "git merge develop"}) is None
+
+
+def test_read_only_git_and_gh_are_allowed(tmp_path, monkeypatch):
+    """読み取りは止めない（`git merge-base` / `gh issue view` / `gh issue list`）。"""
+    h = _hook()
+    repo = _org_repo(tmp_path, "develop")
+    monkeypatch.chdir(repo)
+    assert h._integration_bypass("Bash", {"command": "git merge-base develop main"}) is None
+    for cmd in ("gh issue view 42", "gh issue list --state open", "gh pr create --base develop"):
+        assert h._gh_bypass("Bash", {"command": cmd}) is None, cmd
+
+
+def test_manual_issue_writes_are_held(tmp_path, monkeypatch):
+    """organ を通さない Issue の書き換えを hold する。
+
+    運用では6件を `gh issue create` で作って dept/objective/parent/冪等キーを落とし、
+    5件を `gh issue close` で閉じて `cycle_completed` を1件も残さなかった。
+    """
+    h = _hook()
+    repo = _org_repo(tmp_path, "develop")
+    monkeypatch.chdir(repo)
+    for cmd in ("gh issue create --title x", "gh issue close 42",
+                "gh issue edit 42 --add-label y"):
+        r = h._gh_bypass("Bash", {"command": cmd})
+        assert r is not None, f"organ の外の Issue 書き換えが通った: {cmd}"
+        assert "github_sync" in r or "org_cycle" in r, "打つべきコマンドが示されていない"
+
+
+def test_no_hold_outside_an_orgforge_repo(tmp_path, monkeypatch):
+    """org でないリポジトリには、この規律を適用しない。"""
+    h = _hook()
+    repo = tmp_path / "plain"; repo.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "develop"], cwd=repo, capture_output=True)
+    monkeypatch.chdir(repo)
+    assert h._integration_bypass("Bash", {"command": "git merge feat/x"}) is None
+    assert h._gh_bypass("Bash", {"command": "gh issue create --title x"}) is None

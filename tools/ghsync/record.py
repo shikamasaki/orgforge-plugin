@@ -212,6 +212,44 @@ _RAN = ("npm ", "npx ", "git ", "psql", "python3", "node ", "pytest", "cargo ", 
         "supabase", "curl ", "exit=", "exit code", "passed", "failed", "$ ", "→", "->")
 
 
+
+def _prior_admission(issue):
+    """その Issue に gate の `admit` があるか。(verdict, actor) を返す（無ければ (None, None)）。
+
+    台帳は `phase_started` に対して既に同じ検査をしている（design が admit されていなければ
+    implement を拒否する）。**統合の側にも同じ形を置く** — `integration_admitted = pass` が
+    gate の admit なしに通ると、maker の報告の質が admit の代わりに使われる。運用では、質の
+    高い報告を受けて `git merge` し、そのあと `integration_admitted` を記録して通っていた。
+    """
+    try:
+        sys.path.insert(0, HERE)          # HERE = tools/（_core に集約。0.22.1 の教訓）
+        from discover import ledger_root
+        from ledger import corrected_seqs
+        root = ledger_root()
+    except Exception:
+        return None, None
+    path = os.path.join(root, "ledger.jsonl") if root else None
+    if not path or not os.path.isfile(path):
+        return None, None
+    evs = []
+    for line in open(path, encoding="utf-8"):
+        try:
+            evs.append(json.loads(line))
+        except Exception:
+            continue
+    voided = corrected_seqs(evs)
+    want = str(issue).lstrip("#")
+    hit = (None, None)
+    for e in evs:
+        if e.get("class") != "admission_decided" or e.get("seq") in voided:
+            continue
+        pl = e.get("payload", {}) or {}
+        ids = {str(pl.get(k, "")).lstrip("#") for k in ("issue", "deliverable") if pl.get(k)}
+        if want in ids:
+            hit = (pl.get("verdict"), e.get("actor"))
+    return hit
+
+
 def _claim_verify_defect(a):
     """監督の記録が「誰が確かめたか」を書き分けているかを見る。
 
@@ -299,6 +337,22 @@ def cmd_decide(a):
               f"For a progress milestone use `log`.", file=sys.stderr)
         return 2
     why = (a.why or "").strip()
+    # integration_admitted は gate の admit を前提とする。**これは拒否する** —
+    # 統合の記録が admit なしに残ると、後から見て「通った」と読めてしまう。
+    if a.event == "integration_admitted" and a.verdict in ("pass", "admit"):
+        verdict, actor = _prior_admission(a.issue)
+        if verdict != "admit":
+            print(f"integration_admitted を記録できない: #{a.issue} に gate の admit が無い"
+                  f"（台帳の最新は {verdict or '記録なし'}）。\n"
+                  f"  先に gate を通すこと:\n"
+                  f'    python3 "{os.path.join(HERE, "org_cycle.py")}" verify '
+                  f"--issue {a.issue} --role gate\n"
+                  f"  **maker の報告の質は admit の代わりにならない。** 台帳は phase_started に対して\n"
+                  f"  既に同じ検査をしている（design が admit されていなければ implement を拒否）。\n"
+                  f"  統合の記録が admit なしに残ると、後から見て「通った」と読めてしまう。",
+                  file=sys.stderr)
+            return 4
+
     # 監督の書き分けを見る（拒否ではなく警告。判断は監督の仕事）
     for w in _claim_verify_defect(a):
         print(f"注意: {w}", file=sys.stderr)

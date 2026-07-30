@@ -6,6 +6,32 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 0.30.0
+
+Controls existed for the deliverable, the judgment, the report and the declaration. Nothing
+covered **the supervisor doing the same state change by hand** — `git merge` instead of
+`integrate`, `gh issue create` instead of `github_sync create`. In one session that put two
+deliverables into `develop` with no gate and no skeptic; the ledger refused correctly, but only
+once `complete` was run hours later.
+
+### Added
+- `PreToolUse` holds `git merge` / `rebase` / `cherry-pick` when the checkout is on `develop`,
+  `main` or `master` inside an org. Feature-branch merges and read-only commands
+  (`git merge-base`) are untouched. `ORG_ALLOW_MANUAL_MERGE=1` proceeds and records
+  `bypass_declared` in the ledger.
+- `PreToolUse` holds `gh issue create|close|edit|reopen` inside an org. `gh issue view|list` and
+  `gh pr *` are untouched. `ORG_ALLOW_MANUAL_GH=1` behaves the same way.
+- `bypass_declared` ledger class — a declared bypass is allowed but never unrecorded.
+
+### Changed
+- `github_sync decide --event integration_admitted` requires a `gate` admit for that Issue in the
+  ledger and exits 4 without one, writing nothing to the Issue. The ledger already enforces the
+  same shape on `phase_started`; this puts it on the integration side. A maker's report, however
+  well evidenced, is not an admission.
+
+Every hold prints the command to run instead. A hold that only refuses teaches its own bypass:
+the bypass flag gets memorised and used routinely, and then the detour stops being recorded.
+
 ## 0.29.0
 
 ### Added

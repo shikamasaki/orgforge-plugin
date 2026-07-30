@@ -765,3 +765,34 @@ def test_legacy_calls_without_claimed_verified_still_pass(monkeypatch, capsys):
     rc = GS.cmd_decide(_cv())
     assert rc == 0
     assert "痕跡" not in capsys.readouterr().err
+
+
+# ── 0.30.0: integration_admitted は gate の admit を前提とする ──────────────
+def test_integration_admitted_requires_a_gate_admit(monkeypatch, tmp_path, capsys):
+    """gate も skeptic も通っていない Issue に `integration_admitted = pass` が通っていた。
+
+    台帳は `phase_started` に対して既に同じ検査をしている（design が admit されていなければ
+    implement を拒否）。**maker の報告の質は admit の代わりにならない。**
+    """
+    led = tmp_path / "led"; led.mkdir()
+    monkeypatch.setenv("ORG_LEDGER_ROOT", str(led))
+    fake = CommentGh(); monkeypatch.setattr(GS, "gh", fake)
+    rc = GS.cmd_decide(_cv(issue=42, event="integration_admitted", verdict="pass"))
+    assert rc == 4, "gate の admit なしに統合の記録が通った"
+    err = capsys.readouterr().err
+    assert "gate の admit が無い" in err
+    assert "verify" in err and "--role gate" in err, "打つべきコマンドが示されていない"
+    assert not fake.posted, "Issue にも記録してはいけない"
+
+
+def test_integration_admitted_passes_after_an_admit(monkeypatch, tmp_path):
+    """admit があれば通す。"""
+    led = tmp_path / "led2"; led.mkdir()
+    (led / "ledger.jsonl").write_text(json.dumps({
+        "seq": 1, "class": "admission_decided", "actor": "gate",
+        "payload": {"issue": 42, "deliverable": "42", "verdict": "admit"}}) + "\n",
+        encoding="utf-8")
+    monkeypatch.setenv("ORG_LEDGER_ROOT", str(led))
+    fake = CommentGh(); monkeypatch.setattr(GS, "gh", fake)
+    rc = GS.cmd_decide(_cv(issue=42, event="integration_admitted", verdict="pass"))
+    assert rc == 0, "admit 済みの統合が弾かれた"

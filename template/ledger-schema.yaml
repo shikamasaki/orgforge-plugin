@@ -38,6 +38,12 @@ event_classes:
   # /clear). Stamped at each milestone of a cycle: how far (0..1 or a phase label), what was just done,
   # the concrete next step, and any blocker. work_in_progress reads the LATEST per candidate; /org-resume
   # replays it to continue exactly where the cycle stopped. This is the backlog's memory of "how far".
+  # bypass_declared: **道具を迂回したことの記録**。organ を通さずに同じ状態変更を行う経路
+  # （保護ブランチへの直接マージなど）は hook が hold するが、壊れたときに詰まるので明示の
+  # 宣言（`ORG_ALLOW_MANUAL_MERGE=1`）で通せる。**その宣言自体をここに残す** — 記録に残らない
+  # 迂回を許すと、宣言が常用されて迂回が見えないまま高速化する。塞げないことを記録する形。
+  bypass_declared:      { what, command, declared_by }   # GUARD-BYPASS
+
   # asset_touched: **本番資産への変更**。exposure_budget_checked はローカルのファイル操作を
   # 数えるが、リモート DB への DDL・本番の権限変更・インフラ操作は数えていない。実際には
   # 後者のほうが危険で、しかも取り消しにコストがかかる。実地では本番 DB にマイグレーション
