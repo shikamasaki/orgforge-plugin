@@ -113,12 +113,19 @@ The twenty tools in `tools/`:
 | `conventions.py` | internal reusable precedent ("how we do X here") | `adopt` `conflict` `render` |
 | `handoff.py` | build a delegation packet: slice + seam contract + scoped doctrine | *(single command)* |
 | `repro_lint.py` | the **Level-2 reproducibility gate** — deterministic check that a repo the org *builds* clones-and-runs the same for anyone (docs/11 §4a) | `check <repo> [--phase]` |
-| `github_sync.py` | the backlog↔GitHub-Issue projection: the work-lock, the SPEC task Issues, the judgment record (docs/11 §4f), the human-task front door (§0c) | `claim` `create` `needs-human` `log` `decide` `ready` `branch` `coverage-check` `split-check` `candidate-id` |
-| `org_cycle.py` | **1サイクル分の配管を1コマンドで** — claim/spec_delegated/phase_started/cycle_started/log/stage を正しい順序と actor で。`parent` と `candidate_id` は Issue から自動解決（docs/11 §0d） | `begin` `complete` `plan` |
+| `github_sync.py` + `ghsync/` | the backlog↔GitHub-Issue projection: the work-lock, the SPEC task Issues, the judgment record (docs/11 §4f), the human-task front door (§0c) | `claim` `create` `needs-human` `log` `decide` `ready` `branch` `coverage-check` `split-check` `candidate-id` |
+| `org_cycle.py` + `orgcycle/` | **1サイクル分の配管を1コマンドで** — claim/worktree/spec_delegated/phase_started/cycle_started/log/stage を正しい順序と actor で。`parent` と `candidate_id` は Issue から自動解決（docs/11 §0d）。判定の材料の組み立て（`verify`）・PR と fan-in（`handback`/`integrate`）・状態の一望（`show`）も同じ配管の一部。**判断は一切持たない** | `begin` `complete` `plan` `verify` `handback` `integrate` `show` `gc` `record` `touched` |
 | `req_lint.py` | 要求記述の書式検査（ISO/IEC/IEEE 29148 tailored + EARS、docs/11 §0b） | `check <REQUIREMENTS.md>` |
-| `discover.py` | org をカレントディレクトリから発見する（ledger / repo / constitution）。**環境変数を不要にする層** | `ledger` `repo` `root` `env` |
+| `discover.py` | org をカレントディレクトリから発見する（ledger / repo / constitution）。**環境変数を不要にする層**。`begin` が作った worktree の中からは**親を辿る** — worktree を org root と誤認すると、そこに迷子の台帳ができて実判定が本体から消える（実地で1日3回起きた） | `ledger` `repo` `root` `env` |
 | `status.py` | the one health board — GREEN/AMBER/RED + 人間待ちの名指し | `status` `redline` |
 | `_organ.py` | shared substrate: ledger reader, event emitter, exit-code contract, root resolution | *(library)* |
+
+`org_cycle.py` と `github_sync.py` は**薄いディスパッチャ**（argparse + サブコマンドの振り分け）で、
+実体は `tools/orgcycle/` と `tools/ghsync/` のパッケージにある。CLI の形は変えていない
+（`python3 tools/org_cycle.py begin …` のまま）。分けたのは、1ファイルが 1400 行を超えて全体が
+見えなくなり、検出器の設計を2回外したため。**パスの基点は各パッケージ `HERE` の1箇所に集約する** —
+分割で階層が変わったとき、散った `__file__` の解決に直し漏れが出て、憲章と seam contract を
+静かに見失った（docs/11）。
 
 `repro_lint.py` is the enforcement half of **reproducibility as a first-class property** (docs/11 §0,
 docs/01 J14/S9): it runs at the SDLC implement/test/deploy gates and holds a repo that a stranger

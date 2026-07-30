@@ -24,6 +24,28 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 > 「効いていない」と言う。0.16.0 の相関キー必須化、0.16.0 の `unknown` 報告、0.18.0 の
 > reject 追跡、0.21.0 の冪等キー修正は、すべてこの一点である。
 
+## 0.25.3
+
+**ドキュメントの追随のみ**（挙動の変更なし）。0.12〜0.25.2 で入れた機能のうち、読ませる系の
+文書に載っていなかったものを反映した。
+
+| 文書 | 追随していなかったもの |
+|---|---|
+| **README** | 版表記が v0.22 のまま。`touched` / `split-check` / `--plan` / 「subagent は記録しない」／取り下げた検査2件の記録 |
+| **QUICKSTART** | **1つの Issue を実際にどう回すか**（§8 は phase gate の説明だけで、打つコマンドの並びが無かった）。`org-init` が baseline を取ること |
+| **REFERENCE** | `split-check` の新しい2検査（(d) 認可の偏り・(e) 壊れ方の数）、`baseline` を `/org-init` が取ること、`verify` の stdout/stderr の宛先の違い |
+| **ARCHITECTURE** | ツール表が 0.11 相当（`begin` `complete` `plan` の3つだけ）。`orgcycle/` と `ghsync/` へのパッケージ分割と、その理由 |
+| **marketplace の description** | worktree による並列分離、判断の二重記録、起票の粒度検査、baseline との差分 |
+
+**一番の抜けは QUICKSTART だった。** phase gate の理屈は書いてあるのに、
+`begin → complete → handback → verify(gate) → verify(skeptic) → integrate` という**実際の並び**が
+どこにも無く、導入した人が1サイクルを回せない。ツールを足すたびに REFERENCE には行が増えて
+いたが、**通しで読む文書には入っていなかった**。
+
+304 passed（テストの変更なし）。
+
+---
+
 ## 0.25.2
 
 実地の報告2件。どちらも**道具が自分の限界を語らなかった / 権限のない相手に指示していた**という形。

@@ -8,7 +8,7 @@
     {
       "name": "orgforge-plugin",
       "source": "./integrations/claude-code",
-      "description": "非スキップの SDLC フェーズゲート、要求記述の規格準拠検査（ISO/IEC/IEEE 29148 tailored + EARS）、再現性 lint（unread-safe バー: 複雑度上限・型の逃げ道封鎖・重複/デッドコード・マルチOS CI）。実際にツール呼び出しをブロックする PreToolUse ガードレール（blast-radius キャップ、spec 宣言の強制、maker の自己承認拒否）。人間の diff レビューは廃止し、判断は理由とともに Issue に記録される。ゼロセットアップ — org はカレントディレクトリから発見されるので、1つの環境で複数リポジトリを運用できる。gate/skeptic/registrar/maker サブエージェント、/org-init /org-found /org-adopt /org-decompose /org-work などの organ コマンド。"
+      "description": "非スキップの SDLC フェーズゲート、要求記述の規格準拠検査（ISO/IEC/IEEE 29148 tailored + EARS）、再現性 lint（unread-safe バー: 複雑度上限・型の逃げ道封鎖・重複/デッドコード・マルチOS CI、baseline との差で新規の悪化だけを止める）。実際にツール呼び出しをブロックする PreToolUse ガードレール（blast-radius キャップ、spec 宣言の強制、maker の自己承認拒否）。人間の diff レビューは廃止し、判断は理由とともに Issue と台帳の**両方に1コマンドで**記録される（片側だけ落ちるのを防ぐ）。並列で回すときは Issue ごとの git worktree で物理的に分離する。起票の粒度も検査する（壊れ方が複数か、認可が「入った後に何ができるか」を定めているか）。ゼロセットアップ — org はカレントディレクトリから発見されるので、1つの環境で複数リポジトリを運用できる。gate/skeptic/registrar/maker サブエージェント、/org-init /org-found /org-adopt /org-decompose /org-work などの organ コマンド。"
     }
   ]
 }

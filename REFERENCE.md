@@ -78,7 +78,7 @@ irreversible patterns draw down a budget.
 
 | Command | What it does |
 |---|---|
-| `/org-init [org-name] [ja\|en]` | **Step 1 — set up.** Create the ledger/doctrine/conventions roots, install the org spec files, ensure `develop` + the backlog labels, then lint the spec and probe that the guardrails actually bite. **No environment setup** — the org is discovered from the working directory (`tools/discover.py`), so nothing is exported and several repos can run from one shell. Idempotent; designs nothing. |
+| `/org-init [org-name] [ja\|en]` | **Step 1 — set up.** Create the ledger/doctrine/conventions roots, install the org spec files, ensure `develop` + the backlog labels, then lint the spec, take the `repro_lint` **baseline**（機械バーの現時点を記録する起点 — 無いと「この変更による悪化」と「元からの負債」を区別できない）, and probe that the guardrails actually bite. **No environment setup** — the org is discovered from the working directory (`tools/discover.py`), so nothing is exported and several repos can run from one shell. Idempotent; designs nothing. |
 | `/org-found <RFP or brief>` | **Step 2 — design.** Draft the org from a brief and write the five **fixed-name** founding artifacts (docs/11 §0a): `REQUIREMENTS.md`, `FEATURE-INVENTORY.md`, **`ARCHITECTURE.md` (the 全体設計書)**, `coverage-manifest.md`, `organization.yaml` — then stop and report up for scope approval. Design only. |
 | `/org-adopt [残りの要求]` | **既存リポジトリへの後付け.** `/orgforge-plugin:org-found` の途中導入版: 実在するコードから `ARCHITECTURE.md` と `organization.yaml` を*読み取って*書き、**未実装分だけ**を manifest に載せ（実装済みを載せると動くものを作り直す Issue が生える）、機械バーの現状を `repro_lint baseline` で既知の負債として記録する。コミットのある repo で `/orgforge-plugin:org-found` の代わりに使う。 |
 | `/org-decompose [objective-id]` | **Step 3 — decompose.** Turn the approved `coverage-manifest.md` + `ARCHITECTURE.md` into **atomic SPEC task Issues**, one per independently-completable unit, each a native sub-issue of its objective and each carrying the full spec (so any environment can pick it up). Gated by `coverage-check`: exits non-zero if a must-have never became an Issue. |
@@ -190,9 +190,12 @@ python3 tools/org_cycle.py  complete --role R --issue N --outputs T --command CM
                             # --learned は doctrine に propose される。admit は gate の仕事
 python3 tools/org_cycle.py  verify    --issue N --role gate|skeptic
                             # 判定の材料を組み立てる: seam contract・agents/<role>.md の憲章
-                            # （＝検証チェックリスト）・Issue の SPEC/MUST・decide の雛形。
-                            # skeptic には gate が既に見たことを引き渡す。
-                            # **verdict / why / risk は埋めない** — 判定は役割が決める
+                            # （＝検証チェックリスト）・Issue の SPEC/MUST・判定履歴（何周目か）。
+                            # skeptic には gate が既に見たことと「gate が撃っていない領域」を渡す。
+                            # **verdict / why / risk は埋めない** — 判定は役割が決める。
+                            # stdout = subagent に渡す本文（「返すもの」の指定。記録コマンドは
+                            # 載せない — subagent に env も台帳のパスも渡っていないため）
+                            # stderr = 監督が打つコマンド（返ってきた値を decide に流す）
 python3 tools/org_cycle.py  handback  --issue N [--summary S] [--result OUT]
                             # push → develop 宛 PR（body に Closes #N）→ Issue へ log
 python3 tools/org_cycle.py  integrate --issue N [--test "npm test"] [--plan]
@@ -220,7 +223,11 @@ python3 tools/req_lint.py   check <REQUIREMENTS.md> [--json] [--warn-only]
                             # 必須節の欠落 / shall なし / 禁止語 / TBD / 未解決の
                             # [NEEDS CLARIFICATION] を落とす
 python3 tools/repro_lint.py check    <repo_dir> [--phase implement|test|deploy] [--json] [--baseline PATH]
-python3 tools/repro_lint.py baseline <repo_dir>   # 採用時の失敗を「既知の負債」として記録
+python3 tools/repro_lint.py baseline <repo_dir>   # 現時点の失敗を「既知の負債」として記録
+                            # **/org-init と /org-adopt が1回取る。** baseline が無いと
+                            # 「この変更による悪化」と「元からの負債」を区別できず、check は
+                            # その旨を明示する（以前は区別せず断定し、gate が既存の負債を
+                            # 新規の悪化と読んで判定を止めた）
 ```
 
 ### その他の organ ツール
@@ -305,7 +312,12 @@ github_sync.py decide --repo R --issue N --event <judgment> --verdict V --why "<
                       [--standard S] [--risk K] --event-id <ledger id>
 github_sync.py ready  --repo R [--kind task|objective|any]   # tasks only by default (objectives are parents)
 github_sync.py branch --repo R --issue N [--create] [--base B]   # the deterministic feat/issue-N-<slug>
-github_sync.py split-check    --repo R --issue N   # exit 10: too coarse / dep open / acceptance not EARS
+github_sync.py split-check    --repo R --issue N   # exit 10: 起票の SHAPE 検査（警告のみ）
+                              # (a) owns が複数 territory (b) depends_on が OPEN
+                              # (c) 受入基準が EARS でない
+                              # (d) 認可の MUST が「入った後に何ができるか」を定めていない
+                              # (e) 壊れ方が2種類以上ある（owns が同じでも別 Issue の候補）
+                              # (d)(e) は実地で12周した Issue を本文だけから検出した — docs/11 §4b
 github_sync.py needs-human --title T --body B [--objective O] [--parent N] [--blocks 10,11]
                       # 人間にしか実行できない前提条件を Issue にする（docs/11 §0c）
 github_sync.py coverage-check --repo R [--manifest coverage-manifest.md]   # exit 10: a must-have has no Issue

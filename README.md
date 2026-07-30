@@ -242,10 +242,15 @@ cycle_started → log → stage）は順序と actor が決まっているので
 コミットが別Issueのブランチに載る（実際に起きた事故で、`git checkout` がツリー全体を切り替える
 以上、必ず再発する）ので、判断ではなく物理で分ける。検証側は `org_cycle.py verify --issue N
 --role gate|skeptic` が、seam contract・**`agents/<role>.md` の憲章（＝検証チェックリスト）**・
-Issue の SPEC/MUST・`decide` の雛形を組み立て、skeptic には gate が既に見たことを引き渡す —
-検証手順を毎回人が書き下ろすと、書くたびに基準が変わるため。PR は `handback`、develop への
-fan-in は `integrate`（**gate の admit と skeptic の survives が台帳に無ければ止まる**）、
-1つの Issue の全体像は `show`（判定履歴・いま何待ちか）。**自動化したのは配管だけで、
+Issue の SPEC/MUST・**判定履歴（何周目か）**を組み立て、skeptic には gate が既に見たことと
+「gate 自身が撃っていないと書いた領域」を引き渡す — 検証手順を毎回人が書き下ろすと、書くたびに
+基準が変わるため。**subagent に記録は求めない**（env も台帳のパスも渡っていない）: 判定を返す
+までが役割で、記録は監督が `decide` で Issue と台帳の両方に1コマンドで書く。PR は `handback`、
+develop への fan-in は `integrate`（**gate の admit と skeptic の survives が台帳に無ければ
+止まる**。`--plan` で衝突を予告）、1つの Issue の全体像は `show`（判定履歴・周回の性質・
+いま何待ちか）、本番資産への変更は `touched`（誰の権限で入れたかごと残す）、溜まった
+worktree は `gc`。起票の粒度は `split-check` が警告する（壊れ方が複数か、認可が境界だけを
+定めていないか）。**自動化したのは配管だけで、
 何を選ぶか・誰に委ねるか・admit するかは自動化していない**（docs/03 §6.5 — forced delegation は
 設計エラー、forced invariant は正しい）。とりわけ `verify` は verdict / why / risk を一切埋めない:
 ツールが判定した瞬間に gate は形骸化する。
@@ -263,7 +268,7 @@ neutral core, one folder per harness. See [integrations/README.md](integrations/
 
 ## Status & honesty
 
-v0.22. This is a **framing + template**, distilled from published organizational theory and the
+v0.25. This is a **framing + template**, distilled from published organizational theory and the
 current agent-engineering literature. The parts (principal-agent theory, harness/loop engineering,
 runtime substrates like AIOS, automated agent design like ADAS/DGM) already exist; the contribution
 here is **the top-down organizational decomposition that places them** — and, per the research in
@@ -280,16 +285,26 @@ demonstrated once ([demos/S1-founding-rehearsal.md](demos/S1-founding-rehearsal.
 agents, the maker/checker separation held structurally, and the adversarial checker caught a real bug
 the maker and gate both missed.** That answers the load-bearing "has it ever run?" question.
 
-**S2 以降 — 継続運用は 0.12〜0.22 で回した。** 1つの PWA（割り勘・立替精算）を RFP から
+**S2 以降 — 継続運用は 0.12〜0.25 で回した。** 1つの PWA（割り勘・立替精算）を RFP から
 18 Issue に分解し、maker / gate / skeptic で回し続けている。そこで出たのは「機能が足りない」
 ではなく、**統制が効いているつもりで効いていない**という一群の欠陥だった: 実装済みの
 自己承認拒否が payload のキー違いで素通りし、deploy ゲートが `null == null` の一致で
 丸ごと無効になり、「学習が使われている」と報告する検出器が同じ失敗を3回した org を clean と
-判定していた。いずれも実データで再現し、テストで固定して塞いである（[CHANGELOG](CHANGELOG.md)）。
+判定し、道具が読んでいない baseline について断定して gate の判定を止めた。いずれも実データで
+再現し、テストで固定して塞いである（[CHANGELOG](CHANGELOG.md)）。
 
 同時に、統制が働いた実例も出ている: gate が3周にわたって reject を出し、テストが全部 green の
 まま残っていた実バグ（合計は正しいが内訳が不公平な端数配分）と、その性質を検証していない
-テストの穴を捕まえた。**人間の diff レビューを廃止した前提で、機械の層が実際に不良を止めた。**
+テストの穴を捕まえた。ある Issue では skeptic が「gate は5回にわたり『非メンバーが入れるか』を
+8テーブル×4操作で網羅したが、**入った後に他のメンバーに何ができるかを一度も問わなかった**」
+という構造的な欠落を捕まえている。**人間の diff レビューを廃止した前提で、機械の層と
+敵対的レビューが実際に不良を止めた。**
+
+**入れた検査を取り下げたことも2回ある。** 語彙の重なりで「rework がスコープ外か」を判定する
+案は誤検出し、要求の動詞-目的語の依存を見る `VOIDDEP` は日本語の要求から目的語を切り出せず
+一度も発火しなかった。**誤検出しかしない検査は無いより悪い**（誤警告は正しい警告まで
+無効化する）ので、取り下げて理由を残してある — 道具の履歴として、入れたものと同じくらい
+外したものが読めるようにしている。
 
 What remains: an automated projection layer (which instruction-file conventions to target — done by
 hand in the rehearsal), the Tier-B host-environment controls for asset-touching orgs, the multi-cycle

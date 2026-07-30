@@ -105,6 +105,11 @@ ledger を意図的にチェックアウトの外に置く場合や CI で固定
 `/orgforge-plugin:org-init` は**実行時のカレントディレクトリ**に org を作る。プロダクトのリポジトリで
 実行すること — ステップ0が場所を表示し、プラグイン自身の開発ツリーなら停止する。
 
+`org-init` は `repro_lint` の **baseline** も1回取る（機械バーの現時点を記録する起点）。これが
+無いと、後の gate 判定で「この変更による悪化」と「元からあった負債」を区別できない — 実地では
+gate が既存の負債を新規の悪化と読んで判定を止めた。新規リポジトリなら失敗はほぼ無く、それが
+正しい出発点になる（以後の悪化が全部見える）。
+
 ## 4. Sanity-check: a guardrail actually fires
 
 Before founding a company you'll trust to fan out, confirm the teeth are live. With `ORG_LEDGER_ROOT`
@@ -268,6 +273,43 @@ What that buys you, concretely:
   gets cheap the constraint moves downstream to review/test/deploy, and the attention layer steers
   there). See [docs/05](docs/05-lifecycle-operations.md) §reliability-budget / §DORA and
   [docs/11](docs/11-sdlc-mold.md) §4.
+
+### 1つの Issue を回す — 実際に打つコマンド
+
+PM ループ（`/org-work`）の中身は、この並びである。**配管はツールが回し、判断は役割が下す。**
+
+```
+org_cycle.py begin     --role R --issue N [--agent A]
+  # claim → worktree(.orgforge/wt/issue-N/) → spec_delegated → phase_started → cycle_started
+  #   → Issue へ log → stage。parent と candidate_id は Issue から自動解決
+  # 着手前の確認（依存が rework 中か・人間の作業待ちが残っていないか）も出す。止めない
+
+  … maker が worktree の中で作る …
+
+org_cycle.py complete  --role R --issue N --outputs T --command CMD --result OUT
+                       (--domain-model-updated REF | --domain-model-none WHY) [--learned "学び"]
+  # 新しい公開面（SECURITY DEFINER 関数・grant・エンドポイント）が増えていれば、
+  #   申告するまで止まる — 認可ホールは「関数を1つ足した」ところから生まれる
+  # --learned は doctrine に propose される（admit は gate の仕事）
+
+org_cycle.py handback  --issue N --summary S --result OUT      # push → PR（Closes #N）→ log
+org_cycle.py verify    --issue N --role gate                   # 判定の材料を組み立てる
+  # stdout = subagent に渡す本文（憲章・SPEC/MUST・判定履歴・「返すもの」の指定）
+  # stderr = 監督が打つコマンド（gate が返した値を decide に流す）
+  #   → subagent は判定を返すまでが役割。記録は監督が行う
+
+org_cycle.py verify    --issue N --role skeptic                 # gate の admit 後
+  # gate が既に見たことと「gate 自身が撃っていないと書いた領域」を引き渡す
+
+org_cycle.py integrate --issue N [--plan]
+  # --plan: 何を統合するか・並行 worktree との衝突を先に見せる
+  # gate の admit と skeptic の survives が**台帳に**無ければ止まる（exit 4）
+```
+
+途中の状態は `org_cycle.py show --issue N` で一望する（判定履歴・周回の性質・いま何待ちか・
+不可逆な変更の数）。本番資産（DB の DDL・権限）に触ったら `touched` で誰の権限で入れたかごと
+残す。溜まった worktree は `gc`。誤って書いた記録や検証用のプローブは `correction` で無効を
+宣言する（追記型なので消せない）。
 
 The org and the system grow together: `operate` closes the loop back to `requirements`
 ([docs/11](docs/11-sdlc-mold.md) §4), and the doctrine that guides each role is retrained as the
