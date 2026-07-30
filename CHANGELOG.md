@@ -6,6 +6,26 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 0.32.3
+
+Closes the last gap the audit left open in `review_subject_id`, before the ledger-writer work starts.
+
+### Fixed
+- **`review_subject_id` recorded untracked filenames but not their contents.** The dirty digest was
+  built from `git status --porcelain` plus `git diff HEAD`, and `git diff HEAD` does not include
+  untracked content — so replacing an untracked file's contents entirely left the subject identical
+  (demonstrated by the audit). A judge reading untracked files could have two verdicts about
+  different artefacts count as agreement.
+  The reviewed tree is now a real tree SHA: `read-tree HEAD` + `add -A` + `write-tree` against a
+  **temporary index** (`GIT_INDEX_FILE`), binding tracked, staged, unstaged and untracked state into
+  one identity without touching the supervisor's real index. `.gitignore`d build output stays
+  excluded, so the same review is still reproducible. `dirty` and `head_tree_sha` are recorded
+  separately so a dirty review can be recognised as such afterwards.
+
+### Migration
+Subjects computed by 0.32.2 differ from 0.32.3 for the same tree, so a provisional verdict recorded
+under the old scheme cannot pair with a new one. Re-run both lineages on the same tree.
+
 ## 0.32.2
 
 The same independent audit re-ran against 0.32.1: conditions 1, 2, 3, 5, 6 and 7 held, but

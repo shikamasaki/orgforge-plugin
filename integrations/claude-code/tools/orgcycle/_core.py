@@ -315,6 +315,49 @@ def banner():
     print(f"[orgforge {ver} @ {os.getcwd()}]", file=sys.stderr)
 
 
+def _worktree_tree_sha(cwd=None):
+    """作業ツリー全体（tracked / staged / unstaged / **untracked**）を1つの tree SHA に束ねる。
+
+    `git diff HEAD` は未追跡ファイルの内容を含まない。名前だけ拾って中身を見ないと、
+    **未追跡ファイルの内容を丸ごと差し替えても同じ id になる**（監査が実証）。judge が
+    未追跡ファイルを読んで判定していれば、別の成果物を「同じもの」として一致させられる。
+
+    そこで **一時 index** に作業ツリーを読み込んで `git write-tree` する。`GIT_INDEX_FILE` で
+    別ファイルを指すので、**実 index は変更しない** — 監督の staging 状態を壊さない。
+
+    .gitignore された生成物は含めない（`--exclude-standard`）。ビルド出力やのモジュール群で
+    id が毎回変わるなら、同じレビューを2度行えなくなる。
+    """
+    import tempfile as _tf
+    def _git(*args, env=None):
+        try:
+            e = dict(os.environ)
+            if env:
+                e.update(env)
+            r = subprocess.run(["git", *args], capture_output=True, text=True,
+                               timeout=60, cwd=cwd, env=e)
+            return r.returncode, r.stdout.strip()
+        except Exception:
+            return 1, ""
+
+    fd, idx = _tf.mkstemp(prefix="orgforge-index-")
+    os.close(fd)
+    os.unlink(idx)                       # git は存在しないパスに新規 index を作る
+    env = {"GIT_INDEX_FILE": idx}
+    try:
+        # HEAD の内容を土台にし、作業ツリーの実状態を重ねる
+        _git("read-tree", "HEAD", env=env)
+        _git("add", "-A", "--", ".", env=env)
+        code, tree = _git("write-tree", env=env)
+        return tree if code == 0 else ""
+    finally:
+        for p_ in (idx, idx + ".lock"):
+            try:
+                os.unlink(p_)
+            except OSError:
+                pass
+
+
 def review_subject(issue, role, phase=None, cwd=None):
     """**判定対象の同一性**を1つの digest に束ねる。`verify` が一度だけ生成する。
 
@@ -346,13 +389,12 @@ def review_subject(issue, role, phase=None, cwd=None):
         except Exception:
             return ""
 
-    tree = _git("rev-parse", "HEAD^{tree}")
-    dirty = ""
-    st = _git("status", "--porcelain")
-    if st:
-        # 未コミットの変更があるなら、その内容も対象の一部である。
-        dirty = hashlib.sha256(
-            (st + "\n" + _git("diff", "HEAD")).encode("utf-8")).hexdigest()[:16]
+    head_tree = _git("rev-parse", "HEAD^{tree}")
+    # **実際にレビューされた木**。commit ではなく tree にするのは、同じ内容の commit を
+    # 作り直しても対象は変わらないからである。未コミット・未追跡も含めて1つの id に束ねる
+    # （`git diff HEAD` は未追跡の内容を含まないので、それでは足りない）。
+    tree = _worktree_tree_sha(cwd) or head_tree
+    dirty = "1" if tree != head_tree else ""
     base = ""
     for ref in ("origin/develop", "develop", "origin/main", "main"):
         base = _git("merge-base", "HEAD", ref)
@@ -368,7 +410,8 @@ def review_subject(issue, role, phase=None, cwd=None):
             break
 
     parts = {"issue": str(issue), "role": role, "phase": phase or "",
-             "base_sha": base, "reviewed_tree_sha": tree, "dirty": dirty,
+             "base_sha": base, "reviewed_tree_sha": tree,
+             "dirty": dirty, "head_tree_sha": head_tree,
              "requirements_digest": req_digest}
     sid = hashlib.sha256(
         json.dumps(parts, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()

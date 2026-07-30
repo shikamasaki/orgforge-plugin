@@ -1526,3 +1526,95 @@ def test_xh_disagreement_recorded_in_either_order(tmp_path, first, second):
     assert len(dis) == 1, o
     assert dis[0]["payload"]["same_harness"] == first
     assert dis[0]["payload"]["cross_harness"] == second
+
+
+# ══ 0.32.3: review_subject が作業ツリー全体を束ねる ═══════════════════════════
+
+def _repo(tmp_path):
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    (tmp_path / "t.txt").write_text("tracked\n", encoding="utf-8")
+    (tmp_path / "REQUIREMENTS.md").write_text("MUST: A\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
+                    "commit", "-qm", "init"], cwd=tmp_path, check=True)
+    return tmp_path
+
+
+def _sub(path, issue=7, role="gate", phase="implement"):
+    sys.path.insert(0, str(TOOLS))
+    from orgcycle._core import review_subject
+    return review_subject(issue, role, phase, cwd=str(path))[0]
+
+
+def test_subject_changes_when_untracked_content_changes(tmp_path):
+    """**監査が実証した欠陥。** 未追跡ファイルの内容を差し替えても id が同じだった。
+
+    `git diff HEAD` は未追跡の内容を含まないので、名前だけ拾って中身を見ていなかった。
+    judge が未追跡ファイルを読んで判定していれば、別の成果物を「同じもの」として
+    一致させられる。
+    """
+    org = _repo(tmp_path)
+    (org / "untracked.txt").write_text("first\n", encoding="utf-8")
+    s1 = _sub(org)
+    (org / "untracked.txt").write_text("second-different-content\n", encoding="utf-8")
+    s2 = _sub(org)
+    assert s1 != s2
+
+
+def test_subject_is_reproducible_for_the_same_tree(tmp_path):
+    """同じ状態なら同じ id。でなければ同じレビューを2度行えない。"""
+    org = _repo(tmp_path)
+    (org / "untracked.txt").write_text("x\n", encoding="utf-8")
+    assert _sub(org) == _sub(org)
+
+
+def test_subject_ignores_gitignored_build_output(tmp_path):
+    """生成物で id が動くと、同じレビューを2度行えない。"""
+    org = _repo(tmp_path)
+    (org / ".gitignore").write_text("build/\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=org, check=True)
+    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
+                    "commit", "-qm", "ignore"], cwd=org, check=True)
+    before = _sub(org)
+    (org / "build").mkdir()
+    (org / "build" / "out.js").write_text("artifact\n", encoding="utf-8")
+    assert _sub(org) == before
+
+
+def test_subject_changes_for_staged_and_unstaged_alike(tmp_path):
+    """tracked の staged / unstaged いずれの変更でも id は動く。"""
+    org = _repo(tmp_path)
+    base = _sub(org)
+    (org / "t.txt").write_text("tracked\nunstaged\n", encoding="utf-8")
+    unstaged = _sub(org)
+    assert unstaged != base
+    subprocess.run(["git", "add", "t.txt"], cwd=org, check=True)
+    assert _sub(org) == unstaged        # 同じ内容なので id は同じ（staging は対象ではない）
+
+
+def test_subject_does_not_touch_the_real_index(tmp_path):
+    """一時 index を使うので、監督の staging 状態を壊さない。"""
+    org = _repo(tmp_path)
+    (org / "untracked.txt").write_text("x\n", encoding="utf-8")
+    (org / "t.txt").write_text("tracked\nmodified\n", encoding="utf-8")
+    before = subprocess.run(["git", "status", "--porcelain"], cwd=org,
+                            capture_output=True, text=True).stdout
+    _sub(org)
+    after = subprocess.run(["git", "status", "--porcelain"], cwd=org,
+                           capture_output=True, text=True).stdout
+    assert before == after
+    assert "?? untracked.txt" in after       # staged にされていない
+
+
+def test_subject_records_dirty_and_head_tree_separately(tmp_path):
+    """dirty かどうかと、HEAD の木が何かを、両方残す（後から追える形）。"""
+    sys.path.insert(0, str(TOOLS))
+    from orgcycle._core import review_subject
+    org = _repo(tmp_path)
+    _, clean = review_subject(7, "gate", "implement", cwd=str(org))
+    assert clean["dirty"] == ""
+    assert clean["reviewed_tree_sha"] == clean["head_tree_sha"]
+    (org / "untracked.txt").write_text("x\n", encoding="utf-8")
+    _, dirty = review_subject(7, "gate", "implement", cwd=str(org))
+    assert dirty["dirty"] == "1"
+    assert dirty["reviewed_tree_sha"] != dirty["head_tree_sha"]
