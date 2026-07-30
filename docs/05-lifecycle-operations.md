@@ -886,6 +886,248 @@ To not repeat the "described as if built" gap this repo has been audited for:
 
 ---
 
+## 9. 統制が効いていることを実測する（総合検証プロトコル）
+
+統制を入れたあと、**それが実際に効いているか**を実 org に対して確かめる手順。実装者の自己申告は証拠に数えない。
+# 総合検証プロトコル（0.32.1 → 0.39.0）
+
+実 org に対して、これまでに入れた統制が**実際に効いているか**を確かめる手順。
+
+### この文書の前提
+
+**実装者の自己確認だけでは足りない。** 今回の一連の作業で、実装者（Claude）は次のような報告を
+繰り返した。
+
+- 「lock は fail-closed にした」— 置換が適用されておらず、環境変数はコードに存在しなかった
+- 「必須 field を検証した」— 空の payload が通っていた
+- 「correction で無効化した」— payload の形が違い、何も無効化されていなかった
+- 「hook が発火した」— `//` キーで設定ファイルごと読み飛ばされ、何も gate していなかった
+
+どれも**正常系だけを見て達成と述べた**結果である。したがってこの検証は:
+
+1. **成功系・拒否系・故障注入・control** を各項目で回す
+2. **終了コードだけを信じない** — 台帳の永続イベント、seq/hash、鎖、Issue 投影、実ファイルへの
+   効果まで確かめる
+3. **独立した視点で複数回レビューする**（下記のスイスチーズ方式）
+4. **検証中にコードを修正したら、結果を破棄して最初からやり直す**
+
+最後の点が重要である。修正を挟んだ検証結果は、修正前の状態と修正後の状態が混ざっており、
+どちらについても何も言っていない。
+
+
+### 実行の順序
+
+```
+0. 前提の固定（版・schema・preflight）
+1. 単項目の検証（A〜K）— 各項目で 成功 / 拒否 / 故障注入 / control
+2. スイスチーズ・レビュー（claude -p を4視点 + Codex 1視点）
+3. 差異の突き合わせと、残った疑義の再測
+```
+
+
+### 0. 前提の固定
+
+```bash
+cd <org>
+python3 <plugin>/tools/ledger.py schema            # exit 0 であること（--fix の 0 ではない）
+python3 <plugin>/tools/ledger.py verify            # chain intact であること
+git -C <plugin> rev-parse --short HEAD             # 検証対象の版を記録する
+```
+
+**`schema --fix` の exit 0 を preflight 成功と読まない。** 上書きを避けた衝突が残っていても 0 を
+返す。必ず `--fix` なしの診断が 0 であることを確かめる。
+
+記録すること: プラグインの commit、org の台帳の件数と tip hash、`validated:v1` と
+`legacy_unvalidated` の件数。
+
+
+### 1. 単項目の検証
+
+各項目で必ず4種を回す。**拒否系だけを確かめて「通せること」を確かめない**のが、この一連で
+2回起きた失敗である。
+
+| 種別 | 何を見るか |
+|---|---|
+| 成功系 | 正しい入力が **通る**こと（通らない検査は org を止める） |
+| 拒否系 | 誤った入力が **拒否される**こと、かつ **副作用が無い**こと |
+| 故障注入 | 記録に失敗したとき **fail-closed** になること |
+| control | 仕組みを外すと **同じ操作が通る**こと（= その仕組みが止めていた証拠） |
+
+### A. subject / correction（0.32.2, 0.32.3）
+
+- 成功: `verify --print-subject` が判定を回さずに subject を返す
+- 拒否: 別 subject の provisional が一致しない（exit 6）／同一血統の verdict 差し替え（exit 4）
+- **脱出**: 案内された `correction` を**実際に打って**、その後に新しい判定が入ること
+- 未追跡ファイルの内容を変えると subject が変わること（`git diff HEAD` では見えない）
+- 生成物（`.gitignore` 済み）では subject が変わらないこと
+- 実 index を壊さないこと（`git status` が前後で同一）
+
+### B. 並行 append（0.33.0）
+
+- 12〜16 並列で append し、**seq に重複が無く鎖が通る**こと
+- 故障注入: `ORG_LEDGER_FORCE_LOCK_FAIL=1` で exit 4、**ファイルが作られない**こと
+- `ORG_LEDGER_ALLOW_UNLOCKED=1` で通り、かつ「保証は確かめられない」と出力すること
+- torn line / seq 飛び / hash 不一致で exit 4（自動修復しない）
+
+### C. schema migration（0.33.1, 0.33.3, H8）
+
+- `ledger.py schema` が org とテンプレートの差分（クラス**と** validation 規則）を出す
+- `--fix` が org 独自の厳格規則を**保存**する（消さない）
+- 同じ path で値が違えば **conflict として報告し、上書きしない**
+- `--fix` 後に `event_classes` が1つだけであること（YAML の後勝ちで消えない）
+- **トップレベルキーの重複が無いこと**
+
+### D. 原子的な cap 予約（0.34.0, 0.34.1）
+
+- 成功: cap 内で `allow` が記録され、実際に操作が通る
+- 拒否: cap 超過で hold、**hold が台帳に残る**、対象ファイルが変わらない
+- **16 並列で allow の合計が cap を超えない**こと
+- 予約を generic append で偽造できないこと（writer-only）
+- 同じ冪等キーで内容の違う要求が拒否されること
+- 負・NaN の delta / 過去の負の曝露で deny
+- 故障注入: append/fsync 失敗で **allow にならず、書きかけが残らない**
+- hook が **JSON の decision を読む**こと（deny を印字して exit 0 する偽 writer を通さない）
+
+### E. Codex plugin と hook の実効性（0.35.0）
+
+- plugin を install し、**checkout を消した状態で hook が発火する**こと
+- cap 内は通り allow が残る／cap 超過は deny され sentinel が無傷で hold が残る
+- 壊れた台帳で deny
+- `session_id` / `tool_use_id` が**空でない**こと
+- 同一 `tool_use_id` の再送で二重計上しないこと
+- **control: plugin を remove すると同じ操作が通り、台帳が増えない**
+- trust を TUI で付与し、**bypass なしで**同じ結果になること
+- Codex には「**1回だけ試し、拒否されたら代替手段を使わず終了**」と指示すること
+
+### F. halt / latch / release（0.36.0, 0.38.0）
+
+- 成功: halt 中に観測・検証・安全な修復が通る
+- 拒否: 通常作業（`npm test` / `git commit` / Write / Edit）が止まる
+- 故障注入: halt の記録に失敗しても **ラッチで次の呼び出しが止まる**
+- ラッチを手で消しても台帳の halt が止め続けること
+- 読めない台帳が **halt とみなされる**こと
+- 解除: 止めた主体・共有鍵・未認可の鍵・別 halt の receipt・証拠なし — **すべて拒否**
+- 解除の成功: 独立した認可済み approver で解除でき、その後 gated action が通る
+- 故障注入: 解除の記録に失敗したら **停止を維持**し、exact retry で完了できること
+- **halt の検査が別プロセスで行われること**（`ledger.py` を import しない）
+
+### G. 署名 receipt と認可（0.37.0, 0.38.0）
+
+- 成功: 非対称 receipt で `identity_assurance: authenticated`
+- receipt 無しなら `claimed`（**昇格しない**）
+- 共有鍵なら `attested`（**authenticated にならない**）
+- 拒否: 再利用（別 issue / 別 subject / 別血統）・改変・失効鍵・trust store 読込失敗
+- **代理記録でも `decision_by` が judge のまま**であること
+- 職務分離が `decision_by` を比べ、`recorded_by` を比べないこと
+- 認可: 役・血統・解除権限それぞれで拒否されること
+- **同一 signer の二血統が `same_signer` として記録される**こと（独立性の証拠に数えない）
+- trust store に秘密鍵があれば読み込みを拒否すること
+
+### H. writer 隔離（0.39.0, 段階A）
+
+- 成功: writerd 経由で書ける
+- 拒否: 直接 append／改変／再送／パス指定／未知 org／非書き込み op
+- **daemon 停止中は両経路とも fail-closed**（台帳が増えない）
+- socket 親が他者書き込み可・シンボリックリンクなら拒否
+- 同一 UID で `--require-root-owned` が拒否され、**なぜ `separate_uid` を主張できないか**を言うこと
+- peer credential が `recorded_by` にだけ入り、`decision_by` に流れないこと
+- ラッチ・鍵 registry・schema の権限が監査されること
+
+### I. 段階B（別 UID）— **あなたが sudo で実行する部分**
+
+```bash
+sudo <plugin>/tools/writer-install.sh --org-root <org> --dry-run   # 先に差分を見る
+sudo <plugin>/tools/writer-install.sh --org-root <org>
+<plugin>/tools/writer-verify.sh --org-root <org>                   # root で実行しない
+```
+
+`writer-verify.sh` が全項目通るまで **`workload_isolation` は `process_mediated` のまま**にする。
+
+戻すとき: `sudo <plugin>/tools/writer-install.sh --uninstall`
+
+### J. Issue 投影
+
+- `provisional` が Issue にコメントを投影し、`reasoning_sha256` が台帳の receipt と一致すること
+- repo が無い org では「照合対象が残らない」と告げること
+- `decide` が台帳を先に通し、拒否されたら Issue に書かないこと
+
+### K. 実ファイルへの効果
+
+**台帳のイベントだけを見て「効いた」と判断しない。** 各拒否系で:
+
+- sentinel ファイルが変わっていないこと
+- ブランチが動いていないこと
+- Issue の状態が変わっていないこと
+
+
+### 2. スイスチーズ・レビュー
+
+**1つの視点では、その視点の盲点が見えない。** 独立した視点に分けて回す。
+
+### claude -p（4視点）
+
+各視点に、その視点だけを与える。**同じプロンプトを4回投げるのではない。**
+
+```bash
+claude -p "INDEPENDENT: <視点の定義>。<対象>を検証し、
+  終了コードだけでなく台帳の永続イベント・seq/hash・鎖・実ファイルへの効果を確かめること。
+  **正常系だけで達成と述べないこと。** 拒否系・故障注入・control を必ず回すこと。
+  発見は「実測したコマンドと出力」を添えて報告すること。" \
+  --model claude-opus-5
+```
+
+| 視点 | 何を探すか |
+|---|---|
+| レジリエンス工学 / Safety-II | 予見・監視・対応・学習の4能力。**適応を摘発に変えていないか** |
+| STPA / システム安全 | 制御構造、非安全な制御動作、**制御が届かない経路** |
+| 敵対的コード監査 | 迂回路、信頼境界、**名前と保証の乖離** |
+| SRE / 運用・人的要因 | 可用性事故、復旧不能、**検査が組織を止める形** |
+
+### Codex（別血統）
+
+```bash
+codex exec --sandbox read-only -m gpt-5.5 \
+  --output-schema <plugin>/template/schemas/gate-verdict.json \
+  "$(cat <検証材料>)" </dev/null
+```
+
+**別の base model であることが要点である。** 同じ血統の checker は maker と盲点を共有する。
+
+### 突き合わせ
+
+- 複数の視点が同じ穴を指すなら、優先度が高い
+- 1つの視点だけが指す穴も**消さない** — 見えた視点があるということである
+- **視点間で結論が食い違ったら、食い違いそのものを記録する**（`judges_disagreed` と同じ扱い）
+
+
+### 3. 検証を無効化する条件
+
+次のいずれかが起きたら、**それまでの結果を破棄して 0 からやり直す**。
+
+- 検証中にプラグインのコードを修正した
+- 検証中に org の schema / 設定を変更した
+- 検証対象の版（commit）が途中で変わった
+- 故障注入の環境変数が、意図しない項目にも効いていた
+
+**部分的にやり直さない。** 修正の前後が混ざった結果は、どちらについても何も言っていない。
+
+
+### 報告の形
+
+各項目について:
+
+```
+項目: D. 原子的な cap 予約
+  成功系:   16並列 cap=5 → allow 5件、合計 5.0、seq 重複 0、chain intact
+  拒否系:   generic append で予約 → exit 2、台帳に 0 件
+  故障注入: FORCE_APPEND_FAIL → deny、書きかけ無し、verify 通過
+  control:  ORG_WRITER_SOCKET を外す → 同じ直接 append が通る（= 経路の強制が効いていた）
+  実ファイル: sentinel 無傷
+```
+
+**「確かめていないこと」を空欄にせず、確かめていないと書く。** この一連で最も多かった失敗は、
+確かめていないものを確かめたと述べることだった。
+
 ## Sources
 
 - McChrystal, S. et al. 2015 — *Team of Teams* (shared consciousness / empowered
