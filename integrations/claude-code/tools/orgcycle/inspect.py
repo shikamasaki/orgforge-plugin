@@ -53,8 +53,8 @@ def _issue_reasons(issue):
 def cmd_show(a):
     """1つの Issue について「誰が何を判定し、いま何待ちか」を一望する。
 
-    実地では gh issue view と台帳の grep と status.py を別々に叩く必要があり、#7 が3周した
-    ときにどの周のどの判定を見ているのか分からなくなった。#8 の refutation 欠落も #11 の
+    実地では gh issue view と台帳の grep と status.py を別々に叩く必要があり、が3周した
+    ときにどの周のどの判定を見ているのか分からなくなった。ある Issue の反証記録 欠落も の
     reject 欠落も、この視点があれば即座に見つかっていた。
     """
     title, _ = _issue_body(a.issue)
@@ -97,7 +97,7 @@ def cmd_show(a):
     else:
         print("  判定:     まだ無い")
 
-    # 4: 周回が何を意味しているか。#9 が9周、#11 が10周した。統制は毎回実害のある欠陥を
+    # 4: 周回が何を意味しているか。が9周、が10周した。統制は毎回実害のある欠陥を
     # 見つけており機能しているが、**いつ収束するかの見通しが立たない**。回数だけでなく
     # 「直近の判定が何を問題にしているか」が見えると、切るかどうかの判断材料になる。
     # **判定はしない** — 「もう切れ」とは言わない。性質の変化を並べるだけ。
@@ -120,23 +120,23 @@ def cmd_show(a):
             kinds.append(k)
         print(f"  周回:     {len(rounds)} 周 — 直近3回: {' / '.join(kinds)}")
         # ③ rework が積み増している = 「直すべきものが増え続けている」signal。
-        # 実地の #27 は8回 rework し、**4回目以降の発見はすべて spec の MUST に無いもの**だった。
+        # 運用では8回 rework し、**4回目以降の発見はすべて spec の MUST に無いもの**だった。
         # 「不可逆 N 件」と同じ扱い — **止めない。材料を出す。**
         reworks = [e for e in judged
                    if e["class"] == "rework_requested" and e.get("seq") not in voided]
-        # 判定回数ではなく **rework の回数**で見る。#7 は7周かかったが rework は2回で収束した —
+        # 判定回数ではなく **rework の回数**で見る。は7周かかったが rework は2回で収束した —
         # 判定を重ねること自体は悪くない（gate が丁寧に見た結果でもある）。問題は
         # 「直して、また直して」が積み増すことなので、そこを数える。
         if len(reworks) > 3:
             print(f"            ⚠ rework {len(reworks)} 回 / 判定 {len(rounds)} 回 — 3回を超えている。"
                   f"**Issue の切り方か、完了の定義を見直す価値がある。**\n"
-                  f"              実地の #27 は8回 rework し、4回目以降の発見はすべて spec の "
+                  f"              運用では8回 rework し、4回目以降の発見はすべて spec の "
                   f"MUST に無いものだった（範囲外の欠陥は別 Issue にする — template/SPEC.md の"
                   f"「完了の判定」）")
         # 4（要望書の提案4）については、**実装を見送った。**
         # 「直近の rework が MUST のどれに対応しているか」を語彙の重なりで判定してみたが、
-        # 実データで誤検出した: 完了済みの #7（MUST どおりの一様性の話）に「スコープ外」と
-        # 警告を出し、本当にスコープ外だった #11 は `expenses` がたまたま一致して素通りした。
+        # 実データで誤検出した: 完了済みの Issue（MUST どおりの作業）に「スコープ外」と
+        # 警告を出し、本当にスコープ外だった は `expenses` がたまたま一致して素通りした。
         # 対応関係の判定は語彙一致では届かない — 誤警告は正しい警告まで無効化する
         # （実地で complete の狼少年が Issue コメントの目視統合を招いた）。
         # 提案の狙い（スコープ外の作業を検出する）は、split-check の (d)(e) と
@@ -145,7 +145,7 @@ def cmd_show(a):
             print(f"            直近3周とも「MUST は満たすが検査が足りない」型。"
                   f"実装ではなく検査の欠陥が続いている")
 
-    # 3: この Issue が生んだ**不可逆な変更**の数。実地の #11 は migration を5本生み、
+    # 3: この Issue が生んだ**不可逆な変更**の数。運用では migration を5本生み、
     # それらが相互に干渉した（0009 が直したものを 0010 が壊し、0011 が別の2件を RED にした）。
     # **3本目を書く時点で「これは1つの Issue ではない」と気づけたはず。** 止めない — 材料を出す。
     irreversible = []
@@ -163,7 +163,7 @@ def cmd_show(a):
         print(f"  不可逆:   {len(total)} 件 — {', '.join(t[:34] for t in total[:5])}"
               + (" …" if len(total) > 5 else ""))
         print(f"            1つの deliverable が3件以上の不可逆な変更を生んでいる。"
-              f"Issue の切り方を見直す価値がある（実地の #11 は migration 5本が相互干渉した）")
+              f"Issue の切り方を見直す価値がある（相互に干渉するマイグレーションを生む）")
 
     nxt = ("gate 再判定 → skeptic → integrate" if av == "reject" else
            f"integrate --issue {a.issue}" if av == "admit" and rv == "survives" else

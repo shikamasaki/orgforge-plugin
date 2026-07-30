@@ -150,11 +150,11 @@ def cmd_status(a):
     # 通りやすいという構造になっている。**それ自体は正しい運用**（書かれない穴より遥かによい）
     # だが、書き得にしないために「何件溜まっているか」は見えている必要がある。
     # **同一 deliverable は最新の判定が有効。** 集合で持つと reject が後から来ても admit が
-    # 残り続け、rework 中の成果物を「admit 済み」と数える。実地では #11 が admit(216) →
-    # reject(218) の順で記録されたのに board が RED を出し続けた。台帳は追記型なので、
+    # 残り続け、rework 中の成果物を「admit 済み」と数える。運用では admit → reject の順で
+    # 記録されたのに board が RED を出し続けた。台帳は追記型なので、
     # 「一度でも admit があった」と「いま admit されている」は別物。
     # correction{kind: probe|mistake} で無効化された記録は数えない。実地では仕様検証の
-    # プローブ4件が実判定として board に出ていた（#11 が RED になった直接の原因）。
+    # 検証用のプローブが実判定として board に出ていた（RED が出続けた直接の原因）。
     try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         from ledger import corrected_seqs

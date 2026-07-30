@@ -58,7 +58,7 @@ def _append_progress_receipt(a):
     """Issue に書いた作業ログの受領証を台帳にも残す。
 
     `log` は Issue にコメントするだけで台帳に何も書いていなかった。結果、実地では Issue に
-    7回の作業記録があるのに `progress_recorded` は **0件**。これは #8 の refutation で
+    7回の作業記録があるのに `progress_recorded` は **0件**。これは ある Issue の反証記録 で
     塞いだのと同型（二重記録の片側が落ちる）で、しかも影響が具体的:
 
       · work_in_progress ビューは progress_recorded を読むので `/org-resume` が復帰できない
@@ -182,7 +182,7 @@ def _reasoning_digest(*fields):
 
 
 # 「確かめていないことを、確かめたかのように述べる」— この org が実地で8回検出した失敗様式が、
-# **検出する側（監督）**に現れた。実地の #32:
+# **検出する側（監督）**に現れた。運用で観測した形:
 #   maker の報告 : 「src/db/client.ts は**このブランチにまだ存在せず** feat/issue-11 側にありました」
 #   監督の要約   : 「maker は推測せず src/db/client.ts の loadEnv() を読んで変数を確定させた」
 #   落ちた条件   : 「**このブランチには無い**」

@@ -280,7 +280,7 @@ def cmd_split_check(a):
     for line in body.splitlines():
         if line.lower().lstrip().startswith(("depends_on", "depends on", "- **depends_on")):
             # `#N` の形だけを依存とみなす。数字を全部拾うと散文が誤検出される —
-            # 「実装コードは1行も入らない」の「1」が #1 として解釈された（実地で判明）。
+            # 「実装コードは1行も入らない」の「1」が として解釈された（実地で判明）。
             # 同じ依存が本文の複数行に出ると同じ警告が並ぶ（実地で3行出た）。
             # 一度言えば足りる — 同じことを繰り返す警告は、読み飛ばされる側に回る。
             for num in dict.fromkeys(re.findall(r"#(\d+)", line.split(":", 1)[-1])):
@@ -300,7 +300,7 @@ def cmd_split_check(a):
                         "(docs/11 §4b), so the gate has a checkable bar.")
     # (d) 守る対象の偏り — 認可を扱う deliverable なのに、**何が守られているか**が偏っていないか。
     #
-    # 実地の #11: MUST 12件のうち認可を定めているのは2件だけで、しかもその1件は「あだ名」
+    # 運用で見つかった形: 12件の MUST のうち認可を定めているのは2件だけで、その1件は「あだ名」
     # （装飾的なテキスト列）だった。金額・支払者・債務の向き・グループ所有権については
     # 一行も無い。skeptic の言葉では「装飾的なテキスト列を守り、金額・支払者・債務の向き・
     # グループ所有権を無防備にしていた」。結果、後半6周の rework は Issue のどの MUST にも
@@ -319,11 +319,11 @@ def cmd_split_check(a):
         INSIDE = ("メンバーが", "メンバー同士", "他のメンバー", "他人の", "作成者", "所有者",
                   "自分以外", "owner", "creator", "member who", "書き換え")
         # 「非メンバーが」は境界の話。部分一致で内側に数えると、境界しか定めていない Issue が
-        # 「内側も定めている」ことになり、この検査が丸ごと無効になる（実地の #11 がそうだった）。
+        # 「内側も定めている」ことになり、この検査が丸ごと無効になる（運用の例では がそうだった）。
         OUTSIDE = ("非メンバー", "non-member", "未認証", "unauthenticated", "anonymous")
         guarded = [l for l in authz_musts
                    if any(k in l for k in INSIDE) and not any(o in l for o in OUTSIDE)]
-        # あだ名・表示名だけを守っているなら、それは「守っている」に数えない（実地の #11）
+        # あだ名・表示名だけを守っているなら、それは「守っている」に数えない（運用で観測）
         DECORATIVE = ("あだ名", "表示名", "nickname", "display_name", "アイコン", "avatar")
         substantive = [l for l in guarded if not any(d in l for d in DECORATIVE)]
         if authz_musts and not substantive:
@@ -338,7 +338,7 @@ def cmd_split_check(a):
                 f"**内側の規則**が要求として書かれているか確認すること。")
 
     # (e) 壊れ方が何種類あるか — `owns` が同じでも、**壊れ方と検証手段が違えば別 Issue**。
-    # 実地の #11 は「スキーマの形（型・制約）」と「認可（攻撃シナリオ）」を1つに束ねており、
+    # 運用では「スキーマの形（型・制約）」と「認可（攻撃シナリオ）」を1つに束ねており、
     # gate が毎回両方を見ることになり、一方の修正が他方を壊し続けた（migration 5本が相互干渉）。
     FAILURE_MODES = {
         "スキーマ/型の誤り": ("型", "制約", "schema", "column", "not null", "型検査", "migration"),
@@ -352,7 +352,7 @@ def cmd_split_check(a):
             f"壊れ方が {len(hit)} 種類ある: {' / '.join(hit)}。"
             f"**`owns` が同じでも、壊れ方と検証手段が違えば別 Issue** — 束ねると gate が毎回"
             f"「どこを見るか」から始めることになり、一方の修正が他方を壊す"
-            f"（実地の #11 は migration 5本が相互干渉した）。"
+            f"（相互に干渉するマイグレーションを生む）。"
             f"「この deliverable が壊れたとき、壊れ方は1種類か」を問うこと。")
 
     if warnings:

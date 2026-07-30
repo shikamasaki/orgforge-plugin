@@ -86,7 +86,7 @@ def _prior_gate(issue, repo=None):
 def _judgment_history(issue, cls=None):
     """この Issue に対する過去の判定（訂正済みは除く）を古い順に。
 
-    gate は毎回これを渡されないと **初回判定として扱う**。3周目の #7 で「前回見落とした点を
+    gate は毎回これを渡されないと **初回判定として扱う**。3周目の で「前回見落とした点を
     今回どう確認したか」を明示させたら質が上がった、という実地の観察がある。過去の reject を
     知らない gate は、同じ指摘を繰り返すか、直ったことの確認を飛ばすかのどちらかになる。
     """
@@ -199,7 +199,7 @@ def cmd_verify(a):
         out.append("HOLD（exit 10）なら reject。パスが通らない場合はそう報告すること — "
                    "「ツールが無いので未実行」は、機械バーが効いていないという最も重い所見。")
     if role == "skeptic" and prior:
-        # 5: gate は毎回 --risk に「今回撃っていない領域」を書く。実地では #9 で gate が
+        # 5: gate は毎回 --risk に「今回撃っていない領域」を書く。実地では で gate が
         # 「1件も当てていない」と書いた領域から実バグが出た。人が手で転記していたので配管が運ぶ。
         # **断片を正規表現で切り出すより、gate が書いた Known risk の節ごと渡す** —
         # gate は既に構造化して書いており、切り刻むと重複した断片が並んで読めなくなる
@@ -288,7 +288,7 @@ def cmd_verify(a):
     # ① reject/refuted を受けたら rework の発注も記録する。**判定の記録と同じ場所に置く** —
     # 発注は「判定を受け取る → 検証 → decide → 発注 → 記録」の順で、発注した subagent の通知が
     # 来ると記録が流れる。記録のコマンドが目の前にある状態で発注すれば順序が逆転する。
-    # 実地で reject/refuted 28件に対し rework_requested が台帳に無く、show の警告が沈黙した。
+    # 運用で reject/refuted の多くに対し rework_requested が台帳に無く、show の警告が沈黙した。
     bad = "reject" if role == "gate" else "refuted"
     print(f"===== {bad} だった場合 — rework の発注も記録する =====\n"
           f'python3 "{os.path.join(HERE, "org_cycle.py")}" rework --issue {a.issue} '
@@ -308,7 +308,7 @@ def cmd_verify(a):
 
 
 # 役割ごとに「報告が成果物の形になっている」ための必須要素。
-# **subagent の turn が作業の途中で終わる**ことがある（実地で1晩に3件）。status は completed で
+# **subagent の turn が作業の途中で終わる**ことがある（運用で短期間に複数回）。status は completed で
 # 返り、result は「Now the key attack:」のような宣言1文だけ。SendMessage で再開させると続きを
 # 実行して完走したので、agent が死んだのではなく報告が成果物の形になる前に turn が終わっている。
 #
@@ -389,8 +389,8 @@ def cmd_intake(a):
 def cmd_rework(a):
     """reject / refuted を受けて rework を発注したことを記録する。
 
-    **専用コマンドが無かったことが記録漏れの一因である。** 実地で reject/refuted 28件に対し
-    `rework_requested` が記録されていなかった（#32 は4回 reject で記録0件）。監督は
+    **専用コマンドが無かったことが記録漏れの一因である。** 運用で reject/refuted の多くに対し
+    `rework_requested` が記録されていなかった（4回 reject されて記録0件の Issue もあった）。監督は
     `ledger.py append --class rework_requested --payload '{...}'` を手で組む必要があり、
     しかも発注は「判定を受け取る → 検証 → decide → **発注** → 記録」の順で、発注した subagent の
     通知が来ると記録が流れる。
@@ -422,8 +422,8 @@ def cmd_rework(a):
 def cmd_record(a):
     """2: 済んだ判定を遡って台帳に記録する。
 
-    #7/#8 の統合には判定がどこにも無く（integration_admitted が0件）、しかも「マージ後の
-    10件失敗のうち8件は worktree 走査の偽陽性で、#7 の欠陥はゼロ」という切り分けの判断が
+    統合の判定がどこにも残らないことがある（`integration_admitted` が0件）。しかも「マージ後の
+    10件失敗のうち8件は worktree 走査の偽陽性で、の欠陥はゼロ」という切り分けの判断が
     記録から消えていた。**その切り分けこそ後から最も知りたい情報**なので、遡って残せる口を開ける。
 
     追記型なので過去は書き換わらない — `backfilled: true` を付けて、後から足した記録だと

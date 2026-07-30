@@ -65,7 +65,7 @@ PHASE_ORDER = ["requirements", "design", "implement", "test", "integrate", "depl
 # 同じ仕事を指す識別子は2系統に分かれていた: 人間側 / decide / org_cycle の照合は
 # `deliverable` / `issue`、強制ロジック（requires_prior / DISTINCT_ACTOR）は
 # `candidate_id` / `claim_id`。同じものを指しているのに片方しか見ないため、
-# **実地では自己 admit も、存在しない deliverable の deploy も素通りした**（seq 204/205）。
+# **運用では自己 admit も、存在しない deliverable の deploy も素通りした。**
 # 束ねて、どちらで書かれていても相関が取れるようにする。
 _CORRELATION_KEYS = ("candidate_id", "claim_id", "deliverable", "issue")
 
@@ -108,7 +108,7 @@ def _work_aliases(hist):
     """台帳全体から「同じ仕事を指す識別子」の同値類を作る。
 
     実地では cycle_started が candidate_id しか持たず、判定側は deliverable で書かれるため、
-    直接比較では永久に相関しなかった（seq 208 で maker が自分の #7 を admit できた）。
+    直接比較では永久に相関しなかった（で maker が自分の を admit できた）。
     橋は台帳の中にある — `cycle_started{candidate_id, pack_manifest_id:"issue-7"}` と
     `candidate_submitted{candidate_id, contract_ref}` が両者を繋いでいる。
     **人に同じキーで書かせるのではなく、既にある対応関係を辿る。**
@@ -205,8 +205,8 @@ def _phase_admitted_for(ev, hist, phase):
 
     **なぜ親まで遡るのか。** founding は objective 単位で requirements/design を admit する
     （設計はそこで起きるので当然）。一方 /org-work は task Issue 番号を deliverable にして
-    `phase_started{implement}` を打つ。両者は別の文字列なので、objective #1 で admit しても
-    task #7 には効かず、指示どおり進めても task #1 が弾かれた（実地で判明）。
+    `phase_started{implement}` を打つ。両者は別の文字列なので、objective で admit しても
+    task には効かず、指示どおり進めても task が弾かれた（実地で判明）。
 
     task ごとに requirements/design を再度 admit させるのは、同じ設計を N 回 admit させる
     セレモニーにしかならない。**設計は objective の単位で起きた**のだから、その admit を
@@ -253,7 +253,7 @@ REQUIRES_PRIOR = {
     ),
     # 識別子は束ねて見る（_same_work）。`claim_id == candidate_id` だけを見ていたため、
     # deliverable/issue で書かれた実地の refutation 2件と相関できず、しかも
-    # None == None が一致してしまい **deploy ゲートが丸ごと無効**だった（seq 205 が通った）。
+    # None == None が一致してしまい **deploy ゲートが丸ごと無効**だった（が通った）。
     "result_deployed": lambda ev, hist: any(
         e["class"] == "refutation_attempted"
         and _same_work(e["payload"], ev["payload"], hist)
@@ -329,7 +329,7 @@ def _distinct_actor_violation(ev, hist):
     if not ids:
         # 相関キーが1つも無い判定は **拒否する**。以前はここで素通りさせており（"the payload-shape
         # check is elsewhere" と書いてあったが、その elsewhere は存在しなかった）、実地で maker が
-        # 自分の成果物を admit できた（seq 204）。相関できない判定は、検証できない判定であって、
+        # 自分の成果物を admit できた。相関できない判定は、検証できない判定であって、
         # 「検証を通った判定」ではない。無言で通すのが最悪で、統制が効いていないことが誰にも
         # 見えないまま、ハッシュ連鎖が偽造にお墨付きを与える。
         return (f"{ev['class']} rejected — 判定の対象を特定できない: payload に "

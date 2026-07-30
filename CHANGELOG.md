@@ -3,988 +3,316 @@
 All notable changes to orgforge-plugin. This project follows a pragmatic semver:
 minor = new mechanisms/features, patch = fixes, major = breaking articulation changes.
 
-> **0.12.0〜0.22.0 について。** この区間は、実際に org を回して（タテカエという PWA を
-> 18 Issue に分解して作らせて）出てきた指摘を、そのまま直し続けた記録である。直した約20件を
-> 並べると、ほぼ全部が同じ形をしていた:
->
-> ```
-> ドキュメントが「こうせよ」と述べる
->   → 守らせる機構が無い / payload のキーが揃わないと無効 / 実行手段が無い
->   → 成功して返る（無言）
->   → 守られない
->   → 検出器も board も「問題なし」と報告する（誤った安心）
-> ```
->
-> 最後の一段が一番効く。単に守られないだけなら気づけるが、`learning repeats` が clean と言い、
-> `complete` が admit 済みでも「まだ」と言い、`log` が成功を返す。**信号が壊れているので、
-> 壊れていることが分からない。** これは #7 の split() で捕まえた欠陥（性質が壊れる場所を
-> テストが検証していない）と同じ構造で、プラグイン自身の統制層に同じものがあった。
->
-> 対策として一貫して選んだのは「無言の素通しをやめる」こと — 拒否するか、少なくとも
-> 「効いていない」と言う。0.16.0 の相関キー必須化、0.16.0 の `unknown` 報告、0.18.0 の
-> reject 追跡、0.21.0 の冪等キー修正は、すべてこの一点である。
+Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
+predate that convention and are left as written. Design rationale lives in `docs/`, not here.
+
+## 0.28.2
+
+### Documentation
+- This file rewritten for 0.12.0 onward: English, Keep a Changelog headings, one entry per
+  version at 5–20 lines. It had grown to 50–70 lines per version and read as a work journal —
+  retracted assessments, session narrative, an essay-length preamble about the 0.12–0.22 period.
+  A changelog states what changed; rationale belongs in `docs/`. 1768 → ~1070 lines, with the
+  0.11.0-and-earlier entries left as they were written.
+- `docs/11-sdlc-mold.md` and the tool comments keep the design reasons but drop the incident
+  detail — Issue numbers, round counts, ledger sequence numbers. A comment explaining why a check
+  exists is useful to whoever maintains it; which Issue first tripped it is not.
 
 ## 0.28.1
 
-### ★ 宣言のマッチを行頭に限定した（実害あり）
-
-`INDEPENDENT:` の判定が全文の部分一致だったため、**否定文が宣言として通っていた**。実地の
-プローブで踏まれた:
-
-```
-「contract も INDEPENDENT: も付けていません」 → ALLOWED（否定文が (A) として一致）
-```
-
-実害のある形は「この作業は independent ではないので contract を付ける」と書いた **(B) の spawn
-が (A) と誤判定される**こと。0.28.0 自身が明示したとおり **(A) は `owns` の宣言を免除する**ので、
-偶然の一致で免除が取れる。ガードの文面が「子プロンプトの冒頭に1行書く」と言っているのに、
-**検査が文面より緩かった。**
-
-`^\s*INDEPENDENT:` に限定した（前の空白・2行目の行頭は許す）。
-
-**同じ穴が seam 側にもあった。** `"seam contract"` という語が `_SEAM_MARKERS` に入っており、
-「no seam contract is attached」が seam の宣言として通っていた。単なる語を外し、handoff.py が
-出す**構造**（`## Your slice` / `Inputs you receive:` / `Outputs you MUST produce:`）だけを見る。
-構造は否定文に現れない — 「`Inputs you receive:` が無い」と書くことはあっても、コロン付きの
-見出しを否定文の中に置くことはまずない。
-
-### ① `intake` の exit code — 実装は正しく、観測経路が違った
-
-報告された「本命ケースだけ exit=0」は再現しなかった。3経路（repo / バンドル / インストール済み）
-すべてで **exit=10** を返す。4症例を直接確認しても 10 / 10 / 10 / 0（正常系）で揃っている。
-
-原因は**パイプ**だった。`| tail` や `| grep` を通すと、シェルの終了コードは最後のコマンドの
-ものになり、`intake` の 10 は消える。
-
-ただし懸念（スクリプトで判定する経路で見逃す）は残るので、**機械が拾える1行**を出力に置いた:
-
-```
-[intake] INCOMPLETE issue=30 role=skeptic missing=verdict,evidence exit=10
-```
-
-パイプで読む経路でも `grep INCOMPLETE` で判定できる。正常系では出さない。
-
-### 報告された検証結果について
-
-`intake` の false positive がゼロで、特に `Now let me summarize.` で始まる**完全な**報告が
-通ったとのこと。0.28.0 で「途中で切れたように読める語を根拠にしない」と決めた判断が、実測で
-裏付けられた — 語で弾いていたら、丁寧に途中経過を書く maker が罰される検査になっていた。
-
-327 passed。
-
----
+### Fixed
+- Independence and seam-contract declarations are matched **at the start of a line** only. A
+  negation ("no `INDEPENDENT:` and no contract here") was matching as a declaration, and an
+  independence declaration exempts the `owns` check — so the exemption could be taken by accident.
+- Dropped the bare `"seam contract"` string from the seam markers; the gate now looks for the
+  **structure** `handoff.py` emits (`## Your slice`, `Inputs you receive:`, `Outputs you MUST
+  produce:`), which does not appear inside a negation.
+- `intake` prints a machine-readable `[intake] INCOMPLETE issue=N role=R missing=…` line. Its
+  exit code was already 10, but a shell pipeline (`| tail`) reports the last command's status.
 
 ## 0.28.0
 
-実地の報告3件。**①は「監督が気づけない失敗」を作る唯一のものだった。**
+### Added
+- `org_cycle intake --issue N --role gate|skeptic|maker --report TXT` — checks that a subagent's
+  report has the shape its role owes (verdict + evidence for gate/skeptic; a commit hash + DoD
+  output for maker). Exit 10 when incomplete. It does not judge the verdict, only its presence.
+  `--report -` reads stdin.
 
-### ① `org_cycle intake` — 報告が作業の途中で切れる【最優先】
-
-subagent の turn が作業の途中で終わることがある（実地で1晩に3件）。`status` は completed で
-返り、`result` は宣言1文だけ:
-
-```
-#27 skeptic → 「Now the key attack:」と宣言した直後
-#34 maker   → 「Now update the call sites.」と言った直後
-```
-
-`SendMessage` で再開させると両方とも続きを実行して完走した。**agent が死んだのではなく、
-報告が成果物の形になる前に turn が終わっている。**
-
-**気づけない形が危ない。** 「Now the key attack:」なら verdict が無いと分かるが、
-**「MUST 2 は防がれました」で切れていたら、それを verdict として読んで admit しかねない** —
-この org が繰り返し検出した「確かめていないことを確かめたかのように述べる」が、**報告の切断**
-という経路で起きる。
-
-```
-org_cycle.py intake --issue N --role gate|skeptic|maker --report "<返ってきた報告>"
-  skeptic → verdict が survives|refuted か / 実行の痕跡があるか
-  gate    → verdict が admit|reject|park か / 実行の痕跡があるか
-  maker   → コミットハッシュがあるか / DoD の実測出力があるか
-```
-
-**判定はしない** — verdict の中身も妥当性も見ない。役割として要求される欄が埋まっているかだけ。
-欠けていれば exit 10 で「報告が不完全。再開させること」と言う。実地の4症例（切れた報告2件・
-気づけない形1件・正常系）で検証した。
-
-なお「途中で切れたように読める語」（`Now …` など）は**根拠にしない**。必須要素が揃っていれば
-完走とみなす — 語だけで判定すると、丁寧に途中経過を書いた完全な報告を弾く。
-
-### ③ `branch --create` がメインリポジトリのブランチを切り替えていた
-
-worktree で並列運用している org で `--create` を打つと、**メインが develop から離れた**。
-気づかなければ develop での統合テストが別 Issue のブランチ上で走る。
-
-`.orgforge/wt/issue-*` が既にあれば worktree 運用とみなし、**worktree を作る**（メインは
-動かさない）。あえてメインで切り替えるなら `--no-worktree`。メインを切り替えた場合は
-「develop での統合テストを走らせる前に戻すこと」と警告する。
-
-### ② seam gate のメッセージが、実際に通る道を後ろに書いていた
-
-`tools/handoff.py` を使えと主に書いていたが、実地では `INDEPENDENT:` を冒頭に付けるだけで
-通した — **それが正しい経路だった**。急いでいる監督に、使わない道具の名前を読ませるのは無駄。
-通る道を短い順に書き直した。
-
-併せて**穴を明示した**: `INDEPENDENT:` は `owns` の宣言を免除するので、ガードは衝突を検査
-できない（宣言が無いものは照合できない）。並列で複数の子を出すとき、同じ worktree や同じ
-ファイルに向けていないかは**監督が確かめること**。実地で3本を別々の worktree に振って衝突を
-避けられたのは監督の規律であって、道具の要求ではない。
-
-### ④ worktree の占有ロックは引き続き入れていない
-
-実地で3本を別々の worktree に振って衝突しなかった。**ロックの解放漏れが新しい詰まりを生む
-経路の方がまだ怖い**（報告も保留を推奨）。
-
-### 効いていると報告されたもの
-
-`--claimed` / `--verified`（0.27.0）が「コメントを読んで確認した」をコマンド無しで拒否し、
-実際に `grep` を走らせてから通った。バナーで古いパスの事故が消えた。rework の記録漏れは
-0.26.0 の警告以降ゼロ。
-
-323 passed。
-
----
+### Changed
+- `github_sync branch --create` creates a **worktree** when `.orgforge/wt/issue-*` exists instead
+  of switching the main checkout's branch. `--no-worktree` restores the old behaviour; switching
+  the main branch now warns.
+- The seam-gate rejection message leads with the shorter path (`INDEPENDENT:` on the first line)
+  and states that it exempts the `owns` collision check.
 
 ## 0.27.1
 
-**モデル切り替えを検討し、実測の結果 見送った。** 併せて、実測で唯一削れると分かった箇所
-（プロンプトの重複）を削った。
+### Changed
+- `verify` no longer repeats the prior judgment twice (it appeared in both the judgment history
+  and the "what the gate already saw" section). Skeptic prompts drop ~58 lines.
 
-### 測った結果 — 削る対象が支配的でない
-
-実運用の完了通知から `duration_ms` を集めた（n=52）:
-
-| 役割 | 平均 | 中央 | 最長 | n | 合計 |
-|---|---|---|---|---|---|
-| maker | 486.7s | 376.1s | 1788.8s | 18 | 146.0分（54%） |
-| gate | 260.2s | 226.7s | 571.4s | 18 | 78.1分（29%） |
-| skeptic | 169.3s | 153.4s | 294.2s | 16 | 45.1分（17%） |
-
-```
-1周 = maker(487s) + gate(260s) + skeptic(169s) ≈ 15.3分
-反証による周回 = 214分 / 269分 = 79%
-```
-
-**「1回の待ち時間」は総時間の21%しかなく、79%は周回数である。** モデルや effort を下げて削れる
-のは前者だけで、しかも gate/skeptic を下げれば周回が増えて逆方向になる。効くのは 0.26.0 で
-入れた「完了の判定」と skeptic の2段化である。
-
-`registrar` は理屈の上では唯一の安全な候補（センサー評価とスケジュール計算が主）だが、
-**実運用で0回呼ばれている**ので効果が測れない。安全性だけを見て効果を見ていなかった。
-
-**maker が過半（54%）だが、これは推論の遅さではなく書いた量である。** 最長の 29.8分は 728行の
-SQL + テスト34件に対応する。質が足りていないという見方も否定された — 同じ成果物で skeptic が
-「一手隣」を探して見つけられず、「列挙をやめて述語に置き換えたので原理的に出にくくなっている」
-と述べた。**maker の設計判断が反証を止めた実例である。**
-
-### 削ったもの — プロンプトの重複58行
-
-`verify` が判定履歴（`bodies[-2:]`）と「gate が既に見たこと」（`prior`）で**同じ本文を2回**
-出していた。実測で skeptic 457行のうち、gate の最新判定の全文が2箇所（26行 + 20行超）に
-現れていた。履歴を出したときは `prior` を出さない。
-
-```
-skeptic: 457行 → 399行（#11）· 253行（#9）· 187行（#32）
-```
-
-「gate が撃っていない領域」の引き渡しは残す — `prior` から Known risk の節を抜き出すので、
-`prior` の取得自体は消してはいけない（実地では gate が「1件も当てていない」と書いた領域から
-実バグが出た）。テストで固定した。
-
-### 未測定として申告されたこと
-
-`registrar` の所要時間と `org-tick` の挙動は未測定（実運用で一度も呼ばれていない）。
-**判断材料には使っていない。**
-
-319 passed。
-
----
+### Notes
+- Considered per-role model/effort tiers and did not adopt them. Measured over 52 runs: one wait
+  is ~21% of total time and rework rounds are ~79%, so lowering a tier cannot move the total, and
+  lowering the gate or skeptic would add rounds.
 
 ## 0.27.0
 
-**監督（supervisor）自身の記録を機械で検査する。** 実地の依頼書より — この org は maker の
-成果物と gate/skeptic の判定を機械で検査しているが、**監督の記録だけ何も検査していなかった**。
-1晩の運用で監督の失敗5件のうち4件が、道具の側で捕まえられる形だった。
-
-> この org が同じ晩に8回検出した失敗様式は「確かめていないことを、確かめたかのように述べる」で、
-> それが**成果物 → 判定 → 道具 → 監督**の4層すべてに現れた。最初の3層には機械の検査がある。
-> **4層目にだけ無い。**
-
-### ① `org_cycle rework` — 記録漏れ28件の対策【最優先】
-
-台帳を数えると reject/refuted **28件**に対し `rework_requested` が記録されていなかった
-（1件は4回 reject で記録0件）。**副作用として `show` の rework 警告（0.26.0）が沈黙していた** —
-台帳に材料が無いので閾値に届かない。**道具は数えられないものを数えない。**
-
-- `rework_requested` を記録する**専用コマンド**を作った。`ledger.py append --payload '{...}'` を
-  手で組む必要があったことが漏れの一因だった
-- `verify` が reject/refuted のとき、**判定の記録と同じ場所**でそのコマンドを出す。発注は
-  「判定 → 検証 → decide → **発注** → 記録」の順で、発注した subagent の通知が来ると記録が
-  流れる。記録のコマンドが目の前にあれば順序が逆転する
-- 周回数（何周目か）は自動で埋まる
-
-### ② `decide --claimed / --verified` — 要約が条件節を落とすのを捕まえる
-
-実地の失敗:
-
-```
-maker の報告 : 「src/db/client.ts は**このブランチにまだ存在せず** feat/issue-11 側にありました」
-監督の要約   : 「maker は推測せず src/db/client.ts の loadEnv() を読んで変数を確定させた」
-落ちた条件   : 「**このブランチには無い**」
-```
-
-**maker は正直に条件を書いていた。監督が要約で落とした。** その要約が gate への指示にも流れ、
-gate は「そのファイルは存在しない」を reject 事由にした。
-
-- `--claimed`（報告されたこと）と `--verified`（監督が自分で走らせて確かめたこと）に分ける
-- `--verified` に実行の痕跡（コマンド・出力・`exit=`）が無ければ警告
-- **`--claimed` の条件節が `--verified` で触れられていなければ警告**。条件節は種類ごとに束ねる
-  （「存在せず」と「存在しない」を別物として扱うと、正しく運んでいるのに警告が出る — 実装当初
-  そうなった）
-- 拒否ではなく警告。判断は監督の仕事だが、条件を落としたことに気づける材料は要る
-- `--claimed` / `--verified` を渡さない旧来の呼び出しは通す（後方互換）
-
-**この検査は完全ではない。** 「確かめた」と書くだけでも通り得るし、痕跡の検査自体が
-「コマンド名を書けば通る」形式化を招く。**塞げないことを正直に記録する**（docs/11）。
-
-### ③ 実行時のバージョンと cwd を stderr に1行
-
-```
-[orgforge 0.27.0 @ /Users/shikama/tatekae]
-```
-
-実地で 0.26.0 のリリース後も **0.25.2 のパスを打っていた**（直前に使ったものを流用した）。
-古いパスを打てば次の行で気づく。
-
-**ただしこの1行が、機械可読な出力を壊した。** `ledger view`（JSON を返す）に混ざって
-`JSONDecodeError` でテストが落ちた。stderr に書いていても、消費側が `2>&1` で混ぜれば同じ。
-`view` / `census` / `digest` では黙り、内部呼び出し（`_run`）では `ORG_QUIET` を立てる。
-**人間向けの便利のために、機械が読む出力を壊すのは筋が通らない。**
-
-### ④ worktree の占有ロックは入れていない
-
-「gate の稼働中に監督が同じ worktree で変異検査を走らせ、skeptic が偽の失敗を観測した」という
-実害があり、警告は筋が通る。しかし同じ晩に gate が異常終了しており、**ロックの解放漏れが新しい
-詰まりを生む経路が実在する**（依頼書も保留を推奨）。①②③を入れたあとの再発を見て判断する —
-**詰まりを直すために別の詰まりを作らない。**
-
-317 passed。
-
----
+### Added
+- `org_cycle rework --issue N --after reject|refuted --by WHO --reason TXT` records that a rework
+  was ordered. `verify` prints this command next to the `decide` command on a reject, so the
+  ordering and the recording happen together.
+- `github_sync decide --claimed / --verified` separate what was reported from what the supervisor
+  ran themselves. Warns when `--verified` carries no trace of a command, and when a hedge in
+  `--claimed` ("not present", "not measured", …) is not addressed in `--verified`. Existing calls
+  without these flags are unaffected.
+- `org_cycle` / `github_sync` / `ledger` print `[orgforge <version> @ <cwd>]` to stderr.
+  Suppressed for `view` / `census` / `digest`, for internal calls, and by `ORG_QUIET=1`.
 
 ## 0.26.0
 
-実地の報告3件 — **範囲外の発見を Issue に積み増さない**ための3層。加えて README を書き直した。
+### Changed
+- `agents/skeptic.md` splits findings in two: a refutation of the Issue's MUSTs is grounds for
+  `refuted`; a real defect outside those MUSTs is returned as "recommend filing an Issue" and is
+  not. Ambiguous cases go to the supervisor rather than being decided by the skeptic.
+  `agents/gate.md` states the same line for `reject`.
+- `verify` asks the skeptic for an `out_of_scope` field.
+- `template/SPEC.md` and `/org-decompose` require a **definition of done**: the MUSTs going
+  RED→GREEN completes the Issue; defects found afterwards outside that scope become new Issues.
+- `org_cycle show` warns when a deliverable has been reworked more than three times. Counts
+  reworks, not judgments — an Issue can take many rounds and still converge.
 
-### ② skeptic の責務を2段に分けた（最も効く）
-
-`skeptic.md` は「隣接領域を探せ」「articulation の欠陥はより重要」と**無条件に**求めていた。
-skeptic は仕事として必ず何かを見つけるので、範囲を切らないと MUST と無関係な発見でも
-`refuted` になる。実地では **8周 rework した Issue の4回目以降の発見が、すべて spec の MUST に
-書かれていないもの**だった。
-
-| 見つけたもの | 扱い |
-|---|---|
-| MUST が守ると述べたことが守られていない | `refuted` の根拠。本務 |
-| MUST の範囲外の欠陥（実在するが、この Issue が守ると述べていない） | **「Issue 化を推奨」として別に返す**。verdict には数えない |
-| どちらか判断が難しい | **skeptic が決めない。両方の読み方を書いて監督に返す** — carve out は監督の判断 |
-
-「MUST の文言は満たすが意図を裏切る」ものは**範囲内**（placebo）である。線引きはそこ。
-`verify` の「返すもの」にも `out_of_scope` を足した（憲章だけ直すとプロンプトと食い違う）。
-`gate.md` にも同じ線を入れた — 範囲外の欠陥は `reject` の根拠にしない。
-
-### ① SPEC に「完了の判定」を足した
-
-```
-- **完了の判定:** 上の MUST が RED→GREEN になった時点で完了とする。
-  **着手後に見つかった範囲外の欠陥は、この Issue で直さず別 Issue にする。**
-```
-
-`template/SPEC.md` と `/org-decompose` の両方に。**maker・gate・skeptic の3者が同じ完了条件を
-見る**のが要点で、spec 側に書かないと3者が別々の終わり方を想定する。
-
-### ③ rework 回数を `show` が警告する
-
-```
-周回:     13 周 — 直近3回: 実装の欠陥 / テストの欠陥 / テストの欠陥
-          ⚠ rework 8 回 / 判定 13 回 — 3回を超えている。
-            **Issue の切り方か、完了の定義を見直す価値がある。**
-```
-
-**判定回数ではなく rework の回数で見る。** 最初は `len(rounds) > 5` も条件にしたが、
-7周かかって rework 2回で収束した Issue（gate が丁寧に見た結果）まで警告した。実データで
-#9（8回）と #11（6回）だけが出て、#7 / #8 / #10 は沈黙する。止めない — 材料を出す。
-
-### README を書き直した — 英語に統一し、331行 → 215行
-
-**私が追記した2節だけが日本語**になっていた（"How to use it" 30/77行、"Status & honesty"
-18/51行）。方針を決めずに、その時の会話の言語で書き足した結果である。README は GitHub の入口で
-既存の8割が英語なので、英語に統一した（日本語0行）。
-
-取捨選択も直した。"How to use it" が **85行**あり、`worktree` の事故の詳細・`--plan` の挙動・
-識別子の相関の設計まで書いていた — それは `REFERENCE.md` と `docs/11` の役割である。README は
-**入口**に絞る: これは何か / なぜ org として分解するか / 何が入っているか / どこを読むか /
-実運用で何が起きたか。1サイクルの具体的なコマンド列は `QUICKSTART.md` §8 に送る。
-
-`Status & honesty` は残したが、書き方を変えた — 実運用で見つけた欠陥（統制が効いているつもりで
-効いていなかった4件）と、統制が働いた実例と、**入れて取り下げた検査2件**を、いずれも短く。
-道具の履歴として、入れたものと同じくらい外したものが読めるようにしている。
-
-308 passed。
-
----
+### Documentation
+- README rewritten: English throughout, 331 → 215 lines, scoped to an entry point (what it is,
+  why the decomposition, what ships, where to read, honest status). Command-level detail moved to
+  `REFERENCE.md`; the per-cycle walkthrough to `QUICKSTART.md` §8.
 
 ## 0.25.3
 
-**ドキュメントの追随のみ**（挙動の変更なし）。0.12〜0.25.2 で入れた機能のうち、読ませる系の
-文書に載っていなかったものを反映した。
-
-| 文書 | 追随していなかったもの |
-|---|---|
-| **README** | 版表記が v0.22 のまま。`touched` / `split-check` / `--plan` / 「subagent は記録しない」／取り下げた検査2件の記録 |
-| **QUICKSTART** | **1つの Issue を実際にどう回すか**（§8 は phase gate の説明だけで、打つコマンドの並びが無かった）。`org-init` が baseline を取ること |
-| **REFERENCE** | `split-check` の新しい2検査（(d) 認可の偏り・(e) 壊れ方の数）、`baseline` を `/org-init` が取ること、`verify` の stdout/stderr の宛先の違い |
-| **ARCHITECTURE** | ツール表が 0.11 相当（`begin` `complete` `plan` の3つだけ）。`orgcycle/` と `ghsync/` へのパッケージ分割と、その理由 |
-| **marketplace の description** | worktree による並列分離、判断の二重記録、起票の粒度検査、baseline との差分 |
-
-**一番の抜けは QUICKSTART だった。** phase gate の理屈は書いてあるのに、
-`begin → complete → handback → verify(gate) → verify(skeptic) → integrate` という**実際の並び**が
-どこにも無く、導入した人が1サイクルを回せない。ツールを足すたびに REFERENCE には行が増えて
-いたが、**通しで読む文書には入っていなかった**。
-
-304 passed（テストの変更なし）。
-
----
+### Documentation
+- `QUICKSTART.md` §8 gains the actual command sequence for one Issue
+  (`begin → complete → handback → verify → integrate`), which existed nowhere in prose.
+- `REFERENCE.md`, `ARCHITECTURE.md` and the marketplace description catch up with 0.12–0.25.2.
 
 ## 0.25.2
 
-実地の報告2件。どちらも**道具が自分の限界を語らなかった / 権限のない相手に指示していた**という形。
+### Fixed
+- `repro_lint check` states that it has **not** judged whether a failure is new when no baseline
+  exists. It had been asserting "not in the baseline, so newly regressed" without reading one,
+  which stopped a gate from judging work whose whole purpose was to fix those items.
+- `/org-init` takes a `repro_lint baseline` once, as `/org-adopt` already did.
 
-### ① `repro_lint` が読んでいない baseline を語っていた（実害が出た）
-
-baseline が無いときも、失敗全件にこう付けていた:
-
-> これらは baseline に無い＝この変更で新たに悪化した、または最初から満たすべきもの。
-
-**読んでいないものについて断定していた。** 実地で gate がこれを額面どおり受け取り、既存の
-負債（`develop` 自体が同じ2件で HOLD）を「この変更による悪化」と読んで判定を止めた —
-**対象の Issue は、まさにその2件を緑にする作業だった**。
-
-いまはこう言う:
-
-```
-HELD: 2 required artifact(s) missing for the implement gate: complexity-bounded, type-escapes-closed.
-  **baseline が無い**（探した先: ./.orgforge/repro-baseline.json）ので、
-  **この変更による悪化か、採用前からの既存の負債かは判定していない。**
-  判定に使うなら、まず基準を取ること: `repro_lint.py baseline .`
-```
-
-報告のとおり、**何も言わないより「この道具はここを見ていない」と述べるほうが、判定する側は
-正しく動ける**。加えて `/org-init` も baseline を1回取るようにした（`/org-adopt` は既に
-取っていた）ので、新規 org が最初の gate 判定でこれを踏むことはなくなる。
-
-### ② subagent が記録できないのに「記録せよ」と指示していた
-
-`agents/gate.md` と `agents/skeptic.md` は「判定を台帳と Issue の両方に記録せよ」と指示して
-いたが、subagent には `ORG_GITHUB_REPO` も台帳のパスも渡っていない。**指示と権限の食い違い**。
-実地で gate と skeptic が計7回、判定を出した後に「記録は監督に委ねます」と述べて止まり、
-**一度は判定そのものが台帳に入らないまま失われかけた**。
-
-報告にあった2案のうち **(b) 責務を判定に絞る**を採った — 実地でも subagent は判定に集中した
-ほうが質が上がっていたし、判定者が記録も持つと独立性の検査（台帳の DISTINCT_ACTOR）が
-形式化しやすい。
-
-- `agents/*.md` を「verdict / why / evidence / standard / risk を**返す**まで」に書き換え
-- `verify` の **stdout（subagent に渡す本文）から記録コマンドを削除**し、「返すもの」の指定に
-- 監督が打つコマンドは **stderr**（監督向け）に出す — 配管が判定を運べなくなっては本末転倒
-- skeptic には「撃ったミューテーションの一覧」も返させる（次の周回が同じ場所を撃ち直さない）
-
-### 報告のうち1件は取り下げられた
-
-「バッククォートがシェルに食われる」件は、報告者の再検証でツール側の問題ではないと判明。
-**自分の側の誤りを取り下げる報告**は、道具を直すのと同じくらい価値がある — 誤った修正は
-別の穴を作る。
-
-304 passed。
-
----
+### Changed
+- `agents/gate.md` and `agents/skeptic.md` end at returning the judgment (verdict, why, evidence,
+  standard, risk); recording is the supervisor's. Subagents have neither `ORG_GITHUB_REPO` nor the
+  ledger path, so the previous instruction to record could not be followed.
+- `verify` splits its output: stdout is what the subagent receives (what to return), stderr is the
+  command the supervisor runs.
 
 ## 0.25.1
 
-**0.25.0 で入れた VOIDDEP を取り下げた。** 実地の報告: 「VOIDDEP は発火しませんでした。
-REQUIREMENTS.md にバッククォート識別子が1つも無いためです」。
-
-確認したところ、そのとおりだった — 実データの識別子は **0 件**。「利用者が表示名を変更した
-とき」のように普通の名詞で書くのが自然な日本語であり、テンプレートもそう書かせている。
-
-助詞で区切って「〜を<動詞>」を拾う実装も試したが、`利用者が支出` と `メンバーが支出` が
-別物として抽出され、**全件が誤検出**になった。形態素解析を持ち込めば届くが、それは
-req_lint の重さを一段変える判断になる。
-
-形式化（QUS の `Complete`）そのものは正しい。**日本語の要求から目的語を切り出せない**という
-実装上の壁で、AQUSA が意味理解を要する基準の自動化を諦めているのと同じ場所である。
-
-**誤検出しかしない検査は、無いより悪い。** 0.24.0 で提案4（rework が MUST に対応しているか）を
-見送ったのと同じ理由で戻す。狙い（要求の欠落を捕まえる）は `split-check` の「認可が境界だけを
-定めていないか」が実データで機能しているので、そちらに寄せる。
-
-再実装するなら**目的語を確実に取れる前提**（英語の要求か、識別子を義務づける記法）が要る。
-テストにその条件を残した。
-
-### 私の検証が不十分だった
-
-VOIDDEP は**合成したテスト文書**で「検出する / 誤検出しない」を確認して出した。実際の
-REQUIREMENTS.md で回していない。テストが本番と違う形を作れば、壊れる場所で検証していない
-ことになる — 0.22.1 で同じ失敗をしたばかりだった。
-
-301 passed（VOIDDEP のテスト3件を取り下げの記録に差し替え）。
-
----
+### Removed
+- `req_lint` VOIDDEP (added in 0.25.0). It keyed on backtick identifiers, and real requirement
+  documents in Japanese carry none, so it never fired. A version keying on particles produced
+  false positives on every line. The formalisation is sound; extracting the object from Japanese
+  prose is not tractable here.
 
 ## 0.25.0
 
-SDD 系ツール・従来手法の分割基準を**一次資料で調べ**（Spec Kit / Kiro に加え、INVEST /
-SPIDR / Humanizing Work / QUS / PBR / BMAD / Devin / Tessl / Cursor）、取り入れるべきものを実装した。
-出典と原文引用は docs/sources。
+### Added
+- `req_lint` VOIDDEP — flags an update/delete requirement whose object is never created (the QUS
+  `Complete` predicate). *Removed in 0.25.1.*
 
-### `req_lint` に VOIDDEP — 作る要求が無い対象を更新/削除している
+### Changed
+- `/org-decompose` doctrine: do not split by layer or by file. A unit is a valuable change in
+  behaviour that will likely touch several layers; `owns` avoids collisions but is not the split
+  criterion. INVEST's *Small* is cited for its actual reason — above that size the scope of the
+  story stops being knowable.
 
-QUS（Lucassen et al., Requirements Engineering 2016）の `Complete` の形式化:
-
-> "to read, update or delete an item one first needs to create it"
-> `voidDep(µ1) ↔ depends(av1, av2) ∧ ∄µ2 ∈ U. do2 = do1`
-
-これは実地で踏んだ形（#11 が「誰が入れるか」を定めて「入った後に何ができるか」を定めて
-いなかった）の**一般化**でもある。バッククォート付きの識別子だけを見る — 散文から名詞を
-切り出すと誤検出が支配的になる。
-
-### 「層/ファイルで割らない」を doctrine に明記
-
-Humanizing Work の垂直スライスの定義は *"a work item that delivers a valuable change in system
-behavior such that you'll probably have to touch **multiple architectural layers**"* —
-**複数層に触ることを肯定的に含む**。層ごとに割るのは independent でも valuable でもない
-失敗パターンとして名指しされている。
-
-つまり **`owns`（同じファイルを触るか）を分割の判断基準にすることは、既存の規範体系では
-反パターン**である。`owns` は衝突の回避には正しいが、分割の判断そのものではない。
-
-### INVEST の *Small* の根拠を doctrine に引いた
-
-> "Above this size, and it seems to be too hard to know what's in the story's scope"（Wake 2003）
-
-根拠は見積精度ではなく**スコープの境界が認識できなくなること**。実地の #11 はまさにそれで
-5回スコープが変わった。
-
-### 調査で分かった業界の実態
-
-**過大タスクの検出は、調べた範囲のどのツール・手法も持っていない。** Spec Kit の `analyze` の
-Detection Passes に粒度の検査は無く、Kiro は人間の承認ゲートのみ。BMAD は同じ機能要求
-（Issue #1471）が**未解決のまま放置**され、学術側の AQUSA も Estimatable の自動化を
-「意味理解を要する」として明示的に諦めている。定量閾値を持つのは Devin の *"three hours or
-less"* だけで、事前 lint ではない。
-
-**「壊れ方が違えば別単位」を規範として明文化した先例も見つからなかった。** PBR が「検証手段を
-起点に据える」点で最も近いが、あれは分割ではなく検査の規範である。0.24.0 で足した軸は、
-既存手法の空白に置いたことになる。
-
-### 誤検出の確認
-
-0.24.0 の split-check を tatekae の全 Issue（#7〜#20）で回した。**追加した2種が出るのは14件中5件**
-（#11 #12 #14 #16 #18）で、内容を確認するといずれも妥当だった — #16 は精算の状態機械で
-MUST 15件中認可が1件、#18 は内側に触れているのが「あだ名」だけ（#11 の再現）。
-`depends_on` の重複警告（同じ依存が3行出ていた）も直した。
-
-303 passed。
-
----
+### Documentation
+- `docs/sources.md` records the split criteria of Spec Kit, Kiro, INVEST, SPIDR, QUS, PBR, BMAD,
+  Devin and Tessl with primary quotes. None of them detects an oversized task.
 
 ## 0.24.0
 
-タテカエ org からの要望書（`/org-decompose` の分割基準）に対応。**実測が明快だった**:
+### Added
+- `github_sync split-check` gains two checks: (d) authorisation MUSTs that only define who may
+  enter and never what a member may do; (e) more than one failure mode in one Issue (same `owns`,
+  different verification means).
 
-| Issue | 判定回数 | rework | 生んだ migration |
-|---|---|---|---|
-| #11 中核スキーマと RLS | **14** | **5** | 0007〜0011（相互干渉） |
-| #9 PWA シェル | 13 | 7 | — |
-| #8 settle() | 3 | 0 | — |
-| #10 CI | 2 | 0 | — |
-
-#8 と #10 は1〜2周で通り、#11 は12周でも終わらなかった。
-
-### 分割の軸に「壊れ方」を足した
-
-現行の基準は `owns` の交わり1本で、これは **Spec Kit の `[P]`（"different files, no
-dependencies"）と同じ判定**であり、同じ限界を継承していた。#11 は `supabase/` に閉じていたので
-分割されなかったが、中身は「スキーマの形（型・制約で守る）」と「認可（攻撃シナリオで守る）」
-という**壊れ方も検証手段も別の2つ**だった。
-
-> この deliverable が壊れたとき、**壊れ方は1種類か**。検証に必要な手段は**1種類か**。
-
-Kiro の *"Implement X function" rather than "Support X feature"* が同じことを別の言い方で
-述べている。`/org-decompose` の doctrine に書き、`split-check` が起票後に警告する。
-
-### 要求が薄い領域を検出する
-
-#11 の EARS 12件のうち認可を定めたものは4件で、**そのどれも「入った後に何ができるか」を
-定めていなかった**（内側に触れていたのは「あだ名」＝装飾的なテキスト列だけ）。金額・支払者・
-債務の向き・所有権は無防備で、後半6周の rework は Issue のどの MUST にも対応しなかった。
-
-`split-check` が「境界だけを定めて内側を定めていない」認可要求を警告する。実データで **#11 だけ
-2件検出し、#7 / #8 / #9 / #10 は0件**（#9 が長引いたのは分割の問題ではない、という報告とも一致）。
-
-### この Issue が生んだ不可逆な変更の数を出す
-
-#11 は migration を5本生み、それらが相互干渉した（0009 が直したものを 0010 が壊し、0011 が
-別の2件を RED にした）。3件以上で `show` が材料を出す。**止めない。**
-
-### 提案4（rework が MUST に対応しているか）は見送った
-
-語彙の重なりで判定してみたが実データで誤検出した — 完了済みの #7 に「スコープ外」と警告し、
-本当にスコープ外だった #11 は `expenses` がたまたま一致して素通りした。**誤警告は正しい警告
-まで無効化する**ので、届かない検査は入れない。狙い（スコープ外の作業の検出）は `split-check` の
-2件と「不可逆 N 件」が別の角度から材料を出している。
-
-### SPEC テンプレートに「その検査が鳴らない場合」を書く欄
-
-#9 の13周の多くは実装ではなく**検査側**の欠陥だった（テストが `sw.ts` を一度も実行していない／
-警報が条件分岐で構造的に鳴らない／ミューテーション実行器が構文エラーを SURVIVED と誤読する）。
-いずれも「テストは書いてある・green である」を満たしている。**書けないなら、その検査はまだ
-何を見ているか分かっていない。**
-
-### 一次ソースの確認
-
-Spec Kit と Kiro の実テンプレートを取得して分割基準を確認した（docs/sources）。
-**両者とも「タスクが大きすぎる」ことの検出機構を持たない** — Spec Kit の `analyze` の
-Detection Passes に粒度の検査は無く、Kiro は人間の承認ゲートだけである。人間の diff レビューを
-廃止した org ではその頼り先が無いので、警告を機械側に置く。
-
-### ついでに直したバグ
-
-`split-check` の関数内 `import re` がモジュールレベルの `re` を隠しており、`owns` が複数
-territory のときだけ後半で `NameError` になっていた（今回の追加コードが露出させた）。
-
-300 passed。
-
----
+### Changed
+- `/org-decompose` asks whether the deliverable has one failure mode and one verification means,
+  in addition to disjoint `owns`.
 
 ## 0.23.0
 
-実地の報告5件。**1つ目は私が前に入れた変更が引き金だった。**
+### Fixed
+- `discover.py` walks past a worktree created by `begin`. Tracked files under `.orgforge/`
+  restored an `.orgforge/` inside each worktree, which stopped the search and produced a stray
+  ledger there — judgments written from a worktree never reached the org's ledger.
+- `integrate` passes its own test output to the Issue log; it was failing its own log check.
+- Ordinary `git push` is no longer metered against `destructive_ops` (only `--force`,
+  `--force-with-lease`, `--delete`, `--mirror` are). Default cap raised 50 → 150.
 
-### 1. worktree に迷子の台帳ができていた（最優先）
-
-```
-begin が作る worktree に .orgforge/ が復元される
-  → subagent が worktree 内で ledger を叩くと、そちらに書く（appended seq=1）
-  → 実判定が本体の台帳から消える
-```
-
-実地で1日3回起き、実判定4件（#10 の survives、#11 の reject×2、#9 の admit）が迷子になった。
-
-**原因は 0.21.0 で doctrine / evidence を git 追跡下に置いたこと。** その結果 worktree にも
-`.orgforge/` が復元され、それが `ORG_MARKERS` に当たって親の探索が止まる。「学びは clone した
-誰の環境でも効いてほしい」という判断自体は今も正しいと思うが、**探索の前提を壊すことに
-気づいていなかった**。
-
-警告で防ぐ設計は破れる（実際 gate が一度踏んだ）ので、構造で防ぐ: worktree の中からは必ず
-親を辿る。判定は `git worktree` の実体（`.git` が**ファイル**で `gitdir:` が
-`/worktrees/` を指す）で行う — パス名ではなくツリーの性質で見る。
-
-この迷子は二次被害も生んだ。掃除しようとした `rm -rf .orgforge/wt/*/.orgforge` が、追跡下の
-doctrine と evidence 19ファイルを巻き添えにした。**そもそも迷子ができなければ起きない。**
-
-### 2. integrate が自分の log 検査に引っかかっていた
-
-0.14.0 で入れた「マイルストーンでは `--command`/`--result` 必須」に integrate 自身が抵触し、
-統合は完了するのに Issue へのログだけ落ちていた。**自分で統合テストを走らせて結果を持って
-いるのだから、人に書かせる理由が無い。**
-
-### 3. cap が開発そのものを止めていた
-
-実測すると `destructive_ops` が **50/50 で満杯**だった。犯人は `git push` で、一律に破壊的と
-して数えていた。その結果 maker が作業を終えたのに push できない。
-
-- **通常の `git push` は対象外**。追記であって取り消せる（revert / 新しいコミット）。
-  force 系（`--force`/`--force-with-lease`/`--delete`/`--mirror`）だけを数える
-- 既定の cap を 50 → **150** に。重み3の操作（`rm -rf` / `DROP` / `reset --hard`）なら
-  50回で到達するので、暴走の歯止めとしては十分に効く
-
-cap が測るのは irreversibility であって活動量ではない。**開発そのものを止めるなら cap の誤用**
-である。なお `git commit` と `sed -i` は 0.15.0 の時点で既に対象外だった。
-
-### 4. 周回の性質を `show` に出す
-
-#9 が9周、#11 が12周した。統制は毎回実害のある欠陥を見つけており機能しているが、**いつ収束
-するかの見通しが立たない**。回数だけでなく直近3回が何を問題にしているか（実装の欠陥か、
-テストの欠陥か）を出す。
-
-```
-周回:     9 周 — 直近3回: テストの欠陥 / 実装の欠陥 / 実装の欠陥
-```
-
-分類はキーワードによる粗い当て推量で、**判断材料であって判断ではない**。「切れ」とは言わない。
-
-### 5. gate の「撃っていない領域」を skeptic に渡す
-
-gate は毎回 `--risk` に今回撃っていない領域を書く。実地では #9 で gate が「1件も当てていない」
-と書いた領域から実バグが出た。人が手で転記していたので配管が運ぶ。
-
-正規表現で断片を切り出す実装を最初に書いたが、重複した断片が並んで読めなくなった。gate は
-既に構造化して書いているので、**Known risk の節ごと渡す**形にした。
-
-295 passed。
-
----
+### Added
+- `org_cycle show` reports what the recent rounds were about (implementation vs test defects).
+- `verify --role skeptic` forwards the areas the gate said it did not probe.
 
 ## 0.22.1
 
-**0.22.0 のリファクタで `verify` が壊れていた。** 実地の報告: gate / skeptic の両方が
-「agents/*.md が見つからない（探した先: None）」で使えない。
-
-原因は `tools/` → `tools/orgcycle/` と階層が1つ深くなったこと。各所に散っていた
-`os.path.dirname(os.path.abspath(__file__))` のうち **2箇所で直し漏れ**が出た:
-
-- `_agents_dir` — 憲章を見失い、**verify が gate/skeptic とも死ぬ**（検証基準の唯一の出所）
-- `_seam` — `handoff.py` を見失い、seam contract が生成できない
-
-`show` の「実装:」行は 0.22.0 で直していたので再発しなかった。**直したのは踏んだ1箇所だけで、
-同じ形の残りを洗っていなかった。**
-
-### 基点を1箇所に集約した
-
-`__file__` からのパス解決は各パッケージ **`HERE` のみ**。基点が散っていると、階層が変わる
-たびに直し漏れが起きる。テストで1箇所であることを強制する。
-
-### テストが緑のまま壊れていた理由
-
-`test_verify_finds_charter_in_bundled_layout` は `CLAUDE_PLUGIN_ROOT` を設定してから呼んで
-おり、**env が無い経路＝実際の使われ方を検査していなかった**。env の有無の両方を見る形に
-直し、さらに「ヘルパ単体」ではなく **verify の出力に憲章と Boundary contract が入ること**を
-見るテストを足した。実地の症状は「verify が使えない」であって「`_role_charter` が None を
-返す」ではない。
-
-壊れる場所で検証していないテストは無いのと同じ — #7 の split() で捕まえたのと同じ形を、
-テスト側でやっていた。ミューテーション（0.22.0 の壊れた形に戻す）で2件が落ちることを確認済み。
-
-291 passed。
-
----
+### Fixed
+- `verify` could not find `agents/*.md` or `handoff.py` after the 0.22.0 split — two of the four
+  `__file__`-relative lookups were not updated. Path resolution is now in one place per package
+  (`HERE`), enforced by a test.
 
 ## 0.22.0
 
-**リファクタ。呼び出し方は変えず、中を分ける。** `org_cycle.py` が1440行・11サブコマンド、
-`github_sync.py` が1176行・12サブコマンドまで肥大していた。実際、1440行のファイルを見ながら
-`_new_public_surfaces`（0.20.0）の設計を2回外している — 全体が見えていなかった。
-
-```
-org_cycle.py    1440行 → 149行 + tools/orgcycle/{_core,cycle,judge,ship,inspect}.py
-github_sync.py  1176行 → 197行 + tools/ghsync/{_core,backlog,record,branch,coverage}.py
-tests/          1834行 → conftest.py + test_{ledger,orgcycle,status,organs}.py
-```
-
-`python3 tools/org_cycle.py begin ...` のまま。ドキュメントも実地の手順も無変更。
-
-### 分割が2回、同じ穴を持ち込んだ
-
-`HERE`（ツールのパス基点）。`tools/orgcycle/` に移した瞬間、`_gh_sync` が `github_sync.py` を
-見失い、`_branch_for` が slug 無しのブランチ名を返して、**`show` の実装行と `integrate --plan` の
-変更一覧が黙って空になった**。エラーは出ない — 組み立て系のツールは「見つからない」を静かに
-素通りするため。実地で `show` を叩いていなければ気づいていない。
-
-`github_sync` 側にも同じ形が2箇所あり、そちらは `record.py` が `ledger.py` を見失う。つまり
-**0.21.0 で塞いだばかりの「判断が Issue にだけ残る」片側落ちが、分割によって再発する**ところ
-だった。移す前に潰した。パスの基点は分割で最初に壊れる場所である。
-
-`build.sh` が `tools/*.py` しか同期せず、サブパッケージがバンドルに入らない穴も同時に出た
-（プラグインとして入れた瞬間に ImportError）。
-
-### テストの検出力を実測した
-
-`HERE` を壊れた形に戻すミューテーションで、`test_core_HERE_points_at_tools` と
-`test_bundle_includes_subpackages` が落ちることを確認。テストがあることと、テストが壊れた実装を
-検出できることは別。
-
-288 passed。
-
----
+### Changed
+- `org_cycle.py` (1440 lines) → a 149-line dispatcher plus `tools/orgcycle/`
+  (`_core`, `cycle`, `judge`, `ship`, `inspect`).
+- `github_sync.py` (1176 lines) → a 197-line dispatcher plus `tools/ghsync/`
+  (`_core`, `backlog`, `record`, `branch`, `coverage`).
+- `tests/` split into `conftest.py` + `test_ledger` / `test_orgcycle` / `test_status` /
+  `test_organs`.
+- CLI invocation is unchanged (`python3 tools/org_cycle.py begin …`).
+- `build.sh` syncs `tools/` subpackages into the plugin bundle.
 
 ## 0.21.0
 
-**二重管理をやめる。** 実地の方針: 「外だしできるものは外だししたほうがいい。二重管理はまじで
-やめたほうがいい。GitHub Issue に全てのログが残るほうが、ユーザーにとっても見やすいし、
-SaaS みたいな考えで保守性も高い」。
-
-### 判断の記録を2回打たせるのをやめた
-
-`decide` が Issue に書き、人が `ledger append` を別に打つ設計だった。**実地で片側落ちが3回**:
-#8 の refutation が台帳に0件 / #11 の1回目の reject が台帳に無い / `progress_recorded` が0件。
-actor は `--by` で既に渡っているので、分ける理由が無かった。
-
-順序は **台帳が先、Issue が後**。統制（自己承認拒否・順序違反）は台帳が持っているので、Issue に
-書いてから拒否されると「Issue には admit と書いてあるが台帳には無い」という食い違いが**外に**
-残る。拒否されるなら、外から見える記録を作る前に止める（exit 4）。
-
-### 冪等キーが統制の裏口だった（この検証で発見）
-
-`(class, natural_key)` だけを見ていたため、**キーさえ一致すれば actor が違っても no-op** になり、
-`DISTINCT_ACTOR` も `REQUIRES_PRIOR` も評価すらされなかった。gate の判定と同じキー
-`admission_decided-11` を maker が使うと、自己承認が exit 0 で通る。
-
-- 冪等 no-op は「同じ actor の再実行」に限る。別 actor が同じキーを使ったら拒否
-- `decide` のキーを `{event}-{issue}-{digest}` に。`{event}-{issue}` だと**2周目の判定が
-  1周目と衝突して no-op** になり、同じ穴を踏む
-
-冪等性は再実行を守る仕組みであって、統制を迂回する経路ではない。
-
-### 検証中の事故
-
-プローブ掃除の一括削除で、#11 の gate 判定3件を誤って消した。台帳に理由と digest が残っていた
-ので Issue に復元した。「台帳は派生」という方針とは逆向きに台帳が救いになった形で、二重に
-持つこと自体の価値も同時に示している。**外出しの方向は変えないが、台帳は「統制と復旧のための
-派生」として維持する。**
-
----
+### Changed
+- `github_sync decide` writes **both** the Issue comment and the ledger receipt in one command,
+  ledger first — if a control rejects the judgment, nothing is written to the Issue. Previously
+  the receipt was a second command the operator had to run.
+- Idempotent no-op requires the **same actor**. `(class, natural_key)` alone meant a different
+  actor reusing a key was treated as a replay, so `DISTINCT_ACTOR` and `REQUIRES_PRIOR` were
+  never evaluated. `decide` keys on `{event}-{issue}-{digest}` so a second round does not collide
+  with the first.
 
 ## 0.20.0
 
-**実地の指摘: 「verify が rework の履歴を渡さない」。** 264行のプロンプトに「この Issue は既に
-2回 reject されている」が入っておらず、gate は毎回**初回判定として扱っていた**。3周目の #7 で
-「前回見落とした点を今回どう確認したか」を明示させたら質が上がった、という観察がある。
-
-`show` が既に判定履歴を持っていたので、`verify` がそれを埋め込む。回数は**台帳と Issue の
-多い方**を採る — 台帳だけだと「2回目」と言ってしまい（1回目が台帳に無い）、過少に伝えると
-gate が「ほぼ初回」として扱う。
-
-### `integrate --plan` — 衝突の予告
-
-#7 の統合後に10件失敗し、切り分けに時間を使った（8件が worktree 走査の偽陽性）。何を統合するか・
-**並行 worktree が同じファイルを触っていないか**を先に見せる。
-
-### `asset_touched` — 本番資産への変更を残す口
-
-`exposure_budget_checked` はローカルのファイル操作しか数えない。実際に危険なのは本番 DB への
-DDL や権限変更で、実地ではマイグレーション2本と `revoke` が入ったのに台帳に何も残らず、
-**「あの revoke は誰の権限で入ったのか」が辿れなかった**。`--authority` がその欄。
-
-### `public_surface_declared` — 何を外に晒したか
-
-`domain_model` は「領域規則を決めたか」を問うが「何を外に晒したか」は誰も見ていなかった。
-**認可ホールは「関数を1つ足した」ところから生まれる**（実地の `join_group`）。complete が
-新しい公開面を検出したら、申告するまで止まる。
-
-検出の設計で2回外した: テストヘルパを拾いすぎて肝心の1件が10件に埋もれ、SECURITY DEFINER を
-ファイル単位で見ていたため定義が後ろの関数が29位に沈んだ。**拾いすぎは、見落としと同じくらい
-悪い。**
-
----
+### Added
+- `verify` embeds the judgment history (which round this is, prior reasons in full). Round count
+  takes the larger of ledger and Issue, since one side of the double record can be missing.
+- `integrate --plan` shows what would be merged and which parallel worktrees touch the same files.
+- `asset_touched` ledger class + `org_cycle touched` — records production-asset changes (DDL,
+  privilege grants) with `authority` and `reversible`.
+- `public_surface_declared` ledger class — `complete` lists newly exported symbols, DB functions,
+  grants, RLS policies and endpoints and requires a declaration (`--new-surface` /
+  `--new-surface-none`). Ranks `SECURITY DEFINER` and granted functions first; excludes tests.
 
 ## 0.19.0
 
-実務で「無くて困った」ものを実装した。
+### Added
+- `org_cycle show --issue N` — one view of an Issue: commits, worktree, judgment history (with
+  correction and backfill marks), what it is waiting on, next command.
+- `correction` ledger class — `kind: probe|mistake` is excluded from counts; `backfill` and
+  `superseded` are not.
+- `begin` / `plan` list unready dependencies and open human tasks before starting. Advisory.
 
-### `org_cycle show --issue N`
-
-`gh issue view` と台帳の grep と `status.py` を別々に叩く必要があった。#7 が3周したとき
-「どの周のどの判定を見ているのか」が分からなくなる。実装コミット・worktree・判定履歴
-（訂正済み / backfill の印つき）・いま何待ちか・次の一手を一望する。
-
-### `correction` を第一級イベントに
-
-台帳は追記型なので過去を消せない。自由記述の注記では**機械が読めず**、実地では検証プローブ
-4件が実判定として集計され、board が現実と食い違った。`kind: probe|mistake` は集計から除外し、
-`backfill`（後から書いた実判定）と `superseded`（時系列の解決が扱う）は除外しない。
-
-### board に判定理由を出す
-
-件数だけでは CEO に何も伝わらない。理由は台帳に無く Issue コメント側にある（設計どおり）ので、
-board が Issue から引く。
-
-### `begin` / `plan` の着手前チェック
-
-依存が rework 中か、人間の作業待ちが残っていないか。**止めない — 見せる**。判断は人の仕事だが、
-材料が無ければ判断のしようがない。
-
-### seam contract の参照渡し
-
-0.12.1 で「ガードが本文を見るのは正しい」と書いたが、**保証できないのはガードが読まなければの
-話**だった。読めば保証できる。264行を毎回貼る必要が無くなり maker の context が空く。読む範囲は
-org のルート配下と一時ディレクトリ、512KB まで。
-
----
+### Changed
+- The status board shows the reason a deliverable was rejected, read from the Issue.
+- The seam gate reads a seam contract from a file the prompt references (org root and temp
+  directories, 512 KB limit), so a long contract need not be pasted inline.
 
 ## 0.18.0
 
-**判定は最新が有効。** `status.py` が集合で持っていたため、reject が後から来ても admit が
-消えなかった。実地の #11 で `admit(216) → reject(218)` の順に記録されたのに board が RED を
-出し続けた。追記型の台帳では「一度でも admit があった」と「いま admit されている」は別物。
-
-reject されたまま放置されているものも board に出す（RED ではなく AMBER — 差し戻しは正常な
-過程だが、rework が止まっていることには気づける必要がある）。
-
-`verify` の雛形にあった未定義の `$P` を絶対パスにした。**貼っても動かない雛形は打たれないか、
-打ち間違えられる** — 台帳側の記録が落ちた一因。
-
----
+### Fixed
+- The status board takes the **latest** `admission_decided` per deliverable. Held as a set, an
+  earlier `admit` survived a later `reject`.
+- Rejected deliverables awaiting rework appear on the board (AMBER).
+- `verify` templates use absolute paths instead of an undefined `$P`.
 
 ## 0.17.0
 
-**0.16.0 の修正が実地では効いていなかった。** `deliverable` で書いた自己 admit が通っていた
-（seq 208）:
+### Fixed
+- Correlation resolves identifiers transitively through the ledger. `cycle_started` carries
+  `candidate_id` and `pack_manifest_id: "issue-N"` while judgments carry `deliverable`/`issue`,
+  so direct comparison never matched and a maker could admit its own work. Rejection messages
+  show how the identifiers were linked.
 
-```
-cycle_started(seq 74) : candidate_id="cand-0677...", pack_manifest_id="issue-7"
-admission_decided     : deliverable="7", issue=7
-                        → 共有する識別子が1つも無く、_same_work が相関できない
-```
-
-**テストが実地の形を再現していなかった** — `cycle_started` に `issue` を入れて書いていたので
-直接の共有 ID があり、穴が見えなかった。テストが本番と違う形を作れば「壊れる場所で検証して
-いない」ことになる。#7 で学んだのと同じ失敗を、テスト側でやっていた。
-
-直し方: 人に同じキーを書かせず、**台帳にある対応関係を辿る**。`pack_manifest_id: "issue-7"` /
-`contract_ref` が橋になるので、union-find で推移的に解決する。どう繋がったかを出す —
-「同じ仕事だ」と言われた側が納得も反論もできないメッセージは、拒否の理由になっていない。
-
-未検証だった統制（skeptic の自己反証拒否・`report_up`/`conformance_reviewed` の順序・
-alignment/resource/reconcile）を実測し、テストに固定した。**使っていない機能は壊れていても
-分からない。**
-
----
+### Notes
+- Verified the previously untested controls: skeptic self-refutation, `report_up` /
+  `conformance_reviewed` ordering, and every `alignment` / `resource` / `reconcile` subcommand.
 
 ## 0.16.0
 
-**無言の素通しをやめる。** 実装済みの統制が、payload のキーが揃わないと黙って無効になっていた。
+### Fixed
+- A judgment carrying no correlation key is **rejected** rather than silently accepted. The
+  `DISTINCT_ACTOR` check returned early when the key was absent.
+- `result_deployed` correlates a `refutation_attempted` by any shared identifier. Comparing
+  `claim_id == candidate_id` matched `null == null`, which disabled the deploy gate.
+- `learning.py repeats` reads `cause`, `hypothesized_cause`, `reason`, `why` and
+  `checklist_ref`, and covers `rework_requested`. Reports `unknown` rather than `clean` when no
+  cause is readable, and states that matching is by string.
 
-```python
-if key is None:
-    return None    # nothing to correlate on; the payload-shape check is elsewhere
-```
-
-この "elsewhere" は存在しなかった。実地の台帳で maker が自分の #7 を admit でき（seq 204）、
-存在しない deliverable 999 を deploy できた（seq 205）。
-
-- 識別子を束ねて相関する（`candidate_id` / `claim_id` / `deliverable` / `issue`）
-- **相関キーが1つも無い判定は拒否する。** 相関できない判定は「検証を通った判定」ではない
-- `result_deployed` が `claim_id == candidate_id` だけを見ていたため、実地の refutation 2件と
-  相関できず `null == null` が一致し、**deploy ゲートが丸ごと無効**だった
-
-### 検出器が「学習が使われている」と嘘をついていた
-
-`learning.py repeats` が `payload.cause` しか読まず、`rework_requested` は対象ですらなかった。
-**同じ失敗を3回した org に対して clean と報告していた。** `reason` / `why` も読み、死因が1件も
-読めないときは `clean` ではなく `unknown` と言う — 「繰り返していない」と「見えていない」は
-別で、混同すると誤った安心になる。嘘をつく検出器は無いより悪い。
-
-一致は文字列で見るという限界も明示する。実地の2件は「端数の偏り」「テスト硬化」と別の言葉で
-書かれていたが根は同じだった。
-
----
+### Documentation
+- `REFERENCE.md` lists `handoff`, `doctrine`, `learning`, `alignment`, `resource`, `reconcile`,
+  `harness_probe`, `status`, `attention` and `conventions`, which were absent.
 
 ## 0.15.0
 
-### `log` が台帳に何も書いていなかった
+### Added
+- `github_sync log` writes a `progress_recorded` receipt to the ledger. Without it the
+  `work_in_progress` view stayed empty and `/org-resume` could not recover.
+- `complete --learned` proposes a claim to doctrine with provenance filled in (`propose` allowed
+  omitting `retrieved_at` / `review_by` that `admit` requires, so it always stalled).
+- `org_cycle gc` removes merged worktrees, keeping unmerged or dirty ones; `org_cycle record`
+  backfills a past judgment with a `backfilled` marker; `begin` records `attention_allocated`.
 
-Issue に7回の作業記録がある一方、`progress_recorded` は **0件**。`work_in_progress` ビューが
-空になるため `/org-resume` が中断から復帰できない状態だった。
-
-### 学びの蓄積口がサイクルに繋がっていなかった
-
-`doctrine/` も `conventions/` も空。真因は道具の不整合で、`propose` は `retrieved_at` /
-`review_by` を省略できるのに `admit` はそれを必須にする — **素直に使うと admit で必ず詰まる**。
-`complete --learned` が provenance を埋めて propose し、admit は gate の仕事。
-tatekae の実知見5件を投入して、skeptic の brain に3件・persistence_schema に1件が実際に届くことを
-確認した。
-
-### 予算 cap が日常の後片付けだけを止めていた
-
-1日5回発火して5件とも実害ゼロ（worktree / node_modules / scratchpad）。**cap が測るのは
-irreversibility であって活動量ではない**ので、再生成できる対象は重み 0 にした。`src/` も `/` も
-親への遡上も重いまま。
-
-`gc`（worktree の片付け）、`record`（済んだ判定の backfill）、`begin` が `attention_allocated` を
-打つ、も同時に入れた。
-
----
+### Changed
+- `destructive_ops` weights 0 for regenerable targets (`.orgforge/wt/`, `node_modules`, build
+  output). Recursive deletes of source, `/`, `~` or parent traversal are unchanged.
 
 ## 0.14.0
 
-**実測が示したのは「検査のある場所だけが厚くなる」という一つの形。** 同じ Issue の中で
-`decide` 経由の判定は 3,506〜5,894字、検査の無い `log` は 276〜473字だった。
+### Added
+- `org_cycle handback --issue N` — pushes the feature branch, opens a PR against `develop` with
+  `Closes #N`, and logs it. There was no command to open a PR.
 
-- マイルストーンの `log` は `--command` / `--result` を必須にし、「通った」の言い換えを拒否する。
-  途中の刻み（`progress_recorded`）は検査しない — 軽く刻めることも同じくらい大事
-- **PR を作る手段が無かった。** `/org-work` §4 は「feature ブランチ → PR → develop」と書いて
-  いたのに、実地では PR ゼロ件・`git merge` で直接統合・統合済み Issue が OPEN のまま。
-  `handback` が push → PR（body に `Closes #N`）→ Issue へ log
-- `begin` の log に branch / worktree / parent / candidate_id を自動で入れる。人が書いた276字には
-  ブランチ名も worktree のパスも無かったが、**org_cycle は両方知っていた**
-
----
+### Changed
+- `github_sync log` requires `--command` and `--result` on milestone events and rejects a result
+  that only restates success. `progress_recorded` is exempt.
+- `begin` fills the log with facts the tool already knows (branch, worktree, parent,
+  `candidate_id`); `complete` requires `--command` / `--result`.
 
 ## 0.13.0
 
-**統合直前の穴。** 台帳を数えたら `refutation_attempted` が **0件**。Issue にはコメントがあった
-ので、二重記録の片側だけが落ちていた。`requires_prior` は `result_deployed` にしか掛かっておらず、
-統合はその手前なので何も止めなかった。
+### Added
+- `org_cycle integrate --issue N` — verifies the gate's `admit` and the skeptic's `survives` are
+  in the **ledger**, then merges, runs the combined suite, records `integration_admitted` and
+  logs it. Exit 4 when the prerequisites are missing.
+- The status board reports deliverables admitted with no refutation record (RED).
+- `verify` embeds an absolute path for `repro_lint`; the gate had been reporting it as unrunnable.
+- `risk_accepted` in the ledger payload, surfaced on the board; the skeptic receives the gate's
+  known risks.
 
-- `_refutation_for()` を admission と同じ強度で実装
-- `org_cycle integrate` — 前提照合 → マージ → 統合後テスト → `integration_admitted` → Issue へ log。
-  前提が欠けたら exit 4 で止め、マージ手順に入らない
-- `status.py` が「admit 済みだが skeptic の記録が無い」を **RED** で出す。tatekae で #8 が実際に
-  RED として表面化した
-- **`repro_lint` が一度も走っていなかった** — パス解決ができず gate が `--risk` に「未実行」と
-  書いていた。誰も diff を読まない前提で機械的拒否層が丸ごと効いていない状態。`verify` が
-  絶対パスを埋める
-- `--risk` が書き得になっていたので、台帳に `risk_accepted` を運ばせ board に出す。skeptic には
-  gate が書いた Known risk を抜き出して「まずここを潰せ」と渡す
-- `--domain-model-none` のとき、増えた公開型/エクスポートを列挙して問い返す（判定はしない）
-- `complete` が worktree を片付ける（未コミットなら残して警告）
-
----
+### Changed
+- `complete --domain-model-none` lists newly exported symbols and asks whether they are domain
+  vocabulary. Advisory.
+- `complete` removes the worktree `begin` created, keeping it if there are uncommitted changes.
 
 ## 0.12.1
 
-- `complete` の「gate の admission がまだ」が**嘘だった** — 362行目は台帳を一切見ておらず、
-  `rc==0` なら常に同じ文言を出していた。実際に照合するようにし、`deliverable` と
-  `payload.issue` の両方で引く。見つからない時は「近い記録: seq N に admission_decided が
-  あるが deliverable=... で一致しない」と示す
-- seam contract をファイルで渡すと spawn が HELD される件は、ガードではなく `verify` の案内側を
-  直した（0.19.0 でガード側を直し、参照渡しを許すようにした）
-
----
+### Fixed
+- `complete` checks the ledger before reporting that a gate admission is missing; it printed the
+  same line unconditionally. Matches on `deliverable` and `payload.issue`, and names a near-miss
+  record when nothing matches.
+- `verify` states that its output may be pasted inline (the seam gate reads the prompt body).
+  *Superseded in 0.19.0, which lets the gate read a referenced file.*
 
 ## 0.12.0
 
-### 案5: worktree 分離の強制（切迫していた方）
+### Added
+- `begin` creates a per-Issue git worktree at `.orgforge/wt/issue-<N>/`. Running parallel makers
+  in one checkout put one Issue's commits on another's branch. `--no-worktree` opts out.
+- `org_cycle verify --issue N --role gate|skeptic` assembles the material for a judgment: the
+  seam contract (via `handoff.py`), the charter from `agents/<role>.md`, the Issue's SPEC/MUSTs,
+  and a `decide` skeleton. The skeptic also receives what the gate already examined. Verdict,
+  reasoning and risk are left empty.
 
-実地の報告: 「並列 fan out で #7 のコミットが `feat/issue-8-settle` に載る事故が起きました。
-同一ツリーで並列 maker を走らせる限り再発します。**『毎回正しく判断する』前提の設計は破れる**、
-という実例になりました」。
-
-`git checkout` はツリー全体を切り替えるので、注意深さの問題ではなく構造の問題として再発する。
-`begin` が `.orgforge/wt/issue-<N>/` を自動で用意する。**判断ではなく物理で分ける** —
-forced invariant であって forced delegation ではない。
-
-### 案2: `verify` — 配管だけを引き受け、判定は委ねる
-
-実地の報告: 「検証手順をプロンプトに書き下ろす作業が一番重い。毎回書き直しで、私の書き方で
-gate の厳しさが変わる。18 Issue なら18回書き、そのたびに基準がブレます」。
-
-`org_cycle verify --issue N --role gate|skeptic` が組み立てるのは**材料だけ**:
-handoff の seam contract・**`agents/<role>.md` の憲章（＝検証チェックリスト）**・Issue の
-SPEC/MUST・`decide` の雛形。skeptic には gate が既に見たことを引き渡す（渡さないと同じ
-ミューテーションを繰り返す）。
-
-**verdict / why / risk / どのミューテーションを試すかは持たない。ツールが verdict を決めた
-瞬間に gate は形骸化する。** テストで固定した。
-
-### ついでに直した実バグ
-
-- `handoff.py` は root 省略時の discovery が**未実装**で TypeError で落ちていた。ヘルパは
-  「省略時は自動発見」と謳っていたので、6引数の手打ちは仕様ではなく、ただ壊れていた
-- `_agents_dir` がバンドル配置（`agents/` が `tools/` の兄弟）で憲章を見失っていた
-
----
+### Fixed
+- `handoff.py` resolved its root by discovery only in its help text; the code raised `TypeError`.
+- `_agents_dir` missed the bundled layout where `agents/` is a sibling of `tools/`.
 
 ## 0.11.0
 

@@ -14,7 +14,7 @@ event; tick.py plans WHEN.
 
   reclaim <root> --holder R --resource TYPE --yield-threshold F [--idle-cycles N]
       ALLOCATION-RECLAIM. Stranded resource is the dominant 24/7 waste: a downranked/stalled
-      dept monotonically capturing scarce compute #1 needs. Reclaims from a low-yield/idle
+      dept monotonically capturing scarce compute another dept needs. Reclaims from a low-yield/idle
       holder silently (safe direction); escalates ONLY if reclaim would deactivate a
       CEO-founded/protected dept, or there is nowhere non-harmful to cut (scarcity crisis).
 
