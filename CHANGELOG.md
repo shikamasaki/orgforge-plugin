@@ -6,6 +6,54 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 0.39.1 — the stage-B installer produced a state that could not run
+
+An independent audit (four `claude -p` lenses, all NO-GO) reviewed the stage-B scripts before any
+`sudo` was run. **The installer's own output would have prevented the daemon from starting**, and the
+verifier would have damaged a live org. Nothing was executed against the real org.
+
+### Fixed — the installer built a broken state
+- **`1770` on the socket parent is exactly what `writerd` refuses.** Group-write means anyone in that
+  group can substitute the socket, so the daemon would have exited before binding. It is now `0755`:
+  callers need **traverse (x)**, not write. The daemon's check now distinguishes other-write (always
+  refused) from group-write (refused only under `--require-root-owned`), so stage A still works.
+- **A `0600` socket owned by the writer is unreachable from a caller.** Connecting and writing are
+  different things — the socket is now `0666`, and what protects the ledger is that only the writer
+  process writes it, plus the RPC checks.
+- **`700` on the ledger breaks the caller's `verify`, board and projections.** The control is "cannot
+  write", not "cannot see" — a ledger nobody can audit is not an audit ledger. Now `750` with
+  group-read and `640` files.
+- **PyYAML was checked with the operator's `python3`, not the daemon's.** Measured on this machine:
+  PyYAML lives in `~/Library/Python/3.9`, invisible to a daemon running as another UID, and
+  `PYTHONNOUSERSITE=1 /usr/bin/python3 -c 'import yaml'` fails. Without it `ledger.py` refuses every
+  append (fail-closed by design), so the daemon would run and write nothing. Preflight now tests
+  `--daemon-python` and offers three working remedies.
+- **No `set -e`.** A failed `chown` continued to "install complete", leaving a half-owned tree and a
+  daemon that would not start. Now `set -euo pipefail`, and `run()` aborts with the rollback command.
+- **`cp -R src dst/src` creates `tools/tools` on re-run** — the idempotence claim was false. Now
+  removes and copies with a trailing `/.`.
+
+### Fixed — the verifier damaged what it was verifying
+It appended a forged line to the ledger, truncated HEAD, overwrote the schema and key registry,
+deleted the socket, moved the socket's parent and stopped the daemon. Every check now **opens for
+write without writing a byte**, or inspects ownership instead of attempting `chmod`. The daemon is
+never stopped. `--no-write` removes even the single `progress_recorded` the success path adds.
+It also now checks that the ledger **stays readable** — the previous version could have passed while
+leaving the org unable to audit itself.
+
+### Fixed — two claims that were not measured
+- **`separate_uid` came from the flag, not the state.** `measured_isolation()` now derives it from the
+  socket parent's ownership and mode, the ledger's owner, and the writer's own UID. Passing
+  `--require-root-owned` no longer makes the label appear.
+- **The peer UID was placed in the environment and never read.** `observed_recorder()` now consumes
+  it, so `recorded_by` carries `peer:uid=…` — while `decision_by` still comes only from a signed
+  receipt.
+
+### Status
+`sudo tools/writer-install.sh` and `tools/writer-verify.sh` were **not** run against a live org, and
+the audit's NO-GO stands until it re-reviews these fixes. `workload_isolation` remains
+`process_mediated`; H1's `separate_uid` is still unresolved.
+
 ## 0.39.0 — Authenticated Writer, stage A: one path to the ledger
 
 `decision_by` was verified from a receipt, but **the write path itself was open to anyone** — and so

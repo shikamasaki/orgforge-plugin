@@ -1740,11 +1740,19 @@ def test_install_script_dry_run_changes_nothing(tmp_path):
     led = tmp_path / ".orgforge" / "ledger"; led.mkdir(parents=True)
     before = sorted(str(p.relative_to(tmp_path)) for p in tmp_path.rglob("*"))
     r = subprocess.run(["bash", str(TOOLS / "writer-install.sh"),
-                        "--org-root", str(tmp_path), "--dry-run"],
+                        "--org-root", str(tmp_path), "--dry-run",
+                        # **daemon が使う python で PyYAML を検査する**ので、それが無い環境では
+                        # preflight が正しく止まる。ここでは「何も変えない」ことを見たいので、
+                        # 検査を通せる処理系を渡す（無ければ preflight で止まることを確かめる）。
+                        "--daemon-python", sys.executable],
                        capture_output=True, text=True)
-    assert r.returncode == 0, r.stdout + r.stderr
-    assert "[dry-run]" in r.stdout
-    assert "脅威モデルの外" in r.stdout            # 境界を明示している
+    both = r.stdout + r.stderr
+    if r.returncode != 0:
+        # preflight で止まった場合も **何も変えていない**ことが要件である
+        assert "PyYAML" in both, both
+    else:
+        assert "[dry-run]" in r.stdout
+        assert "脅威モデルの外" in r.stdout        # 境界を明示している
     assert sorted(str(p.relative_to(tmp_path))
                   for p in tmp_path.rglob("*")) == before, "dry-run が何かを変えた"
 
@@ -1754,3 +1762,134 @@ def test_verify_script_refuses_to_run_as_root():
     src = (TOOLS / "writer-verify.sh").read_text(encoding="utf-8")
     assert 'if [ "$(id -u)" = "0" ]' in src
     assert "root では全部できてしまい" in src
+
+
+# ══ 0.39.1 — 監査が見つけた「installer が作る状態では動かない」9件 ═══════════
+# **設定を書いたことは、動くことではない。** --dry-run が exit 0 でも、その設定で daemon が
+# 起動しない／caller が接続できない／台帳が読めないなら、install は完了していない。
+
+def test_stage_b_permissions_let_the_daemon_start(tmp_path):
+    """段階B の親ディレクトリ権限で writerd が起動できること。
+
+    実測（監査）: installer が 1770 を設定し、**writerd 自身がそれを拒否して起動しなかった**。
+    caller に必要なのは通過（x）であって書き込みではない — 0755 が正しい。
+    """
+    sys.path.insert(0, str(TOOLS))
+    import importlib
+    wd = importlib.import_module("writerd")
+    parent = tmp_path / "p"; parent.mkdir()
+    # installer が設定する mode を、root 所有として評価する（uid の検査だけ別に見る）
+    # **root 所有の実在ディレクトリで判定する。** 自分の tmp では uid の検査で先に落ち、
+    # group-write の判定に到達しない。
+    for path, should_pass in (("/usr/local", True), ("/var/run", False)):
+        if not os.path.isdir(path):
+            continue
+        st = os.stat(path)
+        if st.st_uid != 0:
+            continue
+        err = wd.check_socket_parent(f"{path}/w.sock", require_root_owned=True)
+        assert (err is None) == should_pass, f"{path} (mode {oct(st.st_mode & 0o777)}): {err}"
+        if not should_pass:
+            assert "group から書き込み可能" in err
+    # other-write は段階A でも拒否する
+    os.chmod(parent, 0o777)
+    assert wd.check_socket_parent(str(parent / "w.sock")) is not None
+    os.chmod(parent, 0o755)
+
+
+def test_installer_uses_permissions_the_daemon_accepts():
+    """installer が書く mode と、writerd が受け付ける mode が一致していること。
+
+    **この2つがずれていると、install は成功して daemon は起動しない。**
+    """
+    src = (TOOLS / "writer-install.sh").read_text(encoding="utf-8")
+    assert "chmod 0755 '${SOCK_PARENT}'" in src, "socket 親が 0755 でない"
+    assert "chmod 1770" not in src, "1770 は writerd が拒否する"
+    # 台帳は読めなければ verify も projection も動かない
+    assert "chmod 750 '${ORG_ROOT}/.orgforge/ledger'" in src
+    assert "chmod 700 '${ORG_ROOT}/.orgforge/ledger'" not in src
+
+
+def test_socket_is_connectable_by_a_caller(tmp_path):
+    """**接続できることと、書けることは別。** 0600 だと別 UID の caller は接続すらできない。"""
+    led, sock, proc = _wd_start(tmp_path)
+    try:
+        mode = os.stat(sock).st_mode & 0o777
+        assert mode & 0o066, f"socket が {oct(mode)} — 別 UID の caller が接続できない"
+    finally:
+        proc.terminate(); proc.wait(timeout=10)
+
+
+def test_isolation_is_measured_not_flagged(tmp_path):
+    """`separate_uid` は **実測で** 決める。フラグを渡したかどうかで決めない。"""
+    sys.path.insert(0, str(TOOLS))
+    import importlib
+    wd = importlib.import_module("writerd")
+    led = tmp_path / "l"; led.mkdir()
+    # 同一 UID・自分所有の親 → process_mediated（--require-root-owned を渡しても変わらない）
+    assert wd.measured_isolation(str(led / "w.sock"), [str(led)]) == "process_mediated"
+
+
+def test_peer_uid_reaches_the_recorder(tmp_path, monkeypatch):
+    """peer credential が `recorded_by` に **届く**こと（環境に置くだけでは足りない）。"""
+    sys.path.insert(0, str(TOOLS))
+    import importlib
+    ident = importlib.import_module("identity")
+    monkeypatch.setenv("ORG_WRITER_PEER_UID", "501")
+    monkeypatch.setenv("ORG_WRITER_PEER_PID", "999")
+    who, assurance = ident.observed_recorder()
+    assert who == "peer:uid=501,pid=999" and assurance == "observed"
+    # **decision_by には流れない** — 接続は判断の証拠ではない
+    monkeypatch.delenv("ORG_WRITER_PEER_UID")
+    who2, _ = ident.observed_recorder()
+    assert who2 != who
+
+
+def test_installer_stops_on_the_first_failure():
+    """`set -e` が無いと、chown が半端な状態で「install 完了」と表示される。"""
+    src = (TOOLS / "writer-install.sh").read_text(encoding="utf-8")
+    assert "set -euo pipefail" in src
+    assert "半端な状態で続けない" in src
+
+
+def test_installer_checks_the_daemon_python_for_pyyaml():
+    """**daemon が使う python** で PyYAML を検査すること。
+
+    利用者の python3 に入っていても、別 UID の daemon には見えない
+    （実測: PyYAML が ~/Library/Python にあり、PYTHONNOUSERSITE=1 で読めなかった）。
+    """
+    src = (TOOLS / "writer-install.sh").read_text(encoding="utf-8")
+    assert "PYTHONNOUSERSITE=1" in src
+    assert "${DAEMON_PYTHON}" in src
+    assert "site-packages にある場合は無効" in src
+    # 実行可能な回避策を出すこと
+    assert "venv" in src and "break-system-packages" in src
+
+
+def test_installer_copy_is_idempotent():
+    """`cp -R src dst/src` は再実行で tools/tools を作る。"""
+    src = (TOOLS / "writer-install.sh").read_text(encoding="utf-8")
+    assert "rm -rf '${INSTALL_DIR}/tools'" in src
+    assert "cp -R '$PLUGIN_DIR/tools/.'" in src, "末尾の /. が無いと入れ子になる"
+
+
+def test_verifier_does_not_damage_the_target():
+    """**検証が検証対象を壊さない。** 書き込みを試すのではなく、開けるかだけを見る。"""
+    src = (TOOLS / "writer-verify.sh").read_text(encoding="utf-8")
+    for forbidden, why in (
+            ('{"forged":true}', "本番の台帳に行が残る"),
+            ("chmod 777 \"$LED\"", "本番の権限が変わる"),
+            ('printf \'#\' >> "$f"', "daemon の複製に行が残る"),
+            ('rm -f "$SOCK"', "daemon が止まる"),
+            ('mv "$PARENT"', "socket が消える"),
+            ("launchctl bootout", "daemon が止まる")):
+        assert forbidden not in src, f"破壊的な操作が残っている（{why}）: {forbidden}"
+    assert "1バイトも書かない" in src
+    assert "--no-write" in src            # 副作用ゼロで回せる経路がある
+
+
+def test_verifier_checks_the_ledger_stays_readable():
+    """**書けないことと、見えないことは別。** 読めない台帳は監査のための台帳ではない。"""
+    src = (TOOLS / "writer-verify.sh").read_text(encoding="utf-8")
+    assert "caller から台帳を **読める**" in src
+    assert "verify / board / projection が動かない" in src

@@ -95,18 +95,30 @@ def check_socket_parent(path, require_root_owned=False):
         return (f"socket の親ディレクトリがシンボリックリンクである: {parent}\n"
                 f"  リンクを張り替えれば socket ごと差し替えられる。")
     st = os.stat(parent)
-    if st.st_mode & 0o022:
-        return (f"socket の親ディレクトリが他者から書き込み可能である "
+    # **other-write は常に不可。** 誰でも書けるなら socket を差し替えられる。
+    if st.st_mode & 0o002:
+        return (f"socket の親ディレクトリが誰からでも書き込み可能である "
                 f"（mode {oct(st.st_mode & 0o777)}）: {parent}\n"
                 f"  **書ける主体は socket を差し替えられる** — 偽の writer に繋がされる。")
     if require_root_owned:
+        # 段階B: root 所有で、**caller の属する group からも書けない**こと。
+        # 1770 のように group-write を許すと、その group に入る caller が socket を差し替え
+        # られる（実測: installer が 1770 を設定し、writerd 自身がそれを拒否して起動しなかった）。
+        # **通過（x）は許し、書き込み（w）は落とす** — 0755 が正しい。
         if st.st_uid != 0:
             return (f"socket の親ディレクトリが root 所有でない（uid={st.st_uid}）: {parent}\n"
                     f"  同じ UID で書き換えられる限り、caller は socket を差し替えられる。"
                     f"**workload_isolation を separate_uid と呼べない。**")
-    elif st.st_uid not in (0, os.getuid()):
-        return (f"socket の親ディレクトリの所有者が自分でも root でもない "
-                f"（uid={st.st_uid}）: {parent}")
+        if st.st_mode & 0o020:
+            return (f"socket の親ディレクトリが group から書き込み可能である "
+                    f"（mode {oct(st.st_mode & 0o777)}）: {parent}\n"
+                    f"  その group に入る caller は socket を差し替えられる。"
+                    f"**通過（x）だけを許し、書き込み（w）は落とすこと** — 0755 が正しい。")
+    else:
+        # 段階A（同一 UID）: 自分の所有でよい。group-write も自分の group なので許す。
+        if st.st_uid not in (0, os.getuid()):
+            return (f"socket の親ディレクトリの所有者が自分でも root でもない "
+                    f"（uid={st.st_uid}）: {parent}")
     return None
 
 
@@ -236,9 +248,38 @@ def audit_writer_assets(root, org_root=None, require_owner_uid=None):
     return found
 
 
+
+def measured_isolation(sock_path, ledger_roots):
+    """`workload_isolation` を **実測で** 決める。フラグでは決めない。
+
+    実測（監査）: `--require-root-owned` を渡しただけで `separate_uid` と報告していた。
+    渡したかどうかは意図であって、状態ではない。
+
+    `separate_uid` と言えるのは:
+      - socket の親が root 所有で、group からも書けない
+      - 台帳が **この writer プロセスの UID** の所有である（= caller の UID ではない）
+      - writerd 自身のプロセスが caller と別 UID で動いている
+
+    そのどれかが欠ければ `process_mediated` である。
+    """
+    if check_socket_parent(sock_path, require_root_owned=True):
+        return "process_mediated"
+    me = os.getuid()
+    if me == 0:
+        return "process_mediated"        # root で走る writer は隔離ではない
+    for root in ledger_roots:
+        try:
+            if os.stat(root).st_uid != me:
+                return "process_mediated"
+        except OSError:
+            return "process_mediated"
+    return "separate_uid"
+
+
 class Writer:
-    def __init__(self, roots, require_root_owned=False):
+    def __init__(self, roots, require_root_owned=False, isolation="process_mediated"):
         self.roots = roots                      # {org_name: ledger_root}
+        self.isolation = isolation              # **実測値**。フラグではない
         self.nonces = _NonceStore()
         self.require_root_owned = require_root_owned
         self.lock = threading.Lock()            # 1プロセス内の直列化
@@ -290,8 +331,7 @@ class Writer:
         # **recorded_by は peer credential から。** decision_by には使わない。
         env = dict(os.environ)
         env["ORG_LEDGER_ROOT"] = root
-        env["ORG_WRITER_ISOLATION"] = ("separate_uid" if self.require_root_owned
-                                       else "process_mediated")
+        env["ORG_WRITER_ISOLATION"] = self.isolation
         env["ORG_WRITER_PEER_UID"] = str(peer_uid) if peer_uid is not None else ""
         env["ORG_WRITER_PEER_PID"] = str(peer_pid) if peer_pid is not None else ""
         env["ORG_INSIDE_WRITER"] = "1"          # ledger.py がこれを見て直接書き込みを許す
@@ -334,12 +374,17 @@ def serve(a):
         os.unlink(sock)
     srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     srv.bind(sock)
-    os.chmod(sock, 0o600)          # 同一 UID のみ。**同じ UID の中では境界にならない**
+    # **接続は誰でもできる必要がある。** 別 UID の writer が 0600 で作ると、caller は接続
+    # すらできない（実測で指摘された）。socket に繋げることと台帳に書けることは別である —
+    # 書けるのは writer だけで、繋いだ相手も RPC の検査を通らなければ何も書けない。
+    os.chmod(sock, 0o666)
     srv.listen(16)
-    w = Writer(roots, require_root_owned=a.require_root_owned)
+    # **isolation は実測で決める。** フラグを渡したかどうかで決めてはいけない
+    # （実測: --require-root-owned を渡しただけで separate_uid と報告していた）。
+    iso = measured_isolation(sock, list(roots.values()))
+    w = Writer(roots, require_root_owned=a.require_root_owned, isolation=iso)
     print(json.dumps({"listening": sock, "orgs": sorted(roots),
-                      "workload_isolation": ("separate_uid" if a.require_root_owned
-                                             else "process_mediated"),
+                      "workload_isolation": iso,
                       "note": ("同一 UID の writerd は OS 境界ではない — caller は daemon を"
                                "止められる。separate_uid には別 UID と root 所有の親ディレクトリ"
                                "が必要である。")}, ensure_ascii=False), flush=True)
@@ -461,9 +506,9 @@ def _cmd_check(a):
     print(json.dumps({"ok": err is None and not assets, "socket": sock, "detail": err,
                       "asset_issues": [{"path": p, "issue": i} for p, i in assets],
                       "daemon_running": os.path.exists(sock),
-                      "workload_isolation": ("separate_uid"
-                                             if a.require_root_owned and not err and not assets
-                                             else "process_mediated")},
+                      # **実測。** フラグでも、err が無いことでもなく、状態を見て決める。
+                      "workload_isolation": (measured_isolation(sock, [root])
+                                             if not assets else "process_mediated")},
                      ensure_ascii=False))
     return 0 if (err is None and not assets) else 4
 

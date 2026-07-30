@@ -16,9 +16,19 @@
 #
 # **root で実行しないこと。** root なら全部できてしまうので、検証にならない。
 # 通常の caller として走らせる。
+#
+# ## 実 org で回してよいか
+#
+# **この検証は台帳・鍵・schema・socket を破壊しない。** 書き込みを「試す」のではなく、
+# **書き込みモードで開けるかどうか**だけを見る（1バイトも書かない）。daemon も止めない。
+# 検証が検証対象を壊すのは最悪の形である（docs/11）。
+#
+# 唯一の副作用は ⑧ の writerd 経由の append で、`progress_recorded` が1件増える。
+# それが困る org では `--no-write` を付けること。
 set -uo pipefail
 
 ORG_ROOT=""
+NO_WRITE=0
 SOCK="/var/run/orgforge/writer.sock"
 LABEL="com.orgforge.writerd"
 SERVICE_USER="_orgforge-writer"
@@ -26,6 +36,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --org-root) ORG_ROOT="${2:-}"; shift 2 ;;
     --socket)   SOCK="${2:-}"; shift 2 ;;
+    --no-write) NO_WRITE=1; shift ;;
     -h|--help)  sed -n '1,28p' "$0"; exit 0 ;;
     *) echo "不明な引数: $1" >&2; exit 2 ;;
   esac
@@ -65,35 +76,72 @@ fi
 
 echo
 echo "── ② 通常 CLI からの直接書き込みが OS 権限で失敗するか（**実測条件**）"
-if printf '{"forged":true}\n' >> "$LED/ledger.jsonl" 2>/dev/null; then
-  bad "台帳に直接追記できた — **境界が無い**"
-  note "追記した行を消すこと: 手で確認して削除、または ledger verify で検出させる"
+# **本番の台帳を壊さない。** 追記を試して成功したら、その行が本物の台帳に残る — 検証が
+# 検証対象を壊すのは最悪の形である（docs/11）。だから **新しいファイルを作れるか**で見る。
+# 台帳ディレクトリに書けるかどうかは、追記できるかと同じ権限の問題である。
+PROBE="$LED/.write-probe-$$"
+if : > "$PROBE" 2>/dev/null; then
+  bad "台帳ディレクトリに書き込めた — **境界が無い**"
+  rm -f "$PROBE" 2>/dev/null || true
 else
-  ok "台帳に直接追記できない（OS 権限で失敗）"
+  ok "台帳ディレクトリに書き込めない（OS 権限で失敗）"
 fi
-if [ -f "$LED/HEAD" ] && printf 'x' > "$LED/HEAD" 2>/dev/null; then
-  bad "HEAD を上書きできた"
+# 既存ファイルへの追記は **O_APPEND で開けるかだけ**を見る（1バイトも書かない）。
+if python3 - "$LED/ledger.jsonl" <<'PYEOF' 2>/dev/null
+import os, sys
+try:
+    fd = os.open(sys.argv[1], os.O_WRONLY | os.O_APPEND)
+except OSError:
+    sys.exit(1)
+os.close(fd)                 # **何も書かない。** 開けたかどうかだけを見る
+sys.exit(0)
+PYEOF
+then
+  bad "台帳を追記モードで開けた — **書き込める**"
 else
-  ok "HEAD を上書きできない"
+  ok "台帳を追記モードで開けない"
+fi
+if python3 -c "
+import os, sys
+try: fd = os.open('$LED/HEAD', os.O_WRONLY)
+except OSError: sys.exit(1)
+os.close(fd); sys.exit(0)" 2>/dev/null; then
+  bad "HEAD を書き込みモードで開けた"
+else
+  ok "HEAD を書き込みモードで開けない"
+fi
+# **読めることも確かめる。** 書けないことと見えないことは別である — 監査できない台帳は
+# 監査のための台帳ではない。
+if [ -r "$LED/ledger.jsonl" ] && python3 "$T/ledger.py" verify "$LED" >/dev/null 2>&1; then
+  ok "caller から台帳を **読める**（verify が通る）"
+else
+  bad "caller から台帳を読めない — verify / board / projection が動かない"
 fi
 
 echo
 echo "── ③ chmod で権限を戻せないか"
-if chmod 777 "$LED" 2>/dev/null; then
-  bad "台帳ディレクトリの権限を変えられた — 所有者が自分である"
-  chmod 700 "$LED" 2>/dev/null || true
+# **chmod を実際に打たない。** 成功したら本番の権限が変わる（そして戻し忘れれば穴が残る）。
+# chmod できるのは所有者と root だけなので、**所有者を見れば同じことが分かる**。
+LED_UID="$(stat -f '%u' "$LED")"
+if [ "$LED_UID" = "$(id -u)" ]; then
+  bad "台帳ディレクトリの所有者が自分（uid=$LED_UID）— **chmod で権限を戻せる**"
 else
-  ok "台帳ディレクトリの chmod が失敗する（所有者でない）"
+  ok "台帳ディレクトリの所有者が自分でない（uid=$LED_UID）— chmod できない"
 fi
 
 echo
 echo "── ④ 鍵 registry / schema を差し替えられないか"
 for f in "$ORG_ROOT/.orgforge/trust/keys.json" "$ORG_ROOT/ledger-schema.yaml"; do
   [ -f "$f" ] || { note "$（無い）: $f"; continue; }
-  if printf '{}' > "$f" 2>/dev/null; then
-    bad "$(basename "$f") を上書きできた — 検証規則／署名者を偽装できる"
+  # **1バイトも書かない。** 上書きを試すと本物の鍵 registry / schema を壊す。
+  if python3 -c "
+import os, sys
+try: fd = os.open('$f', os.O_WRONLY)
+except OSError: sys.exit(1)
+os.close(fd); sys.exit(0)" 2>/dev/null; then
+    bad "$(basename "$f") を書き込みモードで開けた — 検証規則／署名者を偽装できる"
   else
-    ok "$(basename "$f") を上書きできない"
+    ok "$(basename "$f") を書き込みモードで開けない"
   fi
 done
 
@@ -104,16 +152,24 @@ if [ -d "$PARENT" ]; then
   POWNER="$(stat -f '%Su' "$PARENT")"; PMODE="$(stat -f '%Lp' "$PARENT")"
   note "親: $PARENT （$POWNER, mode $PMODE）"
   if [ "$POWNER" = "root" ]; then ok "親ディレクトリは root 所有"; else bad "親が root 所有でない（$POWNER）"; fi
-  if mv "$PARENT" "$PARENT.moved" 2>/dev/null; then
-    bad "親ディレクトリを移動できた — **socket を差し替えられる**"
-    mv "$PARENT.moved" "$PARENT" 2>/dev/null || true
+  # **移動を実際にやらない。** 成功すれば daemon の socket が消え、戻す前に何かが起きうる。
+  # 移動できるのは **その親の親** に書ける主体なので、そちらの権限を見る。
+  GRAND="$(dirname "$PARENT")"
+  PROBE3="$GRAND/.probe-$$"
+  if : > "$PROBE3" 2>/dev/null; then
+    bad "$GRAND に書き込めた — **socket の親ごと差し替えられる**"
+    rm -f "$PROBE3" 2>/dev/null || true
   else
-    ok "親ディレクトリを移動できない"
+    ok "$GRAND に書き込めない（親ごとの差し替えができない）"
   fi
-  if rm -f "$SOCK" 2>/dev/null && [ ! -S "$SOCK" ]; then
-    bad "socket を消せた — 偽 socket を置ける"
+  # **socket を消さない。** 消せたら daemon が止まり、検証が対象を壊す。親ディレクトリに
+  # 書けるかどうかで同じことが分かる（消すのも作るのも親への書き込み権限である）。
+  PROBE2="$PARENT/.probe-$$"
+  if : > "$PROBE2" 2>/dev/null; then
+    bad "socket の親に書き込めた — **偽 socket を置ける／消せる**"
+    rm -f "$PROBE2" 2>/dev/null || true
   else
-    ok "socket を消せない（sticky / root 所有）"
+    ok "socket の親に書き込めない（socket を差し替えられない）"
   fi
 else
   bad "socket の親ディレクトリが無い: $PARENT"
@@ -124,31 +180,44 @@ echo "── ⑥ writerd の複製を差し替えられないか"
 for f in /usr/local/libexec/orgforge/tools/writerd.py /Library/LaunchDaemons/$LABEL.plist \
          /usr/local/etc/orgforge/writerd.conf; do
   [ -e "$f" ] || { note "（無い）: $f"; continue; }
-  if printf '#' >> "$f" 2>/dev/null; then
-    bad "$(basename "$f") を書き換えられた — **daemon 自体を差し替えられる**"
+  # **1バイトも書かない。** 書けたら daemon の複製に余計な行が残る。
+  if python3 -c "
+import os, sys
+try: fd = os.open('$f', os.O_WRONLY | os.O_APPEND)
+except OSError: sys.exit(1)
+os.close(fd); sys.exit(0)" 2>/dev/null; then
+    bad "$(basename "$f") を書き込みモードで開けた — **daemon 自体を差し替えられる**"
   else
-    ok "$(basename "$f") を書き換えられない"
+    ok "$(basename "$f") を書き込みモードで開けない"
   fi
 done
 
 echo
 echo "── ⑦ daemon を通常 UID で止められないか"
-if launchctl bootout "system/$LABEL" 2>/dev/null; then
-  bad "daemon を止められた — 通常 UID で停止できる"
-  note "戻す: sudo launchctl bootstrap system /Library/LaunchDaemons/$LABEL.plist"
+# **実際に止めない。** 止まったら以降の検証が全部落ち、実 org なら統制も止まる。
+# `launchctl print` を通常 UID で叩き、system domain に触れないことで見る。
+if launchctl print "system/$LABEL" >/dev/null 2>&1; then
+  bad "system domain の daemon を通常 UID で参照できた — 停止も試せる可能性がある"
+  note "**実際の停止は試していない**（対象を壊すため）。sudo で確かめること:"
+  note "  sudo launchctl print system/$LABEL   # 動いていることの確認"
 else
-  ok "daemon を通常 UID では止められない"
+  ok "通常 UID からは system domain の daemon を操作できない"
 fi
 
 echo
 echo "── ⑧ writerd 経由なら書けるか（**止めるだけでは意味が無い**）"
 export ORG_WRITER_SOCKET="$SOCK"
+if [ "$NO_WRITE" = 1 ]; then
+  note "--no-write が指定されたので飛ばす（台帳に1件も足さない）"
+  note "**書けることを確かめていない** — 止まるだけの org は運用できない。別途確かめること。"
+else
 OUT="$(python3 "$T/writer_client.py" append -- --actor verify --class progress_recorded \
         --payload '{"role":"verify","candidate_id":"wv1","phase":"operate"}' 2>&1 | head -1)"
 if printf '%s' "$OUT" | grep -q '"ok": true'; then
   ok "writerd 経由で書けた"
 else
   bad "writerd 経由でも書けない: $(printf '%s' "$OUT" | head -c 160)"
+fi
 fi
 
 echo

@@ -345,6 +345,13 @@ def observed_recorder():
     hook が渡す session / agent の識別子、または実行環境から取る。取れなければ
     `unknown` を返し、`recorder_assurance` は `claimed` に落ちる。
     """
+    # **writer が観測した peer credential を最優先する。** socket 越しに得た uid/pid は
+    # 「接続してきた主体」であって申告ではない。ただし **判断の identity には使わない** —
+    # 接続してきたことは、その判断をしたことの証拠にならない。
+    puid = os.environ.get("ORG_WRITER_PEER_UID")
+    if puid:
+        ppid = os.environ.get("ORG_WRITER_PEER_PID") or ""
+        return (f"peer:uid={puid}" + (f",pid={ppid}" if ppid else "")), "observed"
     for k in ("ORG_SESSION_ID", "CLAUDE_SESSION_ID", "CODEX_SESSION_ID"):
         v = os.environ.get(k)
         if v:

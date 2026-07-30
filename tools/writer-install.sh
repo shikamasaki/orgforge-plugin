@@ -29,7 +29,9 @@
 #   sudo tools/writer-install.sh --org-root /path/to/org --uninstall  # 戻す
 #
 # 冪等である。既にあるものは作り直さず、足りないものだけ足す。
-set -uo pipefail
+set -euo pipefail
+# **失敗したら止まる。** set -e が無いと、chown が半端に済んだ状態で「install 完了」と
+# 表示され、daemon が起動しない org が残る（実測で指摘された）。
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 SERVICE_USER="_orgforge-writer"
@@ -40,6 +42,8 @@ SOCK_PARENT="/var/run/orgforge"
 INSTALL_DIR="/usr/local/libexec/orgforge"
 CONFIG="/usr/local/etc/orgforge/writerd.conf"
 BACKUP_DIR="/usr/local/var/orgforge/backup"
+DAEMON_PYTHON="/usr/bin/python3"     # LaunchDaemon が起動する処理系。--daemon-python で変えられる
+CALLER_GROUP="staff"                 # 台帳を読める group（caller の primary group）
 
 ORG_ROOT=""
 DRY_RUN=0
@@ -47,6 +51,8 @@ UNINSTALL=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --org-root) ORG_ROOT="${2:-}"; shift 2 ;;
+    --daemon-python) DAEMON_PYTHON="${2:-}"; shift 2 ;;
+    --caller-group)  CALLER_GROUP="${2:-}"; shift 2 ;;
     --dry-run)  DRY_RUN=1; shift ;;
     --uninstall) UNINSTALL=1; shift ;;
     -h|--help) sed -n '1,40p' "$0"; exit 0 ;;
@@ -55,7 +61,15 @@ while [ $# -gt 0 ]; do
 done
 
 say()  { printf '  %s\n' "$*"; }
-run()  { if [ "$DRY_RUN" = 1 ]; then printf '  [dry-run] %s\n' "$*"; else eval "$@"; fi; }
+run()  {
+  if [ "$DRY_RUN" = 1 ]; then printf '  [dry-run] %s\n' "$*"; return 0; fi
+  if ! eval "$@"; then
+    printf '✗ 失敗した: %s\n' "$*" >&2
+    printf '  **半端な状態で続けない。** ここまでの変更を戻すには:\n' >&2
+    printf '    sudo %s --uninstall\n' "$0" >&2
+    exit 1
+  fi
+}
 fail() { printf '✗ %s\n' "$*" >&2; exit 1; }
 
 # ── 事前条件 ──────────────────────────────────────────────────────────────────
@@ -76,7 +90,36 @@ if [ "$UNINSTALL" = 0 ]; then
   ORIG_OWNER="$(stat -f '%Su:%Sg' "${ORG_ROOT}/.orgforge/ledger")"
   say "台帳の現在の所有者: ${ORIG_OWNER}"
   [ -f "$PLUGIN_DIR/tools/writerd.py" ] || fail "writerd.py が無い: $PLUGIN_DIR/tools"
-  python3 -c 'import yaml' 2>/dev/null || fail "PyYAML が必要（writerd が schema を読む）"
+  # **daemon が使う python で検査する。** 利用者の python3 に入っていても、LaunchDaemon が
+  # 起動する /usr/bin/python3 に無ければ writerd は schema を読めない（実測で指摘された）。
+  if ! PYTHONNOUSERSITE=1 "${DAEMON_PYTHON}" -c 'import yaml' 2>/dev/null; then
+    fail "$(cat <<EOF
+${DAEMON_PYTHON} に PyYAML が無い（writerd が schema を読むのに要る）。
+  LaunchDaemon はここで起動するので、利用者の python3 に入っていても足りない。
+  **とくに ~/Library/Python/*/lib/python/site-packages にある場合は無効である** —
+  daemon は別 UID で走るので、そのユーザーの site-packages は見えない
+  （このマシンの実測: PyYAML は ${HOME}/Library/Python/3.9 にあり、PYTHONNOUSERSITE=1 では
+  読めなかった）。
+  **PyYAML が無いと writerd は何も書けない** — ledger.py が schema を読めず、
+  「検証できないまま書かない」として全ての append を拒否する（fail-closed）。
+  省略できない前提条件である。
+
+  どれかを選ぶこと:
+    1. システム全体に入れる（daemon から見える）:
+         sudo ${DAEMON_PYTHON} -m pip install --break-system-packages pyyaml
+    2. Homebrew の python を使う:
+         brew install python@3.13
+         /opt/homebrew/bin/python3 -m pip install pyyaml
+         sudo $0 --org-root '<org>' --daemon-python /opt/homebrew/bin/python3
+    3. venv を作って daemon にそこを使わせる:
+         sudo ${DAEMON_PYTHON} -m venv /usr/local/libexec/orgforge/venv
+         sudo /usr/local/libexec/orgforge/venv/bin/pip install pyyaml
+         sudo $0 --org-root '<org>' --daemon-python /usr/local/libexec/orgforge/venv/bin/python3
+  検査したコマンド: PYTHONNOUSERSITE=1 ${DAEMON_PYTHON} -c 'import yaml'
+EOF
+)"
+  fi
+  say "${DAEMON_PYTHON}: PyYAML あり"
 fi
 
 # ── uninstall ────────────────────────────────────────────────────────────────
@@ -141,9 +184,13 @@ fi
 # ── daemon の複製（root 所有・caller から差し替え不能）──────────────────────
 echo
 echo "── daemon を root 所有の場所へ"
+# **再実行で tools/tools を作らない。** `cp -R src dst/src` は dst/src があると
+# その中にコピーする（実測で指摘された）。毎回消してから入れる。
+run "rm -rf '${INSTALL_DIR}/tools' '${INSTALL_DIR}/template'"
 run "mkdir -p '${INSTALL_DIR}'"
-run "cp -R '$PLUGIN_DIR/tools' '${INSTALL_DIR}/tools'"
-run "cp -R '$PLUGIN_DIR/template' '${INSTALL_DIR}/template'"
+run "mkdir -p '${INSTALL_DIR}/tools' '${INSTALL_DIR}/template'"
+run "cp -R '$PLUGIN_DIR/tools/.' '${INSTALL_DIR}/tools/'"
+run "cp -R '$PLUGIN_DIR/template/.' '${INSTALL_DIR}/template/'"
 run "chown -R root:wheel '${INSTALL_DIR}'"
 run "chmod -R go-w '${INSTALL_DIR}'"
 say "${INSTALL_DIR} （root 所有・他者書き込み不可）"
@@ -153,9 +200,12 @@ say "**caller はここを書き換えられない** — writerd 自体の差し
 echo
 echo "── socket の親ディレクトリ"
 run "mkdir -p '${SOCK_PARENT}'"
-run "chown root:${SERVICE_GROUP} '${SOCK_PARENT}'"
-run "chmod 1770 '${SOCK_PARENT}'"
-say "${SOCK_PARENT} （root 所有・group=${SERVICE_GROUP}・sticky・他者書き込み不可）"
+run "chown root:wheel '${SOCK_PARENT}'"
+# **0755。** 1770 だと writerd 自身が「group から書ける親は差し替えられる」として起動を拒否する
+# （実測でそうなった）。caller に必要なのは **通過（x）** であって書き込みではない。
+# socket そのものは writerd が 0666 で作るので、接続はできる。
+run "chmod 0755 '${SOCK_PARENT}'"
+say "${SOCK_PARENT} （root 所有 0755 — 通過は許し、**誰も書き込めない**）"
 say "**caller は親ディレクトリを差し替えられない** — 偽 socket に繋がされる経路を塞ぐ"
 
 # ── 設定（root 所有。caller は台帳のパスを指定できない）─────────────────────
@@ -186,9 +236,14 @@ if [ -d "${ORG_ROOT}/.orgforge/trust" ]; then
   run "chmod -R go-rwx '${BACKUP_DIR}/trust-backup'"
   say "鍵 registry を退避した: ${BACKUP_DIR}/trust-backup"
 fi
-run "chown -R '${SERVICE_USER}:${SERVICE_GROUP}' '${ORG_ROOT}/.orgforge/ledger'"
-run "chmod 700 '${ORG_ROOT}/.orgforge/ledger'"
-say "台帳を ${SERVICE_USER} 所有・700 にした → **通常の caller UID からは書けない**"
+# **書けないが、読める。** 700 にすると caller の `ledger verify` も board も projection も
+# 落ちる（実測で指摘された）。統制は「書けないこと」であって「見えないこと」ではない —
+# 監査できない台帳は、監査のための台帳ではない。
+run "chown -R '${SERVICE_USER}:${CALLER_GROUP}' '${ORG_ROOT}/.orgforge/ledger'"
+run "chmod 750 '${ORG_ROOT}/.orgforge/ledger'"
+run "find '${ORG_ROOT}/.orgforge/ledger' -type f -exec chmod 640 {} +"
+say "台帳を ${SERVICE_USER} 所有・750/640（group=${CALLER_GROUP}）にした"
+say "  → **caller は読めるが書けない**（verify / board / projection は動く）"
 if [ -d "${ORG_ROOT}/.orgforge/trust" ]; then
   run "chown -R root:${SERVICE_GROUP} '${ORG_ROOT}/.orgforge/trust'"
   run "chmod 750 '${ORG_ROOT}/.orgforge/trust'"
@@ -218,7 +273,7 @@ else
   <key>GroupName</key><string>${SERVICE_GROUP}</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/usr/bin/python3</string>
+    <string>${DAEMON_PYTHON}</string>
     <string>${INSTALL_DIR}/tools/writerd.py</string>
     <string>serve</string>
     <string>--org</string><string>default=${ORG_ROOT}/.orgforge/ledger</string>
