@@ -6,6 +6,48 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 0.35.0 — Codex plugin packaging, and what a Codex install actually guarantees
+
+orgforge was not a Codex plugin: it was a `hooks.json` you copied into `.codex/`, pointing at
+`${CODEX_PROJECT_ROOT}/integrations/common/org_hook.py` — so enforcement depended on a checkout the
+plugin did not own, and vanished if that checkout moved.
+
+### Added
+- **A real Codex plugin** — `.codex-plugin/plugin.json`, `hooks/hooks.json`, and a `build.sh` that
+  bundles the neutral core (`scripts/`, `tools/`, `template/`) so **every path is under
+  `$PLUGIN_ROOT`**. Verified by deleting the source checkout mid-test: the hook still fired and still
+  recorded its reservation.
+- `.agents/plugins/marketplace.json`, so the repo can be added as a local marketplace
+  (`codex plugin marketplace add .`).
+- Tests that fail if the Codex bundle drifts, if a hook command references the checkout, if
+  `hooks.json` carries a `//` key, or if the two projections' versions diverge.
+
+### Learned by measurement (codex-cli 0.146.0; the public plugin docs URL is dead)
+- `$PLUGIN_ROOT` is the injected variable. **`CODEX_PLUGIN_ROOT` does not exist** —
+  `CLAUDE_PLUGIN_ROOT` is kept as an alias for Claude Code compatibility.
+- The marketplace manifest must be at `.agents/plugins/marketplace.json`; a root `marketplace.json`
+  is not read.
+- **Codex's hooks parser accepts only `description` and `hooks`.** A `//` comment key — which Claude
+  Code accepts, and which this repo's file had — makes it warn and **skip the whole file**, so the
+  guardrail is silently absent. That is exactly how the first install looked like it worked while
+  nothing was gated.
+- **Installing and enabling a plugin does not enable enforcement.** An untrusted hook is silently
+  skipped: no prompt, no warning in `codex exec`, no ledger entry. Trust is granted in the
+  interactive TUI and stored as a content-bound sha256, so it cannot be seeded headlessly, and
+  **editing a hook can require re-trusting**.
+- `--dangerously-bypass-hook-trust` is a CI smoke-test tool. It proves the hook body works; it does
+  **not** show that a normally-installed Codex is guarded, and it is not counted as a guarantee.
+
+### Verified under bypass, in a disposable org against a sentinel
+PreToolUse fires for `Bash` with `session_id` and `tool_use_id` both populated (so the reservation's
+idempotency key is real); an operation inside the cap runs and leaves an `allow`; an operation over
+the cap is denied with the **sentinel unchanged** and the `hold` recorded; a torn ledger denies; a
+replayed `tool_use_id` does not double-count. Codex was told to try once and stop on refusal — a
+correctly-denied call followed by a workaround would read as the hook never firing.
+
+**Still unverified: the normal (trusted, no-bypass) path.** That requires granting trust in the
+interactive TUI once, and is deliberately not claimed here.
+
 ## 0.34.1 — three trust-boundary paths the atomic lock did not cover
 
 0.34.0 made the reservation atomic, and the existing tests passed. Three ways around it remained,

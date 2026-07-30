@@ -1,0 +1,108 @@
+# sensors.yaml — the crisis signals of docs/02 §4, made measurable.
+#
+# Every sensor moves.yaml references is defined here: which ledger views feed it, the
+# formula, the window, the threshold, hysteresis (so the org doesn't oscillate on a
+# boundary), and who evaluates it — machine (pure formula over the ledger) or llm (a
+# judgment the registrar obtains and RECORDS as a sensor_reading with its inputs, so the
+# reading is auditable). Sensor readings are ledgered BEFORE any move consumes them
+# (moves.yaml header); a move whose precondition cites an unledgered reading is illegal.
+#
+# `preregistered_for_night` marks the (sensor → move) patterns under which admission may
+# CONTINUE overnight (constitution delegated.night.safe_mode). Anything not listed here
+# suspends admission when humans are away — fail-safe, not fail-open. Example values are
+# a starting point; tune against your own system and ledger the tuning as proposals.
+
+defaults:
+  evaluation_cadence: every_30_min      # the registrar's clock (organization.yaml)
+  hysteresis: two_consecutive_readings  # a threshold must hold twice before firing
+
+sensors:
+
+  - id: supervisor_saturation
+    feeds_moves: [widen_span_via_context, add_layer]
+    source_views: [direction_flags, recent_ledger_census]
+    formula: fraction of supervision cycles in the window where per-report review tokens
+      < min_review_tokens (default 500) — i.e. flags stamped without reading
+    window: 24h
+    threshold: "> 0.30"
+    judge: machine
+    preregistered_for_night: [widen_span_via_context]   # add_layer is charter anyway
+
+  - id: blocked_on_center
+    feeds_moves: [delegate_authority]
+    source_views: [sensor_readings, recent_ledger_census]
+    formula: sum of role idle-time awaiting a central decision / sum of role active time
+      (idle-awaiting is measured from cycle_completed outputs that end in a decision request
+      with no matching response before the next cycle_started)
+    window: 24h
+    threshold: "> 0.20"
+    judge: machine
+    preregistered_for_night: [delegate_authority]
+
+  - id: divergence
+    feeds_moves: [add_coordination_gate]
+    source_views: [live_findings, coverage_map]
+    formula: near-duplicate rate among candidates submitted by DIFFERENT departments in
+      the window (near-duplicate match is an llm judgment; its inputs and verdict are
+      recorded in the sensor_reading)
+    window: 48h
+    threshold: "> 0.15"
+    judge: llm
+    preregistered_for_night: []          # cross-team gates wait for morning
+
+  - id: red_tape_ratio
+    feeds_moves: [lighten_gate]
+    source_views: [recent_ledger_census]
+    formula: (gate tokens + reporting tokens) / task tokens, from cycle_completed.tokens
+    window: 72h
+    threshold: "> 0.35"
+    judge: machine
+    preregistered_for_night: []          # gate-lightening never runs unattended
+
+  - id: queue_empty
+    feeds_moves: [deactivate_department]
+    source_views: [open_experiments, proposal_queue, recent_ledger_census]
+    formula: target department's inbound queue depth == 0 for >= 1 full review cycle
+      (review cycle = the department's loop cadence × 2)
+    window: per_department_cadence
+    threshold: "== true"
+    judge: machine
+    preregistered_for_night: [deactivate_department]   # shrinking at night is safe
+
+  - id: demand_signal
+    feeds_moves: [activate_department]
+    source_views: [open_experiments, coverage_map, live_findings]
+    formula: ">= 3 arriving work items in the window whose contract-match against a latent
+      department scores confidence >= 0.8 (match is an llm judgment, recorded with inputs)"
+    window: 24h
+    threshold: ">= 3 items"
+    judge: llm
+    preregistered_for_night: [activate_department]     # activation is reversible
+
+  - id: doctrine_stale
+    feeds_moves: [update_doctrine]
+    source_views: [doctrine_ttl_board]
+    formula: any doctrine claim past its review_by date
+    window: continuous
+    threshold: ">= 1 claim"
+    judge: machine
+    preregistered_for_night: [update_doctrine]         # still gate-admitted per docs/06
+
+  - id: blocked_on_missing_context
+    feeds_moves: [adjust_context_scope]
+    source_views: [recent_ledger_census]
+    formula: denied pull-interface queries at one seam (ledgered denials) in the window
+    window: 7d
+    threshold: ">= 3 denials at the same seam"
+    judge: machine
+    preregistered_for_night: []          # scope changes wait for morning by default
+
+  - id: context_utilization
+    feeds_moves: [adjust_context_scope]
+    source_views: [recent_ledger_census]
+    formula: per role, fraction of granted views actually referenced by outputs
+      (cycle_completed.views_referenced / granted views), averaged over the window
+    window: 5_cycles
+    threshold: "< 0.30"                  # persistent under-use → narrow the grant
+    judge: machine
+    preregistered_for_night: []

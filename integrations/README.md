@@ -91,7 +91,50 @@ cp integrations/codex/config.toml  <repo>/.codex/config.toml
 export ORG_LEDGER_ROOT=/path/to/ledger
 ```
 
-### Codex as a judge — a genuinely different lineage
+### Codex: installing the plugin does not enable enforcement
+
+Verified 2026-07 against codex-cli 0.146.0, by installing this plugin and observing what actually
+fires. Each of these was measured, not read from a doc — the public plugin docs URL is dead.
+
+| | |
+|---|---|
+| **Self-contained reference** | `$PLUGIN_ROOT` — the directory Codex unpacks the plugin into. There is **no** `CODEX_PLUGIN_ROOT`; `CLAUDE_PLUGIN_ROOT` exists as an alias for Claude Code compatibility. The install path is version-pinned, so never hardcode it. |
+| **Marketplace manifest** | `.agents/plugins/marketplace.json`. A `marketplace.json` at the repo root is **not** read (`marketplace root does not contain a supported manifest`). |
+| **Hooks manifest** | `hooks/hooks.json`, referenced from `plugin.json` as `"hooks": "./hooks/hooks.json"`. Codex's parser accepts only `description` and `hooks` — **a `//` comment key makes it warn and skip the entire file**, so the guardrail is silently absent. Claude Code accepts `//`, which is how that mistake got made here. |
+
+**Installing and enabling the plugin does NOT turn enforcement on.** An untrusted hook is
+**silently skipped** — no prompt, no warning in `codex exec`, and no ledger entry. Trust is granted
+in the interactive TUI (`/hooks`) and stored in `~/.codex/config.toml` as a **content-bound sha256**
+(`[hooks.state."<id>"].trusted_hash`), so it cannot be seeded by hand or precomputed. There is no
+verified headless path to grant it.
+
+Consequences to plan around:
+
+- **Editing a hook changes its hash, so it can require re-trusting.** A plugin upgrade that touches
+  `hooks/hooks.json` may leave enforcement off until the TUI is opened again.
+- `--dangerously-bypass-hook-trust` runs enabled hooks without trust. **It is for CI smoke tests
+  only and does not count toward any production guarantee** — it proves the hook body works, not
+  that a normally-installed Codex is guarded.
+- A user-level `~/.codex/hooks.json` without the flag makes `codex exec` **hang** on the interactive
+  trust prompt.
+
+### What was measured with the plugin trusted-by-bypass
+
+With `--dangerously-bypass-hook-trust`, in a disposable org against a sentinel file:
+
+- PreToolUse fires for `Bash`; `session_id` and `tool_use_id` are both populated
+  (`019fb2da-…`, `call_PoqvYbj5…`) — so the reservation's idempotency key is real, not empty.
+- An operation inside the cap runs and leaves an `allow` reservation in the ledger.
+- An operation over the cap is denied, **the sentinel is unchanged**, and the `hold` is recorded.
+- A torn ledger denies the operation.
+- The same `tool_use_id` replayed does not double-count.
+- The hook works with the source checkout moved away entirely — nothing outside `$PLUGIN_ROOT`.
+
+Codex was instructed to attempt the operation **once** and stop on refusal without trying another
+route; otherwise a correctly-denied call followed by a successful workaround reads as the hook
+never firing.
+
+## Codex as a judge — a genuinely different lineage
 
 `template/role-settings.yaml` declares `skeptic: model_family: family-B` — a different family from
 the gate and the maker, because an adversarial checker on the same base model shares their blind

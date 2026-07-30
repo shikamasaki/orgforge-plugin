@@ -1,0 +1,211 @@
+# moves.yaml — the legal-move catalog: every structural change the org may make,
+# with its preconditions, authorization tier, and reversal.
+#
+# The org never free-edits its own chart. A reorg is: a sensor fires (reading recorded
+# in the ledger) -> the REGISTRAR (docs/05 s2.6) selects a move whose preconditions the
+# recorded readings satisfy -> the diff passes tools/org_lint.py -> the gate authorizes
+# -> the commit lands on organization.yaml. Anything not in this catalog is not a legal
+# reorg. Adding a move is itself charter-tier (constitution.yaml).
+#
+# Schema per move:
+#   tier: delegated | charter | irreversible   (must match constitution.yaml's lists)
+#   preconditions: list of {sensor: ...} (machine-checked, from ledger-recorded readings),
+#     {check: ...} (re-runs a lint rule), or {judgment: ..., judge: human|llm}
+#     (NOT machine-decidable; judge:human items queue a proposal instead of executing).
+#   effect / reverse: structured where machine-applicable, prose where not (yet).
+#
+# Sensors (crisis signals of docs/02 s4 made measurable): every sensor named below is
+# DEFINED in template/sensors.yaml — source views, formula, window, threshold, judge,
+# and night pre-registration. The lint cross-checks this catalog against it. Summary:
+#   supervisor_saturation  - rubber-stamp rate rising / review depth per report falling
+#   blocked_on_center      - time departments idle awaiting central decisions
+#   divergence             - duplicate-work rate / contradictory conventions across seams
+#   red_tape_ratio         - (gate + reporting tokens) / (task tokens) above threshold
+#   queue_empty            - a department idle for a full review cycle
+#   demand_signal          - arriving work matching a latent department's contract
+#   doctrine_stale         - doctrine claims past their review-by date (docs/06)
+#   blocked_on_missing_context - grant-request denial rate at a seam (docs/07)
+#   context_utilization    - share of a pack actually used by the role's outputs (docs/07)
+
+moves:
+
+  - id: activate_department
+    tier: delegated
+    preconditions:
+      - sensor: demand_signal
+      - judgment: "specialization gate: the work is recurring, OR would dilute an active generalist's context pack, OR requires SoD independence (docs/02 s4)"
+        judge: llm
+      - check: span_check_on_supervisor
+      - check: named_checker_active_with_it     # a maker never activates without its Checker
+      - check: requester_is_not_target_checker_maker   # no dept (de)activates its own checker
+      - check: requester_scope_covers_target    # TARGET must lie in the transitive closure of the
+                                                # initiator's supervises: — a manager scales only
+                                                # within its span-of-authority (docs/02 §scale-authority)
+    effect:
+      patch:
+        - { role: TARGET, set: { active: true } }
+      side_effects: [deliver_context_pack_with_current_doctrine, ledger_rationale]
+      initiated_by_supervisor: REQUESTER        # whose scale authority this is exercised under —
+                                                # ledgered so the closure check has an auditable input
+    reverse: deactivate_department
+
+  - id: deactivate_department
+    tier: delegated
+    preconditions:
+      - sensor: queue_empty
+      - judgment: "or its contract is admitted/absorbed by a standing convention"
+        judge: llm
+      - check: not_a_control_role_while_exploration_active
+      - check: requester_is_not_maker_checked_by_target   # makers cannot starve their Checker off
+      - check: requester_scope_covers_target    # scale only within span-of-authority (docs/02)
+    effect:
+      patch:
+        - { role: TARGET, set: { active: false } }
+      side_effects: [profile_and_ledger_history_persist]   # lossless dormancy
+      initiated_by_supervisor: REQUESTER
+    reverse: activate_department        # returns with full institutional memory
+
+  - id: widen_span_via_context
+    tier: delegated
+    preconditions:
+      - sensor: supervisor_saturation
+    effect:
+      prose: "invest in Organ 5 - sharper direction flags, better context packs, standardized handoff formats - to raise effective span WITHOUT hierarchy"
+    reverse: none_needed                # strictly improving
+    note: MUST be attempted before add_layer (docs/02 s3, the span gate)
+
+  - id: edit_organic_profile
+    tier: delegated
+    preconditions:
+      - judgment: "supervisor's direction check flags drift whose root cause is the profile (SUPERVISOR.md)"
+        judge: llm
+      - check: target_regime_is_organic
+      - check: edit_does_not_touch_discipline_preamble   # the immutable block is charter-tier
+    effect:
+      prose: "commit a profile diff; the fix lands on the target's next scheduled run"
+    reverse: revert_profile_commit
+
+  - id: update_doctrine
+    tier: delegated
+    preconditions:
+      - sensor: doctrine_stale
+      - judgment: "or the curator files an intelligence item affecting this role (docs/06 s2)"
+        judge: llm
+      - check: diff_admitted_by_gate                     # anti-poisoning: gate admission first
+      - check: target_regime_is_organic                  # mechanistic doctrine is charter-tier
+      - check: diff_does_not_touch_proposer_own_discipline_or_gate_thresholds
+    effect:
+      prose: "commit a versioned doctrine diff with provenance and TTL; loaded from the next cycle's context pack"
+    reverse: revert_doctrine_commit
+
+  - id: adjust_context_scope
+    tier: delegated
+    preconditions:
+      - sensor: blocked_on_missing_context               # widening; OR
+      - sensor: context_utilization                      # narrowing/revocation (docs/07 s3)
+      - check: both_ends_of_seam_are_organic             # control-layer scopes are charter-tier
+      - check: grant_recorded_in_ledger
+      - check: requester_scope_covers_target    # a manager may re-scope only within its span-of-
+                                                # authority — both seam ends in its supervises-closure
+    effect:
+      prose: "open, widen, narrow, or revoke a seam grant in information_flow.scopes; recertified on cadence"
+      initiated_by_supervisor: REQUESTER
+    reverse: restore_previous_scope
+
+  - id: delegate_authority
+    tier: delegated
+    preconditions:
+      - sensor: blocked_on_center
+    effect:
+      prose: "push method decisions down to the department; center specifies outputs only"
+    reverse: recentralize               # rare; ledger the reason
+
+  - id: add_coordination_gate
+    tier: delegated
+    preconditions:
+      - sensor: divergence
+    effect:
+      prose: "shared convention / cross-team context pack / review gate at the seam"
+    reverse: lighten_gate
+
+  - id: lighten_gate
+    tier: delegated
+    preconditions:
+      - sensor: red_tape_ratio
+      - check: target_is_not_admission_gate   # lint-enforced, not just prose: any gate holding
+                                              # the authorization duty or sitting in the
+                                              # mechanistic control layer is non-lightenable
+    effect:
+      prose: "replace a formal coordination gate with mutual adjustment where context is already shared"
+    reverse: add_coordination_gate
+
+  - id: add_layer
+    tier: charter                       # hierarchy is the LAST resort - a human decides
+    preconditions:
+      - sensor: supervisor_saturation
+      - check: widen_span_via_context_already_attempted
+      - judgment: "split point is a natural domain boundary"
+        judge: human
+    effect:
+      prose: "insert exactly one sub-supervisor for one cluster"
+    reverse: remove_layer
+
+  - id: remove_layer
+    tier: delegated                     # flattening is safe ONLY if the parent can absorb
+    preconditions:
+      - judgment: "the layer can no longer name the load it relieves (docs/04 s4)"
+        judge: llm
+      - check: parent_passes_post_merge_span_check   # counting ALL reabsorbed active reports;
+                                                     # if it would exceed span, this move is
+                                                     # NOT legal delegated - file add_layer-reversal
+                                                     # as a charter proposal instead
+    effect:
+      prose: "dissolve the sub-supervisor; departments report to the parent again"
+    reverse: add_layer                  # via charter
+
+  - id: enter_maintenance
+    tier: charter
+    preconditions:
+      - judgment: "all RFP contracts admitted; residual work is corrective"
+        judge: human
+    effect:
+      prose: "exploration front to latent; activate the pre-designed watch set (monitor + fixer + their checker)"
+    reverse: reactivation_via_activate_department_on_new_demand_signal
+
+  - id: prepare_handover
+    tier: charter
+    preconditions:
+      - judgment: "successor designated by humans"
+        judge: human
+    effect:
+      prose: "generate the succession package from the ledger (docs/05 s4.2) - read-only projection"
+    reverse: none                       # package generation is read-only
+
+  - id: sunset
+    tier: irreversible                  # prepared by the org, executed by humans only
+    preconditions:
+      - judgment: "handover complete, or handover explicitly waived by humans"
+        judge: human
+    effect:
+      prose: "deactivate all; archive ledger read-only; retire the constitution instance"
+    reverse: refound                    # a new organization, with inherited memory
+
+  - id: refound
+    tier: charter                       # a FOUNDING act — humans author the new structure inside
+                                        # the unchanged constitution; only the CEO/human may reshape
+                                        # the whole chart (docs/05 §4.4). Re-mints the SoD skeleton.
+    preconditions:
+      - judgment: "a ROOT problem in how the org is shaped (not an edge that a scale/reorg move
+          fixes) — the human decides the structure itself is wrong"
+        judge: human
+      - check: doctrine_remap_covers_every_live_claim   # every role-keyed doctrine claim maps to a
+                                                        # new role or is surfaced to the human; none
+                                                        # silently orphaned (docs/05 §4.4)
+      - check: new_structure_passes_lint                # the new chart passes org_lint like any founding
+    effect:
+      prose: "tear down the role structure and re-found with new roles, ASSETS INTACT — the ledger
+        (custody, not a role) persists untouched; doctrine is re-mapped {old_role: new_role};
+        admitted results / contracts / intent history re-project onto the new roles. One atomic
+        ledgered event so a crash mid-refound leaves the old structure intact."
+      side_effects: [ledger_persists_untouched, doctrine_remapped, refounding_commit_ledgered]
+    reverse: refound                    # itself — a re-found is reversed by another re-found

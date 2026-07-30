@@ -1,0 +1,29 @@
+{
+  "description": "Codex projection of the org guardrails. SELF-CONTAINED: every path is under $PLUGIN_ROOT, the directory Codex unpacks this plugin into — referencing a checkout would make enforcement depend on a tree the plugin does not own, and on it still being there. Verified 2026-07 against codex-cli 0.146.0: the injected variable is PLUGIN_ROOT (there is no CODEX_PLUGIN_ROOT; CLAUDE_PLUGIN_ROOT is kept as an alias). Codex's hooks parser accepts only `description` and `hooks` — a `//` comment key is rejected outright (it warns and skips the whole file, so the guardrail is silently absent). INSTALLING DOES NOT ENABLE ENFORCEMENT: an untrusted hook is SILENTLY SKIPPED. Trust it once in the interactive TUI (/hooks). Editing this file changes its content-bound hash, which can require re-trusting.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "^(Bash|Shell|Write|Edit|ApplyPatch)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$PLUGIN_ROOT/scripts/org_hook.py\"",
+            "timeout": 30,
+            "statusMessage": "org guardrail: reserving blast-radius exposure"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$PLUGIN_ROOT/scripts/org_session_start.py\"",
+            "timeout": 20
+          }
+        ]
+      }
+    ]
+  }
+}

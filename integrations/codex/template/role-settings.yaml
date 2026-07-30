@@ -1,0 +1,87 @@
+# role-settings.yaml — NEUTRAL model/runtime settings, one block per role.
+#
+# This is the model/runtime half of the projection (template/PROJECTION.md): it articulates,
+# harness-neutrally, how much capability each role's work warrants, its capability scope (the
+# deontic "who MAY do what"), its stop condition, and how its deliverable is returned. The
+# projection maps these onto a concrete harness via harness-map.<harness>.yaml — the neutral
+# tiers/effort/tool-names here are NEVER vendor model strings; that mapping is the only
+# vendor-specific file (docs/01 C1).
+#
+# Worked example matching template/organization.yaml. Replace with your own roles.
+# Validate the whole articulated org (this file included) with tools/org_lint.py.
+
+# Neutral tiers are risk-calibrated (docs/01 §5): a cheap reversible role does not warrant the
+# judge tier; a checker of high-stakes work does. model_tier is a lever, not a default-to-max.
+defaults:
+  effort: medium
+  tier: A                       # A = drift-only (ordinary sandbox); B = asset-touching (needs host custody)
+  output: { format: files }
+
+roles:
+
+  - role: miner
+    model_tier: worker
+    effort: medium
+    context_budget_tokens: 20000        # MUST equal this role's information_flow.scopes grant
+    stop: { goal: "candidate submitted to the gate", max_iterations: 8 }
+    tools: { allow: [read, write, run_tests], deny: [network, deploy, secrets] }
+
+  - role: improver
+    model_tier: worker
+    effort: medium
+    context_budget_tokens: 20000
+    stop: { goal: "sharpened candidate submitted to the gate", max_iterations: 8 }
+    tools: { allow: [read, write, run_tests], deny: [network, deploy, secrets] }
+
+  - role: executor
+    model_tier: worker
+    effort: high                        # runs the real experiments — warrants deeper reasoning
+    context_budget_tokens: 20000
+    stop: { goal: "honest verdicts written for the open backlog", max_iterations: 12 }
+    tools: { allow: [read, write, run_tests], deny: [network, deploy, secrets] }
+
+  - role: curator
+    model_tier: worker
+    effort: medium
+    context_budget_tokens: 20000
+    stop: { goal: "gate-admitted doctrine diffs and provenance-complete items filed", max_iterations: 6 }
+    tools: { allow: [read, write, web_read], deny: [deploy, secrets] }   # external watch (docs/06)
+
+  - role: gate                          # CHECKER of high-stakes admission — warrants the judge tier
+    model_tier: judge
+    model_family: family-A              # a NEUTRAL family label — the projection maps it to a
+                                        # concrete vendor family; only relative distinctness matters
+    effort: high
+    context_budget_tokens: 40000
+    stop: { goal: "admit / reject decided against the admission standard", max_iterations: 4 }
+    tools: { allow: [read, run_tests] }   # read/verify only — checkers cannot implement (default-deny)
+    output: { format: json_schema, json_schema: { verdict: "admit|reject|park", reasons: "list[str]" } }
+
+  - role: skeptic                       # adversarial CHECKER — judge tier, method is free (docs/03 §2)
+    model_tier: judge
+    model_family: family-B              # DIFFERENT family from the gate/maker: an adversarial checker
+                                        # on the same base model shares their blind spots (docs/03 §3).
+                                        # **同一ハーネスの subagent では inherit になり、この宣言は
+                                        # 効かない。** 血統を実際に分けるには別ハーネスで動かす —
+                                        # integrations/README の「Codex as a judge」を見ること。
+                                        # 下の output.json_schema は Codex の --output-schema に
+                                        # 写せる（template/schemas/skeptic-verdict.json）。
+    effort: high
+    context_budget_tokens: 40000
+    stop: { goal: "refuted / survives decided for the admitted positive", max_iterations: 6 }
+    tools: { allow: [read, run_tests] }
+    output: { format: json_schema, json_schema: { verdict: "refuted|survives", cases_tried: "list", defect: "str?" } }
+
+  - role: supervisor
+    model_tier: judge                   # reads direction across departments — warrants strong model
+    effort: high
+    context_budget_tokens: 30000
+    stop: { goal: "direction flags reviewed; organic profiles corrected or proposals filed", max_iterations: 4 }
+    tools: { allow: [read, edit_organic_profile], deny: [admit, deploy, secrets] }   # coaches, never admits
+
+  - role: registrar                     # mechanistic clerk — deterministic work, mid tier is enough
+    model_tier: worker
+    effort: medium
+    context_budget_tokens: 30000
+    stop: { goal: "sensors evaluated, reorg diffs authored (for gate admission), digest projected", max_iterations: 6 }
+    tools: { allow: [read, write_ledger, author_diff], deny: [admit, deploy, secrets] }  # proposes, approves nothing

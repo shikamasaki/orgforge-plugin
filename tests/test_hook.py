@@ -8,6 +8,7 @@ org_hook.py as a subprocess (the real host interface) and assert the block/allow
 import json
 import os
 import pathlib
+import re
 import pytest
 import shutil
 import subprocess
@@ -648,3 +649,67 @@ def test_hook_trusts_the_reservation_json_not_just_the_exit_code(tmp_path, body,
     r = subprocess.run([sys.executable, str(HOOK)], input=json.dumps(ev),
                        capture_output=True, text=True, env=env)
     assert r.returncode == expect, r.stdout + r.stderr
+
+
+# ── 0.35.0: Codex plugin の自己完結とマニフェスト形式 ──────────────────────────
+def test_codex_plugin_bundle_is_in_sync():
+    """Codex plugin の同梱物が neutral source と一致すること（drift を CI で捕まえる）。"""
+    r = subprocess.run(["bash", str(REPO / "integrations" / "codex" / "build.sh"), "--check"],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_codex_hooks_reference_only_the_plugin_root():
+    """**checkout を参照しない。** 参照すると、その木が無くなれば統制が消える。"""
+    h = json.loads((REPO / "integrations" / "codex" / "hooks" / "hooks.json")
+                   .read_text(encoding="utf-8"))
+    cmds = [hh["command"] for ev in h["hooks"].values() for entry in ev for hh in entry["hooks"]]
+    assert cmds, "hook が1つも無い"
+    for c in cmds:
+        assert "$PLUGIN_ROOT" in c, f"$PLUGIN_ROOT を使っていない: {c}"
+        assert "CODEX_PROJECT_ROOT" not in c, f"checkout を参照している: {c}"
+        # CODEX_PLUGIN_ROOT は **存在しない変数**（2026-07 に実測）。使うと hook が失敗する。
+        assert "CODEX_PLUGIN_ROOT" not in c, f"存在しない変数を使っている: {c}"
+
+
+def test_codex_hooks_json_has_no_comment_key():
+    """Codex の parser は `description` と `hooks` しか受け付けない。
+
+    `//` を入れると **警告してファイル全体を読み飛ばす** ので、統制が黙って消える
+    （Claude Code は `//` を許すので、そのまま持ち込んで実際にそうなった）。
+    """
+    raw = (REPO / "integrations" / "codex" / "hooks" / "hooks.json").read_text(encoding="utf-8")
+    d = json.loads(raw)
+    assert set(d) <= {"description", "hooks"}, f"未対応のキー: {sorted(set(d) - {'description', 'hooks'})}"
+
+
+def test_codex_plugin_manifest_is_valid():
+    """plugin.json の必須フィールドと、hooks への参照。"""
+    d = json.loads((REPO / "integrations" / "codex" / ".codex-plugin" / "plugin.json")
+                   .read_text(encoding="utf-8"))
+    for k in ("name", "version", "description", "author", "interface", "hooks"):
+        assert d.get(k), f"必須フィールドが無い: {k}"
+    assert d["author"].get("name")
+    assert re.match(r"^\d+\.\d+\.\d+$", d["version"]), d["version"]
+    assert d["hooks"].startswith("./"), "相対パスで ./ から始めること"
+    # 同梱先が実在すること
+    assert (REPO / "integrations" / "codex" / d["hooks"][2:]).is_file()
+
+
+def test_codex_marketplace_manifest_is_at_the_path_codex_reads():
+    """`marketplace.json` を root に置いても読まれない — `.agents/plugins/` の下である。"""
+    mk = REPO / ".agents" / "plugins" / "marketplace.json"
+    assert mk.is_file(), "`.agents/plugins/marketplace.json` が無い"
+    d = json.loads(mk.read_text(encoding="utf-8"))
+    plug = d["plugins"][0]
+    assert plug["source"]["source"] == "local"
+    assert (REPO / plug["source"]["path"][2:] / ".codex-plugin" / "plugin.json").is_file()
+
+
+def test_codex_plugin_version_matches_the_claude_plugin():
+    """2つの projection のバージョンがずれると、どちらが新しいか分からなくなる。"""
+    cx = json.loads((REPO / "integrations" / "codex" / ".codex-plugin" / "plugin.json")
+                    .read_text(encoding="utf-8"))["version"]
+    cc = json.loads((REPO / "integrations" / "claude-code" / ".claude-plugin" / "plugin.json")
+                    .read_text(encoding="utf-8"))["version"]
+    assert cx == cc, f"codex={cx} / claude-code={cc}"

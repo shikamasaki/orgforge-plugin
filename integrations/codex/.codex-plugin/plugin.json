@@ -1,0 +1,23 @@
+{
+  "name": "orgforge",
+  "version": "0.35.0",
+  "description": "Run an AI-native IT company through a forced SDLC with guardrails that actually block: blast-radius caps reserved atomically in a hash-chained ledger, a gate and an adversarial skeptic, and every judgment recorded with its reasoning.",
+  "author": {
+    "name": "shikamasaki",
+    "url": "https://github.com/shikamasaki"
+  },
+  "homepage": "https://github.com/shikamasaki/orgforge-plugin",
+  "repository": "https://github.com/shikamasaki/orgforge-plugin",
+  "license": "MIT",
+  "keywords": ["guardrails", "sdlc", "audit-ledger", "agent-governance"],
+  "hooks": "./hooks/hooks.json",
+  "interface": {
+    "displayName": "OrgForge",
+    "shortDescription": "Guardrails that block, on a hash-chained ledger",
+    "longDescription": "Projects orgforge's neutral guardrail layer onto Codex. A PreToolUse hook reserves blast-radius exposure atomically in an append-only, hash-chained ledger and denies a call whose reservation cannot be written — so only a decision that was recorded becomes an allow. Holds are recorded too, and a bypass that cannot be recorded is refused.",
+    "developerName": "shikamasaki",
+    "category": "Productivity",
+    "capabilities": ["Write"],
+    "websiteURL": "https://github.com/shikamasaki/orgforge-plugin"
+  }
+}

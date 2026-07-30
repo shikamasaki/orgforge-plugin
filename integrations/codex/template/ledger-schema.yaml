@@ -1,0 +1,472 @@
+# ledger-schema.yaml — the audit + enforcement record, specified. NOT the SSoT: the SSoT is code + the domain model (conventions + org spec); this is the tamper-evident process journal views project from.
+#
+# The ledger is Organ 5's shared record and Organ 6's custody+recording holder. This file
+# defines its envelope (tamper evidence), its event classes (the org's complete factual
+# vocabulary — if it isn't an event class, it didn't happen), its derived views (the ONLY
+# things context packs may contain), and how packs are assembled. Views are regenerated
+# from events, never hand-edited. The runtime that serves this schema is specified in
+# docs/08-runtime.md; the lint cross-checks every reference in organization.yaml,
+# moves.yaml, and sensors.yaml against this file.
+
+# ── Envelope: every event, no exceptions ─────────────────────────────────────
+envelope:
+  fields:
+    id: uuid                       # idempotency key (at-least-once delivery, dedup on id)
+    seq: monotonic_integer         # assigned by the ledger service, gapless per ledger
+    ts: rfc3339_utc
+    actor: role_id | human:<name> | system:<component>   # from runtime identity, NEVER from payload
+    class: one_of_event_classes_below
+    payload: class_specific_object
+    prev_hash: sha256              # hash chain: tamper evidence
+    hash: sha256                   # H(prev_hash || canonical_json(id,seq,ts,actor,class,payload))
+  write_control:
+    append_only: true
+    single_writer: ledger_service  # agents call append(); they never hold the file/store
+    actor_identity_source: runtime_session   # an agent cannot claim another's actor id
+    verification: external_watchdog_replays_hash_chain   # docs/05 §2.4, docs/08 §5
+
+# ── Event classes: the org's complete factual vocabulary ────────────────────
+# ── 検証の軸（Writer Phase 0 / 0.33.1）─────────────────────────────────────
+# **3つを分けて扱う。** 全クラスを一度に closed-world にすると、schema の乖離が
+# 「組織全体の記録停止」に変わる — それは fail-closed ではなく、既知の移行不備による
+# 可用性事故である。
+#
+#   validation:
+#     required: [..]                  宣言したクラスだけ、必須 field の欠落を拒否
+#     <field>: a|b|c                  宣言済み field は **存在する場合に** enum / 型を検証
+#     additional_properties: false    厳格化したいクラスだけ、未宣言 field を拒否
+#
+# 未宣言 field は既定で許可し、census に記録する（乖離を見えるようにするが止めない）。
+# 統制イベント（admission / verdict / cap 予約）は最初から厳格側に置く。
+# `progress_recorded` は実態が宣言と乖離しているので、**実態を schema に反映してから**
+# 別の migration で厳格化する（実データ43件中 fraction は0件、宣言に無い milestone が38件）。
+#
+# required は **実データを数えて決めている** — 宣言が実態と違えば、検査は嘘になる。
+validation:
+  required:
+    admission_decided:    [verdict]
+    refutation_attempted: [verdict]
+    verdict_provisional:  [role, lineage, verdict, for_event,
+                           review_subject_id, reasoning_sha256]
+    judges_disagreed:     [for_event]
+    phase_started:        [phase, role]
+    phase_admitted:       [phase, verdict]
+    correction:           [corrects, kind]
+    exposure_budget_checked: [window_id, dimension, committed_so_far, delta_requested, cap,
+                              actor_role, decision, session_id, tool_use_id, rule,
+                              request_digest]
+  # **相関キーはどれか1つあればよい。** deliverable / candidate_id / claim_id / issue はどれも
+  # 正当な相関キーで（`_same_work` が union-find で束ねる）、どれを使うかは経路によって違う。
+  # 1つに固定すると正当な書き込みを弾く（実際に統制のテストを弾いた）。
+  # **1つも無い判定は拒否する** — 何についての判定か分からない記録は、検査に使えない。
+  require_any:
+    admission_decided:    [deliverable, candidate_id, issue]
+    refutation_attempted: [deliverable, claim_id, candidate_id, issue]
+    verdict_provisional:  [deliverable, issue]
+    judges_disagreed:     [deliverable, issue]
+    phase_started:        [deliverable, candidate_id]
+    phase_admitted:       [deliverable, candidate_id]
+    result_deployed:      [deliverable, claim_id, candidate_id, issue]
+  # 未宣言 field を拒否するクラス（closed world）。統制の中核だけに絞る。
+  additional_properties_false: [verdict_provisional, judges_disagreed, exposure_budget_checked]
+  # **writer 専用のクラス。** generic append では書けない。
+  #
+  # 上限の予約を通常の append で書ける状態は、上限そのものを無効化する — 実測で
+  # `delta_requested: -100` を append したあと、cap=5 に対して delta=50 が allow され、
+  # 鎖も intact だった。**検査に使う記録は、検査する側だけが書ける**必要がある。
+  #
+  # これは identity の認証ではない（H1 は別問題）。同じ UID なら writer を騙れる。
+  # ただし「通常の append 経路で偶然にも意図的にも書けてしまう」ことは、これで塞がる。
+  writer_only: [exposure_budget_checked]
+  # enum。**存在する場合に**検証する（欠けているかは required が見る）。
+  enums:
+    verdict_provisional:
+      role:    [gate, skeptic]
+      lineage: [same-harness, cross-harness]
+    admission_decided:
+      verdict: [admit, reject, park]
+    refutation_attempted:
+      verdict: [refuted, survives]
+    correction:
+      kind:    [probe, mistake, backfill, superseded]
+    phase_admitted:
+      verdict: [pass, fail]
+  # 型。同上、存在する場合に検証する。
+  types:
+    correction:          { corrects: list }
+    admission_decided:   { from_seqs: list, agreed_by: list }
+    verdict_provisional: { issue: int_or_str }
+
+
+
+event_classes:
+
+  # metabolism (Organ 4)
+  # candidate_id: WHICH backlog item this cycle is working (docs/09). Ties the cycle to the
+  # candidate_submitted it drains, so "in flight" is per-item, not just a per-role count — and so a
+  # cycle interrupted (e.g. by /clear) is recoverable: the work_in_progress view pairs the started
+  # candidate with its latest progress_recorded. Absent ⇒ an untracked cycle (legacy / not backlog-driven).
+  cycle_started:        { role, candidate_id, pack_manifest_id }
+  # progress_recorded: the CHECKPOINT that survives a context wipe (docs/01 R−1: the org acts only on
+  # what is written; a half-done implementation that lives only in the agent's context is lost on
+  # /clear). Stamped at each milestone of a cycle: how far (0..1 or a phase label), what was just done,
+  # the concrete next step, and any blocker. work_in_progress reads the LATEST per candidate; /org-resume
+  # replays it to continue exactly where the cycle stopped. This is the backlog's memory of "how far".
+  # bypass_declared: **道具を迂回したことの記録**。organ を通さずに同じ状態変更を行う経路
+  # （保護ブランチへの直接マージなど）は hook が hold するが、壊れたときに詰まるので明示の
+  # 宣言（`ORG_ALLOW_MANUAL_MERGE=1`）で通せる。**その宣言自体をここに残す** — 記録に残らない
+  # 迂回を許すと、宣言が常用されて迂回が見えないまま高速化する。塞げないことを記録する形。
+  bypass_declared:      { what, command, declared_by }   # GUARD-BYPASS
+
+  # asset_touched: **本番資産への変更**。exposure_budget_checked はローカルのファイル操作を
+  # 数えるが、リモート DB への DDL・本番の権限変更・インフラ操作は数えていない。実際には
+  # 後者のほうが危険で、しかも取り消しにコストがかかる。実地では本番 DB にマイグレーション
+  # 2本と権限の revoke が入ったのに、台帳には何も残らなかった — 「あの revoke は誰の権限で
+  # 入ったのか」が後から辿れない状態。
+  #   target     : 何に対してか（"supabase:<project>", "gcp:<project>/<service>" など）
+  #   op         : apply_migration / revoke / grant / drop / deploy / scale …
+  #   reversible : 戻せるか。false なら、戻せないことを承知で入れたという記録になる
+  #   authority  : 誰の権限で入れたか（issue-N の一部 / CEO の明示指示 / 自己判断）
+  asset_touched:        { target, op, name, reversible: bool, authority, issue,
+                          rollback }   # PRODUCTION-ASSET
+
+  # public_surface_declared: このサイクルで**外に晒した面**。cycle_completed の domain_model は
+  # 「領域規則を決めたか」を問うが、「何を外に晒したか」は誰も見ていなかった。認可ホールは
+  # 「関数を1つ足した」ところから生まれる（実地の join_group がまさにそれ）。
+  #   surfaces: [{kind: db_function|endpoint|export|env, name, exposure, authz}]
+  public_surface_declared: { role, issue, surfaces: [ {kind, name, exposure, authz} ],
+                             none_asserted }   # ATTACK-SURFACE
+
+  # correction: 追記型の台帳では過去を消せないので、誤って書かれた／検証目的で書かれた
+  # イベントを「無効」と宣言するのはこのイベントの仕事。自由記述の note では機械が読めず、
+  # status / learning が除外できない（実地でプローブ4件が実判定として数えられ、board が
+  # 現実と食い違った）。corrects で対象の seq を、kind で理由の型を構造化して指す。
+  #   kind: probe        — 仕様検証のために書いたもので、実際の判定ではない
+  #         mistake      — 誤って書いた（対象・値の取り違え）
+  #         backfill     — 後から実時点の記録を補ったもの（対象が実判定であることは変わらない）
+  #         superseded   — 後続の判定で置き換わった
+  # 訂正そのものも追記なので、訂正の訂正も可能。誰が無効化したかは actor に残る。
+  correction:           { corrects: [seq], kind: probe|mistake|backfill|superseded, reason,
+                          corrected_by }   # LEDGER-CORRECTION
+
+  # ── 判定クラス（`github_sync decide` が受け付けるもの）───────────────────────
+  # **これらは実運用で書かれていたが、schema に宣言が無かった。** Writer Phase 0 の
+  # 「宣言の無いクラスは書けない」検査を入れたときに露見した（実データに design_decided 5件、
+  # rework_requested 23件）。宣言の無いクラスは projection にも sensor にも乗らないので、
+  # 書いても読まれない — `show` の rework 警告が沈黙した一因でもある。
+  # 形は実データに合わせている。**宣言が実態と違えば、検査は嘘になる。**
+  design_decided:       { issue, deliverable, verdict, reasoning_sha256 }
+  rework_requested:     { issue, deliverable, verdict, reasoning_sha256, phase, role,
+                          candidate_id, requester, evidence_ref, reason, from_verdict, to_role,
+                          risk_accepted }
+  scope_decided:        { issue, deliverable, verdict, reasoning_sha256, phase, in_scope,
+                          out_of_scope, reason }
+  tradeoff_decided:     { issue, deliverable, verdict, reasoning_sha256, chosen, rejected, reason }
+  deploy_decided:       { issue, deliverable, verdict, reasoning_sha256, phase }
+
+  # ── writer / schema の境界（Writer Phase 0）─────────────────────────────────
+  # **規範的な判定根拠は各イベントの envelope の `schema_version`** であって、この記録ではない。
+  # これは観測可能性のための補助 — 「いつから検証が効いているか」を人が1行で読めるようにする。
+  # この記録が欠けても、各イベントの version から検証可能であることが条件（B は任意、A が規範）。
+  #
+  # 2つの保証を混ぜないこと。**schema が検証済みかと、actor が認証済みかは独立した性質である**:
+  #   validation_assurance:  legacy_unvalidated | validated:v1
+  #   identity_assurance:    claimed | observed | attested | authenticated   ← 未着手
+  schema_enforcement_started: { schema_id, first_validated_seq, note,
+                          authority: "informational — the normative record of which validator
+                                      applies is each event's own envelope schema_version" }
+
+  progress_recorded:    { role, candidate_id, fraction, phase, done_so_far, next_step,
+                          blocked_by, artifacts: [ref] }
+  # accountable_supervisor (docs/09 §A1): which supervising role owns this output up the chain,
+  # set from the runtime supervision edge (never the payload — a manager cannot forge who owns a
+  # result, mirroring actor_identity_source). Empty for the top (human-owned) tier.
+  # reused: the reusable_modules/parts this cycle PULLED FROM instead of re-authoring (docs/12 §5 #7).
+  # Recorded so reuse is a visible, auditable fact ("I can see reuse happened, and how much it saved"),
+  # not an invisible discipline — the factory compounds only if reuse actually fires.
+  # domain_model: the SSoT底上げ enforcement (docs/11 §4d). A cycle that produced code but touched no
+  # domain model silently lets the context base rot (the co-commit discipline, docs/12 §3.3). So a
+  # cycle_completed MUST state it, like exceptions_none_asserted: either it references the
+  # convention_adopted / domain-model artifact this cycle co-committed, OR it explicitly asserts none was
+  # established this cycle (a claim the skeptic can refute — "you changed the money-split rule and didn't
+  # record it"). requires_prior rejects a cycle_completed missing this field, so "forgot to update the
+  # domain model" cannot happen silently. It is what makes SDD run ON a growing context base, not in a vacuum.
+  cycle_completed:      { role, candidate_id, tokens: {task, gate, reporting}, outputs: [ref],
+                          reused: [ref], views_referenced: [view_id], accountable_supervisor,
+                          domain_model: {updated: [ref], none_asserted: reason} }   # exactly one of updated / none_asserted
+  heartbeat:            { component, invariants_hold: bool }
+  halt_tripped:         { trigger, scope: global|role }
+  # work (Organs 2/6)
+  # source: how this backlog item entered the department's backlog (docs/09, docs/03). `mandate` =
+  # a top-down instruction handed down; `self` = a self-generated task the department raised from its
+  # own aspiration gap (problemistic search). Both land in the SAME backlog (open_experiments) and are
+  # prioritized on one footing by attention.py; source only lets a mandate carry a floor (zone of
+  # acceptance, Simon 1947) and lets an audit see where work came from. Absent ⇒ treated as `self`.
+  candidate_submitted:  { maker, candidate_id, contract_ref, evidence: [ref], source: mandate|self }
+  # predicted_outcome: the gate's expected result for this admission — the input the OUTCOME-DELTA /
+  # FRAME-REVIEW organs (learning.py, alignment.py) join against the realized outcome (docs/05 §5.4,
+  # docs/05 §5.4). Declared here so the emitting role knows to populate it; the organs are inert
+  # (silently) without it.
+  # reasoning_sha256 + issue (docs/11 §4f.1): with human review retired the Issue comment holds the
+  # ACCOUNT of why the change merged, and a GitHub comment is editable by the very agents it judges.
+  # The digest is what makes that account tamper-EVIDENT — re-hash the comment and compare. Both
+  # judgment classes also carry a runtime distinct-actor rule (ledger.py DISTINCT_ACTOR): the actor
+  # recording a verdict must not be the actor whose work it judges, and the skeptic must differ from
+  # the gate. Without it a maker could self-admit and the chain would launder the forgery.
+  admission_decided:    { gate, candidate_id, verdict: admit|reject|park, standard_ref,
+                          predicted_outcome, evidence: [ref], issue, reasoning_sha256,
+                          lineage: "same-harness|cross-harness|joint — `joint` means generated from two
+                                    agreeing verdict_provisional records, not placed by one judge",
+                          agreed_by, from_seqs, review_subject_id,
+                          reasoning_by_lineage: "per-lineage {seq, reasoning_sha256, reasoning_ref} —
+                                                 the joint digest is derived from BOTH, so neither
+                                                 side's account can go missing",
+                          distinct_actor: "actor != the actor of cycle_started/cycle_completed for this candidate" }
+  refutation_attempted: { skeptic, claim_id, verdict: refuted|survives, checklist_ref, issue,
+                          reasoning_sha256, lineage,
+                          distinct_actor: "actor != the maker's and != the admitting gate's" }
+  # ── judge の血統（スイスチーズ層。docs/03 §3, docs/11）──────────────────────
+  # 同一ハーネスの subagent は親のモデルを継ぐので、`role-settings.yaml` が別系統を宣言しても
+  # 血統は分かれない。constitution の `enforcement.judges.lineage: cross-harness` を宣言した org は
+  # judge を2人走らせ、**一致だけが admission を生成する**。
+  #
+  # そのため admit/survives は **直接 append できない**。各血統の判定を verdict_provisional として
+  # 置き、2件が一致した時点で道具が admission_decided{lineage: joint} を組み立てる。段2で verdict を
+  # 作るのは配管であって判断ではない（一致という事実の関数）。**不一致なら道具は admit を作れない。**
+  verdict_provisional:  { role: gate|skeptic, lineage: same-harness|cross-harness,
+                          verdict, for_event, issue, deliverable, reasoning_sha256, reasoning_ref,
+                          review_subject_id: "digest of (issue, role, phase, base_sha,
+                                              reviewed_tree_sha, dirty, requirements_digest) — generated
+                                              ONCE by `verify`, never by the judge. Two verdicts with
+                                              different subjects looked at different artefacts and
+                                              therefore do NOT agree",
+                          authority: "NONE on its own — a single lineage's verdict is material, not a decision",
+                          one_per: "(issue, for_event, lineage) — a lineage may not rewrite its verdict to
+                                    manufacture agreement; correct via `correction`" }
+  judges_disagreed:     { issue, deliverable, role, for_event,
+                          same_harness: verdict, cross_harness: verdict,
+                          note: "NOT an anomaly — this is the POINT of separating lineage. Never deleted;
+                                 counted. Whichever side says no, stands (the strict side wins)." }
+  # ── SDLC phase mold (docs/11) — the forced, non-skippable phase chain, reproducibility's spine ──
+  # A deliverable travels requirements → design → implement → test → integrate → deploy → operate. Each phase is
+  # ENTERED by phase_started and CLEARED by phase_admitted{verdict:pass}. The chain is enforced by the
+  # SAME requires_prior idiom as result_deployed: phase_started{P} is INVALID unless a
+  # phase_admitted{prior(P), pass} exists for the deliverable. prior(requirements)=∅. This is what makes
+  # the PROCESS reproducible: same spec ⇒ the same phases run in the same order for every founder/run.
+  # The existing test→integrate→deploy gate (result_deployed requires survives) and design→implement conformance
+  # (conformance_reviewed) are the two hardest phase boundaries, already enforced below; these two
+  # events extend the identical mechanism to the earlier boundaries.
+  # parent（任意）: task の deliverable に対する親 objective。founding は objective 単位で
+  # requirements/design を admit するので、task はここを辿って親の admit を継承する。
+  # 無ければ自分の admit だけを見る（従来どおり）。
+  phase_started:        { deliverable, parent, phase: requirements|design|implement|test|integrate|deploy|operate, role,
+                          requires_prior: "phase_admitted{deliverable==deliverable, phase==prior(phase), verdict==pass} (∅ for requirements)" }
+  phase_admitted:       { deliverable, phase: requirements|design|implement|test|integrate|deploy|operate,
+                          verdict: pass|rework|reject, evidence_ref, admitter }
+  # integrate phase (docs/11 §4c): the fanned-out siblings merged to `develop` and pass the COMBINED
+  # suite together. Green CI on develop is its machine form; result_deployed should require it (the
+  # develop→main promotion). Owned by the supervising manager (A3 extended to cross-deliverable).
+  integration_admitted: { integration_branch, deliverables: [ref], combined_ci_ref, verdict: pass|fail,
+                          admitter }
+  # A result may only deploy AFTER the skeptic refuted-and-failed (verdict: survives) for it.
+  # requires_prior makes the skeptic load-bearing: without a `survives` for this candidate_id,
+  # a result_deployed event is INVALID (the deploy path cannot skip adversarial review).
+  # observed_outcome: the realized result the organs diff against predicted_outcome (docs/05 §5.4).
+  result_deployed:      { candidate_id, net_effect_ref, observed_outcome,
+                          requires_prior: "refutation_attempted{claim_id==candidate_id, verdict==survives}" }
+  result_retired:       { candidate_id, cause, observed_outcome }
+  # structure (Organ 7 / moves)
+  sensor_reading:       { sensor, value, window, inputs_ref }
+  move_executed:        { move_id, tier, diff_ref, precondition_evidence: [sensor_reading.id], lint_report_ref }
+  proposal_filed:       { subject, diff_ref, diagnosis, expected_effect, dedup_key }
+  proposal_adjudicated: { proposal_id, decision: approve|reject|amend, human }
+  irreversible_staged:  { action_class, effect_diff_ref, checker_signature }
+  irreversible_executed: { staged_id, human }
+  # SILENCE-CONSENT (docs/05 §2.1): may a backlog action proceed on silence, or hold for an ack?
+  # Reversible => delegated tier (silence is consent); irreversible => irreversible-hold (ack).
+  consent_decided:      { action_class, item_ref, reversible: bool, tier: delegated|irreversible,
+                          decision: silence_is_consent|explicit_ack_required }
+  # profiles, doctrine, scopes (Organs 3/5, docs/06-08)
+  profile_edited:       { role, diff_ref, editor, section: body|preamble }
+  doctrine_diff_admitted: { role, claims: [{claim, provenance: {source, retrieved_at, confidence}, review_by}] }
+  intelligence_filed:   { curator, item_ref, provenance, affected_roles }
+  scope_grant_changed:  { seam: {from, to}, change: open|widen|narrow|revoke, grantor }
+  intent_revised:       { version, diff_ref, human }
+  refounding_committed: { old_structure_ref, new_structure_ref, doctrine_remap: {old_role: new_role},
+                          unmapped_claims_surfaced: [claim_id], human }   # docs/05 §4.4 — atomic re-found,
+                          # assets intact: the ledger persists, doctrine is re-mapped, none orphaned
+  digest_generated:     { window, census: {class: count}, exceptions_ref }
+  anomaly_detected:     { detector, description, matched_pattern: pattern_id|none }
+  # operating events (docs/05) — the recurring checks a 24/7 unattended org needs beyond
+  # founding. Each obeys reconcile-by-exception: the silent path emits the event as an audit
+  # breadcrumb; only the exception routes up. §2.1–2.3 have running code (tools/guardrails.py).
+  # BLAST-RADIUS-CAP。**writer 専用**（validation.writer_only）— `reserve-exposure` だけが書ける。
+  # 通常の append で書けると、負の曝露を1件入れるだけで上限が無効になる。
+  # session_id / tool_use_id / rule / request_digest は冪等性のためのもの:
+  #   キーは (session_id, tool_use_id, rule, class) の canonical tuple の hash
+  #   request_digest は要求内容（dimension/delta/cap/window/actor）の digest —
+  #   **同じキーで内容が違う要求は再実行ではない**ので、conflict として拒否する
+  exposure_budget_checked: { window_id, dimension, committed_so_far, delta_requested, cap,
+                             actor_role, decision: allow|hold, caused_by_event,
+                             session_id, tool_use_id, rule, request_digest }
+  # ITERATION/SPEND-CAP (docs/10 §1, docs/12 §5 #2): a role's loop cycles + cumulative tokens per window;
+  # HOLDs a runaway loop the blast-radius cap can't see (reversible read-think-edit spinning forever).
+  iteration_budget_checked: { window_id, role, cycles_so_far, tokens_so_far, max_cycles, max_tokens,
+                              decision: allow|hold, limiting }
+  # RELIABILITY-BUDGET (docs/05 §reliability-budget): an SRE error budget (100%−SLO) that bounds
+  # DEPLOY velocity — a sibling of BLAST-RADIUS-CAP (aggregate limit over a window) but a DIFFERENT
+  # axis: blast-radius meters irreversibility per act; this meters reliability BURN and FREEZES deploys
+  # when the budget is spent. The docs/11 deploy gate reads it (result_deployed also gates on a healthy
+  # budget). Emitted on each deploy-gate check; the exception (budget exhausted) routes up.
+  reliability_budget_checked: { service, slo, window_id, budget_total, budget_burned, budget_remaining,
+                                deploy_verdict: allow|freeze, caused_by_event }
+  # DORA (docs/05 §DORA): the four keys — deploy frequency, lead time, change-fail rate, MTTR — as the
+  # named/instrumented generalization of OUTCOME-DELTA. The org's navigation instrument for the moving
+  # bottleneck (Theory of Constraints, docs/12 §3). A periodic snapshot; a regressed key routes up.
+  dora_snapshot: { window_id, deploy_frequency, lead_time_p50, change_fail_rate, mttr_p50,
+                   inferred_bottleneck: design|review|test|deploy|operate, delta_vs_prior }
+  # CIRCUIT-BREAKER (docs/12 §5 #3): trips when a candidate's progress_recorded stream stops advancing
+  # (identical next_step repeated, or fraction flat) — flag for a human, free the WIP slot.
+  stall_breaker_checked: { candidate_id, role, checkpoints, repeat_run, no_advance_run,
+                           decision: trip|ok, reason }
+  # REPEATED-DEATH (docs/06, docs/12 §5): a death cause reappeared on a later candidate — the org
+  # re-made a mistake it had recorded, i.e. accumulated learning was NOT fed forward. The direct
+  # measure that "the team's output quality rises over time" is holding (or not).
+  repeated_death_detected: { cause, occurrences, candidate_ids: [ref] }
+  # PROVEN-ROLLBACK (docs/05 §4, docs/12 §5): a reversible action must carry a declared undo, or its
+  # reversibility is an untested claim the silence-consent tier must not trust.
+  rollback_declared:    { action_ref, undo }
+  rollback_unproven:    { action_ref, reason }
+  state_reconciled:     { domain, expected_value, observed_value, drift: bool, magnitude,
+                          unaccounted_events: [ref] }                              # STATE-RECONCILED
+  reference_staleness_checked: { trigger_event, bound_roles: [role], stale_roles: [role],
+                                 silent_duration_per_role, result: all_current|stale_found } # STALE-REFERENCE
+  # lateral reconciliation family (docs/05 §2.4) — DESIGN, not yet coded. The horizontal seam
+  # no other organ watches; shared shape unifies the three timings of peer divergence.
+  work_claimed:         { role, work_territory, intent_summary,
+                          depends_on: [{producer_role, seam_id}] }                 # COLLISION-SCAN (claim); depends_on = the blocked-on edges DEPENDENCY-STALL reads
+  # claim_released: closes a work_claimed so the spawn-time non-collision gate (org_hook) stops treating
+  # the territory as live. A cycle_completed/result_* on the same territory also closes it implicitly.
+  claim_released:       { role, work_territory }
+  lateral_reconciled:   { observer_role, subjects: [role], reference, result: consistent|divergent,
+                          divergence_kind: duplicate|contradiction|stall|breaking_change,
+                          evidence_event_ids: [ref] }
+  dependency_stall_raised: { blocked_role, awaited_seam_id, awaited_producer_role,
+                             stalled_ticks, downstream_impact: [ref], route_to }   # DEPENDENCY-STALL; route_to = lowest common owner
+  contract_change_proposed: { seam_id, producer_role, current_hash, proposed_shape,
+                              is_breaking: bool, dependents: [role], objection_deadline_tick } # CONTRACT-CHANGE
+  # resource, learning, and the schedule planner (docs/05 §5.4, §5.6)
+  priority_ranking_set: { ranking_id, ordered_objectives: [{objective_id, rank, weight,
+                          rationale_hash}], supersedes, basis_event_ids: [ref] }   # PRIORITY-RANKING
+  allocation_reclaimed: { holder, resource_type, from_level, to_level, yield_metric,
+                          ranking_ref, reason }                                     # ALLOCATION-RECLAIM
+  authority_reviewed:   { grants_reviewed, auto_narrowed: [ref], renewed: [ref] }   # AUTHORITY-EXPIRED
+  outcome_delta:        { decision_event_id, predicted_outcome, observed_outcome,
+                          delta_magnitude, delta_sign, department, recurrence_count } # OUTCOME-DELTA
+  tick_planned:         { now_min, night: bool, due: [check_id], suspended: [check_id],
+                          missed: [check_id] }   # tick.py's own run — a gap proves the host cron died
+  # intra-department attention allocation (docs/09) — how ONE dept picks what to work on next
+  attention_allocated:  { role, wip_limit, in_flight, ranking_id,
+                          selected: [{candidate_id, objective, score, in_ranking, source}],
+                          deferred: [{candidate_id, score}], reason }   # ATTENTION-ALLOCATION
+  # proxy-stack guards (docs/05) — is the org still solving the RIGHT problem?
+  premise_reconciled:   { premise_id, asserted, observed, status: holds|weakened|broken } # PREMISE/TELOS
+  sunk_course_reviewed: { course_id, attempts, cost, outcome_trend, still_open: bool,
+                          decision: continue|abandon }                          # SUNK-COURSE (Staw)
+  frame_review_raised:  { near_target_decisions, result_trend, question }        # DOUBLE-LOOP (Argyris)
+  mandate_conflict_raised: { subjects: [role], contested_decision, mandate_refs: [role],
+                             resolution: precedence_applies|integrate|escalate, evidence_ids: [ref] } # MANDATE-CONFLICT
+  convention_adopted:   { scope, settled_choice, owner, review_by }              # internal precedent (Nelson&Winter)
+  # manager accountability (docs/09) — the VERTICAL control down the supervision edge, distinct
+  # from the gate/skeptic's cross-cutting admission (docs/09 §honest-distinction).
+  # spec_delegated (docs/09 §spec-driven): the manager pushes the per-task intent DOWN as an explicit
+  # spec BEFORE work starts (Deming's acceptance-spec), with a token_budget carved from its own —
+  # the producer of conformance_reviewed.delegated_intent_ref. confirmed == the supervisor affirms
+  # the spec conforms to the intent it holds (down-front A3). token_budget is how granularity is
+  # controlled: a subordinate spawns within its budget (~1 agent per ~50k tokens, measured), so the
+  # budget — not a depth/width knob — sets how deep/wide the sub-tree grows (docs/09 §granularity).
+  # spec_ref is the TASK ISSUE (its #/URL) — the spec lives in the Issue body (template/SPEC.md is the
+  # Issue structure), NOT a docs/spec/*.md file. The SSoT is the ledger + org spec; the task spec is
+  # working detail in the Issue, and this event just points at it (no fragment-Spec files, docs/12 §3.3).
+  spec_delegated:       { supervisor, subordinate, spec_ref, contract_ref, intent_basis_ref,
+                          token_budget, confirmed: bool }                        # spec-driven + budget
+  conformance_reviewed: { supervisor, subordinate, reviewed_ref, delegated_intent_ref,
+                          verdict: conforms|rework|reject, evidence_ref }        # A3 intent-conformance
+  # report_up is INVALID without a prior conformance_reviewed{conforms} for each subordinate result
+  # it rolls up — the manager cannot own unverified work upward (requires_prior, as result_deployed
+  # requires a skeptic survives). exceptions_none_asserted makes silence a positive claim (anti-MUM).
+  report_up:            { supervisor, parent, window, basis_refs: [ref],
+                          intent_status: met|at_risk|missed, exceptions: [ref],
+                          exceptions_none_asserted: bool, decisions_needed: [ref],
+                          requires_prior: "conformance_reviewed{verdict==conforms} for each rolled-up result" } # A4 honest roll-up
+
+# ── Cadence triggers: what `loop.cadence: on_<x>` may bind to ────────────────
+triggers:
+  candidate_arrival:      candidate_submitted
+  positive_result:        admission_decided   # filtered verdict == admit
+  handover_preparation:   move_executed       # filtered move_id == prepare_handover
+  operator_instruction:   human               # out-of-band; runtime-delivered
+
+# ── Derived views: the ONLY vocabulary of context packs and scope grants ─────
+# Each view: which classes it derives from, and its shape. Regenerated, never edited.
+views:
+  live_findings:        { from: [admission_decided, result_deployed], shape: currently-admitted results and their state }
+  nearby_deaths:        { from: [admission_decided, refutation_attempted, result_retired], shape: recent rejections/refutations adjacent to the reader's contract, with causes }
+  death_causes:         { from: [admission_decided, result_retired], shape: aggregated failure causes }
+  coverage_map:         { from: [candidate_submitted], shape: searched vs unsearched territory }
+  parked_inventory:     { from: [admission_decided], shape: verdict == park, with park reasons }
+  parts_inventory:      { from: [admission_decided, result_retired], shape: admitted orthogonal components }
+  combination_history:  { from: [candidate_submitted, admission_decided], shape: tried combinations and outcomes }
+  open_experiments:     { from: [candidate_submitted, cycle_completed], shape: backlog awaiting execution }
+  work_in_progress:     { from: [cycle_started, progress_recorded, cycle_completed], shape: candidates STARTED but not yet completed, each with its latest progress checkpoint (how far / next step / blocker) — the recovery source after a context wipe (/org-resume) }
+  reusable_modules:     { from: [cycle_completed], shape: shared implementation assets }
+  gate_input_spec:      { from: [intent_revised, proposal_adjudicated], shape: the current candidate submission format }
+  doctrine_gaps:        { from: [doctrine_diff_admitted, cycle_completed], shape: roles whose doctrine is thin or expiring }
+  doctrine_ttl_board:   { from: [doctrine_diff_admitted], shape: claims by review_by date }
+  watch_sources:        { from: [intelligence_filed, doctrine_diff_admitted], shape: declared external sources and their yield }
+  direction_flags:      { from: [cycle_completed, sensor_reading], shape: per-role direction verdicts for the supervisor }
+  sensor_readings:      { from: [sensor_reading], shape: latest value per sensor with window }
+  ledger_census:        { from: ["*"], shape: counts of every event class, all time }
+  recent_ledger_census: { from: ["*"], shape: counts of every event class, current window }
+  admission_standard:   { from: [intent_revised, proposal_adjudicated], shape: the purpose-grounded standard, current version }
+  candidate_under_review: { from: [candidate_submitted], shape: the one candidate the gate is judging, full submission }
+  claim_under_review:   { from: [admission_decided], shape: the admitted positive under adversarial review }
+  refutation_checklist: { from: [intent_revised, proposal_adjudicated], shape: the skeptic's current battery }
+  full_evidence_trail:  { from: ["*"], shape: everything touching the item under review — control roles only }
+  moves_catalog:        { from: [proposal_adjudicated], shape: current legal moves (mirror of moves.yaml at its adopted version) }
+  proposal_queue:       { from: [proposal_filed, proposal_adjudicated], shape: open proposals by subject }
+  pending_conformance_review: { from: [cycle_completed, conformance_reviewed], shape: subordinate outputs a supervisor owns (accountable_supervisor) but has not yet conformance-reviewed — an over-span manager's unreviewed backlog (docs/09 §A3) }
+
+# ── Context-pack assembly (docs/07; executed by the registrar) ───────────────
+context_pack:
+  algorithm: |
+    1. intent block, by reference to its latest intent_revised version (never copied).
+    2. the role's current doctrine (doctrine_diff_admitted, folded; TTL-expired claims flagged).
+    3. each view granted to the role in organization.yaml information_flow.scopes.grants,
+       rendered fresh from the ledger.
+    4. budget check: if the rendered pack exceeds pack_budget_tokens, summarize the
+       overflowing views and attach ledger refs for pull-based drill-down — never
+       silently truncate, never drop the intent or the contract.
+    5. write a pack manifest (what was included, which versions, what was summarized)
+       and ledger it via cycle_started.pack_manifest_id.
+  # the only non-view pack entries — the single source of truth is
+  # organization.yaml information_flow.universal_pack_items (which the lint reads); do NOT
+  # duplicate the list here (two copies drift). Named there, referenced here.
+  special_pack_items: see_organization.universal_pack_items
+  pull_interface: a role may query any view it is GRANTED, mid-cycle, for drill-down;
+    queries outside its grants are denied and ledgered (blocked_on_missing_context feeds
+    on these denials)
+
+# ── Proposal (approval-queue) item & digest shapes ───────────────────────────
+proposal_item:
+  fields: { subject: one_charter_item, diff_ref, diagnosis, expected_effect, dedup_key }
+  rules_ref: constitution charter.queue_rules
+digest:
+  deterministic: true              # same window + same ledger ⇒ byte-identical digest
+  sections:
+    - census: counts of EVERY event class in the window (mandatory, uncurated)
+    - reorg_commits: all move_executed with diffs
+    - open_proposals: proposal_queue view
+    - held_irreversibles: irreversible_staged not yet executed
+    - anomalies: anomaly_detected + any census count outside its trailing band
+    - budget_report: tokens by role and category vs caps
