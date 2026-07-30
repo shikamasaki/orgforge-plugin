@@ -75,6 +75,33 @@ event_classes:
   correction:           { corrects: [seq], kind: probe|mistake|backfill|superseded, reason,
                           corrected_by }   # LEDGER-CORRECTION
 
+  # ── 判定クラス（`github_sync decide` が受け付けるもの）───────────────────────
+  # **これらは実運用で書かれていたが、schema に宣言が無かった。** Writer Phase 0 の
+  # 「宣言の無いクラスは書けない」検査を入れたときに露見した（実データに design_decided 5件、
+  # rework_requested 23件）。宣言の無いクラスは projection にも sensor にも乗らないので、
+  # 書いても読まれない — `show` の rework 警告が沈黙した一因でもある。
+  # 形は実データに合わせている。**宣言が実態と違えば、検査は嘘になる。**
+  design_decided:       { issue, deliverable, verdict, reasoning_sha256 }
+  rework_requested:     { issue, deliverable, verdict, reasoning_sha256, phase, role,
+                          candidate_id, requester, evidence_ref, reason, from_verdict, to_role,
+                          risk_accepted }
+  scope_decided:        { issue, deliverable, verdict, reasoning_sha256, phase, in_scope,
+                          out_of_scope, reason }
+  tradeoff_decided:     { issue, deliverable, verdict, reasoning_sha256, chosen, rejected, reason }
+  deploy_decided:       { issue, deliverable, verdict, reasoning_sha256, phase }
+
+  # ── writer / schema の境界（Writer Phase 0）─────────────────────────────────
+  # **規範的な判定根拠は各イベントの envelope の `schema_version`** であって、この記録ではない。
+  # これは観測可能性のための補助 — 「いつから検証が効いているか」を人が1行で読めるようにする。
+  # この記録が欠けても、各イベントの version から検証可能であることが条件（B は任意、A が規範）。
+  #
+  # 2つの保証を混ぜないこと。**schema が検証済みかと、actor が認証済みかは独立した性質である**:
+  #   validation_assurance:  legacy_unvalidated | validated:v1
+  #   identity_assurance:    claimed | observed | attested | authenticated   ← 未着手
+  schema_enforcement_started: { schema_id, first_validated_seq, note,
+                          authority: "informational — the normative record of which validator
+                                      applies is each event's own envelope schema_version" }
+
   progress_recorded:    { role, candidate_id, fraction, phase, done_so_far, next_step,
                           blocked_by, artifacts: [ref] }
   # accountable_supervisor (docs/09 §A1): which supervising role owns this output up the chain,

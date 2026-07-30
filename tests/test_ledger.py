@@ -483,3 +483,153 @@ def test_decide_key_is_unique_per_judgment():
 
 
 # ── 0.22.0: 分割で持ち込んだ穴を塞ぐ ────────────────────────────────────
+
+
+# ══ Writer Phase 0 — lock / fsync / HEAD 回復 / schema 境界 ═══════════════════
+# **actor には触らない。** ここで固定するのは「書き込みが壊れないこと」と「新規イベントが
+# 検証済みであること」だけ。identity_assurance（誰が書いたか）は独立した軸として後で扱う。
+
+_PR = {"role": "maker", "candidate_id": "c1", "fraction": 0.5, "phase": "implement",
+       "done_so_far": "x", "next_step": "y"}
+
+
+def _app(root, cls="progress_recorded", payload=None, actor="w", extra=()):
+    return run("ledger.py", "append", str(root), "--actor", actor, "--class", cls,
+               "--payload", json.dumps(payload if payload is not None else _PR), *extra)
+
+
+def _evs(root):
+    p = pathlib.Path(root) / "ledger.jsonl"
+    if not p.exists():
+        return []
+    return [json.loads(l) for l in p.read_text(encoding="utf-8").splitlines() if l.strip()]
+
+
+def test_writer_stamps_schema_version_and_timestamp(tmp_path):
+    """条件1+8: version と ts は writer が付ける。"UNSET" を書かない。"""
+    assert _app(tmp_path)[0] == 0
+    ev = _evs(tmp_path)[0]
+    assert ev["schema_id"] == "orgforge-ledger"
+    assert isinstance(ev["schema_version"], int) and ev["schema_version"] >= 1
+    assert ev["schema_sha256"]
+    assert ev["ts"] != "UNSET" and ev["ts"].endswith("Z")
+
+
+def test_client_cannot_name_the_schema_version(tmp_path):
+    """条件2: クライアント指定は downgrade 攻撃なので拒否する。"""
+    code, out = _app(tmp_path, payload={**_PR, "schema_version": 1})
+    assert code == 2
+    assert "writer が決める" in out
+    code, out = _app(tmp_path, payload={**_PR, "schema_sha256": "deadbeef"})
+    assert code == 2
+
+
+def test_schema_id_in_payload_is_allowed_for_boundary_events(tmp_path):
+    """禁止は版を名指しする値だけ。schema_id は境界を記録するイベントが持って自然。
+
+    禁止を広く取りすぎると記録したい事実が書けない（実際に epoch 記録が弾かれた）。
+    """
+    code, out = _app(tmp_path, cls="schema_enforcement_started",
+                     payload={"schema_id": "orgforge-ledger", "note": "境界の記録"})
+    assert code == 0, out
+
+
+def test_unknown_event_class_is_refused(tmp_path):
+    """条件3: schema に宣言の無いクラスは書けない。"""
+    code, out = _app(tmp_path, cls="totally_unknown_class", payload={})
+    assert code == 2
+    assert "未知のイベントクラス" in out
+
+
+def test_unreadable_schema_fails_closed(tmp_path, monkeypatch):
+    """条件4: schema を読めないなら新規 append を拒否する（検証せずに書かない）。"""
+    monkeypatch.setenv("ORG_LEDGER_SCHEMA", str(tmp_path / "nope.yaml"))
+    code, out = _app(tmp_path)
+    assert code == 2
+    assert "検証" in out
+
+
+def test_concurrent_appends_do_not_collide(tmp_path):
+    """条件: append 全体が critical section。**12並列で全件 seq=1 になっていた。**"""
+    import concurrent.futures as cf
+    with cf.ThreadPoolExecutor(max_workers=12) as ex:
+        futs = [ex.submit(_app, tmp_path, "progress_recorded",
+                          {**_PR, "candidate_id": f"c{i}"}, f"w{i}") for i in range(12)]
+        codes = [f.result()[0] for f in futs]
+    assert all(c == 0 for c in codes), codes
+    seqs = [e["seq"] for e in _evs(tmp_path)]
+    assert sorted(seqs) == list(range(1, 13)), seqs
+    assert run("ledger.py", "verify", str(tmp_path))[0] == 0
+
+
+def test_head_is_a_cache_rebuilt_from_the_log(tmp_path):
+    """条件: HEAD は権威ではない。壊れていても log から再構築して続ける。"""
+    assert _app(tmp_path)[0] == 0
+    (tmp_path / "HEAD").write_text('{"seq": 99, "hash": "bogus"}', encoding="utf-8")
+    code, out = _app(tmp_path, payload={**_PR, "candidate_id": "c2"})
+    assert code == 0, out
+    assert "log から再構築" in out
+    assert [e["seq"] for e in _evs(tmp_path)] == [1, 2]
+
+
+def test_torn_line_is_not_auto_repaired(tmp_path):
+    """条件: 途中の破損は自動修復せず fail-closed。上に整合した HEAD を載せない。"""
+    assert _app(tmp_path)[0] == 0
+    with open(tmp_path / "ledger.jsonl", "a", encoding="utf-8") as f:
+        f.write('{"seq": 2, "class": "progress_recorded"')     # 改行なし
+    code, out = _app(tmp_path)
+    assert code == 4, out
+    assert "自動修復しない" in out
+
+
+def test_interior_tampering_blocks_further_appends(tmp_path):
+    """条件: 中間の書き換えも fail-closed。"""
+    for i in range(3):
+        assert _app(tmp_path, payload={**_PR, "candidate_id": f"c{i}"})[0] == 0
+    p = tmp_path / "ledger.jsonl"
+    lines = p.read_text(encoding="utf-8").splitlines()
+    ev = json.loads(lines[1]); ev["payload"]["fraction"] = 0.99
+    lines[1] = json.dumps(ev, ensure_ascii=False)
+    p.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    code, out = _app(tmp_path)
+    assert code == 4
+    assert "hash 不一致" in out
+
+
+def test_same_natural_key_different_payload_is_refused(tmp_path):
+    """条件9: 同じキーで中身が違うのは再実行ではない。no-op で捨ててはいけない。"""
+    assert _app(tmp_path, extra=("--natural-key", "k1"))[0] == 0
+    assert _app(tmp_path, extra=("--natural-key", "k1"))[0] == 0        # 完全一致 → no-op
+    assert len(_evs(tmp_path)) == 1
+    code, out = _app(tmp_path, payload={**_PR, "fraction": 0.9},
+                     extra=("--natural-key", "k1"))
+    assert code == 3, out
+    assert "payload が違う" in out
+
+
+def test_verify_reports_both_assurances_separately(tmp_path):
+    """条件6: verify が version 別に検証し、legacy と validated を分けて報告する。"""
+    assert _app(tmp_path)[0] == 0
+    code, out = run("ledger.py", "verify", str(tmp_path))
+    assert code == 0, out
+    assert "validation_assurance" in out
+    assert "validated:v1" in out
+
+
+def test_legacy_events_remain_readable_but_unvalidated(tmp_path):
+    """条件5: version を持たない既存イベントは読める。遡って拒否しない。"""
+    # legacy を手で書く（0.32.3 以前の形）
+    ev = {"id": "elegacy", "seq": 1, "ts": "UNSET", "actor": "w",
+          "class": "progress_recorded", "payload": dict(_PR), "prev_hash": "GENESIS"}
+    sys.path.insert(0, str(TOOLS))
+    import importlib
+    led = importlib.import_module("ledger")
+    ev["hash"] = led._hash("GENESIS", ev)
+    (tmp_path / "ledger.jsonl").write_text(json.dumps(ev) + "\n", encoding="utf-8")
+    (tmp_path / "HEAD").write_text(json.dumps({"seq": 1, "hash": ev["hash"]}), encoding="utf-8")
+    code, out = run("ledger.py", "verify", str(tmp_path))
+    assert code == 0, out
+    assert "legacy_unvalidated 1 件" in out
+    # 続けて v1 を足せる（混在が壊れない）
+    assert _app(tmp_path, payload={**_PR, "candidate_id": "c2"})[0] == 0
+    assert run("ledger.py", "verify", str(tmp_path))[0] == 0

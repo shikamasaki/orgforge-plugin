@@ -759,8 +759,10 @@ def test_carrying_the_condition_through_is_silent(monkeypatch, capsys):
     assert "条件節" not in err, err
 
 
-def test_legacy_calls_without_claimed_verified_still_pass(monkeypatch, capsys):
+def test_legacy_calls_without_claimed_verified_still_pass(monkeypatch, capsys, tmp_path):
     """--claimed / --verified を渡さない旧来の呼び出しは通す（後方互換）。"""
+    led = tmp_path / "led"; led.mkdir()
+    monkeypatch.setenv("ORG_LEDGER_ROOT", str(led))
     fake = CommentGh(); monkeypatch.setattr(GS, "gh", fake)
     rc = GS.cmd_decide(_cv())
     assert rc == 0
@@ -788,10 +790,16 @@ def test_integration_admitted_requires_a_gate_admit(monkeypatch, tmp_path, capsy
 def test_integration_admitted_passes_after_an_admit(monkeypatch, tmp_path):
     """admit があれば通す。"""
     led = tmp_path / "led2"; led.mkdir()
-    (led / "ledger.jsonl").write_text(json.dumps({
-        "seq": 1, "class": "admission_decided", "actor": "gate",
-        "payload": {"issue": 42, "deliverable": "42", "verdict": "admit"}}) + "\n",
-        encoding="utf-8")
+    # **実際の append で seed する。** 手書きの偽イベント（hash / prev_hash 無し）を置くと、
+    # Writer Phase 0 の健全性検査が正しく拒否する — 鎖の無い台帳に追記できてはいけない。
+    # 偽の台帳で試験していたことは、Phase 0 を入れて初めて露見した。
+    import subprocess as _sp
+    r = _sp.run([sys.executable, str(REPO / "tools" / "ledger.py"), "append", str(led),
+                 "--actor", "gate", "--class", "admission_decided",
+                 "--payload", json.dumps({"issue": 42, "deliverable": "42",
+                                          "verdict": "admit"})],
+                capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
     monkeypatch.setenv("ORG_LEDGER_ROOT", str(led))
     fake = CommentGh(); monkeypatch.setattr(GS, "gh", fake)
     rc = GS.cmd_decide(_cv(issue=42, event="integration_admitted", verdict="pass"))

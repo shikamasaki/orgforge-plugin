@@ -1,7 +1,7 @@
 {
   "name": "orgforge-plugin",
   "displayName": "OrgForge — stand up an AI-native IT company",
-  "version": "0.32.3",
+  "version": "0.33.0",
   "description": "Stands up and runs an AI-native IT business company on Claude Code: it decides what to build, builds through a forced non-skippable SDLC (requirements→design→implement→test→integrate→deploy→operate), ships via CI/CD, and produces REPRODUCIBLE work — same spec ⇒ same process/gates/contracts, and repos that clone-and-run the same for anyone. Human diff review is retired: an unread-safe mechanical bar (complexity ceilings, closed type escapes, dup/dead-code and multi-OS CI) plus a gate and an adversarial skeptic are the judgment layer, and every judgment is recorded with its reasoning on the task Issue. Zero setup — the org is discovered from the working directory, so several repositories can run from one environment. Guardrails enforce as PreToolUse hooks that actually block. Harness-neutral core; this is the Claude Code projection.",
   "author": {
     "name": "shikamasaki"

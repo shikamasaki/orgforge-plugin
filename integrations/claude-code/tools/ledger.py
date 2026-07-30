@@ -397,7 +397,15 @@ _VIEW_FROM_CACHE = None
 
 
 def _schema_path():
-    """ledger-schema.yaml の場所。org のもの → プラグインのテンプレート、の順に探す。"""
+    """ledger-schema.yaml の場所。org のもの → プラグインのテンプレート、の順に探す。
+
+    `ORG_LEDGER_SCHEMA` が勝つ（discover 系と同じ規律 — env は「本当に上書きが必要な場合」の
+    ための逃げ道）。**壊れた／存在しない schema を指した状態を検査できることも要件**である。
+    検証できない状態で書かないことを、実際に確かめられなければ意味がない。
+    """
+    env = os.environ.get("ORG_LEDGER_SCHEMA")
+    if env:
+        return env if os.path.exists(env) else None
     here = os.path.dirname(os.path.abspath(__file__))
     cands = []
     try:
@@ -441,15 +449,196 @@ def _view_from():
 _ALL_CLASS_VIEWS = ("ledger_census", "recent_ledger_census")
 
 
+# ══ Writer Phase 0 — schema 境界 / lock / fsync / HEAD 回復 ═══════════════════
+#
+# **actor には触らない。** ここで扱うのは「書き込みが壊れないこと」と「新規イベントが検証済み
+# であること」だけで、誰が書いたのかの認証（identity_assurance）は別の軸として後で扱う。
+# 混ぜると、schema を検証しただけで actor も信頼できるという読み違いを招く。
+#
+#   validation_assurance:  legacy_unvalidated | validated:v1
+#   identity_assurance:    claimed | observed | attested | authenticated   ← 未着手
+#
+# **schema_version は writer が付ける。** クライアントが指定できるなら、緩い版を名指しして
+# 検証を素通りできる（downgrade）。指定されたら拒否する。
+
+LEDGER_SCHEMA_VERSION = 1          # 台帳の形式。プラグインの version とは連動させない —
+                                   # コード修正のたびに形式が変わったことにしてはいけない。
+
+
+def _envelope_core_keys(ev):
+    """hash が覆うフィールド。**version ごとに切り替える。**
+
+    v1 以降は `schema_version` を hash に含める — 含めないと、書き換えても検出できないので
+    downgrade の拒否が意味を持たない。legacy（version なし）は従来の6フィールドで検証する。
+    validator は過去 version を変更せず追加する、という規律の具体形である。
+    """
+    if ev.get("schema_version"):
+        return ("id", "seq", "ts", "actor", "class", "payload",
+                "schema_id", "schema_version", "schema_sha256")
+    return ("id", "seq", "ts", "actor", "class", "payload")
+
+
+def schema_digest():
+    """使っている ledger-schema.yaml の digest。形式が入れ替わったことを後から検出できる。"""
+    path = _schema_path()
+    if not path or not os.path.isfile(path):
+        return None
+    with open(path, "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()[:32]
+
+
+def _known_classes():
+    """schema が宣言しているイベントクラス。読めなければ None（呼び側が fail-closed する）。"""
+    path = _schema_path()
+    if not path or not os.path.isfile(path):
+        return None
+    try:
+        import yaml
+        with open(path, encoding="utf-8") as f:
+            doc = yaml.safe_load(f) or {}
+    except Exception:
+        return None
+    ec = doc.get("event_classes")
+    if not isinstance(ec, dict):
+        return None
+    return set(ec.keys())
+
+
+def _validate_new_event(cls, payload):
+    """新規 append の検証。**既存イベントには遡って適用しない** — さもないと移行できない。
+
+    返り値は None（通過）か、拒否理由の文字列。
+    """
+    known = _known_classes()
+    if known is None:
+        return ("ledger-schema.yaml を読めないので、新規 append の検証ができない。\n"
+                "  **検証できないまま書かない** — 検証済みでないものが validated として"
+                "台帳に残る方が悪い。schema の場所と PyYAML を確認すること。")
+    if cls not in known:
+        near = sorted(k for k in known if k[:4] == cls[:4])
+        return (f"未知のイベントクラス {cls!r}（ledger-schema.yaml の event_classes に無い）。"
+                + (f"\n  近いもの: {', '.join(near)}" if near else "")
+                + "\n  クラスを増やすなら schema に宣言してから書くこと — 宣言の無いクラスは"
+                  "projection にも sensor にも乗らず、書いても読まれない。")
+    if not isinstance(payload, dict):
+        return f"payload は map でなければならない（{type(payload).__name__} が来た）。"
+    return None
+
+
+
+def _now_iso():
+    """writer 側の時刻。**"UNSET" を書かない。**
+
+    受け入れ条件8: timestamp は writer が付ける。クライアントが決められるなら、順序を偽れる。
+    実データには `ts: "UNSET"` のイベントが残っており（不正な timestamp が受理されていた）、
+    窓で絞る view や sensor はそれを黙って落とすか、境界の外に置く。
+
+    イベント `id` は (seq, class, payload) からのみ導出されるので、ここに時計が入っても
+    append の決定性は損なわれない — 同じ論理イベントは同じ id になる。
+    """
+    import datetime as _dt
+    return _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def _canonical(ev):
     """The bytes the hash covers: id,seq,ts,actor,class,payload in a fixed, sorted-key form.
     Canonical JSON (sorted keys, no incidental whitespace) so the hash is reproducible."""
-    core = {k: ev[k] for k in ("id", "seq", "ts", "actor", "class", "payload")}
+    core = {k: ev[k] for k in _envelope_core_keys(ev) if k in ev}
     return json.dumps(core, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
 def _hash(prev_hash, ev):
     return hashlib.sha256((prev_hash + _canonical(ev)).encode("utf-8")).hexdigest()
+
+
+
+class _LedgerLock:
+    """append 全体を1つの critical section にする排他ロック。
+
+    **これが無いと、並列 append が全て同じ seq を計算する。** 実測（監査）: 12並列で12件すべてが
+    seq=1 になり、検証は seq gap/disorder で落ちた。`log を読む → seq を決める → 書く →
+    HEAD を更新する` の全体が1つの操作でなければならない。
+
+    6 worktree で並列に回している org なので、これは理論上の危険ではない。
+    """
+
+    def __init__(self, root):
+        self.path = os.path.join(root, "LOCK")
+        self.fh = None
+
+    def __enter__(self):
+        os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
+        self.fh = open(self.path, "a+")
+        try:
+            import fcntl
+            fcntl.flock(self.fh.fileno(), fcntl.LOCK_EX)
+        except Exception:
+            # fcntl が無い環境（Windows 等）。**ロックできないことを黙らない。**
+            print("ledger: このプラットフォームでは append をロックできない — "
+                  "並列 append は seq を衝突させる。逐次で実行すること。", file=sys.stderr)
+        return self
+
+    def __exit__(self, *exc):
+        try:
+            import fcntl
+            fcntl.flock(self.fh.fileno(), fcntl.LOCK_UN)
+        except Exception:
+            pass
+        try:
+            self.fh.close()
+        except Exception:
+            pass
+        return False
+
+
+def _fsync_dir(path):
+    """ディレクトリの fsync。rename の永続化はこれが無いと保証されない。"""
+    try:
+        fd = os.open(path, os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    except Exception:
+        pass                     # 一部の FS は不可。落とすほどのことではない
+
+
+def _head_from_log(root):
+    """log から HEAD を **再構築** する。HEAD は権威ではなく cache である。
+
+    **log 全体が健全なときだけ再構築する。** 途中の破損（torn line、seq の飛び、hash 不一致）を
+    自動修復してはいけない — 壊れた記録の上に整合した HEAD を載せると、壊れていることが
+    分からなくなる。破損は fail-closed で報告する。
+
+    返り値: (head, error). error があれば append してはいけない。
+    """
+    log, _ = _paths(root)
+    if not os.path.isfile(log):
+        return {"seq": 0, "hash": "GENESIS"}, None
+    prev, expect, last = "GENESIS", 1, None
+    with open(log, encoding="utf-8") as f:
+        for lineno, line in enumerate(f, 1):
+            if not line.strip():
+                continue
+            if not line.endswith("\n"):
+                return None, (f"log の {lineno} 行目が改行で終わっていない（torn line — "
+                              f"書き込み途中で落ちた痕跡）。**自動修復しない。** "
+                              f"内容を確認して手当てすること。")
+            try:
+                ev = json.loads(line)
+            except Exception as e:
+                return None, f"log の {lineno} 行目が JSON として読めない: {e}"
+            if ev.get("seq") != expect:
+                return None, (f"seq の飛び／順序違反: {lineno} 行目で {expect} を期待したが "
+                              f"{ev.get('seq')} だった。")
+            if ev.get("prev_hash") != prev:
+                return None, f"prev_hash 不一致（seq={ev.get('seq')}）— 鎖が切られている。"
+            if _hash(prev, ev) != ev.get("hash"):
+                return None, f"hash 不一致（seq={ev.get('seq')}）— 書き換えの痕跡。"
+            prev, last, expect = ev["hash"], ev, expect + 1
+    if last is None:
+        return {"seq": 0, "hash": "GENESIS"}, None
+    return {"seq": last["seq"], "hash": last["hash"]}, None
 
 
 def _paths(root):
@@ -490,8 +679,27 @@ def cmd_append(a):
         print("append: payload must not carry its own 'actor' — actor comes from --actor "
               "(runtime identity), never the event body (ledger-schema §envelope)", file=sys.stderr)
         return 2
-    hist = _read_events(a.root)
-    head = _read_head(a.root)
+    # **schema_version は writer が付ける。** クライアントが名指しできるなら、緩い版を指定して
+    # 検証を素通りできる（downgrade）。payload 経由でも envelope 経由でも受け取らない。
+    # 禁じるのは **版を名指しする値** だけ。`schema_id` は
+    # `schema_enforcement_started` のような「スキーマ境界そのものを記録する」イベントが
+    # payload に持って自然な値で、downgrade の的にはならない（版ではないので）。
+    # 禁止を広く取りすぎると、記録したい事実が書けなくなる（実際に自分の epoch 記録が弾かれた）。
+    for k in ("schema_version", "schema_sha256"):
+        if isinstance(payload, dict) and k in payload:
+            print(f"append: payload に {k!r} を含めてはいけない — schema の版は writer が"
+                  f"決める。クライアントが名指しできると、緩い版を指定して検証を迂回できる。",
+                  file=sys.stderr)
+            return 2
+        if getattr(a, k, None):
+            print(f"append: --{k.replace('_', '-')} は受け取らない — schema の版は writer が"
+                  f"決める（downgrade 防止）。", file=sys.stderr)
+            return 2
+    # 新規 append だけを検証する。既存イベントに遡って適用すると移行できない。
+    bad = _validate_new_event(a.cls, payload)
+    if bad:
+        print(f"append: {bad}", file=sys.stderr)
+        return 2
     # ── idempotency (docs/11 §0 reproducibility): if a natural key is given, this event is a
     # RETRY of a logical event that must be counted once. A replayed/re-fired cycle (a hook that
     # re-fires PreToolUse, a resumed session, a crash-retry) must NOT double-append — else the
@@ -505,46 +713,91 @@ def cmd_append(a):
     # （DISTINCT_ACTOR / REQUIRES_PRIOR）は評価すらされなかった。実地では、gate の判定と
     # 同じキー `admission_decided-11` を maker が使うと、自己承認が「既に記録済み」として
     # exit 0 で通った。冪等性は再実行を守るための仕組みであって、統制を迂回する裏口ではない。
-    nk = getattr(a, "natural_key", None)
-    if nk:
-        for e in hist:
-            if e["class"] != a.cls or e.get("payload", {}).get("_nk") != nk:
-                continue
-            if e.get("actor") != a.actor:
-                print(f"append: {a.cls} rejected — natural key {nk!r} は既に "
-                      f"actor {e.get('actor')!r} が seq={e['seq']} で使っている。\n"
-                      f"  別の actor が同じキーで書くのは再実行ではない。冪等 no-op で通すと、"
-                      f"自己承認や順序違反が『既に記録済み』として統制を素通りする"
-                      f"（実地で確認）。判定ごとに一意なキーを使うこと。", file=sys.stderr)
-                return 3
-            print(f"append: idempotent no-op — {a.cls} with natural key {a.natural_key!r} "
-                  f"already recorded at seq={e['seq']} id={e['id']} (docs/11 §0). Not re-appended.")
-            return 0
-        payload["_nk"] = a.natural_key   # stamp the key so a future retry can find this event
-    seq = head["seq"] + 1
-    # id is derived from (seq, class, canonical payload) so append is deterministic and
-    # idempotent under replay — no wall-clock/random id (docs/08: tools stay deterministic).
-    eid = "e" + hashlib.sha256(
-        f"{seq}:{a.cls}:{json.dumps(payload, sort_keys=True, ensure_ascii=False)}".encode()
-    ).hexdigest()[:12]
-    ev = {"id": eid, "seq": seq, "ts": a.ts or "UNSET", "actor": a.actor,
-          "class": a.cls, "payload": payload, "prev_hash": head["hash"]}
-    if a.cls in REQUIRES_PRIOR and not REQUIRES_PRIOR[a.cls](ev, hist):
-        why = REQUIRES_PRIOR_WHY.get(a.cls, "a required prior event does not exist")
-        print(f"append: {a.cls} rejected — requires a prior event that does not exist: {why} "
-              f"(ledger-schema §event_classes {a.cls}.requires_prior)", file=sys.stderr)
-        return 3
-    sod = _distinct_actor_violation(ev, hist)
-    if sod:
-        print(f"append: {sod}", file=sys.stderr)
-        return 3
-    ev["hash"] = _hash(head["hash"], ev)
+    # **ここから書き込みまでを1つの critical section にする。** log を読む → seq を決める →
+    # 書く → HEAD を更新する、が分かれていると並列 append が同じ seq を計算する
+    # （実測: 12並列で12件すべて seq=1）。
     os.makedirs(a.root, exist_ok=True)
-    log, headp = _paths(a.root)
-    with open(log, "a", encoding="utf-8") as f:
-        f.write(json.dumps(ev, ensure_ascii=False) + "\n")
-    with open(headp, "w", encoding="utf-8") as f:
-        json.dump({"seq": seq, "hash": ev["hash"]}, f)
+    with _LedgerLock(a.root):
+        # **健全性の検査を先に置く。** `_read_events` は破損で例外を投げるので、そこに入る前に
+        # log を検査して、拒否理由を人が読める形で出す。トレースバックは「壊れている」ことを
+        # 伝える手段としては弱く、呼び出し側（hook / organ）も扱えない。
+        head, err = _head_from_log(a.root)
+        if err:
+            print(f"append: log が健全でないので追記しない — {err}\n"
+                  f"  **壊れた記録の上に整合した HEAD を載せない。** 壊れていることが"
+                  f"分からなくなる。", file=sys.stderr)
+            return 4
+        hist = _read_events(a.root)
+        cached = _read_head(a.root)
+        if cached != head and cached != {"seq": 0, "hash": "GENESIS"}:
+            print(f"append: HEAD が log と食い違っていたので log から再構築した"
+                  f"（HEAD={cached.get('seq')} / log={head['seq']}）— "
+                  f"HEAD は cache なので log を正とする。", file=sys.stderr)
+
+        nk = getattr(a, "natural_key", None)
+        if nk:
+            for e in hist:
+                if e["class"] != a.cls or e.get("payload", {}).get("_nk") != nk:
+                    continue
+                if e.get("actor") != a.actor:
+                    print(f"append: {a.cls} rejected — natural key {nk!r} は既に "
+                          f"actor {e.get('actor')!r} が seq={e['seq']} で使っている。\n"
+                          f"  別の actor が同じキーで書くのは再実行ではない。冪等 no-op で通すと、"
+                          f"自己承認や順序違反が『既に記録済み』として統制を素通りする"
+                          f"（実地で確認）。判定ごとに一意なキーを使うこと。", file=sys.stderr)
+                    return 3
+                # **同じキー・同じ actor でも payload が違えば再実行ではない。**
+                prior_pl = {k: v for k, v in (e.get("payload") or {}).items() if k != "_nk"}
+                now_pl = {k: v for k, v in payload.items() if k != "_nk"}
+                if prior_pl != now_pl:
+                    print(f"append: {a.cls} rejected — natural key {nk!r} は seq={e['seq']} に"
+                          f"あるが、payload が違う。\n"
+                          f"  同じキーで中身の違うものを書くのは再実行ではない。"
+                          f"no-op で通すと、後から書いた内容が黙って捨てられる。\n"
+                          f"  差し替えるなら correction を追記してからにすること。",
+                          file=sys.stderr)
+                    return 3
+                print(f"append: idempotent no-op — {a.cls} with natural key {nk!r} "
+                      f"already recorded at seq={e['seq']} id={e['id']} (docs/11 §0). "
+                      f"Not re-appended.")
+                return 0
+            payload["_nk"] = nk
+        seq = head["seq"] + 1
+        eid = "e" + hashlib.sha256(
+            f"{seq}:{a.cls}:{json.dumps(payload, sort_keys=True, ensure_ascii=False)}".encode()
+        ).hexdigest()[:12]
+        # ts は writer が付ける（受け入れ条件8）。クライアントの --ts は移行のため残すが、
+        # 与えられなければ writer の時計を使う — "UNSET" を書かない。
+        ts = a.ts or _now_iso()
+        ev = {"id": eid, "seq": seq, "ts": ts, "actor": a.actor,
+              "class": a.cls, "payload": payload,
+              "schema_id": "orgforge-ledger",
+              "schema_version": LEDGER_SCHEMA_VERSION,
+              "schema_sha256": schema_digest() or "",
+              "prev_hash": head["hash"]}
+        if a.cls in REQUIRES_PRIOR and not REQUIRES_PRIOR[a.cls](ev, hist):
+            why = REQUIRES_PRIOR_WHY.get(a.cls, "a required prior event does not exist")
+            print(f"append: {a.cls} rejected — requires a prior event that does not exist: {why} "
+                  f"(ledger-schema §event_classes {a.cls}.requires_prior)", file=sys.stderr)
+            return 3
+        sod = _distinct_actor_violation(ev, hist)
+        if sod:
+            print(f"append: {sod}", file=sys.stderr)
+            return 3
+        ev["hash"] = _hash(head["hash"], ev)
+        log, headp = _paths(a.root)
+        # append → fsync(log) → HEAD を一時ファイルへ → atomic rename → fsync(dir)
+        with open(log, "a", encoding="utf-8") as f:
+            f.write(json.dumps(ev, ensure_ascii=False) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+        tmp = headp + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"seq": seq, "hash": ev["hash"]}, f)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, headp)
+        _fsync_dir(a.root)
     print(f"appended seq={seq} {a.cls} id={eid} hash={ev['hash'][:12]}…")
     return 0
 
@@ -562,6 +815,7 @@ def cmd_verify(a):
         return 1
     prev = "GENESIS"
     expect_seq = 1
+    validated = legacy = 0
     for ev in events:
         if ev["seq"] != expect_seq:
             print(f"BROKEN: seq gap/disorder at line — expected seq {expect_seq}, got {ev['seq']}",
@@ -575,8 +829,32 @@ def cmd_verify(a):
             print(f"BROKEN: hash mismatch at seq {ev['seq']} — event {ev['id']} was edited "
                   f"after it was written (tamper evidence)", file=sys.stderr)
             return 1
+        # 条件6: **version 別の validator を再実行する。** 鎖が通っていることは「書き換えられて
+        # いない」ことしか言わず、「schema に沿っている」ことは言わない。version を持つ
+        # イベントだけを検証する — legacy に遡って適用すると移行できない。
+        v = ev.get("schema_version")
+        if v:
+            if v > LEDGER_SCHEMA_VERSION:
+                print(f"BROKEN: seq {ev['seq']} は未知の schema_version {v} "
+                      f"（この writer は v{LEDGER_SCHEMA_VERSION} まで）。"
+                      f"新しい版で書かれた台帳を古い道具で読んでいる。", file=sys.stderr)
+                return 1
+            bad = _validate_new_event(ev.get("class"), ev.get("payload"))
+            if bad:
+                print(f"BROKEN: seq {ev['seq']} が v{v} の検証を通らない — {bad}",
+                      file=sys.stderr)
+                return 1
+            validated += 1
+        else:
+            legacy += 1
         prev = ev["hash"]
         expect_seq += 1
+    if validated or legacy:
+        # **2つの保証を混ぜない。** schema 検証済みかと actor 認証済みかは独立した性質である。
+        print(f"validation_assurance: validated:v{LEDGER_SCHEMA_VERSION} {validated} 件 / "
+              f"legacy_unvalidated {legacy} 件"
+              + ("\n  legacy は読めるが、schema 検証済みとしては扱わない"
+                 "（遡って拒否すると移行できない）。" if legacy else ""))
     head = _read_head(a.root)
     if head["hash"] != prev:
         print(f"BROKEN: HEAD hash {head['hash'][:12]}… does not match chain tip {prev[:12]}…",

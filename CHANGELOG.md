@@ -6,6 +6,59 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 0.33.0 — Ledger writer, Phase 0
+
+Makes the ledger's write path survive concurrency and crashes, and validates new events against the
+schema. **It does not touch `actor`.** Identity remains self-declared; `validation_assurance` and
+`identity_assurance` are deliberately separate axes, and only the first one moves here.
+
+### Added
+- **Every append is one critical section** (`flock` on `<root>/LOCK`), covering read → seq → write →
+  HEAD. Measured before: 12 concurrent appends all computed `seq=1` and verification failed on
+  seq disorder. Measured after: seq 1–12, no duplicates, chain intact. Platforms without `fcntl`
+  are told they cannot lock rather than silently racing.
+- **Durable write order**: append → `fsync(log)` → HEAD to a temp file → `fsync` → atomic rename →
+  `fsync(dir)`. **HEAD is now a cache, not the authority** — it is rebuilt from the log, and a HEAD
+  that disagrees is reported and replaced.
+- **Interior damage fails closed.** A torn (unterminated) line, a seq gap, a `prev_hash` break or a
+  hash mismatch refuses the append with exit 4 instead of writing a consistent HEAD on top of a
+  broken log. Previously a malformed line surfaced as a Python traceback.
+- **Schema validation on new appends only.** The writer stamps `schema_id`, `schema_version` and
+  `schema_sha256` into the envelope, and these are covered by the hash for v1+ events (a version
+  outside the hash could be rewritten, which would make refusing a downgrade meaningless). Events
+  without a version stay readable as `legacy_unvalidated` — validating retroactively would make
+  migration impossible. `verify` re-runs the per-version validator and reports both counts.
+- **The client cannot name the schema version.** `schema_version` / `schema_sha256` in the payload or
+  on the command line are refused as downgrade attempts. `schema_id` is allowed, since a
+  boundary-recording event holds it naturally (refusing it broke this release's own epoch record).
+- **Unknown event classes are refused**, and an unreadable schema refuses the append rather than
+  writing something unvalidated.
+- `ts` is stamped by the writer. `UNSET` timestamps exist in real ledgers and any window-filtered
+  view silently drops them.
+- `schema_enforcement_started` — an **optional** audit record of where enforcement began. The
+  normative record of which validator applies is each event's own envelope; this event may be absent.
+- Same natural key with a **different payload** is now refused. Previously it was a no-op, which
+  silently discarded the second write.
+
+### Fixed — surfaced by the validation itself
+- **Five event classes the tools write were never declared in `ledger-schema.yaml`**:
+  `design_decided`, `rework_requested`, `scope_decided`, `tradeoff_decided`, `deploy_decided`.
+  A live ledger holds 5 and 23 of the first two. Undeclared classes ride in no projection and no
+  sensor — they are written and never read, which is part of why the rework warning stayed quiet.
+  All five are now declared, shaped to match the real payloads.
+- Two tests seeded a ledger by hand-writing events with no `hash`/`prev_hash`. The health check
+  correctly refuses to append onto a chain that was never a chain; the tests now seed through the
+  real append.
+
+### Migration
+Orgs keep their own copy of `ledger-schema.yaml`, so **an existing org must take the new class
+declarations or its appends will be refused as unknown classes** — this repo's live org needed
+exactly that. Existing events are untouched and stay `legacy_unvalidated`.
+
+### Still not fixed
+Actor spoofing (Phase 2), unpersisted organ emits with the cap fail-open they imply, and the absent
+halt state machine. `lineage` and separation of duties remain evidence, not authenticated boundaries.
+
 ## 0.32.3
 
 Closes the last gap the audit left open in `review_subject_id`, before the ledger-writer work starts.
