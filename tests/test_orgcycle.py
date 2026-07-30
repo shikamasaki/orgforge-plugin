@@ -980,3 +980,80 @@ def test_intake_emits_a_machine_readable_verdict_line():
                         "--report", "verdict: survives。npm test → 60 passed。"],
                        capture_output=True, text=True, timeout=60)
     assert q.returncode == 0 and "INCOMPLETE" not in q.stderr
+
+
+# ── 0.29.0: CI を触る統合で job 構成を見せる ──────────────────────────────
+def _ci_repo(tmp_path, ci_yaml):
+    repo = tmp_path / "r"; repo.mkdir()
+    def g(*a, cwd=repo):
+        return subprocess.run(["git", *a], cwd=cwd, capture_output=True, text=True)
+    g("init", "-q", "-b", "main"); g("config", "user.email", "t@t"); g("config", "user.name", "t")
+    (repo / ".github" / "workflows").mkdir(parents=True)
+    (repo / ".github" / "workflows" / "ci.yml").write_text(ci_yaml, encoding="utf-8")
+    g("add", "-A"); g("commit", "-qm", "seed"); g("branch", "develop")
+    g("checkout", "-q", "-b", "feat/issue-42")
+    (repo / ".github" / "workflows" / "ci.yml").write_text(ci_yaml + "\n# added\n", encoding="utf-8")
+    g("commit", "-qam", "ci: add")
+    return repo
+
+
+_CI_CONDITIONAL = """name: CI
+on:
+  push:
+    branches: [develop]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: npm test
+  db-test:
+    runs-on: ubuntu-latest
+    steps:
+      - id: probe
+        run: echo present=true >> $GITHUB_OUTPUT
+      - if: steps.probe.outputs.present == 'true'
+        run: git diff --exit-code -- public docs
+"""
+
+_CI_PLAIN = """name: CI
+on:
+  push:
+    branches: [develop]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: npm test
+"""
+
+
+def test_integrate_plan_flags_a_conditional_ci_job(tmp_path):
+    """YAML が妥当でテストが緑でも、条件付き job に入ったステップは走らない。
+
+    運用では union でのマージ結果が条件付き job の末尾に入り、依存する Issue が未統合の間、
+    追加した検査が一度も走っていなかった。step の `if:` は `- if:` の形でも書けるので、
+    ハイフンを見落とすと**まさに捕まえたい形**を落とす。
+    """
+    repo = _ci_repo(tmp_path, _CI_CONDITIONAL)
+    p = subprocess.run([sys.executable, str(TOOLS / "org_cycle.py"), "integrate",
+                        "--issue", "42", "--plan"],
+                       capture_output=True, text=True, cwd=str(repo), timeout=60)
+    out = p.stdout + p.stderr
+    assert "CI を触っている" in out, out
+    assert "db-test（if: 条件付き）" in out, out
+    assert "条件を満たさない間その検査は一度も走らない" in out
+
+
+def test_integrate_plan_lists_only_real_jobs(tmp_path):
+    """`on:` の子（pull_request / push）を job と誤認しないこと。条件が無ければ黙る。"""
+    repo = _ci_repo(tmp_path, _CI_PLAIN)
+    p = subprocess.run([sys.executable, str(TOOLS / "org_cycle.py"), "integrate",
+                        "--issue", "42", "--plan"],
+                       capture_output=True, text=True, cwd=str(repo), timeout=60)
+    out = p.stdout + p.stderr
+    assert "job: test" in out, out
+    for wrong in ("pull_request", "push", "permissions"):
+        assert wrong not in out.split("job:")[1].split("\n")[0], f"{wrong} を job と誤認した"
+    assert "条件付きの job がある" not in out, "条件が無いのに警告した"

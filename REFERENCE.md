@@ -201,7 +201,9 @@ python3 tools/org_cycle.py  handback  --issue N [--summary S] [--result OUT]
                             # push → develop 宛 PR（body に Closes #N）→ Issue へ log
 python3 tools/org_cycle.py  integrate --issue N [--test "npm test"] [--plan]
                             # --plan: 何も実行せず「何を統合するか」を見せる。変更ファイル・
-                            # コミット数・**並行 worktree との重複**（衝突の予告）・前提の可否
+                            # コミット数・**並行 worktree との重複**（衝突の予告）・前提の可否・
+                            # **CI を触るなら job 構成と `if:` の有無**（条件付き job に入った
+                            # ステップは、YAML が妥当でテストが緑でも一度も走らない）
                             # gate の admit と skeptic の survives が**台帳に**無ければ止まる。
                             # マージ → 統合後テスト → integration_admitted → Issue へ log
 python3 tools/org_cycle.py  gc        [--base develop] [--all]

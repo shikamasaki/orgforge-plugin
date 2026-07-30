@@ -24,9 +24,10 @@ from ._core import (
 def _integrate_preview(issue, branch, base, test):
     """統合前に「何を統合するか」を見せる。**衝突しそうな箇所の予告が主目的。**
 
-    統合後に失敗が出ても、その多くが worktree 走査の偽陽性で、切り分けに時間がかかる。事前に分かれば早い。並行する他の worktree が同じファイルを触っていれば、
-    それも出す — 複数の Issue が並行して同じマニフェストを触っている状態では、
-    「後で分かる」より「先に見える」ほうが安い。
+    統合後に失敗が出ても、その多くが worktree 走査の偽陽性で、切り分けに時間がかかる。
+    事前に分かれば早い。並行する他の worktree が同じファイルを触っていれば、それも出す —
+    複数の Issue が並行して同じマニフェストを触っている状態では、「後で分かる」より
+    「先に見える」ほうが安い。
     """
     L = []
     code, files = _raw(["git", "diff", "--name-only", f"{base}...{branch}"])
@@ -59,6 +60,48 @@ def _integrate_preview(issue, branch, base, test):
                 overlaps[other] = shared
     for other, shared in overlaps.items():
         L.append(f"  ⚠ #{other} も同じファイルを変更しています: {', '.join(shared[:5])}")
+
+    # CI のワークフローを触る統合は、**どの job にステップが入ったか**を見せる。
+    # YAML として妥当でテストが緑でも、**条件付きでしか走らない job にステップが入ると
+    # その検査は一度も走らない**。運用では union でのマージ結果が条件付き job の末尾に入り、
+    # 依存する Issue が未統合の間、追加した検査が動いていなかった。
+    # **YAML の意味は読まない** — job 名と `if:` の有無だけを出す。判定は人がする。
+    for f in changed:
+        if not re.search(r"\.github/workflows/.+\.ya?ml$", f):
+            continue
+        code, ci = _raw(["git", "show", f"{branch}:{f}"])
+        if code != 0:
+            continue
+        # **`jobs:` 配下だけを見る。** トップレベルには `on:` `permissions:` などがあり、
+        # その子（`pull_request:` `push:`）を job と誤認する（最初の実装がそうなった）。
+        jobs, cur, conditional = [], None, set()
+        in_jobs = False
+        for line in (ci or "").split("\n"):
+            if re.match(r"^jobs:\s*$", line):
+                in_jobs = True
+                continue
+            if in_jobs and re.match(r"^\S", line):
+                in_jobs = False          # 次のトップレベルキーで抜ける
+            if not in_jobs:
+                continue
+            m = re.match(r"^  ([A-Za-z0-9_-]+):\s*$", line)
+            if m:
+                cur = m.group(1)
+                jobs.append(cur)
+                continue
+            # job 自身の `if:` と、その job のどれかの step の `if:` の両方を数える —
+            # どちらでも「条件を満たさない間その検査は走らない」ことになる
+            # step の `if:` は `- if: …` の形でも書ける（リストの先頭要素）。ハイフンを
+            # 見落とすと、**まさに捕まえたい形**（step 単位の条件付き実行）を落とす。
+            if cur and re.match(r"^\s{4,}(?:-\s+)?if:\s*\S", line):
+                conditional.add(cur)
+        if jobs:
+            L.append(f"  ⚠ CI を触っている: {f}")
+            L.append(f"      job: {', '.join(j + '（if: 条件付き）' if j in conditional else j for j in jobs)}")
+            if conditional:
+                L.append(f"      **条件付きの job がある。** 追加したステップがそこに入っていると、"
+                         f"条件を満たさない間その検査は一度も走らない — YAML が妥当でテストが"
+                         f"緑でも、検査していないことに気づけない。入った先を確かめること。")
 
     # develop の現状（統合先が既に壊れていないか）
     L.append(f"  統合後に走るもの: {test}")

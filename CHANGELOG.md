@@ -6,6 +6,14 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 0.29.0
+
+### Added
+- `integrate --plan` lists the jobs of any `.github/workflows/*.yml` the merge touches and marks
+  those carrying an `if:` condition — on the job or on any of its steps. A merge that unions a CI
+  file can land steps in a job that only runs conditionally, so the check never executes while the
+  YAML is valid and the suite is green. It reports the structure; reading it is the operator's job.
+
 ## 0.28.2
 
 ### Documentation
