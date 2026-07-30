@@ -846,9 +846,44 @@ def _in_window(ev, since, until):
     return True
 
 
+
+def require_writer_path(op):
+    """`ORG_WRITER_SOCKET` が設定された org では、**writerd を通らない書き込みを拒否する**。
+
+    段階A（process_mediated）で強制できるのは「経路が1つであること」だけである。
+    **これは OS 境界ではない** — 同じ UID の caller は daemon を止められ、この環境変数も外せる。
+    したがって `workload_isolation` は `process_mediated` であって `separate_uid` ではない。
+
+    別 UID + root 所有の socket 親ディレクトリまで揃えば、環境変数を外しても台帳のファイルに
+    書けなくなる（OS 権限で失敗する）。そこで初めて境界になる。
+
+    返り値: None なら続行してよい。文字列なら拒否の理由。
+    """
+    if os.environ.get("ORG_INSIDE_WRITER") == "1":
+        return None                     # writerd 自身が呼んでいる
+    sock = os.environ.get("ORG_WRITER_SOCKET")
+    if not sock:
+        return None                     # writerd を使わない org（従来どおり）
+    return (f"この org は writerd 経由の書き込みだけを許している"
+            f"（ORG_WRITER_SOCKET={sock}）。\n"
+            f"  `{op}` を直接実行せず、writerd に送ること:\n"
+            f"    python3 tools/writer_client.py {op} -- <引数…>\n"
+            f"  **台帳への経路を1つにするのが目的である。** 経路が複数あると、"
+            f"「検査に使う記録は検査する側だけが書ける」を強制できない。\n"
+            f"  注意: これは OS 境界ではない（同一 UID なら daemon を止められる）。"
+            f"workload_isolation は process_mediated である。")
+
+
 def cmd_append(a):
     """Append one event under the hash chain. actor is from --actor (runtime identity),
     never the payload. seq is gapless. requires_prior is enforced against real history."""
+    _wp = require_writer_path("append")
+    if _wp:
+        print(json.dumps({"ok": False, "reason": "direct_write_refused", "detail": _wp},
+                         ensure_ascii=False) if "append" != "append" else f"append: {_wp}",
+              file=sys.stderr if "append" == "append" else sys.stdout)
+        return 4
+
     try:
         payload = json.loads(a.payload)
     except json.JSONDecodeError as e:
@@ -1287,6 +1322,13 @@ def cmd_reserve_exposure(a):
     衝突を防げない。**欠落していれば metered action を deny する** — 同一性を確かめられないなら、
     hook の再実行を二重計上しないという保証が成り立たない。
     """
+    _wp = require_writer_path("reserve-exposure")
+    if _wp:
+        print(json.dumps({"ok": False, "reason": "direct_write_refused", "detail": _wp},
+                         ensure_ascii=False) if "reserve-exposure" != "append" else f"reserve-exposure: {_wp}",
+              file=sys.stderr if "reserve-exposure" == "append" else sys.stdout)
+        return 4
+
     for k in ("session_id", "tool_use_id", "rule"):
         if not (getattr(a, k, None) or "").strip():
             print(json.dumps({"decision": "deny", "reason": f"missing_{k}",
@@ -1545,6 +1587,13 @@ def cmd_trip_halt(a):
     ラッチが残って台帳が空になった場合、`active_halt` は `latch_only` として halt を報告する。
     **止まりすぎる方向の失敗**であり、それが正しい向きである。
     """
+    _wp = require_writer_path("trip-halt")
+    if _wp:
+        print(json.dumps({"ok": False, "reason": "direct_write_refused", "detail": _wp},
+                         ensure_ascii=False) if "trip-halt" != "append" else f"trip-halt: {_wp}",
+              file=sys.stderr if "trip-halt" == "append" else sys.stdout)
+        return 4
+
     if not (a.reason or "").strip():
         print(json.dumps({"halted": False, "reason": "missing_reason",
                           "detail": "--reason が必要。なぜ止めたのかが記録されない halt は、"
@@ -1653,6 +1702,13 @@ def cmd_release_halt(a):
     逆順にすると、ラッチを消したあとに台帳への追記が失敗して **halt が消えたまま記録が無い**
     状態になる。それは「止まっていたのに、止まっていた証拠も止まっている状態も無い」である。
     """
+    _wp = require_writer_path("release-halt")
+    if _wp:
+        print(json.dumps({"ok": False, "reason": "direct_write_refused", "detail": _wp},
+                         ensure_ascii=False) if "release-halt" != "append" else f"release-halt: {_wp}",
+              file=sys.stderr if "release-halt" == "append" else sys.stdout)
+        return 4
+
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from identity import verify_receipt, observed_recorder
 

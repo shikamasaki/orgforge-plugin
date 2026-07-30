@@ -6,6 +6,54 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 0.39.0 — Authenticated Writer, stage A: one path to the ledger
+
+`decision_by` was verified from a receipt, but **the write path itself was open to anyone** — and so
+were the halt latch, the key registry and the schema. "A record used by a check is writable only by
+the checker" was declared, with nothing forcing the path to be singular.
+
+### Added
+- **`tools/writerd.py`** — a Unix-socket daemon that is the only writer. Under
+  `ORG_WRITER_SOCKET`, `ledger.py`'s four write operations (`append`, `reserve-exposure`,
+  `trip-halt`, `release-halt`) **refuse to run directly**.
+- **Requests carry a nonce and a digest over the whole body.** A tampered request is refused
+  (`request_tampered`); a replayed nonce is refused (`replayed_nonce`).
+- **The caller cannot choose the ledger path.** Write targets come from `--org NAME=ROOT` at startup;
+  a path in `argv` is refused (`path_in_argv`) and an unknown org is refused (`unknown_org`). Only
+  the four write ops are accepted (`unsupported_op`).
+- **The socket's parent directory is validated before connecting** — not a symlink, not
+  world-writable, owned by you or root. Whoever can write the parent can substitute the socket and
+  answer as a fake writer.
+- **Peer credentials (`LOCAL_PEERCRED` / `SO_PEERCRED`) feed `recorded_by` only.** Having connected is
+  not evidence of having judged; `decision_by` still comes from a signed receipt.
+- **`audit_writer_assets`** checks the latch, key registry, schema, ledger and HEAD. Making the ledger
+  path singular means nothing if the latch can be deleted, the registry swapped, or the rules relaxed.
+- **`tools/writer-install.sh`** (stage B, macOS) — idempotent, `--dry-run`, `--uninstall`. Creates a
+  dedicated role UID, makes the ledger writer-owned, the socket parent root-owned `1770`, and the
+  daemon/plist/config root-owned. Records the original owner and backs up the keys for rollback.
+- **`tools/writer-verify.sh`** — measures the boundary instead of trusting the installer: appending to
+  the ledger must fail, `chmod` must fail, moving the socket parent must fail, stopping the daemon must
+  fail, and RPC tampering/replay must be refused. **It refuses to run as root**, since root can do all
+  of it and would prove nothing.
+
+### What stage A does NOT give you
+**This is not an OS boundary.** At the same UID the caller can stop the daemon, restore file
+permissions, or replace `writerd.py` itself. So `workload_isolation` is recorded as
+**`process_mediated`**, and **H1's `separate_uid` remains unresolved**. Stage B needs a `sudo` step
+this session could not perform, so it ships as a script plus a verifier rather than as a claim.
+
+Even with stage B, **the host administrator is outside the threat model** — they can stop the daemon
+and take ownership back. The guarantee is: *a normal agent/caller UID cannot alter the writer's
+assets.* That is the definition of the boundary, not a shortfall.
+
+### Measured
+Writing through the daemon works and a direct append is refused (nothing lands). With the daemon
+stopped, both paths fail closed and the ledger stays empty. Tampering, replay, path injection, an
+unknown org and a non-write op are each refused. A world-writable or symlinked socket parent is
+refused, and asking for `--require-root-owned` at the same UID is refused **with the tool saying why
+`separate_uid` cannot be claimed**. An `AF_UNIX` path over the OS limit now reports that, instead of
+failing to bind for no visible reason.
+
 ## 0.38.0 — Authenticated Mode, and H4b: releasing a halt
 
 A different HMAC key proves only that *a key differs*. It does not prove a distinct principal, a

@@ -8,6 +8,7 @@ import pathlib
 import pytest
 import re
 import subprocess
+import time
 import sys
 
 from conftest import (REPO, TOOLS, TEMPLATE, run, seed, _cycle_src, _gh_src,
@@ -1502,3 +1503,254 @@ def test_releasing_when_nothing_is_halted_is_a_noop(tmp_path):
     assert _am_release(org, led, rc)[0] == 0
     code, d = _am_release(org, led, rc)
     assert code == 2 and d["reason"] == "no_active_halt"
+
+
+# ══ Authenticated Writer 段階A — 経路を1つにする（process_mediated）═══════════
+# **これは OS 境界ではない。** 同一 UID の caller は daemon を止められ、権限も戻せる。
+# 強制できるのは「台帳への経路が1つであること」までで、workload_isolation は
+# `process_mediated` にとどまる。`separate_uid` は別 UID + root 所有の親ディレクトリが要る。
+
+import socket as _socket
+
+
+def _wd_start(tmp_path):
+    """writerd を起動して (led, sock, proc) を返す。"""
+    led = tmp_path / ".orgforge" / "ledger"; led.mkdir(parents=True)
+    import shutil as _sh
+    _sh.copy(TEMPLATE / "ledger-schema.yaml", tmp_path / "ledger-schema.yaml")
+    (tmp_path / "constitution.yaml").write_text("enforcement: {}\n", encoding="utf-8")
+    # **socket は短いパスに置く。** pytest の tmp_path は AF_UNIX の上限（macOS 104 バイト）を
+    # 超える。実装側もその旨を報告するが、テストでは短い場所を使う。
+    import tempfile as _tf
+    sdir = pathlib.Path(_tf.mkdtemp(prefix="wd", dir="/tmp"))
+    sock = sdir / "w.sock"
+    proc = subprocess.Popen(
+        [sys.executable, str(TOOLS / "writerd.py"), "serve",
+         "--org", f"default={led}", "--socket", str(sock)],
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    for _ in range(80):
+        if sock.exists():
+            break
+        time.sleep(0.05)
+    return led, sock, proc
+
+
+def _wd_client(sock, *args, org="default"):
+    env = dict(os.environ, ORG_WRITER_SOCKET=str(sock))
+    r = subprocess.run([sys.executable, str(TOOLS / "writer_client.py"), "append",
+                        "--org", org, "--", *args],
+                       capture_output=True, text=True, env=env)
+    line = (r.stdout.splitlines() or ["{}"])[0]
+    try:
+        return r.returncode, json.loads(line)
+    except json.JSONDecodeError:
+        return r.returncode, {"raw": r.stdout + r.stderr}
+
+
+_WD_PAYLOAD = '{"role":"maker","candidate_id":"c1","phase":"implement"}'
+
+
+def test_writerd_accepts_a_request_and_direct_write_is_refused(tmp_path):
+    """**経路を1つにする。** writerd 経由なら書け、直接の append は拒否される。"""
+    led, sock, proc = _wd_start(tmp_path)
+    try:
+        code, d = _wd_client(sock, "--actor", "w", "--class", "progress_recorded",
+                             "--payload", _WD_PAYLOAD)
+        assert code == 0 and d.get("ok") is True, d
+        assert d["workload_isolation"] == "process_mediated"     # separate_uid とは呼ばない
+        assert (led / "ledger.jsonl").read_text(encoding="utf-8").strip()
+
+        env = dict(os.environ, ORG_WRITER_SOCKET=str(sock))
+        r = subprocess.run([sys.executable, str(TOOLS / "ledger.py"), "append", str(led),
+                            "--actor", "w", "--class", "progress_recorded",
+                            "--payload", _WD_PAYLOAD.replace("c1", "DIRECT-WRITE")],
+                           capture_output=True, text=True, env=env)
+        assert r.returncode == 4, r.stdout + r.stderr
+        assert "writerd 経由" in (r.stdout + r.stderr)
+        assert "DIRECT-WRITE" not in (led / "ledger.jsonl").read_text(encoding="utf-8")
+    finally:
+        proc.terminate(); proc.wait(timeout=10)
+
+
+def test_a_stopped_daemon_fails_closed(tmp_path):
+    """**daemon が居ないことを「書けた」と読み替えない。** 直接書き込みも拒否のまま。"""
+    led, sock, proc = _wd_start(tmp_path)
+    proc.terminate(); proc.wait(timeout=10)
+    code, d = _wd_client(sock, "--actor", "w", "--class", "progress_recorded",
+                         "--payload", _WD_PAYLOAD)
+    assert code == 4
+    assert d.get("reason") == "writer_unreachable"
+    env = dict(os.environ, ORG_WRITER_SOCKET=str(sock))
+    r = subprocess.run([sys.executable, str(TOOLS / "ledger.py"), "append", str(led),
+                        "--actor", "w", "--class", "progress_recorded",
+                        "--payload", _WD_PAYLOAD],
+                       capture_output=True, text=True, env=env)
+    assert r.returncode == 4, "daemon 停止中に直接書き込みが通った"
+    assert not (led / "ledger.jsonl").exists() or \
+        not (led / "ledger.jsonl").read_text(encoding="utf-8").strip()
+
+
+def _wd_raw(sock, req):
+    c = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
+    c.settimeout(30); c.connect(str(sock))
+    c.sendall((json.dumps(req) + "\n").encode())
+    buf = b""
+    while not buf.endswith(b"\n"):
+        ch = c.recv(65536)
+        if not ch:
+            break
+        buf += ch
+    c.close()
+    return json.loads(buf)
+
+
+def _wd_req(**kw):
+    sys.path.insert(0, str(TOOLS))
+    import importlib
+    wd = importlib.import_module("writerd")
+    req = {"protocol": wd.PROTOCOL, "op": "append", "org": "default",
+           "nonce": kw.pop("nonce", "n" * 32),
+           "argv": ["--actor", "w", "--class", "progress_recorded", "--payload", _WD_PAYLOAD]}
+    req.update(kw)
+    req["digest"] = wd.request_digest(req)
+    return req
+
+
+def test_a_tampered_request_is_refused(tmp_path):
+    """digest は本文全体を覆う — 途中で書き換えた要求は通らない。"""
+    led, sock, proc = _wd_start(tmp_path)
+    try:
+        req = _wd_req()
+        req["argv"] = list(req["argv"]); req["argv"][1] = "attacker"   # digest 後に改変
+        assert _wd_raw(sock, req)["reason"] == "request_tampered"
+        assert not (led / "ledger.jsonl").exists() or \
+            "attacker" not in (led / "ledger.jsonl").read_text(encoding="utf-8")
+    finally:
+        proc.terminate(); proc.wait(timeout=10)
+
+
+def test_a_replayed_request_is_refused(tmp_path):
+    """同じ nonce の再送は通さない。"""
+    led, sock, proc = _wd_start(tmp_path)
+    try:
+        req = _wd_req(nonce="r" * 32)
+        assert _wd_raw(sock, req)["reason"] == "executed"
+        assert _wd_raw(sock, req)["reason"] == "replayed_nonce"
+        lines = [l for l in (led / "ledger.jsonl").read_text(encoding="utf-8").splitlines()
+                 if l.strip()]
+        assert len(lines) == 1, "再送が二重に記録された"
+    finally:
+        proc.terminate(); proc.wait(timeout=10)
+
+
+def test_a_caller_cannot_choose_the_ledger_path(tmp_path):
+    """**書き込み先は writerd が決める。** caller は org 名でしか選べない。"""
+    led, sock, proc = _wd_start(tmp_path)
+    try:
+        req = _wd_req(nonce="p" * 32)
+        req["argv"] = req["argv"] + ["/tmp/elsewhere/ledger.jsonl"]
+        sys.path.insert(0, str(TOOLS))
+        import importlib
+        req["digest"] = importlib.import_module("writerd").request_digest(req)
+        assert _wd_raw(sock, req)["reason"] == "path_in_argv"
+        assert _wd_raw(sock, _wd_req(nonce="o" * 32, org="elsewhere"))["reason"] == "unknown_org"
+    finally:
+        proc.terminate(); proc.wait(timeout=10)
+
+
+def test_only_write_operations_are_accepted(tmp_path):
+    """writerd 経由で任意のサブコマンドを実行できてはいけない。"""
+    led, sock, proc = _wd_start(tmp_path)
+    try:
+        assert _wd_raw(sock, _wd_req(nonce="v" * 32, op="verify"))["reason"] == "unsupported_op"
+    finally:
+        proc.terminate(); proc.wait(timeout=10)
+
+
+def test_peer_credential_is_reported_for_the_recorder_only(tmp_path):
+    """peer identity は `recorded_by` にしか使わない。
+
+    **「接続してきた」ことは「その判断をした」ことの証拠にならない** — decision_by は
+    署名 receipt からのみ確定する。
+    """
+    led, sock, proc = _wd_start(tmp_path)
+    try:
+        code, d = _wd_client(sock, "--actor", "w", "--class", "progress_recorded",
+                             "--payload", _WD_PAYLOAD)
+        assert code == 0
+        assert d.get("recorded_by_peer_uid") == os.getuid()
+        ev = json.loads((led / "ledger.jsonl").read_text(encoding="utf-8").splitlines()[0])
+        # peer uid が decision_by に流れていないこと
+        assert str(os.getuid()) not in json.dumps(ev["payload"].get("decision_by") or "")
+    finally:
+        proc.terminate(); proc.wait(timeout=10)
+
+
+@pytest.mark.parametrize("mode,expect", [(0o777, False), (0o755, True)])
+def test_socket_parent_must_not_be_world_writable(tmp_path, mode, expect):
+    """**親を書ける主体は socket を差し替えられる** — 偽 writer に繋がされる。"""
+    sys.path.insert(0, str(TOOLS))
+    import importlib
+    wd = importlib.import_module("writerd")
+    parent = tmp_path / "p"; parent.mkdir()
+    os.chmod(parent, mode)
+    err = wd.check_socket_parent(str(parent / "writer.sock"))
+    assert (err is None) is expect, err
+    os.chmod(parent, 0o755)
+
+
+def test_socket_parent_may_not_be_a_symlink(tmp_path):
+    """リンクを張り替えれば socket ごと差し替えられる。"""
+    sys.path.insert(0, str(TOOLS))
+    import importlib
+    wd = importlib.import_module("writerd")
+    (tmp_path / "real").mkdir()
+    (tmp_path / "link").symlink_to(tmp_path / "real")
+    err = wd.check_socket_parent(str(tmp_path / "link" / "writer.sock"))
+    assert err and "シンボリックリンク" in err
+
+
+def test_same_uid_cannot_claim_separate_uid(tmp_path):
+    """**同一 UID では `separate_uid` を主張できない。** 道具が自分でそう言う。"""
+    sys.path.insert(0, str(TOOLS))
+    import importlib
+    wd = importlib.import_module("writerd")
+    parent = tmp_path / "p"; parent.mkdir()
+    err = wd.check_socket_parent(str(parent / "writer.sock"), require_root_owned=True)
+    assert err and "root 所有でない" in err
+    assert "separate_uid" in err
+
+
+def test_writer_owned_assets_are_audited(tmp_path):
+    """ラッチ・鍵 registry・schema も書き込み経路と同じ強さで守る必要がある。"""
+    sys.path.insert(0, str(TOOLS))
+    import importlib
+    wd = importlib.import_module("writerd")
+    led = tmp_path / "ledger"; led.mkdir()
+    (led / "ledger.jsonl").write_text("", encoding="utf-8")
+    os.chmod(led / "ledger.jsonl", 0o600)
+    assert wd.audit_writer_assets(str(led)) == []
+    os.chmod(led / "ledger.jsonl", 0o666)
+    issues = wd.audit_writer_assets(str(led))
+    assert issues and "他者から書き込み可能" in issues[0][1]
+
+
+def test_install_script_dry_run_changes_nothing(tmp_path):
+    """段階B の install は `--dry-run` で何も変えない（root 不要で監査できる）。"""
+    led = tmp_path / ".orgforge" / "ledger"; led.mkdir(parents=True)
+    before = sorted(str(p.relative_to(tmp_path)) for p in tmp_path.rglob("*"))
+    r = subprocess.run(["bash", str(TOOLS / "writer-install.sh"),
+                        "--org-root", str(tmp_path), "--dry-run"],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "[dry-run]" in r.stdout
+    assert "脅威モデルの外" in r.stdout            # 境界を明示している
+    assert sorted(str(p.relative_to(tmp_path))
+                  for p in tmp_path.rglob("*")) == before, "dry-run が何かを変えた"
+
+
+def test_verify_script_refuses_to_run_as_root():
+    """検証を root で走らせたら意味が無い（全部できてしまう）。"""
+    src = (TOOLS / "writer-verify.sh").read_text(encoding="utf-8")
+    assert 'if [ "$(id -u)" = "0" ]' in src
+    assert "root では全部できてしまい" in src
