@@ -375,8 +375,14 @@ def cmd_intake(a):
               f"（「{text.strip()[-60:]}」で終わっている）。", file=sys.stderr)
     print(f"    SendMessage で続きを促すこと。**この報告を判定として読まないこと** — "
           f"実地では「Now the key attack:」の1文だけが返り、status は completed だった。\n"
-          f"    途中の1文を verdict として読めば、確かめていないものを admit する。",
+          f"    途中の1文を verdict として読めば、確かめていないものを admit する。\n"
+          f"    [intake] INCOMPLETE issue={a.issue} role={role} "
+          f"missing={','.join(k for k, _ in missing)} exit=10",
           file=sys.stderr)
+    # 最後の1行は**機械が拾える形**にしてある。`| tail` や `| grep` を通すとシェルの終了コードは
+    # 最後のコマンドのものになり、この 10 は消える（実地でそう観測された — 実装は 10 を返して
+    # いたが、観測経路が 0 を見せた）。パイプで読む経路でも判定できるように、
+    # `INCOMPLETE` を出力に置く。
     return 10
 
 

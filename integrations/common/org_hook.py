@@ -496,10 +496,23 @@ def rule_blast_radius(tool_name, ti):
 # handoff.py" from advice into structure: without one of the two, the spawn is blocked. Not an
 # organ/ledger rule — it's a pure shape check on the spawn prompt, so it returns a verdict
 # directly (see main()'s SPAWN_GATE branch) rather than an organ argv.
+# handoff.py が出す**構造**を見る。単なる語（"seam contract"）は散文に現れるので外した —
+# 「no seam contract is attached」が seam の宣言として通っていた（INDEPENDENT の部分一致と
+# 同じ穴が、こちら側にもあった）。構造は否定文に現れない: 「`Inputs you receive:` が無い」と
+# 書くことはあっても、コロン付きの見出しを否定文の中に置くことはまずない。
 _SEAM_MARKERS = ("outputs you must produce", "boundary contract", "inputs you receive",
-                 "seam contract", "## your slice")
-_INDEP_MARKERS = ("independent:", "non-integrating", "no seam", "outputs are not merged",
-                  "independent fan-out")
+                 "## your slice")
+# **宣言は行頭に限る。** 全文の部分一致だと、**否定文が宣言として通る** —
+# 「contract も INDEPENDENT: も付けていません」がそのまま (A) として一致した（実地のプローブ）。
+# 実害のある形は「この作業は independent ではないので contract を付ける」と書いた (B) の spawn
+# が (A) と誤判定されることで、**(A) は `owns` の宣言を免除する**ので偶然の一致で免除が取れる。
+# ガードのメッセージ自身が「子プロンプトの冒頭に1行書く」と言っているので、検査を文面に合わせる。
+_INDEP_RE = re.compile(
+    r"^\s*(?:INDEPENDENT\s*:|独立\s*:"
+    r"|(?:this (?:spawn|child|task) is )?non-integrating\b"
+    r"|outputs are not merged\b"
+    r"|independent fan-?out\b)",
+    re.I | re.M)
 
 def _seam_from_referenced_file(prompt_raw):
     """プロンプトが指すファイルを**ガード自身が読んで** seam contract を探す。
@@ -600,7 +613,8 @@ def spawn_needs_seam_or_independence(tool_name, ti):
     prompt_raw = ti.get("prompt") or ""
     prompt = prompt_raw.lower()
     has_seam = any(m in prompt for m in _SEAM_MARKERS)
-    has_indep = any(m in prompt for m in _INDEP_MARKERS)
+    # 行頭のみ（prompt_raw を使う — prompt は lower 済みだが位置は同じ。re.M で各行の頭を見る）
+    has_indep = bool(_INDEP_RE.search(prompt_raw))
     seam_file = None
     if not (has_seam or has_indep):
         # 本文に無ければ、プロンプトが指すファイルを読んで探す（参照渡しを許す）

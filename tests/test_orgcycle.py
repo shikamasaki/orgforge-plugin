@@ -922,3 +922,61 @@ def test_seam_gate_message_leads_with_the_shortest_path():
     assert seg.index("INDEPENDENT") < seg.index("handoff.py"), \
         "handoff.py が先に読める（実際に通るのは INDEPENDENT: の方が短い）"
     assert "owns` の宣言を免除する" in seg, "INDEPENDENT: が owns 検査を免除することを言っていない"
+
+
+# ── 0.28.1: 宣言は行頭に限る / パイプ経由でも判定できる ──────────────────
+def _spawn_verdict(prompt):
+    import importlib.util, pathlib as _p
+    hook = TOOLS.parent / "integrations" / "common" / "org_hook.py"
+    spec = importlib.util.spec_from_file_location("org_hook_i2", hook)
+    h = importlib.util.module_from_spec(spec); spec.loader.exec_module(h)
+    return h.spawn_needs_seam_or_independence("Task", {"prompt": prompt})
+
+
+def test_negation_is_not_read_as_a_declaration():
+    """全文の部分一致だと**否定文が宣言として通る**。
+
+    実地のプローブ: 「contract も INDEPENDENT: も付けていません」がそのまま (A) として一致した。
+    実害のある形は「この作業は independent ではないので contract を付ける」と書いた (B) の
+    spawn が (A) と誤判定されること — **(A) は `owns` の宣言を免除する**ので、偶然の一致で
+    免除が取れる。ガードの文面自身が「冒頭に1行書く」と言っているので、検査を文面に合わせる。
+    """
+    for prompt in ("contract も INDEPENDENT: も付けていません",
+                   "この作業は independent ではないので contract を付ける",
+                   "no seam contract is attached",
+                   "seam contract を書き忘れました"):
+        assert _spawn_verdict(prompt) is not None, f"否定文が宣言として通った: {prompt!r}"
+
+
+def test_declaration_at_the_start_of_a_line_passes():
+    """行頭の宣言は通す（前の空白・2行目でも可）。"""
+    for prompt in ("INDEPENDENT: 調査のみ。出力はマージされない",
+                   "independent: research only",
+                   "  INDEPENDENT: 前に空白があってもよい",
+                   "前置き\nINDEPENDENT: 2行目の行頭でもよい"):
+        assert _spawn_verdict(prompt) is None, f"正当な宣言を弾いた: {prompt!r}"
+
+
+def test_seam_contract_structure_still_passes():
+    """seam 側は**構造**を見る（単なる語ではない）ので、handoff.py の出力は通る。"""
+    assert _spawn_verdict("## Your slice\nX\nInputs you receive: A\n"
+                          "Outputs you MUST produce: B") is None
+
+
+def test_intake_emits_a_machine_readable_verdict_line():
+    """`| tail` を通すとシェルの終了コードは最後のコマンドのものになり、10 が消える。
+
+    実地でそう観測された（実装は 10 を返していたが、観測経路が 0 を見せた）。
+    パイプで読む経路でも判定できるように INCOMPLETE を出力に置く。
+    """
+    p = subprocess.run([sys.executable, str(TOOLS / "org_cycle.py"), "intake",
+                        "--issue", "30", "--role", "skeptic",
+                        "--report", "MUST 2 は防がれました。"],
+                       capture_output=True, text=True, timeout=60)
+    assert p.returncode == 10
+    assert "INCOMPLETE" in p.stderr, p.stderr
+    q = subprocess.run([sys.executable, str(TOOLS / "org_cycle.py"), "intake",
+                        "--issue", "30", "--role", "skeptic",
+                        "--report", "verdict: survives。npm test → 60 passed。"],
+                       capture_output=True, text=True, timeout=60)
+    assert q.returncode == 0 and "INCOMPLETE" not in q.stderr
