@@ -542,12 +542,34 @@ def _judge_lineage(role):
     if not isinstance(c, dict):
         raise SystemExit(f"constitution.yaml が map ではない（{type(c).__name__}）: {path}")
     j = ((c.get("enforcement") or {}).get("judges") or {})
-    lineage = str(j.get("lineage") or "same-harness").strip()
-    if lineage not in ("same-harness", "cross-harness"):
-        raise SystemExit(f"judges.lineage が不正: {lineage!r}"
-                         f"（same-harness | cross-harness）\n  ファイル: {path}")
-    cfg = (j.get("harness") or {}).get(role)
-    return lineage, cfg if isinstance(cfg, dict) else None
+    declared = str(j.get("lineage") or "same-harness").strip()
+    sys.path.insert(0, HERE)
+    from harness import active_harness, effective_lineage, opposite_harness
+    lineage = effective_lineage(declared)
+    if lineage == "same-harness":
+        return lineage, None
+
+    harness = j.get("harness") or {}
+    if not isinstance(harness, dict):
+        raise SystemExit("judges.harness が map でない。cross-harness の経路を選べない。")
+    missing = [name for name in ("claude", "codex")
+               if not isinstance(harness.get(name), dict)]
+    if missing:
+        raise SystemExit("judges.harness に claude / codex 両方の map が必要（不足: "
+                         + ", ".join(missing) + "）。")
+
+    primary = active_harness()
+    secondary = opposite_harness(primary)
+    cfg = harness[secondary].get(role)
+    if not isinstance(cfg, dict):
+        raise SystemExit(f"judges.harness.{secondary}.{role} が必要。\n"
+                         "  cross-harness の役割を暗黙の CLI に委ねない。")
+    cli = str(cfg.get("cli") or "").strip()
+    if cli != secondary:
+        raise SystemExit(f"主系 {primary!r} の別血統 CLI は {secondary!r} でなければならないが、"
+                         f"{cli!r} が指定されている。\n"
+                         "  同じハーネスを2回走らせても cross-harness にはならない。")
+    return lineage, cfg
 
 
 def cmd_intake(a):

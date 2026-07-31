@@ -146,4 +146,5 @@ roles:
 # ── RUNTIME ───────────────────────────────────────────────────────────────────
 runtime:
   constitution: template/constitution.yaml     # the charter — no agent writes it — keep
-  harness: <claude|codex>                       # which host harness projects these roles
+  harness: adaptive                             # detect Claude Code or Codex; use the opposite
+                                                # reviewer when available, else pseudo same-harness

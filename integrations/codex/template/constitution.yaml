@@ -200,18 +200,20 @@ enforcement:
   # 認証を前提にすると、持っていない環境で org が回らなくなる。**層を増やすのは選択であって
   # 前提ではない。**
   judges:
-    lineage: same-harness   # same-harness | cross-harness
-                            #   same-harness: gate も skeptic も起動中のエージェントで回す（既定）
+    lineage: adaptive       # same-harness | cross-harness | adaptive
+                            #   same-harness: gate も skeptic も起動中のエージェントで回す
                             #   cross-harness: 下の harness 指定に従って別ハーネスで回す。
-                            #     `verify` が打つべきコマンドを出す（実行は監督が行う）
-    # cross-harness のときだけ読まれる。ここに書いたものが `verify` の案内に出る。
-    # **モデル名は必ず1回実際に叩いて確かめること** — 契約によって使えないものがある
-    # （実測: ChatGPT アカウントで `gpt-5-codex` は 400 で拒否された）。
+                            #   adaptive: 実行中の製品を検出し、反対側が利用可能なら cross、
+                            #     無ければ同じ製品内の pseudo same-harness へ明示的に縮退する。
+    # cross-harness で使う secondary 側の設定。両方向を必ず宣言する。model を省略すれば
+    # 各ハーネスで検証済みの現行既定を使う。
     harness:
-      gate: null                       # null = 起動中のエージェントで回す
-      skeptic: null                    # 例: { cli: codex, model: "gpt-5.5", effort: high }
-                                       #   → codex exec --sandbox read-only -m gpt-5.5 …
-                                       #     --output-schema template/schemas/skeptic-verdict.json
+      claude:
+        gate: { cli: claude }
+        skeptic: { cli: claude }
+      codex:
+        gate: { cli: codex, effort: high }
+        skeptic: { cli: codex, effort: high }
     # judge は書き込みを持たない。別ハーネスで回す場合も read-only で走らせる —
     # そのハーネスのガードレールが未検証でも、書けないなら安全側に倒れる。
     read_only: true

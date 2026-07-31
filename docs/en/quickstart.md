@@ -82,7 +82,10 @@ returns a verdict, reasoning, evidence, and accepted risk; the plumbing records 
 ## 5. What the supported guarantees mean
 
 - A signed local receipt is `attested`, not externally `authenticated`.
-- `cross-harness` means a second model lineage reviewed the work.
+- `adaptive` detects the running Claude Code or Codex host and uses the other product for
+  `cross-harness` review when available.
+- With one subscription, it explicitly falls back to pseudo `same-harness` gate/skeptic roles. That
+  keeps the workflow usable but does not claim a second model lineage.
 - The ledger hash chain detects rewriting; it does not make local files immutable.
 - `process_mediated` means the enabled harness and hooks enforce the normal path.
 - Separate-UID writer isolation is not required and is not part of this quickstart.

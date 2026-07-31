@@ -47,6 +47,14 @@ It does not mean:
 
 Review diversity remains valuable as a quality control, not an identity security claim.
 
+`adaptive` routing derives the primary from the running agent (`Claude Code` or `Codex`), not from a
+static preference in `organization.yaml`. If the opposite product is locally available it selects
+that product. If only one product is available it resolves to `same-harness`, emits a degradation
+notice, and records no cross-harness claim. Codex uses its offline login status; macOS Claude Code
+uses the presence of its Keychain credential without reading the secret. Explicit
+`ORGFORGE_CLAUDE_AVAILABLE=false` and corresponding Codex overrides cover other platforms and
+special authentication setups.
+
 ## 4. Record integrity
 
 The ledger is append-only by convention and hash-chained. The chain detects modification and makes
