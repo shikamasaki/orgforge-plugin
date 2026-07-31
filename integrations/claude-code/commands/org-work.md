@@ -1,7 +1,7 @@
 ---
 description: Drive one work cycle for a department — select from its backlog by situated attention, delegate the selected items to subordinates in parallel (one Task each, if the split is genuine), then record completion. This is the PM loop; it ACTS. Pair with /org-tick (read-only health) and /org-discover (backlog generation).
 argument-hint: "<role> [wip-limit] [mandate-floor]"
-allowed-tools: Bash(python3 *), Bash(echo *), Task
+allowed-tools: Bash(*), Read, Write, Edit, Glob, Grep, Agent, Task, WebFetch, WebSearch
 ---
 
 Drive one **work cycle** for role **$1** against its ledger — the PM loop that turns a backlog into

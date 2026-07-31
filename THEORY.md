@@ -1,5 +1,8 @@
 # THEORY — Articulating the Organization So AI Can Run It
 
+> **Current product documentation:** [English](docs/en/README.md) ·
+> [日本語](docs/ja/README.md). This file is the long-form intellectual record.
+
 > **The claim of this repository, in one sentence:** the goal is to run the engineer's
 > work autonomously around the clock with minimal human steering, and getting there
 > **centers on putting the organization into words** — writing down, explicitly enough for

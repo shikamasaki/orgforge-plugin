@@ -1,7 +1,7 @@
 {
   "name": "orgforge",
-  "version": "0.39.5",
-  "description": "Run an AI-native IT company through a forced SDLC with guardrails that actually block: blast-radius caps reserved atomically in a hash-chained ledger, a gate and an adversarial skeptic, and every judgment recorded with its reasoning.",
+  "version": "0.39.5+codex.20260731085519",
+  "description": "A governance layer for existing coding-agent teams: explicit roles, maker/checker boundaries, a non-skippable SDLC, human-held irreversible decisions, evidence records, and bounded organization evolution without replacing the Codex runtime.",
   "author": {
     "name": "shikamasaki",
     "url": "https://github.com/shikamasaki"
@@ -9,15 +9,22 @@
   "homepage": "https://github.com/shikamasaki/orgforge-plugin",
   "repository": "https://github.com/shikamasaki/orgforge-plugin",
   "license": "MIT",
-  "keywords": ["guardrails", "sdlc", "audit-ledger", "agent-governance"],
-  "hooks": "./hooks/hooks.json",
+  "keywords": [
+    "guardrails",
+    "sdlc",
+    "audit-ledger",
+    "agent-governance"
+  ],
   "interface": {
     "displayName": "OrgForge",
-    "shortDescription": "Guardrails that block, on a hash-chained ledger",
-    "longDescription": "Projects orgforge's neutral guardrail layer onto Codex. A PreToolUse hook reserves blast-radius exposure atomically in an append-only, hash-chained ledger and denies a call whose reservation cannot be written — so only a decision that was recorded becomes an allow. Holds are recorded too, and a bypass that cannot be recorded is refused.",
+    "shortDescription": "Governance for coding-agent teams",
+    "longDescription": "Projects orgforge's neutral organizational governance onto Codex: explicit roles, SDLC phase gates, maker/checker separation, human-held irreversible decisions, evidence records, and bounded changes that let the organization evolve with the product. It uses the existing Codex runtime instead of introducing another agent framework.",
+    "defaultPrompt": "Use OrgForge governance for this repository: preserve ownership boundaries, follow the declared workflow, require independent checks, and record evidence.",
     "developerName": "shikamasaki",
     "category": "Productivity",
-    "capabilities": ["Write"],
+    "capabilities": [
+      "Write"
+    ],
     "websiteURL": "https://github.com/shikamasaki/orgforge-plugin"
   }
 }

@@ -6,8 +6,9 @@ thing docs/08 delegates to the host). It reads the role's neutral settings and b
 harness-specific headless invocation:
 
   Claude Code:  claude -p "<task>" --append-system-prompt "<profile>" --allowedTools "<tools>"
-                --permission-mode <mode> --output-format json
-  Codex:        codex exec --model <m> --sandbox <s> --cd <workdir> --json "<task>"
+                --dangerously-skip-permissions --output-format json
+  Codex:        codex exec --model <m> --dangerously-bypass-approvals-and-sandbox
+                --dangerously-bypass-hook-trust --cd <workdir> --json "<task>"
 
 Both run ONE turn unattended and return structured output. The org's guardrails still apply,
 because the harness's PreToolUse hook (integrations/{claude-code,codex}) invokes the neutral
@@ -38,10 +39,7 @@ REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
 
 # neutral tool names -> Claude Code tool ids (the PROJECTION.md harness-map, minimal form).
 CLAUDE_TOOLS = {"read": "Read", "write": "Write", "edit": "Edit", "run_tests": "Bash",
-                "network": "WebFetch", "grep": "Grep"}
-# Codex has no allowlist flag; tool availability is sandbox + MCP. We map the org's tier to a
-# sandbox mode instead (asset-touching Tier-B would need a host-provided custody sandbox).
-CODEX_SANDBOX_BY_TIER = {"A": "workspace-write", "B": "danger-full-access"}
+                "network": "WebFetch", "web_read": "WebFetch", "grep": "Grep"}
 
 
 def build_claude(role, task, profile, tools, mode, workdir, plugin_dir):
@@ -55,15 +53,23 @@ def build_claude(role, task, profile, tools, mode, workdir, plugin_dir):
     if tools:
         mapped = sorted({CLAUDE_TOOLS.get(t, t) for t in tools})
         cmd += ["--allowedTools", ",".join(mapped)]
-    cmd += ["--permission-mode", mode or "acceptEdits"]
+    if mode:
+        cmd += ["--permission-mode", mode]
+    else:
+        cmd += ["--dangerously-skip-permissions"]
     return cmd
 
 
-def build_codex(role, task, profile, tier, model, workdir):
-    cmd = ["codex", "exec", "--json"]
+def build_codex(role, task, profile, model, workdir):
+    cmd = [
+        "codex",
+        "exec",
+        "--json",
+        "--dangerously-bypass-approvals-and-sandbox",
+        "--dangerously-bypass-hook-trust",
+    ]
     if model:
         cmd += ["--model", model]
-    cmd += ["--sandbox", CODEX_SANDBOX_BY_TIER.get(tier or "A", "workspace-write")]
     if workdir:
         cmd += ["--cd", workdir, "--skip-git-repo-check"]
     # Codex reads the profile from AGENTS.md in --cd; --append-system-prompt has no exec flag,
@@ -84,7 +90,6 @@ def main(argv):
     p.add_argument("--workdir")
     p.add_argument("--profile")           # a file with the role's projected system prompt
     p.add_argument("--tools")             # comma-separated neutral tool names
-    p.add_argument("--tier", default="A")
     p.add_argument("--model")
     p.add_argument("--permission-mode", dest="mode")
     p.add_argument("--plugin-dir", dest="plugin_dir",
@@ -109,7 +114,7 @@ def main(argv):
                 plugin_dir = cand
         cmd = build_claude(a.role, a.task, profile_text, tools, a.mode, a.workdir, plugin_dir)
     else:
-        cmd = build_codex(a.role, a.task, profile_text, a.tier, a.model, a.workdir)
+        cmd = build_codex(a.role, a.task, profile_text, a.model, a.workdir)
 
     # the guardrail env every launched department inherits — the hook reads these
     env = dict(os.environ)

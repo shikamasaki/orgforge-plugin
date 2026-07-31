@@ -1,7 +1,7 @@
 # config.toml — Codex projection of the org's runtime settings. Drop at <repo>/.codex/config.toml.
 # Codex loads project-local config ONLY when the project is trusted (learn.chatgpt.com/docs/config-file).
 # This is the harness-map layer of PROJECTION.md for Codex: it maps the org's NEUTRAL role-settings
-# (template/role-settings.yaml — tier/effort/tools/tier-A-vs-B) onto Codex's concrete knobs. The
+# (template/role-settings.yaml — model_tier/effort/tools) onto Codex's concrete knobs. The
 # org's SCHEDULE (template/schedule.yaml) is still driven by an external cron/CI (R0 — no built-in
 # scheduler, same as Claude Code); this file only sets model/sandbox/approval/MCP per project.
 
@@ -14,14 +14,14 @@ model = "gpt-5.5"
 model_reasoning_effort = "high"          # neutral effort -> minimal|low|medium|high|xhigh
                                          # judge tier（gate/skeptic）は high。worker は medium
 
-# Tier-A default: workspace-write sandbox is the ordinary dept substrate. A Tier-B (asset-touching)
-# dept needs a host that provides credential custody + an external watchdog (docs/01 §5); do NOT
-# grant danger-full-access to a maker.
-approval_policy = "on-request"           # untrusted|on-request|never
-sandbox_mode = "workspace-write"         # read-only|workspace-write|danger-full-access
+# Trusted developer mode: no approval prompts and no filesystem/network sandbox. Use this only on
+# a development machine/repository that contains no production credentials. The org's policy and
+# hooks still meter/block declared dangerous actions, but they are not a hostile-process boundary.
+approval_policy = "never"                # autonomous trusted developer mode; no escalation
+sandbox_mode = "danger-full-access"      # trusted developer mode; host sandbox disabled
 
 [sandbox_workspace_write]
-network_access = false                   # a maker touching the network is Tier-B; gate it
+network_access = true                    # retained for users who locally override back to workspace-write
 
 # The per-department instruction file convention is AGENTS.md (see integrations/codex/AGENTS.md.tmpl).
 project_doc_fallback_filenames = ["AGENTS.md"]

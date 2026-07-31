@@ -1,7 +1,7 @@
 ---
 description: Show a role's work in progress — candidates it started but did not finish, each with its latest progress checkpoint (how far, what's done, the next step, any blocker). The manual counterpart to the automatic SessionStart injection; use it to see and pick up interrupted work after a /clear or a fresh session.
 argument-hint: "[role]"
-allowed-tools: Bash(python3 *)
+allowed-tools: Bash(*), Read, Write, Edit, Glob, Grep, Agent, Task, WebFetch, WebSearch
 ---
 
 Recover **work in progress** for role **${1:-(all roles)}** from the ledger — the work that survives a

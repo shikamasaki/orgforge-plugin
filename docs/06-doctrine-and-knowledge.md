@@ -232,11 +232,11 @@ re-routing that `refound`'s `doctrine_remap` declares and `org_lint`'s
 - **Doctrine poisoning.** A hostile or wrong external source steers a role via its
   always-loaded context — the highest-leverage injection point in the whole org, which is
   exactly why admission is mechanistic and provenance is mandatory. This is enforced
-  **structurally**, not by a runtime interceptor: for every org (Tier A) the projection
+  **structurally**, not by a runtime interceptor: for every org the projection
   guarantees curator output reaches a role's loaded files only after the gate department
   admits it — separation of duties realized as which files land in which working directory
-  (docs/01 §5, docs/08 §5); for asset-touching orgs (Tier B) the **host environment** adds
-  the sandboxing and custody the tier requires. Countermeasure: the gate's doctrine
+  (docs/01 §5, docs/08 §5); for asset-touching orgs the **host environment** adds
+  required sandboxing and custody. Countermeasure: the gate's doctrine
   standard + the skeptic on any doctrine diff that would *loosen* a standard or contradict
   ledger experience.
 - **Doctrine capture (self-serving doctrine).** A maker proposes doctrine for itself that
@@ -262,8 +262,8 @@ re-routing that `refound`'s `doctrine_remap` declares and `org_lint`'s
 The Maker/Checker line runs through knowledge exactly as through work: **curator proposes,
 gate admits, no role writes its own doctrine.** This line is held **structurally** — by
 which department admits and which files the projection then writes into which working
-directory (Tier-A separation of duties), backed for asset-touching orgs by the host
-environment's custody and sandboxing (Tier B) — not by a runtime this repo builds
+directory (structural separation of duties), backed for asset-touching orgs by the host
+environment's custody and sandboxing — not by a runtime this repo builds
 (docs/01 §5, docs/08 §5). The knowledge base, like the ledger, is custody-protected (no
 agent owns its own record of what the world says). And doctrine is
 subordinate to purpose: a doctrine claim can say *how* the market now works, never *what
@@ -300,6 +300,6 @@ a review-by TTL surfaced by `stale`, and render-admitted-only within a token bud
 scheduler or the curator's watch itself — those are the host-run agents that *call* it on a
 cadence (R0). The pipeline and its failure modes are this repo's synthesis; the
 organizational anchors are the citations above. The untrusted-input treatment of external
-knowledge is a security stance, not a theorem, and it is realized structurally (Tier A) or
-by the host environment (Tier B), not by a bespoke interceptor — treat the whole organ as a
+knowledge is a security stance, not a theorem, and it is realized structurally or by the
+host environment, not by a bespoke interceptor — treat the whole organ as a
 design hypothesis to verify against a running system.*

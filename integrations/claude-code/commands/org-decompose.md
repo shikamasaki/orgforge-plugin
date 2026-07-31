@@ -1,7 +1,7 @@
 ---
 description: Turn the approved founding design (coverage-manifest.md + ARCHITECTURE.md) into the atomic SPEC task Issues — one per independently-completable unit, each a native sub-issue of its objective, each carrying the full spec so any environment can pick it up. The bridge between /org-found (design) and /org-work (execution).
 argument-hint: "[objective-id] [--dry-run]"
-allowed-tools: Bash(python3 *), Bash(echo *), Bash(test *), Read, Agent
+allowed-tools: Bash(*), Read, Write, Edit, Glob, Grep, Agent, Task, WebFetch, WebSearch
 ---
 
 Decompose the **approved** founding design into the backlog: every must-have in the coverage manifest

@@ -686,16 +686,15 @@ def test_codex_hooks_json_has_no_comment_key():
 
 
 def test_codex_plugin_manifest_is_valid():
-    """plugin.json の必須フィールドと、hooks への参照。"""
+    """plugin.json は現行 Codex schema に従い、hook は標準配置で発見される。"""
     d = json.loads((REPO / "integrations" / "codex" / ".codex-plugin" / "plugin.json")
                    .read_text(encoding="utf-8"))
-    for k in ("name", "version", "description", "author", "interface", "hooks"):
+    for k in ("name", "version", "description", "author", "interface"):
         assert d.get(k), f"必須フィールドが無い: {k}"
     assert d["author"].get("name")
-    assert re.match(r"^\d+\.\d+\.\d+$", d["version"]), d["version"]
-    assert d["hooks"].startswith("./"), "相対パスで ./ から始めること"
-    # 同梱先が実在すること
-    assert (REPO / "integrations" / "codex" / d["hooks"][2:]).is_file()
+    assert re.match(r"^\d+\.\d+\.\d+(?:\+[0-9A-Za-z.-]+)?$", d["version"]), d["version"]
+    assert "hooks" not in d, "現行 Codex manifest schema は hooks field を拒否する"
+    assert (REPO / "integrations" / "codex" / "hooks" / "hooks.json").is_file()
 
 
 def test_codex_marketplace_manifest_is_at_the_path_codex_reads():
@@ -709,12 +708,14 @@ def test_codex_marketplace_manifest_is_at_the_path_codex_reads():
 
 
 def test_codex_plugin_version_matches_the_claude_plugin():
-    """2つの projection のバージョンがずれると、どちらが新しいか分からなくなる。"""
+    """Codex の cachebuster を除いた base version は Claude projection と一致する。"""
     cx = json.loads((REPO / "integrations" / "codex" / ".codex-plugin" / "plugin.json")
                     .read_text(encoding="utf-8"))["version"]
     cc = json.loads((REPO / "integrations" / "claude-code" / ".claude-plugin" / "plugin.json")
                     .read_text(encoding="utf-8"))["version"]
-    assert cx == cc, f"codex={cx} / claude-code={cc}"
+    cx_base, *cx_suffix = cx.split("+", 1)
+    assert cx_base == cc, f"codex={cx} / claude-code={cc}"
+    assert not cx_suffix or cx_suffix[0].startswith("codex."), cx
 
 
 # ── H4a: halt 中は gated action が通らない ────────────────────────────────────

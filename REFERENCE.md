@@ -1,5 +1,8 @@
 # Reference — configuration, commands, events, troubleshooting
 
+> **Current assurance and supported-operation reference:** [English](docs/en/assurance.md) ·
+> [日本語](docs/ja/assurance.md)
+
 The lookup companion to [QUICKSTART.md](QUICKSTART.md) (how to get started) and
 [ARCHITECTURE.md](ARCHITECTURE.md) (how the system fits together). This is the flat reference: every
 environment variable, every command, the blast-radius caps, the ledger event vocabulary, and the
@@ -73,6 +76,24 @@ irreversible patterns draw down a budget.
 | `ORG_NOW_TS` | Pins the hook's "now" (append ts + window boundary). Mainly for tests; leave unset in production so the real clock is used. | *(real UTC now)* |
 | `ORG_TOOLS_DIR` | Override the directory the hooks resolve the organ tools from. Set automatically by the plugin bundle; rarely touched by hand. | *(bundled/repo auto-resolve)* |
 
+### Assurance labels
+
+These values describe separate facts; they are not one ascending security score.
+
+| Label | Meaning |
+|---|---|
+| `claimed` | caller-supplied identity; no verification |
+| `observed` | host/writer observation, such as the connecting UID; not the decision-maker |
+| `attested` | receipt signature and bound fields verified; the default ceiling for local keys |
+| `authenticated` | reserved for externally enforced custody/authentication; not emitted as a default local guarantee |
+| `cross-harness` | different model lineage for decorrelated review; not an authenticated principal |
+| `process_mediated` | normal writes pass through enabled host mediation |
+| `separate_uid` | experimental writer isolation, only after OS permissions are measured |
+
+The plugin controls drift and honest operational error. Separate-UID writer isolation remains an
+unsupported experiment, not normal operation. It does not protect judge private keys and is not
+required to run the Quickstart or claim the supported guarantees.
+
 ---
 
 ## 2. Commands (Claude Code slash-commands)
@@ -83,7 +104,7 @@ irreversible patterns draw down a budget.
 |---|---|
 | `/org-init [org-name] [ja\|en]` | **Step 1 — set up.** Create the ledger/doctrine/conventions roots, install the org spec files, ensure `develop` + the backlog labels, then lint the spec, take the `repro_lint` **baseline**（機械バーの現時点を記録する起点 — 無いと「この変更による悪化」と「元からの負債」を区別できない）, and probe that the guardrails actually bite. **No environment setup** — the org is discovered from the working directory (`tools/discover.py`), so nothing is exported and several repos can run from one shell. Idempotent; designs nothing. |
 | `/org-found <RFP or brief>` | **Step 2 — design.** Draft the org from a brief and write the five **fixed-name** founding artifacts (docs/11 §0a): `REQUIREMENTS.md`, `FEATURE-INVENTORY.md`, **`ARCHITECTURE.md` (the 全体設計書)**, `coverage-manifest.md`, `organization.yaml` — then stop and report up for scope approval. Design only. |
-| `/org-adopt [残りの要求]` | **既存リポジトリへの後付け.** `/orgforge-plugin:org-found` の途中導入版: 実在するコードから `ARCHITECTURE.md` と `organization.yaml` を*読み取って*書き、**未実装分だけ**を manifest に載せ（実装済みを載せると動くものを作り直す Issue が生える）、機械バーの現状を `repro_lint baseline` で既知の負債として記録する。コミットのある repo で `/orgforge-plugin:org-found` の代わりに使う。 |
+| `/org-adopt [残りの要求]` | **既存リポジトリへのone-command導入.** 事前の`org-init`は不要。local stateを安全に準備し、実在するコードから`ARCHITECTURE.md`と`organization.yaml`を*読み取って*書き、**未実装分だけ**をmanifestへ載せ、`repro_lint baseline`で既知の負債を記録し、readiness doctorまで同じinvocationで完了する。network、branch、Issue、daemon、sudo、鍵は不要。 |
 | `/org-decompose [objective-id]` | **Step 3 — decompose.** Turn the approved `coverage-manifest.md` + `ARCHITECTURE.md` into **atomic SPEC task Issues**, one per independently-completable unit, each a native sub-issue of its objective and each carrying the full spec (so any environment can pick it up). Gated by `coverage-check`: exits non-zero if a must-have never became an Issue. |
 | `/org-start [role] [tick] [work] [discover]` | Bring the org to its **running state**: register this session's recurring cycles via the scheduler. Idempotent. The SessionStart hook prompts it for you. |
 | `/orgforge-plugin:org` `[role]` | The **status board** — "how's my org?" in one GREEN/AMBER/RED answer (done / in progress with next steps / what needs you), in your language. Read-only. |

@@ -1,7 +1,7 @@
 ---
 description: Start the org's metabolism in THIS session by driving its cycles with /loop. Prints the exact /loop invocations to run (health tick, PM loop, discovery) so the org runs itself while the session is open. The drive is delegated to Claude Code's /loop; the org keeps only the monitoring (missed-tick detection) that /loop can't provide.
 argument-hint: "[role] [tick-min] [work-min] [discover-hours]"
-allowed-tools: Bash(echo *), Monitor
+allowed-tools: Bash(*), Read, Write, Edit, Glob, Grep, Agent, Task, Monitor, WebFetch, WebSearch
 ---
 
 Bring the organization to its **running state** for this session. The drive — firing each cycle on a

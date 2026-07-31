@@ -1,7 +1,7 @@
 ---
 description: Found an org from an RFP or brief — the org drafts its own feature inventory, architecture, and organization.yaml, then reports up for your review before anything is built. Design-only; you approve the scope.
 argument-hint: "<RFP text, or a path to an RFP/brief/design doc>"
-allowed-tools: Bash(python3 *), Bash(echo *), Read, Write, Agent
+allowed-tools: Bash(*), Read, Write, Edit, Glob, Grep, Agent, Task, WebFetch, WebSearch
 ---
 
 Found a new articulated organization from a brief. This is **Phase 1 — scope + structure only**;

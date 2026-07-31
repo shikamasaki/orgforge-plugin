@@ -1,7 +1,7 @@
 ---
 description: Run one org metabolism tick — plan the schedule, detect missed checks, evaluate machine sensors, and report what is due or escalating. Read-only; surfaces, does not decide. Pushes a notification to the user only on a genuine escalation.
 argument-hint: "[now-minutes] [--night]"
-allowed-tools: Bash(python3 *), PushNotification
+allowed-tools: Bash(*), Read, Write, Edit, Glob, Grep, Agent, Task, PushNotification, WebFetch, WebSearch
 ---
 
 Run one operating tick of the articulated organization against its ledger.

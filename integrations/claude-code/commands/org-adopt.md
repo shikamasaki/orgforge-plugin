@@ -1,11 +1,17 @@
 ---
-description: 既存リポジトリに orgforge を後付けする — 実在するコードから ARCHITECTURE.md と organization.yaml を「読み取って」書き、未実装分だけを coverage-manifest に載せ、機械バーの現状を baseline として記録する。/org-found の途中導入版。
+description: One-command adoption for an existing repository — prepare local orgforge state, read the real code, write the minimal organization and architecture, record remaining work and the current baseline, then verify readiness. No prior /org-init required.
 argument-hint: "[残りの要求 or ブリーフへのパス]"
-allowed-tools: Bash(python3 *), Bash(echo *), Bash(git *), Bash(ls *), Bash(find *), Read, Write, Agent
+allowed-tools: Bash(*), Read, Write, Edit, Glob, Grep, Agent, Task, WebFetch, WebSearch
 ---
 
-**すでにコードがあるリポジトリ**を orgforge の管理下に入れる。`/org-found` の途中導入版であり、
-違いは入力が RFP ではなく **実在するコード**である点にある。
+**すでにコードがあるリポジトリ**を1回のコマンドでorgforgeの管理下に入れる。
+入力はRFPではなく **実在するコード**である。
+
+このコマンドは導入を途中で別commandへhandoffしない。local state準備、現状読解、最小chart、
+architecture、remaining-work manifest、baseline、doctorまでを同じinvocationで完了する。
+
+**通常導入で行わないこと:** network access、GitHub Issue作成、branch作成、daemon、sudo、
+credential設定。GitHub backlogへのprojectionは導入後の任意操作であり、導入成功の条件ではない。
 
 `/org-found` をそのまま既存リポジトリに使ってはいけない。あれは「これから作るもの」を設計する
 コマンドで、実在のディレクトリ構造を見ない。結果 `ARCHITECTURE.md` が実際のコードと食い違い、
@@ -15,14 +21,22 @@ allowed-tools: Bash(python3 *), Bash(echo *), Bash(git *), Bash(ls *), Bash(find
 
 ## 0. どこに導入するのか — 書き込む前に確認する
 
-!`echo "  導入先: $(pwd)"; echo "  remote: $(git remote get-url origin 2>/dev/null || echo '(なし)')"; echo "  追跡ファイル数: $(git ls-files 2>/dev/null | wc -l | tr -d ' ')"; echo "  コミット数: $(git rev-list --count HEAD 2>/dev/null || echo 0)"`
+!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/adopt.py" inspect .`
 
 上が目的のリポジトリでなければ止める。コミット数が 0 なら新規リポジトリなので
 **`/org-found` を使うこと**（このコマンドは既存コードを読む前提で、読むものが無い）。
 
-## 1. まず `/org-init` が済んでいること
+## 1. local stateを安全に準備する
 
-!`D="${CLAUDE_PLUGIN_ROOT}/tools/discover.py"; R="$(python3 "$D" root 2>/dev/null)"; if [ -n "$R" ]; then echo "  org root: $R"; echo "  ledger  : $(python3 "$D" ledger)"; echo "  repo    : $(python3 "$D" repo 2>/dev/null || echo '(GitHubリモートなし=ledger-only)')"; else echo "  STOP — org が見つからない。先に /org-init をここで実行すること。"; fi`
+orgが無ければ、この会話の人間向け言語に合わせて`ja`または`en`を選び、次を実行する。
+既存fileは上書きされないので、再実行は修復として安全である。
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/tools/adopt.py" prepare . --language <ja|en>
+```
+
+`<ja|en>`を会話の言語で置き換えてBash実行する。英語を使っている場合は**最初から**`en`を選ぶ。
+既存`constitution.yaml`がある場合、prepareはその言語設定を変更しない。
 
 ## 2. 既存コードを読む — 設計するのではなく、**現状を記述する**
 
@@ -65,7 +79,7 @@ allowed-tools: Bash(python3 *), Bash(echo *), Bash(git *), Bash(ls *), Bash(find
 まだ存在しないファイルを検査してしまう）:
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/tools/org_lint.py" organization.yaml constitution.yaml moves.yaml ledger-schema.yaml sensors.yaml
+python3 "${CLAUDE_PLUGIN_ROOT}/tools/org_lint.py" organization.yaml constitution.yaml moves.yaml ledger-schema.yaml sensors.yaml role-settings.yaml
 ```
 
 lint が通るまで直す。通らない chart は導入されていない。
@@ -111,25 +125,41 @@ Issue/TODO から未実装分を拾う。
 `/org-discover` が拾うべき自己起票のネタでもある。新しい失敗を baseline に吸収させるのは
 「壊した」を「許容する」に書き換える操作で、ツールが警告する。
 
-## 5. 導入の判断を記録する（docs/11 §4f）
+## 5. 導入の判断を残す（docs/11 §4f）
 
-人間の diff レビューは廃止されているので、**なぜこの形で導入したか**が記録されないと後から辿れない。
-objective Issue を立て、そこに記録する:
+`ARCHITECTURE.md`に、なぜこのrole境界を採用し、どの負債をbaselineへ置いたかを短く残す。
+GitHub remoteと認証が利用可能で、**人間がIssue projectionを求めた場合だけ**objective Issueへ
+同じ判断を投影する:
 
 !`echo 'python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/github_sync.py" create --kind objective --title "<既存リポジトリの orgforge 導入>" --body "<ARCHITECTURE の要約 + 既知の負債 + manifest の方針>"'`
 
 !`echo 'python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/github_sync.py" decide --issue <N> --event scope_decided --verdict admit --by supervisor --why "<既存コードのどこを現状として受け入れ、何を未実装として manifest に載せたか、その判断根拠>" --evidence "<repro_lint の baseline 結果、テストの実行結果>" --risk "<受け入れた既知の負債>"'`
 
-## 6. CEO に報告して止まる
+## 6. 1回の承認とdoctor
 
-`/org-found` と同じく**設計のみ**。報告する内容:
+次を人間へ一度だけ提示し、accept/reviseを求める:
 
 - 読み取った現状（層・技術スタック・実在する owns）
 - **既知の負債**（repro_lint baseline の中身）とその返済方針
 - manifest に載せた未実装分の件数と、載せなかった実装済みの件数
-- CEO の判断が要るもの（スタックを変えるか、負債のどれを優先返済するか）
+- 最小chartとchecker境界
+- orgforgeが有効にするもの／有効にしないもの
 
-承認後は `/org-decompose` から通常フロー。
+reviseならこのinvocation内で修正する。accept後に:
+
+!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/adopt.py" doctor .`
+
+`READY`になるまで不足を直す。最後に次だけを報告する:
+
+- `ADOPTED`
+- setup所要時間
+- 作成したfile
+- enabled: workflow order / maker-checker separation / evidence ledger / human-held irreversible actions
+- not enabled: hostile-process containment / credential isolation / immutable storage
+- 次の通常作業をそのまま依頼できること
+
+`/org-decompose`は大きな既存backlogをGitHub Issueへ展開したい場合だけの任意commandであり、
+導入完了のために人間へ実行を要求しない。
 
 ## 規律
 

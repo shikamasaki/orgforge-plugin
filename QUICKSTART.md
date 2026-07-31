@@ -1,5 +1,8 @@
 # Quickstart — install and run in a few minutes
 
+> **Official standalone versions:** [English](docs/en/quickstart.md) ·
+> [日本語](docs/ja/quickstart.md)
+
 The happy path: **found an AI-native IT business company, watch it build and ship a backlog item
 through the forced SDLC (requirements → design → implement → test → integrate → deploy → operate), and put it
 into continuous operation** — all on a real Claude Code session, with the guardrails actually
@@ -14,6 +17,11 @@ that the company builds and ships something reproducibly through that mold.
 > For the whole-system picture — the ecosystem (neutral core → projection → harness), the organs, and
 > the two coupled lifecycles (the org's metabolism and the product's SDLC) — read
 > [ARCHITECTURE.md](ARCHITECTURE.md). This quickstart is the hands-on path through it.
+
+> **保証範囲。** このQuickstartは幻覚・迎合・確認不足・phase省略・誤操作を対象にする。
+> `cross-harness` は異なるモデル系統によるレビューの非相関化、ローカル署名は `attested`、
+> writerは `process_mediated` が既定である。別UID、KMS/HSM、外部judgeは不要であり、
+> separate-UID writer isolationはsupported coreへ採用していない実験なので、この手順では使わない。
 
 ## 1. Install the plugin
 
@@ -87,7 +95,18 @@ ledger を意図的にチェックアウトの外に置く場合や CI で固定
 環境変数はその**開発用の上書き**であって、org の設定方法ではない。詳細は
 [REFERENCE.md](REFERENCE.md)。
 
-## 3. 最初にやること — 3つのコマンド
+## 3. 最初にやること
+
+既存リポジトリへ導入する場合は1コマンド:
+
+```
+/orgforge-plugin:org-adopt
+```
+
+local state準備、実在codeの読解、最小organization、architecture、remaining-work manifest、
+baseline、readiness doctorまでを同じworkflowで完了する。Issue分解は必要な場合だけ後で行う。
+
+新規orgをbriefから設立する場合は3コマンド:
 
 ```
 /orgforge-plugin:org-init タテカエ ja      # 1. セットアップ（設計はしない）
@@ -95,12 +114,8 @@ ledger を意図的にチェックアウトの外に置く場合や CI で固定
 /orgforge-plugin:org-decompose             # 3. アトミックな task Issue へ分解
 ```
 
-> **コマンド名はプラグイン名で修飾する。** `/orgforge-plugin:org-init` ではなく
-> **`/orgforge-plugin:org-init`**。他のプラグインと名前が衝突しないための正式な形。
->
-> **既存のリポジトリに後から導入する場合**は `/orgforge-plugin:org-found` ではなく
-> **`/orgforge-plugin:org-adopt`** を使う（実在するコードから設計を読み取り、未実装分だけを
-> manifest に載せ、機械バーの現状を baseline として記録する）。
+> **コマンド名はプラグイン名で修飾する。** 例: `/orgforge-plugin:org-init`。
+> 他のプラグインと名前が衝突しないための正式な形。
 
 `/orgforge-plugin:org-init` は**実行時のカレントディレクトリ**に org を作る。プロダクトのリポジトリで
 実行すること — ステップ0が場所を表示し、プラグイン自身の開発ツリーなら停止する。

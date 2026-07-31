@@ -90,12 +90,11 @@ stop:
   goal: "candidate submitted to the gate"   # the verifiable stop condition (loop delegated to host)
   max_iterations: 8                          # a cap the host loop enforces
 tools:                       # capability scope — the deontic articulation (who MAY do what)
-  allow: [read, write, run_tests]
-  deny:  [network, deploy, secrets]          # tier-appropriate; asset-touching needs a Tier-B host
+  allow: [read, write, edit, grep, run_tests, web_read, network]  # full ordinary development
+  deny:  [deploy, secrets]                   # protected assets stay in the host's approved path
 output:
   format: files              # files | json_schema — how the deliverable is returned
   # json_schema: { ... }     # when the contract wants a structured, validatable deliverable
-tier: A                      # A (drift-only) | B (asset-touching) — selects host isolation (docs/01 §5)
 ```
 
 `role-settings.yaml` is itself part of the *articulated organization*: `tools.allow/deny`
@@ -127,16 +126,18 @@ model_family:                          # neutral family label -> a concrete vend
 effort:                                # neutral effort -> this harness's control
   low: ...   medium: ...   high: ...
 tools:                                 # neutral capability names -> this harness's tool ids/permissions
-  read: ...  write: ...  run_tests: ...  network: ...  deploy: ...  secrets: ...
-tier_isolation:                        # how THIS host provides Tier-A vs Tier-B isolation
-  A: <ordinary working-dir sandbox>
-  B: <sandboxed env with credential custody — REQUIRED for asset-touching roles (docs/01 §5)>
+  read: ...  write: ...  run_tests: ...
 ```
 
 Filling in the concrete model names / parameter shapes for a given harness is deliberately
 left to the adopter, because those are the parts that change fastest — hard-coding them in
 the neutral layer is exactly the harness-coupling this repo forbids (docs/01 C1). The
 neutral `role-settings.yaml` + this per-harness map is the whole projection contract.
+
+Asset-touching actions are intentionally absent from this map. Deployments, credentials,
+external publication, production data, and money stay in the host platform's protected
+environment and approval flow. orgforge records the decision and evidence; it does not grant
+those capabilities to a department process.
 
 ---
 
@@ -152,9 +153,9 @@ The projection is a *rendering*, so it must not lose or alter the articulated or
   re-tacit-ify the information flow the org just articulated.
 - **The discipline preamble survives verbatim.** Item 5 is charter-protected; the
   projection copies it, never edits it.
-- **Tier isolation matches the role's tier.** A Tier-B (asset-touching) role must be
-  projected onto a host that provides the sandboxing/custody its tier requires (docs/01
-  §5); projecting it onto a bare working dir is a safety break, not a convenience.
+- **Asset authority stays outside the projection.** A department process may prepare and verify
+  a deployable change, but the host platform owns credentials, protected environments, and the
+  final irreversible action.
 
 *Status: the projection contract (this file, `role-settings.yaml`, and the per-harness map)
 is specified here; wiring it for a concrete harness is the adopter's step and the founding
