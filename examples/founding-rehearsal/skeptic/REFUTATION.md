@@ -2,6 +2,11 @@
 
 **Verdict: REFUTED (one genuine spec violation found)**
 
+> **Resolved in 1.0.0:** the implementation now applies `[^A-Za-z0-9]+` to
+> the original code points before lowercasing. The Kelvin-sign attack is an
+> ordinary passing regression test; no `xfail` remains. The analysis below is
+> retained as the historical evidence that caused the correction.
+
 Skeptic department (adversarial checker). I am a different agent from both the
 maker and the gate. I read `slugify.py`, derived expected outputs strictly from
 the 5 requirements, wrote my own adversarial suite
@@ -21,8 +26,8 @@ as non-alphanumeric) → single hyphen."
 | Reproducing input | `"a" + "K" + "b"` (U+212A KELVIN SIGN between two ASCII letters) |
 | Character identity | `unicodedata.name` = `KELVIN SIGN`, `category` = `Lu` (Unicode uppercase **letter**) |
 | Expected per spec | `"a-b"` — it is a unicode letter, not in ASCII `[a-z0-9]`, so req 2 makes it a hyphen separator |
-| Actual output | `"akb"` — the unicode letter leaks through as an alphanumeric |
-| Other reproductions | `slugify("K")` → `"k"` (spec: `"n-a"`, no ASCII alnum); `slugify("temp K")` → `"temp-k"` (spec: `"temp"`) |
+| Original output | `"akb"` — the unicode letter leaked through as an alphanumeric |
+| Original reproductions | `slugify("K")` → `"k"` (spec: `"n-a"`, no ASCII alnum); `slugify("temp K")` → `"temp-k"` (spec: `"temp"`) |
 
 ### Root cause
 
@@ -59,7 +64,7 @@ to normalize/restrict to ASCII before or independently of lowering — e.g.
 `text.encode("ascii", "ignore")`-style filtering, or apply the non-alnum regex
 against the original casing using an explicit `[^A-Za-z0-9]+` and lowercase
 afterward. Under a literal reading of requirement 2, though, the current output
-`"akb"`/`"k"`/`"temp-k"` is wrong, so the admission is refuted.
+`"akb"`/`"k"`/`"temp-k"` was wrong, so the original admission was refuted.
 
 ---
 
@@ -86,8 +91,8 @@ All of the following produced spec-correct output — no defect:
 - Emoji / astral (`"hi😀there"` → `"hi-there"`, `"😀😀😀"` → `"n-a"`)
 - NBSP / zero-width space → `"a-b"`
 
-Suite result: `16 passed, 1 xfailed` (the xfail is the U+212A refutation,
-`strict=True`, so it is confirmed to fail exactly as documented).
+Original suite result: `16 passed, 1 xfailed`. Current suite result: all 17
+skeptic attacks pass, including the U+212A regression.
 
 ---
 
@@ -100,3 +105,7 @@ violates requirement 2, producing `"akb"` where the spec demands `"a-b"`. It is
 the unique counterexample to the very "lowercase-first is safe" invariant the
 gate relied on, and the maker's test suite has no coverage for the
 lower()-into-ASCII class of unicode letters.
+
+The correction reverses that order and adds the missing maker and skeptic
+coverage. The historical gate verdict remains evidence of what the independent
+skeptic caught; it is not the current implementation status.

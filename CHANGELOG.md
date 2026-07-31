@@ -32,6 +32,12 @@ predate that convention and are left as written. Design rationale lives in `docs
 - Standalone English and Japanese product, architecture, assurance, operations, and adoption guides.
 - Repository-local trusted developer defaults and regression tests for both harness projections.
 
+### Fixed
+
+- Resolved the founding-rehearsal Kelvin-sign defect instead of carrying it as a permanent expected
+  failure. The adversarial suite now imports the repository artifact rather than an absolute `/tmp`
+  copy, and the complete test suite has no `xfail` allowance.
+
 ### Assurance terminology
 
 - **The supported assurance model is explicit.** It addresses drift, hallucination, sycophancy,

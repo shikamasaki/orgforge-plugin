@@ -11,7 +11,9 @@ Where a case exposes a possible spec violation, it is marked ATTACK.
 """
 
 import sys
-sys.path.insert(0, "/tmp/founding-rehearsal/workdir-miner")
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "miner"))
 
 from slugify import slugify
 
@@ -120,16 +122,13 @@ def test_single_char():
 
 # ---- REFUTATION: Unicode letter that case-folds INTO ASCII [a-z0-9] ----
 # U+212A KELVIN SIGN is a Unicode uppercase LETTER (category Lu). Per req 2,
-# unicode letters count as non-alphanumeric and must become a hyphen. But the
-# implementation lowercases FIRST, and 'K'(U+212A).lower() == ASCII 'k', so it
-# leaks through as an alphanumeric letter. This is the ONE Unicode char that
-# does so. Spec expects "a-b"; implementation returns "akb".
-import pytest
-
-
-@pytest.mark.xfail(reason="KNOWN DEFECT: U+212A leaks to ASCII 'k' via pre-lowering", strict=True)
-def test_kelvin_sign_leaks_REFUTATION():
-    assert slugify("aKb") == "a-b"   # spec-correct expectation; FAILS -> 'akb'
+# unicode letters count as non-alphanumeric and must become a hyphen. The
+# original implementation lowercased first and leaked U+212A as ASCII ``k``.
+# This regression stays in the ordinary passing suite after the correction.
+def test_kelvin_sign_is_a_separator():
+    assert slugify("aKb") == "a-b"
+    assert slugify("K") == "n-a"
+    assert slugify("temp K") == "temp"
 
 
 # ---- ATTACK: non-breaking space / zero-width chars ----

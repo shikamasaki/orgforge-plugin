@@ -5,12 +5,11 @@ Status: SUBMITTED (not admitted). Independent gate must re-run.
 ## What I built
 
 - `slugify.py` — `slugify(text)` producing a URL-safe slug. Implementation:
-  lowercase first, then replace every run of characters outside ASCII
-  `[a-z0-9]` with a single hyphen (regex `[^a-z0-9]+`), strip
-  leading/trailing hyphens, and return `"n-a"` when nothing alphanumeric
-  remains. Lowercasing before the regex is what lets ASCII uppercase
-  survive while unicode letters (é, ñ) fall outside `[a-z0-9]` and are
-  treated as separators.
+  replace every run outside ASCII `[A-Za-z0-9]` with one hyphen, lowercase
+  the retained ASCII characters, strip leading/trailing hyphens, and return
+  `"n-a"` when nothing alphanumeric remains. Filtering before lowercasing
+  prevents Unicode characters such as U+212A from folding into the allowed
+  ASCII set.
 - `test_slugify.py` — pytest suite (7 tests).
 
 ## Acceptance case -> test mapping
