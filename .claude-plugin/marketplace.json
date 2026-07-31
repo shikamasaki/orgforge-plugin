@@ -3,12 +3,14 @@
   "owner": {
     "name": "shikamasaki"
   },
-  "description": "Stand up an AI-native IT business company as installable Claude Code features: it builds software through a forced non-skippable SDLC, ships via CI/CD, and produces reproducible work (same spec ⇒ same process/gates/contracts). Guardrails that actually block, per-department subagents, organ commands. Harness-neutral core (tools/), projected here onto Claude Code.",
+  "metadata": {
+    "description": "Govern existing coding-agent teams without replacing their runtime: explicit ownership, maker/checker separation, workflow gates, evidence, human-held irreversible decisions, and bounded organization evolution. Adopt an existing repository in one command and project the same neutral organization onto Claude Code and Codex."
+  },
   "plugins": [
     {
       "name": "orgforge-plugin",
       "source": "./integrations/claude-code",
-      "description": "非スキップの SDLC フェーズゲート、要求記述の規格準拠検査（ISO/IEC/IEEE 29148 tailored + EARS）、再現性 lint（unread-safe バー: 複雑度上限・型の逃げ道封鎖・重複/デッドコード・マルチOS CI、baseline との差で新規の悪化だけを止める）。実際にツール呼び出しをブロックする PreToolUse ガードレール（blast-radius キャップ、spec 宣言の強制、maker の自己承認拒否）。人間の diff レビューは廃止し、判断は理由とともに Issue と台帳の**両方に1コマンドで**記録される（片側だけ落ちるのを防ぐ）。並列で回すときは Issue ごとの git worktree で物理的に分離する。起票の粒度も検査する（壊れ方が複数か、認可が「入った後に何ができるか」を定めているか）。ゼロセットアップ — org はカレントディレクトリから発見されるので、1つの環境で複数リポジトリを運用できる。gate/skeptic/registrar/maker サブエージェント、/org-init /org-found /org-adopt /org-decompose /org-work などの organ コマンド。"
+      "description": "既存のClaude Code運用へ、明示的なownership、maker/checker分離、非スキップのSDLC gate、evidence ledger、人間が保持する不可逆判断を追加するgovernance layer。/org-adoptで途中のrepositoryへ1コマンド導入でき、既存ledgerは追記履歴を保持したまま移行する。通常の開発はtrusted developer modeで進める一方、production credential・deploy・資金・外部公開の保護はhost platformのapprovalとcustodyが担う。"
     }
   ]
 }

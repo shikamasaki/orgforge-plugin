@@ -685,6 +685,14 @@ def test_codex_hooks_json_has_no_comment_key():
     assert set(d) <= {"description", "hooks"}, f"未対応のキー: {sorted(set(d) - {'description', 'hooks'})}"
 
 
+def test_claude_plugin_manifest_uses_the_current_schema():
+    """Claude Code 2.0.73 は plugin manifest の ``displayName`` を拒否する。"""
+    d = json.loads((REPO / "integrations" / "claude-code" / ".claude-plugin" / "plugin.json")
+                   .read_text(encoding="utf-8"))
+    assert set(d) <= {"name", "version", "description", "author", "license", "keywords"}
+    assert "displayName" not in d
+
+
 def test_codex_plugin_manifest_is_valid():
     """plugin.json は現行 Codex schema に従い、hook は標準配置で発見される。"""
     d = json.loads((REPO / "integrations" / "codex" / ".codex-plugin" / "plugin.json")

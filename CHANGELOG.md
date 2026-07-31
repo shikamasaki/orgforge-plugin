@@ -6,7 +6,33 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
-## Unreleased — assurance terminology aligned with the product threat model
+## 1.0.0 — governance for existing coding-agent teams
+
+### Breaking changes
+
+- **orgforge is now explicitly a governance layer, not a replacement agent runtime or an autonomous
+  company prerequisite.** Existing Claude Code and Codex workflows remain the execution surface;
+  orgforge contributes ownership, workflow gates, independent checks, evidence, and bounded
+  organization evolution.
+- **The org-wide Runtime Tier A/B mode is removed.** `run_department.py --tier ...` is rejected and
+  existing `defaults.tier: A|B` declarations must be migrated to explicit role capabilities.
+- **Trusted developer mode is the shipped default.** Claude Code bypasses permission prompts and
+  Codex runs without approval prompts or sandboxing. Use it only in a trusted development checkout
+  without production credentials.
+- **Asset protection belongs to the host platform.** Deployments, funds, publication, production
+  credentials, and regulated assets require host-side custody and approval; role policy and local
+  hooks are not a hostile-process containment boundary.
+
+### Added
+
+- One-command adoption for existing repositories in Claude Code and Codex, without prior founding,
+  sudo, daemons, branches, Issues, keys, or network access.
+- Additive migration for already-operated orgforge repositories. Existing ledgers are preserved;
+  schema skew and obsolete runtime modes prevent `doctor` from reporting false readiness.
+- Standalone English and Japanese product, architecture, assurance, operations, and adoption guides.
+- Repository-local trusted developer defaults and regression tests for both harness projections.
+
+### Assurance terminology
 
 - **The supported assurance model is explicit.** It addresses drift, hallucination, sycophancy,
   skipped verification, and honest operational error on an existing host harness.
