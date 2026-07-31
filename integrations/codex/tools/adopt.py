@@ -14,6 +14,7 @@ creates no branch or Issue, installs no daemon, and requires no sudo.
 
 import argparse
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -118,6 +119,31 @@ def _has_non_whitespace_text(path):
         return bool(path.read_text(encoding="utf-8").strip())
     except (OSError, UnicodeError):
         return False
+
+
+def _legacy_runtime_tier(path):
+    """Return an obsolete org-wide A/B tier declared under ``defaults``, if any."""
+    if not path.is_file():
+        return None
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeError):
+        return None
+
+    in_defaults = False
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip())
+        if indent == 0:
+            in_defaults = stripped == "defaults:"
+            continue
+        if in_defaults:
+            match = re.match(r"^\s+tier:\s*([AB])(?:\s*(?:#.*)?)?$", line)
+            if match:
+                return match.group(1)
+    return None
 
 
 def _language_counts(files):
@@ -252,6 +278,12 @@ def doctor(root):
         "ledger, doctrine, and conventions directories exist")
     add("core_specs", all((root / name).is_file() for name in SPEC_FILES),
         "constitution, sensors, schedule, moves, ledger schema, and role settings exist")
+    legacy_tier = _legacy_runtime_tier(root / "role-settings.yaml")
+    add("runtime_mode", legacy_tier is None,
+        "role settings use the current capability model"
+        if legacy_tier is None else
+        f"role-settings.yaml still declares obsolete defaults.tier: {legacy_tier}; remove the "
+        "org-wide A/B mode and articulate maker/checker capabilities")
     organization = root / "organization.yaml"
     architecture = root / "ARCHITECTURE.md"
     remaining_work = root / "coverage-manifest.md"
@@ -271,6 +303,22 @@ def doctor(root):
         except (OSError, json.JSONDecodeError):
             baseline_ok = False
     add("baseline", baseline_ok, "the current mechanical debt baseline is valid JSON")
+
+    schema_result = None
+    if (root / "ledger-schema.yaml").is_file():
+        schema_result = _run(
+            root,
+            sys.executable,
+            str(Path(__file__).resolve().parent / "ledger.py"),
+            "schema",
+        )
+    schema_ok = schema_result is not None and schema_result.returncode == 0
+    schema_detail = "ledger schema matches the installed orgforge validation rules"
+    if schema_result is not None and not schema_ok:
+        output = ((schema_result.stdout or "") + (schema_result.stderr or "")).strip().splitlines()
+        if output:
+            schema_detail += f" ({output[-1]})"
+    add("ledger_schema", schema_ok, schema_detail)
 
     lint_result = None
     if organization.is_file() and all((root / name).is_file() for name in SPEC_FILES):

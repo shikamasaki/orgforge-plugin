@@ -118,12 +118,61 @@ def test_doctor_rejects_whitespace_only_design_artifacts(tmp_path):
     assert "remaining_work" in failed
 
 
+def test_doctor_rejects_legacy_runtime_tier(tmp_path):
+    ADOPT.prepare(tmp_path, "ja")
+    shutil.copy2(REPO / "template" / "organization.yaml", tmp_path / "organization.yaml")
+    for name in ("ARCHITECTURE.md", "coverage-manifest.md"):
+        (tmp_path / name).write_text("ready\n", encoding="utf-8")
+    (tmp_path / ".orgforge/repro-baseline.json").write_text(
+        json.dumps({"version": 1}), encoding="utf-8"
+    )
+    settings = tmp_path / "role-settings.yaml"
+    settings.write_text(
+        settings.read_text(encoding="utf-8").replace(
+            "defaults:\n  effort: medium\n",
+            "defaults:\n  effort: medium\n  tier: A\n",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    result = ADOPT.doctor(tmp_path)
+    failed = {item["name"] for item in result["checks"] if not item["ok"]}
+
+    assert result["ready"] is False
+    assert "runtime_mode" in failed
+
+
+def test_doctor_rejects_outdated_ledger_schema(tmp_path):
+    ADOPT.prepare(tmp_path, "ja")
+    shutil.copy2(REPO / "template" / "organization.yaml", tmp_path / "organization.yaml")
+    for name in ("ARCHITECTURE.md", "coverage-manifest.md"):
+        (tmp_path / name).write_text("ready\n", encoding="utf-8")
+    (tmp_path / ".orgforge/repro-baseline.json").write_text(
+        json.dumps({"version": 1}), encoding="utf-8"
+    )
+    schema = tmp_path / "ledger-schema.yaml"
+    old = "    halt_released:           [releases_seq, reason, released_by, recovery_verified,\n                              identity_assurance]\n"
+    new = "    halt_released:           [releases_seq, reason, released_by, recovery_verified]\n"
+    text = schema.read_text(encoding="utf-8")
+    assert old in text
+    schema.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+    result = ADOPT.doctor(tmp_path)
+    failed = {item["name"] for item in result["checks"] if not item["ok"]}
+
+    assert result["ready"] is False
+    assert "ledger_schema" in failed
+
+
 def test_adoption_surfaces_validate_neutral_role_settings():
     claude = (REPO / "integrations/claude-code/commands/org-adopt.md").read_text(encoding="utf-8")
     codex = (REPO / "integrations/codex/skills/org-adopt/SKILL.md").read_text(encoding="utf-8")
 
     assert "sensors.yaml role-settings.yaml" in claude
     assert "sensors.yaml role-settings.yaml" in codex
+    assert "ledger.py\" schema --fix" in claude
+    assert "ledger.py\" schema --fix" in codex
 
 
 def test_cli_doctor_exit_code_tracks_readiness(tmp_path):

@@ -38,6 +38,27 @@ python3 "${CLAUDE_PLUGIN_ROOT}/tools/adopt.py" prepare . --language <ja|en>
 `<ja|en>`を会話の言語で置き換えてBash実行する。英語を使っている場合は**最初から**`en`を選ぶ。
 既存`constitution.yaml`がある場合、prepareはその言語設定を変更しない。
 
+### 1a. 既存orgforge運用を更新する
+
+`inspect`が`existing org: yes`なら、既存ledgerを捨てて初期化してはいけない。まずschemaを
+追加方向だけで更新し、hash chainを再検証する:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/tools/ledger.py" schema --fix
+python3 "${CLAUDE_PLUGIN_ROOT}/tools/ledger.py" schema
+python3 "${CLAUDE_PLUGIN_ROOT}/tools/ledger.py" verify
+```
+
+次に既存`role-settings.yaml`を読む。`defaults.tier: A|B`は廃止済みなので削除し、makerには
+`read/write/edit/grep/run_tests/web_read/network`を明示する。gate/skepticはread-onlyを保ち、
+`deploy/secrets/asset_movement/external_publish/production_deploy`をどのroleのallowにも入れない。
+これらの保護はrole policyではなくhost platformのcredential custodyとapprovalが担う。
+`constitution.yaml`にTier A/Bごとの封じ込め保証が残っていれば、同じhost責務へ書き換える。
+
+この更新は既存eventを書き換えない。`legacy_unvalidated`は履歴上そのまま残し、新規eventだけを
+現行schemaで検証する。`ledger.jsonl`、`HEAD`、event件数、tip hashが更新前後で不変であることを
+確認してから先へ進む。
+
 ## 2. 既存コードを読む — 設計するのではなく、**現状を記述する**
 
 ここが `/org-found` との本質的な違い。コードが正であり、文書はその写像である。

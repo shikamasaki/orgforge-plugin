@@ -34,6 +34,23 @@ Complete adoption in the current turn. Do not ask the user to run a second setup
 
    Use `en` when the user's working language is English.
 
+   If inspect reports an existing orgforge organization, preserve its ledger and migrate it in
+   place before drafting anything:
+
+   ```bash
+   python3 "$PLUGIN_ROOT/tools/ledger.py" schema --fix
+   python3 "$PLUGIN_ROOT/tools/ledger.py" schema
+   python3 "$PLUGIN_ROOT/tools/ledger.py" verify
+   ```
+
+   Remove obsolete `defaults.tier: A|B` from `role-settings.yaml`. Give maker roles ordinary
+   development capabilities (`read`, `write`, `edit`, `grep`, `run_tests`, `web_read`, `network`),
+   keep gate and skeptic read-only, and never grant `deploy`, `secrets`, `asset_movement`,
+   `external_publish`, or `production_deploy`. Update Tier A/B containment prose in the constitution
+   to state that credentials and irreversible effects remain protected by the host platform. Verify
+   that ledger bytes, HEAD, event count, and tip hash did not change; historical
+   `legacy_unvalidated` events remain historical rather than being rewritten.
+
 3. Read the README, dependency manifests, real directories, tests, and recent commits.
 
 4. Write:
