@@ -65,3 +65,9 @@ def test_digits_preserved():
     """Supporting case: ASCII digits are alphanumeric and preserved."""
     assert slugify("Version 2.0") == "version-2-0"
     assert slugify("abc123") == "abc123"
+
+
+def test_unicode_that_lowercases_to_ascii_is_still_a_separator():
+    """The ASCII boundary is applied before Unicode lowercasing."""
+    assert slugify("aKb") == "a-b"
+    assert slugify("K") == "n-a"

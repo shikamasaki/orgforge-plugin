@@ -6,11 +6,10 @@ allowed characters are ASCII [a-z0-9] plus hyphen separators.
 
 import re
 
-# Any run of one-or-more characters that are NOT ASCII lowercase
-# letters or digits. Because we lowercase first, uppercase ASCII
-# letters become lowercase and pass through; unicode letters (é, ñ,
-# etc.) are NOT in [a-z0-9] and are therefore treated as separators.
-_NON_ALNUM_RUN = re.compile(r"[^a-z0-9]+")
+# Any run of one-or-more characters that are not ASCII letters or digits.
+# Filtering before lowercasing matters: U+212A KELVIN SIGN lowercases to
+# ASCII ``k`` and would otherwise cross the explicit ASCII boundary.
+_NON_ALNUM_RUN = re.compile(r"[^A-Za-z0-9]+")
 
 
 def slugify(text):
@@ -27,16 +26,12 @@ def slugify(text):
       5. Return "n-a" for input that is empty or contains no
          alphanumeric characters.
     """
-    # Lowercase first so ASCII uppercase letters survive while unicode
-    # letters remain outside the [a-z0-9] set.
-    lowered = text.lower()
+    # Apply the ASCII boundary to the original code points. Lowercasing first
+    # would turn U+212A KELVIN SIGN into ASCII ``k`` and incorrectly keep it.
+    hyphenated = _NON_ALNUM_RUN.sub("-", text)
 
-    # Replace every run of non-[a-z0-9] characters with a single hyphen.
-    # This simultaneously collapses consecutive separators.
-    hyphenated = _NON_ALNUM_RUN.sub("-", lowered)
-
-    # Strip leading/trailing hyphens.
-    slug = hyphenated.strip("-")
+    # Lowercase the retained ASCII characters and strip separator edges.
+    slug = hyphenated.lower().strip("-")
 
     # Empty (or no alphanumeric content) -> "n-a".
     if not slug:
