@@ -1,8 +1,8 @@
 {
   "name": "orgforge-plugin",
-  "displayName": "OrgForge — stand up an AI-native IT company",
+  "displayName": "OrgForge — governance for coding-agent teams",
   "version": "0.39.5",
-  "description": "Stands up and runs an AI-native IT business company on Claude Code: it decides what to build, builds through a forced non-skippable SDLC (requirements→design→implement→test→integrate→deploy→operate), ships via CI/CD, and produces REPRODUCIBLE work — same spec ⇒ same process/gates/contracts, and repos that clone-and-run the same for anyone. Human diff review is retired: an unread-safe mechanical bar (complexity ceilings, closed type escapes, dup/dead-code and multi-OS CI) plus a gate and an adversarial skeptic are the judgment layer, and every judgment is recorded with its reasoning on the task Issue. Zero setup — the org is discovered from the working directory, so several repositories can run from one environment. Guardrails enforce as PreToolUse hooks that actually block. Harness-neutral core; this is the Claude Code projection.",
+  "description": "A governance layer for existing coding-agent teams. OrgForge projects explicit roles, maker/checker boundaries, a non-skippable SDLC, human-held irreversible decisions, and evidence records into Claude Code, then uses that evidence to evolve the organization with the product. Adopt an existing repository with one command; no daemon, sudo, or key infrastructure is required.",
   "author": {
     "name": "shikamasaki"
   },

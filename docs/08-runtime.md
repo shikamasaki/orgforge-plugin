@@ -69,10 +69,10 @@ coding agents already do:
 - **An instruction file it reads on launch** (where the projected profile lands).
 - **File read/write in a working directory** (perception and action over the pack + the
   role's outputs).
-- **Tool execution** with **permissions/sandboxing appropriate to the org's threat tier**
-  (docs/01 §5) — for a Tier-A documentation org, ordinary file tools; for a Tier-B
-  asset-touching org, a sandboxed environment with credential custody. *The system chooses
-  a host that provides the needed isolation; it does not build isolation.*
+- **Tool execution** with **permissions/sandboxing appropriate to deployment impact**
+  (docs/01 §5) — ordinary file tools may suffice for documentation work; an asset-touching
+  deployment needs a sandboxed host with credential custody. *The system chooses a host
+  that provides the needed isolation; it does not build isolation.*
 - **A control loop with stop conditions** (turn/iteration caps, a token budget) — Loop
   engineering, which the harness already implements.
 - **A launch/stop signal on a schedule** (a scheduler the environment provides).
@@ -106,31 +106,20 @@ The skeleton declares *intent*; the host enforces it. Concretely:
   approval queue (docs/05) holding charter/irreversible actions for the operator — not a
   bespoke daemon.
 
-## 5. Control enforcement — split by threat tier (docs/01 §5)
+## 5. Control enforcement and host responsibility (docs/01 §5)
 
 The maker/checker line and separation of duties (Organ 6) must hold at runtime, not just
-in the lint. *How* they're enforced depends on the threat tier the org is deployed under:
+in the lint. The supported mechanism is **structure guaranteed by projection**: a maker's
+context pack routes its positive results to a *different* department (its checker); the
+checker runs on its own harness instance with its own profile; no department's projection
+gives it its own admission authority. This is separation of duties realized as *which files
+land in which working directory* — no bespoke runtime interception needed. The lint proves
+the skeleton has this shape (O6/O6b/O6c/O7); the projection preserves it at launch.
 
-- **Tier A (drift & honest error — every org).** Enforced by **structure the projection
-  guarantees**: a maker's context pack routes its positive results to a *different*
-  department (its checker); the checker runs on its own harness instance with its own
-  profile; no department's projection gives it its own admission authority. This is
-  separation of duties realized as *which files land in which working directory* — no
-  runtime interception needed. The lint proves the skeleton has this shape (O6/O6b/O6c/O7);
-  the projection preserves it at launch. This tier is always on.
-- **Tier B (adversarial optimization — asset-touching orgs only).** When a department can
-  reach real assets/production/funds, structural separation is not enough — you also need
-  the host *environment* to provide write-authorization, tamper-evident records, credential
-  custody, and sandboxing. **These are host-environment features you select, not runtime you
-  build** (docs/01 R2, C4): run such an org on an environment whose sandbox and permission
-  model already provide them. The system's job is to *require the right host* for the tier,
-  and to keep the irreversible-action approval gate (docs/05) between "prepared" and
-  "executed."
-
-Tier-B guarantees are not built inside this repo. Under R0/C4 that would be the
-wrong layer: for asset-touching orgs, choose a host environment that provides a mediation
-layer, effect classification, and an external watchdog; for the
-common Tier-A org, structural separation + the approval gate + the lint suffice.
+When a department can reach real assets, structural separation is not sufficient by itself.
+The host environment must provide write authorization, credential custody, sandboxing, and
+irreversible-action approval. **These are host features to select, not runtime to build**
+(docs/01 R2, C4). They are deployment responsibilities rather than another orgforge mode.
 
 ## 6. Conformance — restated as delegation, not implementation
 
@@ -140,14 +129,13 @@ An organization built from this repo is *runnable* when, on a chosen host harnes
       reads its context-pack files, does a cycle of contract work, and writes its output —
       **with no bespoke runtime process involved** (docs/01 S1/J2; the load-bearing test)
 - [ ] a maker's positive result is routed to a *different* department as checker, enforced
-      by what the projection writes into each working dir (Tier-A SoD)
+      by what the projection writes into each working dir
 - [ ] the role's cadence, stop condition, and token budget are realized by the host loop /
       scheduler, from the declared intent
 - [ ] the shared record is an append-only store the host provides, shaped per
       ledger-schema.yaml
-- [ ] charter/irreversible actions are held for the operator's approval queue (docs/05),
-      and — for a Tier-B org — the host environment provides the sandboxing/custody the tier
-      requires
+- [ ] charter/irreversible actions are held for the operator's approval queue (docs/05);
+      asset-touching deployments obtain required sandboxing and custody from the host
 - [ ] the lint passes on the skeleton and every reorg diff
 
 The first box is the one that matters: **until an org from this template actually launches

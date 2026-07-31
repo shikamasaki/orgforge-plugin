@@ -1,5 +1,8 @@
 # Architecture — the ecosystem and the lifecycle
 
+> **Official standalone versions:** [English](docs/en/architecture.md) ·
+> [日本語](docs/ja/architecture.md)
+
 This document is the whole-system map: what orgforge-plugin **is** (the ecosystem — neutral core,
 projection, organs), and what an org built with it **does over time** (the lifecycle — founding →
 projection → operation → guardrails → evolution). For the design *reasoning* behind each piece, follow
@@ -150,6 +153,27 @@ A crucial distinction for understanding what the system actually *forces* vs wha
 Their exit `0` is a silent breadcrumb (fail-quiet is the *normal* state); their exit `10` pages a human.
 They inform decisions; they do not enforce them. (An advisory organ becomes enforcement only when its
 verdict is routed through `org_hook` — today only the blast-radius cap is so wired.)
+
+### 4a. Assurance has independent axes
+
+orgforge states each guarantee independently:
+
+| Axis | Supported claim |
+|---|---|
+| Judgment account | signed/bound receipt: `attested` |
+| Review quality | different model lineage: `cross-harness` |
+| Writer path | hook/RPC mediation: `process_mediated` |
+| Ledger history | hash-chain: tamper-evident |
+
+These columns must not be borrowed from one another. Isolating the writer does not isolate the judge;
+using two model families does not authenticate two people; verifying a signature does not prove that a
+hostile process under the same UID could not reach the key.
+
+The architecture therefore treats hostile-process containment, credential custody, and immutable
+storage as **non-goals of the plugin**. Asset-touching deployments must select a host environment
+with the required sandboxing, permissions, credentials, and approval controls. The neutral core does
+not grow a custom mTLS judge service, KMS client, scheduler, or execution engine to simulate those
+host guarantees — doing so would violate R0.
 
 ---
 

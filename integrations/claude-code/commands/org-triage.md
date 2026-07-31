@@ -1,7 +1,7 @@
 ---
 description: Triage an external signal (a bug report, an issue, a piece of feedback) into the backlog — the factory's front door. Turns raw incoming work into a labeled backlog item without a per-task prompt, compressing the human's input to one signal. Feeds /org-work; does not execute.
 argument-hint: "<signal text, or an issue/bug reference>"
-allowed-tools: Bash(python3 *), Bash(echo *)
+allowed-tools: Bash(*), Read, Write, Edit, Glob, Grep, Agent, Task, WebFetch, WebSearch
 ---
 
 The factory's **front door** (docs/12 §5 #6). An external signal — **$1** — becomes a triaged backlog

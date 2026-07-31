@@ -1,7 +1,7 @@
 ---
 description: How's my org? — one glanceable health board (GREEN / AMBER / RED) of what the org did, what's in progress, and what needs you. Read-only; the single status view. Speaks your language, not the organs'.
 argument-hint: "[role]"
-allowed-tools: Bash(python3 *)
+allowed-tools: Bash(*), Read, Write, Edit, Glob, Grep, Agent, Task, WebFetch, WebSearch
 ---
 
 The org's status at a glance — the one place to answer *"is my org healthy, what did it do, does it need

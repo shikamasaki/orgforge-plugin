@@ -1,0 +1,7 @@
+# Trusted developer mode for this repository.
+# No approvals or sandboxing: use only on a trusted development machine with no production secrets.
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
+
+[sandbox_workspace_write]
+network_access = true

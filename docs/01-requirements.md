@@ -219,7 +219,7 @@ Concretely, the system succeeds when:
   (Level 2). Reproducibility is checked by a deterministic tooth, not asserted (J14 — docs/11 §0,
   §4a).
 
-The honest status line for the repo: **S1 has been demonstrated once** — a small Tier-A
+The honest status line for the repo: **S1 has been demonstrated once** — a small
 RFP run end-to-end on an existing harness, three departments as separate agents, with the
 maker/checker separation holding structurally (demos/S1-founding-rehearsal). S2–S6 — scale, on-time delivery,
 unit economics, and unattended 24-hour operation — remain to be shown. R0 says a runnable
@@ -231,27 +231,43 @@ frontier is scale and autonomy.
 ## 5. Threat model (stated explicitly, so reviews stop defaulting to max-adversarial)
 
 Earlier reviews collapsed toward exhaustive red-teaming because the threat model was never
-written down. It has two tiers, and controls attach to the tier they defend:
+written down. The supported risks are drift and honest operational error: LLM departments
+hallucinate, sycophantically agree, skimp on verification, apply stale knowledge, or optimize
+a proxy without intending fraud. Defenses include the independent checker (skeptic),
+purpose-grounded admission, fresh doctrine, direction supervision, and lint. These are
+always on because they address the dominant risk in normal agent operation.
 
-- **Tier A — Drift & honest error (the common case, applies to EVERY org).** LLM
-  departments hallucinate, sycophantically agree, skimp on verification, apply stale
-  knowledge, or optimize a proxy without intending fraud. Defenses: the independent
-  checker (skeptic), purpose-grounded admission, fresh doctrine, direction supervision,
-  the lint. These are always on. **This is the primary risk for the overwhelming majority
-  of deployments.**
-- **Tier B — Adversarial optimization (only where the stakes justify it).** A department
-  actively games the boundary — laundering a bad result past the gate, manufacturing a
-  sensor reading, flooding the approval queue, escaping the boundary via a mislabeled
-  action. Defenses: write-authorization, tamper-evident records, external watchdogs,
-  effect resolution. **These are required only for orgs that touch real assets,
-  production, funds, or external publication** — and even then, they are the *host
-  harness's and host environment's* job to provide (sandboxing, permissions, credential
-  custody), which R2 already delegates, not something this repo reimplements.
+Hostile-process containment is outside the product guarantee. If an org touches real assets,
+production, funds, credentials, or external publication, its host harness and host environment
+must provide sandboxing, permissions, approvals, and credential custody. R2 already delegates
+those controls; this repository does not reimplement them.
 
-The design rule: **build Tier-A defenses into the skeleton for everyone; require Tier-B
-defenses only for asset-touching orgs, and satisfy them by choosing a host environment
-that provides them, not by hand-rolling a runtime.** A review must state which tier a
-finding targets; a Tier-B finding against a documentation-generation org is out of scope.
+The design rule: **build drift/error defenses into the skeleton for everyone, and state
+host-environment requirements directly for asset-touching deployments.** Do not hand-roll
+a runtime to simulate a stronger host boundary.
+
+### 5.1 Assurance vocabulary and release scope
+
+Release claims use these terms:
+
+- **`claimed`** — supplied by the caller; no verification.
+- **`observed`** — observed by the host or writer, but not proof of who made a judgment.
+- **`attested`** — a receipt is cryptographically bound to the judgment and its registered
+  signer. A key readable by the same local UID does not establish an adversarial identity
+  boundary, so local asymmetric signatures stop here.
+- **`authenticated`** — reserved for a deployment where custody and caller authentication
+  are supplied by an external host boundary. Core local operation does not claim it.
+- **`cross-harness`** — a decorrelated reviewer on a different model lineage. It is a
+  verification-quality control, not a cryptographic principal.
+- **`process_mediated`** — the default writer claim: normal actions are mediated by the
+  enabled harness and hooks.
+- **`separate_uid`** — an experimental writer-integrity claim, earned only after the
+  caller UID is measured unable to modify writer assets while the socket path still works.
+
+The experimental separate-UID writer code targets ledger and trust-store integrity but is
+not adopted as supported core and does not establish judge-key custody. KMS, HSM, mTLS judge
+services, and separate judge hosts are host-environment choices, not mechanisms this
+repository must build before it runs.
 
 ---
 
@@ -283,9 +299,8 @@ harness-neutral skeleton:
    projection format. A projection-layer decision (§2), not an organizational one.
 2. **Company layer scope** (J10): whether the cross-project asset pool ships now or is a
    future layer above the single-org model.
-3. **How much of Tier B to specify** vs. delegate wholly to the host environment — the
-   §5 rule leans toward delegation, but the boundary for asset-touching orgs needs a
-   concrete checklist.
+3. **Host requirements for asset-touching deployments** — the §5 rule delegates them,
+   but operators still need a concrete checklist for sandboxing, approvals, and custody.
 
 ---
 

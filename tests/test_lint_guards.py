@@ -33,8 +33,67 @@ def _lint(tmp_path, **overrides):
     return r.returncode, r.stdout + r.stderr
 
 
+def _lint_with_role_settings(tmp_path, mutate=None):
+    files = {}
+    for name in ("organization", "constitution", "moves", "ledger-schema", "sensors"):
+        doc = yaml.safe_load((TPL / f"{name}.yaml").read_text())
+        path = tmp_path / f"{name}.yaml"
+        path.write_text(yaml.safe_dump(doc))
+        files[name] = str(path)
+    settings = yaml.safe_load((TPL / "role-settings.yaml").read_text())
+    if mutate:
+        settings = mutate(settings)
+    settings_path = tmp_path / "role-settings.yaml"
+    settings_path.write_text(yaml.safe_dump(settings))
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(TOOLS / "org_lint.py"),
+            files["organization"],
+            files["constitution"],
+            files["moves"],
+            files["ledger-schema"],
+            files["sensors"],
+            str(settings_path),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode, result.stdout + result.stderr
+
+
 def test_clean_template_passes(tmp_path):
     code, out = _lint(tmp_path)
+    assert code == 0, out
+
+
+def test_clean_role_settings_pass_without_runtime_tier(tmp_path):
+    code, out = _lint_with_role_settings(tmp_path)
+    assert code == 0, out
+
+
+def test_asset_touching_tools_cannot_be_enabled_by_legacy_tier(tmp_path):
+    def mutate(settings):
+        settings.setdefault("defaults", {})["tier"] = "B"
+        settings["roles"][0]["tier"] = "B"
+        settings["roles"][0]["tools"]["allow"].append("deploy")
+        return settings
+
+    code, out = _lint_with_role_settings(tmp_path, mutate)
+    assert code == 1, out
+    assert "asset-touching tools" in out
+    assert "host platform" in out
+
+
+def test_normal_development_network_access_is_allowed(tmp_path):
+    def mutate(settings):
+        settings["roles"][0]["tools"]["allow"].append("network")
+        settings["roles"][0]["tools"]["deny"] = [
+            tool for tool in settings["roles"][0]["tools"]["deny"] if tool != "network"
+        ]
+        return settings
+
+    code, out = _lint_with_role_settings(tmp_path, mutate)
     assert code == 0, out
 
 

@@ -96,8 +96,8 @@ role reads the views it has been granted and nothing else — least privilege, a
 information (Saltzer & Schroeder's need-to-know, imported from security because a
 misaligned optimizer with extra context is an attacker with extra reconnaissance). This
 scoping is realized by **which files the projection writes into each working directory** —
-need-to-know as file placement — enforced structurally for every org (Tier A) and, for
-asset-touching orgs, by the host environment (Tier B), not by a runtime gatekeeper
+need-to-know as file placement — enforced structurally for every org and, for
+asset-touching deployments, supplemented by the host environment, not by a runtime gatekeeper
 intercepting reads (docs/01 §5, docs/08 §5). The standard pack formula, for every role:
 
 > intent block + own contract & doctrine (docs/06) + **live state of adjacent
@@ -210,7 +210,7 @@ Need-to-know applies to the exploration front's *lateral* traffic. It never rest
   their duties require, and a maker can never scope-fence its Checker out of the evidence
   (that would be separation of duties defeated by information starvation). This is
   guaranteed structurally: the projection writes the evidence files into the checker's
-  working directory regardless of the maker's grants (Tier-A SoD, docs/08 §5). **The budget
+  working directory regardless of the maker's grants (structural SoD, docs/08 §5). **The budget
   cannot do it either.** The over-budget summarize-and-link rule (§2.4) applies to the
   exploration front, NOT to a checker's `full_evidence_trail`: lossily summarizing a large
   candidate's evidence away is the same SoD-by-starvation attack, committed through a size
@@ -242,7 +242,7 @@ Need-to-know applies to the exploration front's *lateral* traffic. It never rest
 Context packs are delivered by the projection writing files into each working directory
 before launch, and the registrar that does so is a department the host launches on a
 schedule (docs/08 §1/§2, docs/01 R2) — scoping, budgets, and grants are enforced
-structurally (Tier A) or by the host environment (Tier B), not by a bespoke gatekeeper
+structurally or by the host environment, not by a bespoke gatekeeper
 (docs/08 §5). The mechanisms are this repo's synthesis of the cited frames plus
 standard security practice; the sensor thresholds and budget sizes are unvalidated design
 parameters. Treat the dial metaphor seriously — both failure directions are real, and only

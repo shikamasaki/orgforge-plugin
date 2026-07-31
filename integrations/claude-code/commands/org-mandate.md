@@ -1,7 +1,7 @@
 ---
 description: Adjudicate a mandate conflict — two departments each acting in-authority whose decisions cannot both stand — against the human-declared precedence in the constitution. Resolves silently by precedence, integrates if both satisfiable, escalates only the un-ordered / mutually-exclusive case.
 argument-hint: "<subjectA,subjectB> <contested-decision>"
-allowed-tools: Bash(python3 *)
+allowed-tools: Bash(*), Read, Write, Edit, Glob, Grep, Agent, Task, WebFetch, WebSearch
 ---
 
 Adjudicate a genuine mandate conflict (not a resource grab, not a file collision — two mandates that cannot both stand).

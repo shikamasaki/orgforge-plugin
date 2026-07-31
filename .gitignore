@@ -6,4 +6,5 @@ __pycache__/
 .DS_Store
 node_modules/
 jina.txt
-.claude/
+.claude/*
+!.claude/settings.json

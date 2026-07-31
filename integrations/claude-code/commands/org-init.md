@@ -1,7 +1,7 @@
 ---
 description: Initialize a new orgforge org in this directory — create the ledger root, install the constitution/settings, set up the GitHub backlog labels, and verify the guardrails actually bite. Run this once, before /org-found. It sets up the org; it designs nothing.
 argument-hint: "[org-name] [output-language: ja|en]"
-allowed-tools: Bash(python3 *), Bash(mkdir *), Bash(cp *), Bash(git *), Bash(gh *), Bash(echo *), Bash(printf *), Bash(touch *), Bash(grep *), Bash(sed *), Bash(cat *), Read, Write
+allowed-tools: Bash(*), Read, Write, Edit, Glob, Grep, Agent, Task, WebFetch, WebSearch
 ---
 
 Stand up a **new org's state** in this directory, so `/org-found` has somewhere to write and the

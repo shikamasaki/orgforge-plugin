@@ -1,7 +1,7 @@
 ---
 description: Verify the org's guardrails actually block — at the hook-script level AND at the live-harness level (does PreToolUse fire for a spawned subagent's tool call?). Run this at founding before trusting the org to fan out unattended; the whole safety story degrades silently if the harness doesn't gate subagents.
 argument-hint: ""
-allowed-tools: Bash(python3 *), Task
+allowed-tools: Bash(*), Read, Write, Edit, Glob, Grep, Agent, Task, WebFetch, WebSearch
 ---
 
 Certify the enforcement layer before the org runs unattended. The blast-radius cap, catastrophic

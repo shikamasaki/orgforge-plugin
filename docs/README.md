@@ -1,5 +1,16 @@
 # orgforge docs — the reasoning, in four parts
 
+## Official language editions
+
+- **[English documentation](en/README.md)** — standalone product, quickstart, architecture,
+  assurance, and operations documentation.
+- **[日本語ドキュメント](ja/README.md)** — 日本語だけで完結するproduct、quickstart、
+  architecture、保証、運用ドキュメント。
+
+The numbered chapters below are the long-form design and research record. They predate the language
+split and contain mixed-language examples. They remain useful rationale, but the language-specific
+editions above define the current supported profile and assurance claims.
+
 These documents are the *why* behind orgforge: the organization theory, the design law, the operating
 mechanics, and the north star. They read as one argument, **Part I → Part IV**. Each doc is a chapter;
 new material is added as a **section inside the chapter it belongs to** — the four Parts and the twelve

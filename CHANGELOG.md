@@ -6,6 +6,20 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## Unreleased — assurance terminology aligned with the product threat model
+
+- **The supported assurance model is explicit.** It addresses drift, hallucination, sycophancy,
+  skipped verification, and honest operational error on an existing host harness.
+- **Local signed receipts are `attested`, not `authenticated`.** An asymmetric signature binds an
+  account to a registered key, but a key readable by the same local UID is not an adversarial
+  identity boundary.
+- **`cross-harness` means decorrelated review.** It buys a second model lineage with different blind
+  spots, not a cryptographically independent principal.
+- **Separate-UID writer isolation is not adopted as supported core.** Experimental code may document
+  failure modes, but it is not a release prerequisite and does not establish judge-key custody.
+- Historical entries below retain the terminology used by those releases. The current definitions
+  in the language-specific documentation govern new claims.
+
 ## 0.39.5 — three bundles, no new features
 
 Scoped to the three bundles the audit asked for. No new capability was added.

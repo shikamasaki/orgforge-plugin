@@ -55,10 +55,10 @@ against the invariants that must hold for the articulation to be coherent:
   SN   sensors          — each sensor has formula/window/threshold and judge machine|llm;
                           night-preregistered moves are delegated-tier and fed by the sensor
   RS   role-settings    — (optional 6th file) every active role has neutral runtime settings;
-                          budgets match the scope grant; tiers A|B and model_tier neutral
-                          (no vendor strings); checkers restricted to read/verify tools
-                          (default-deny, not a blocklist); the tier flag may not understate an
-                          asset-touching scope; the skeptic's model_family differs from the gate's
+                          budgets match the scope grant; model_tier stays neutral (no vendor
+                          strings); checkers are restricted to read/verify tools (default-deny,
+                          not a blocklist); asset-touching capabilities are never projected into
+                          the core runner; the skeptic's model_family differs from the gate's
 
 Usage:  org_lint.py organization.yaml constitution.yaml moves.yaml ledger-schema.yaml sensors.yaml [role-settings.yaml]
 The first five files are required; role-settings.yaml is an optional sixth (the projection's
@@ -843,15 +843,15 @@ def lint_moves_cite_defined_sensors(mv, sensor_ids, lint):
 
 # ── role-settings.yaml (optional 6th file — the projection's neutral runtime settings) ──
 
-VALID_TIERS_RS = {"A", "B"}
-
 # A checker only reads and re-derives; anything outside this allowlist makes it a maker.
 # This is default-deny, not a blocklist — a renamed write tool cannot slip past.
 CHECKER_ALLOWED_TOOLS = {"read", "run_tests", "web_read"}
 
-# Capabilities that touch assets/production/the boundary. A role that holds any of these
-# is Tier-B by definition — the tier flag cannot understate the capability scope.
-ASSET_TOUCHING_TOOLS = {"deploy", "secrets", "network", "asset_movement",
+# Capabilities that touch protected assets or publish irreversible effects. Ordinary development
+# network access is intentionally not here: dependency resolution, documentation, APIs, and normal
+# git collaboration are part of development. The host still owns deployment credentials and final
+# production/publication authority.
+ASSET_TOUCHING_TOOLS = {"deploy", "secrets", "asset_movement",
                         "external_publish", "production_deploy"}
 
 
@@ -867,10 +867,10 @@ def _scope_budgets(org):
 
 def lint_role_settings(rs, org, lint):
     """RS — the articulated runtime settings must be coherent with the org chart:
-    every role present, budgets matching the scope grant, tiers valid, checkers restricted
-    to read/verify tools (default-deny, not a blocklist), the tier flag not understating an
-    asset-touching scope, the adversarial checker decorrelated from the maker/gate it judges,
-    and no vendor model strings leaking into the neutral layer."""
+    every role present, budgets matching the scope grant, checkers restricted to read/verify
+    tools (default-deny, not a blocklist), asset-touching capabilities kept outside the core
+    runner, the adversarial checker decorrelated from the maker/gate it judges, and no vendor
+    model strings leaking into the neutral layer."""
     raw = rs.get("roles")
     if not isinstance(raw, list) or not raw:
         lint.fail("RS", "role-settings.yaml has no roles: list")
@@ -891,9 +891,6 @@ def lint_role_settings(rs, org, lint):
         if org_roles and rid not in org_roles:
             lint.fail("RS", f"role-settings names '{rid}', absent from organization.yaml — "
                             f"the settings articulate a role the org chart doesn't declare")
-        tier = s.get("tier", (rs.get("defaults", {}) or {}).get("tier"))
-        if tier is not None and tier not in VALID_TIERS_RS:
-            lint.fail("RS", f"role '{rid}' tier must be A or B (docs/01 §5)")
         mt = s.get("model_tier")
         if mt is not None and mt not in ("judge", "worker", "cheap"):
             lint.fail("RS", f"role '{rid}' model_tier must be judge|worker|cheap (a NEUTRAL "
@@ -926,14 +923,16 @@ def lint_role_settings(rs, org, lint):
                                 f"(allowed: {sorted(CHECKER_ALLOWED_TOOLS)}); anything else "
                                 f"makes it a maker checking its own work (Organ 6)")
 
-        # The tier flag may not UNDERSTATE the capability scope: a role that can touch
-        # assets/production/the boundary is Tier-B, whatever the flag says.
+        # Asset-touching execution belongs to the host platform's protected environment.
+        # Granting it to a core role would turn governance metadata into a credential-bearing
+        # runtime, which is explicitly outside orgforge's product boundary.
         asset_caps = allow & ASSET_TOUCHING_TOOLS
-        if asset_caps and tier != "B":
+        if asset_caps:
             lint.fail("RS", f"role '{rid}' is granted asset-touching tools {sorted(asset_caps)} "
-                            f"but is tier {tier!r} — asset-touching work is Tier-B by definition "
-                            f"and needs a host that provides custody/sandboxing (docs/01 §5). "
-                            f"The tier flag cannot understate the scope.")
+                            f"— orgforge's core runner never receives deploy, credential, "
+                            f"publication, or production authority. Record the decision and "
+                            f"evidence here, but execute it in the host platform's protected "
+                            f"environment.")
 
     # Correlated-failure defense: the adversarial checker (skeptic) must not run the SAME
     # model family as the maker/gate it judges — same model, same blind spots. Only checked

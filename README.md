@@ -1,34 +1,48 @@
 # orgforge-plugin
 
-**orgforge stands up and runs an AI-native IT business company: it decides what to build, builds it
-through a forced, non-skippable SDLC, ships continuously via CI/CD, operates on a reliability budget,
-and does it all reproducibly — the org and the system it builds grow together.** This repository is
-the template for standing one up. AI is an amplifier — it magnifies whatever process it's dropped
-into, good or bad — so the hard part isn't the model; it's that a company left running unattended
-drifts, skips phases, duplicates, over-spends, and ships the wrong thing unless the organization it
-runs as, and the mold it builds through, are **written down and enforced**.
+> **Official documentation:** [English](docs/en/README.md) · [日本語](docs/ja/README.md)
+>
+> This root document is the long-form design overview. The language-specific sets above define the
+> current supported product, assurance vocabulary, and operating model.
 
-Four properties are the headline, and each has a chapter behind it:
+## Turn agent instructions into an accountable software team
 
-- **A business, not just an org.** It decides *what to build as a business* — customer / RFP /
-  priority — not merely "does tasks." (THEORY §1b, [docs/01](docs/01-requirements.md) R0b.)
-- **A forced SDLC mold.** Every deliverable travels a non-skippable phase chain —
-  requirements → design → implement → test → integrate → deploy → operate — enforced by a ledger
-  phase-gate, not a prompt. ([docs/11](docs/11-sdlc-mold.md).)
-- **Ships and operates continuously.** Deploy is a phase; CI/CD (GitHub Actions) is its spine; the
-  running company navigates by a reliability/error budget and DORA metrics to the moving bottleneck.
-  ([docs/05](docs/05-lifecycle-operations.md), [docs/11](docs/11-sdlc-mold.md).)
-- **Reproducible, at two levels.** *Same org spec + RFP ⇒ same process, gates, contracts, and
-  verification* (Level 1); and *the repos it builds clone-and-run the same for anyone* (Level 2 —
-  committed lockfile, pinned toolchain, one-command setup+test, green CI from a clean clone), checked
-  by a deterministic tooth, not asserted. This is the **deep purpose** of forcing the SDLC type.
-  ([docs/11](docs/11-sdlc-mold.md) §0/§4a, [docs/01](docs/01-requirements.md) J14/S9.)
+orgforge is a governance layer for coding agents you already use. It does not replace Claude Code,
+Codex, CI, or your deployment platform. It turns an existing repository and its instructions into
+an explicit operating model: ownership, workflow gates, independent checks, evidence, and the
+decisions that remain human-held. As the product changes, the same evidence lets the organization
+propose bounded changes to its roles, contracts, information flow, and checks—so the product and
+the organization improve together.
+
+The product has six parts:
+
+1. **Organization compiler** — derive the smallest useful role and ownership map from real code.
+2. **Workflow governance** — require work to move through declared SDLC phases and acceptance bars.
+3. **Evidence ledger** — preserve decisions, checks, and effects as replayable evidence.
+4. **Harness adapters** — project the same neutral organization onto Claude Code and Codex.
+5. **Operational insight** — show status, drift, caps, HALT state, and remaining work without a new
+   agent runtime.
+6. **Organization evolution** — turn observed bottlenecks and failures into reviewable changes to
+   roles, contracts, context, and controls without letting agents rewrite the human-held purpose.
+
+For an existing repository, adoption is one command: `/orgforge-plugin:org-adopt`. It requires no
+daemon, sudo, separate OS user, or signing infrastructure. orgforge addresses ordinary agent
+failure—drift, skipped checks, self-approval, lost decisions—not hostile-process containment.
+Credentials and irreversible actions stay in the host platform's protected environments.
+
+The shipped configuration favors adoption speed: trusted developer mode runs ordinary development
+without permission prompts and disables the Codex sandbox. Use it only in a trusted checkout with
+no production credentials. orgforge's hooks and policies still govern the normal workflow, but they
+are not a containment boundary.
+
+The longer “AI-native company” model remains useful as a design horizon, but it is not the adoption
+prerequisite or the product boundary. The supported core is the governance layer above.
 
 ### Where to go
 
 | | |
 |---|---|
-| **Run it** | [`QUICKSTART.md`](QUICKSTART.md) — install, found a company, watch it build and ship one backlog item through the forced SDLC. A few minutes; no OSS publish required. |
+| **Run it** | [`QUICKSTART.md`](QUICKSTART.md) — adopt an existing repository in one command or found a new organization from a brief. |
 | **Look something up** | [`REFERENCE.md`](REFERENCE.md) — every env var, command, subcommand, ledger event, cap, and the fixes for problems people actually hit. |
 | **See the whole system** | [`ARCHITECTURE.md`](ARCHITECTURE.md) — the ecosystem (neutral core → projection → harness), the organs, and the two coupled lifecycles. |
 | **Understand why** | [`docs/README.md`](docs/README.md) — the reasoning in four Parts / twelve chapters. [`THEORY.md`](THEORY.md) §0–§1b is the intellectual core. |
@@ -133,7 +147,17 @@ in for your own org.
 
 ## How to use it
 
-The setup path is three commands, in order:
+For an existing repository:
+
+```
+/orgforge-plugin:org-adopt
+```
+
+The command reads the code that exists, prepares local governance state, writes the minimal
+organization and architecture, records current debt, and verifies readiness. It does not create a
+branch or Issue, access the network, install a daemon, or require sudo.
+
+For a new organization, the founding path remains three commands:
 
 ```
 /orgforge-plugin:org-init <name> ja     # 1. set up the org's state, labels, baseline
@@ -143,9 +167,7 @@ The setup path is three commands, in order:
 
 Then `/orgforge-plugin:org-start` brings it to its running state, `/orgforge-plugin:org` is the
 status board (GREEN / AMBER / RED), and `/orgforge-plugin:org-triage` feeds a signal into the
-backlog. Adopting an **existing** codebase? Use `/orgforge-plugin:org-adopt` instead of `org-found` —
-it reads the design out of the code that exists and records today's mechanical-bar failures as
-accepted debt.
+backlog. GitHub Issue decomposition is optional for adopted repositories.
 
 The org's own metabolism — `org-work` (the PM loop), `org-discover`, `org-tick` — runs on cadence;
 you rarely type it. **Plumbing is run by tools, judgment is not.** One command drives one cycle of a
@@ -173,6 +195,24 @@ What is inside the trusted base:
 The hash chain makes tampering *detectable*, not impossible. `judges.lineage: cross-harness`
 likewise buys an independent reviewer, not an authenticated one — a second model lineage with its
 own blind spots, recorded as such.
+
+### Supported assurance
+
+orgforge addresses **drift and honest operational error**, not a zero-trust contest between
+processes owned by the same user. This is deliberate:
+
+| Axis | Default claim | What it means |
+|---|---|---|
+| Judgment identity | `attested` | A receipt was verified and bound to the judgment. A local key does **not** prove that a hostile same-UID process could not use it. |
+| Reviewer diversity | `cross-harness` | A different model lineage reviewed the work, reducing correlated blind spots. It is not a cryptographic security principal. |
+| Writer mediation | `process_mediated` | Enabled hooks and the ledger path enforce the normal workflow inside the host harness's trust boundary. |
+| Record integrity | tamper-evident | The hash chain detects rewriting; it does not make a caller-writable file immutable. |
+
+Hostile-process containment and asset protection are **not orgforge guarantees**. Deployments that
+touch production, funds, external publication, credentials, or regulated assets must rely on their
+host platform for sandboxing, permissions, approvals, and credential custody. A separate writer UID,
+KMS/HSM, or mTLS judge service may be useful host infrastructure, but none is a supported mode,
+release prerequisite, or claim made by this plugin.
 
 An independent audit of 0.32.0 (resilience engineering / STPA / adversarial review / SRE lenses)
 found several places where multiple defence layers rest on the same local process and the same
@@ -216,8 +256,8 @@ and the reason recorded. The history of this tooling is meant to show what came 
 what went in.
 
 What remains: an automated projection layer (which instruction-file conventions to target — done by
-hand in the rehearsal), the Tier-B host-environment controls for asset-touching orgs, the multi-cycle
-elastic lifecycle at scale, and the client/delivery/company-layer surfaces (docs/01 §7).
+hand in the rehearsal), deployment guidance for asset-touching orgs, the multi-cycle elastic
+lifecycle at scale, and the client/delivery/company-layer surfaces (docs/01 §7).
 
 **Human diff review is retired** (docs/11 §4f), on the argument that at fan-out volume a reviewer who
 cannot keep up skims, and a skimmed diff enters the record as reviewed. What replaces it is

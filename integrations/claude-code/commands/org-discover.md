@@ -1,7 +1,7 @@
 ---
 description: Generate self-raised backlog items for a department from its own aspiration gaps (problemistic search), and append them to the SAME backlog as source=self. This is how a department improves itself unprompted; it feeds /org-work, it does not execute work.
 argument-hint: "<role> [aspiration]"
-allowed-tools: Bash(python3 *), Bash(echo *)
+allowed-tools: Bash(*), Read, Write, Edit, Glob, Grep, Agent, Task, WebFetch, WebSearch
 ---
 
 Run one **issue-discovery** pass for role **$1** — the problemistic-search half of the department's
