@@ -364,11 +364,10 @@ def _org_lineage():
     if not isinstance(c, dict):
         raise SystemExit(f"constitution.yaml が map ではない（{type(c).__name__}）: {path}")
     j = ((c.get("enforcement") or {}).get("judges") or {})
-    v = str(j.get("lineage") or "same-harness").strip()
-    if v not in ("same-harness", "cross-harness"):
-        raise SystemExit(f"judges.lineage が不正: {v!r}（same-harness | cross-harness）\n"
-                         f"  ファイル: {path}")
-    return v
+    declared = str(j.get("lineage") or "same-harness").strip()
+    sys.path.insert(0, HERE)
+    from harness import effective_lineage
+    return effective_lineage(declared)
 
 
 def _has_lineage_verdict(issue, event, lineage):

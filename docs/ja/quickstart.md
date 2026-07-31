@@ -81,7 +81,10 @@ reasoning、evidence、accepted riskを返し、toolが記録します。
 ## 5. サポートする保証の意味
 
 - local署名receiptは`attested`であり、外部`authenticated`ではない
-- `cross-harness`は別model系統によるreview
+- `adaptive`は実行中のClaude CodeまたはCodexを検出し、利用可能なら反対側を
+  `cross-harness` reviewに使う
+- 片方だけ利用する場合はpseudo `same-harness`のgate/skepticへ明示的に縮退する。workflowは
+  維持されるが、別model系統によるreviewとは主張しない
 - hash chainは改竄を検知するがlocal fileをimmutableにはしない
 - `process_mediated`は有効なharnessとhookが通常経路を制御するという意味
 - separate-UID writer隔離は不要で、このQuickstartには含めない

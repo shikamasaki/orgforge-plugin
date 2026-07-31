@@ -46,6 +46,12 @@ makerや最初のgateが見落とした欠陥を発見する確率を上げま�
 
 review多様性は品質統制でありidentity security claimではありません。
 
+`adaptive` routingは`organization.yaml`の固定値ではなく、実行中のagent（Claude Codeまたは
+Codex）から主系を判定します。反対側を利用できればそれを選び、片方しか利用できなければ
+`same-harness`へ縮退したことを通知し、cross-harnessとは記録しません。Codexはofflineのlogin
+status、macOSのClaude Codeは秘密値を読まずKeychain credentialの有無を確認します。他OSや特殊な
+認証構成では`ORGFORGE_CLAUDE_AVAILABLE=false`、Codex側も同名形式のoverrideで利用不能を明示できます。
+
 ## 4. Record integrity
 
 ledgerはappend-only規律とhash chainを持ちます。変更を検知し、順序をreplay可能にしますが、

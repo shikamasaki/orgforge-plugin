@@ -194,7 +194,9 @@ What is inside the trusted base:
 
 The hash chain makes tampering *detectable*, not impossible. `judges.lineage: cross-harness`
 likewise buys an independent reviewer, not an authenticated one — a second model lineage with its
-own blind spots, recorded as such.
+own blind spots, recorded as such. The default `adaptive` mode detects whether it is running under
+Claude Code or Codex. It uses the other product when available; with one subscription it falls back
+to explicitly labelled pseudo same-harness role separation and never claims cross-harness diversity.
 
 ### Supported assurance
 
@@ -204,7 +206,7 @@ processes owned by the same user. This is deliberate:
 | Axis | Default claim | What it means |
 |---|---|---|
 | Judgment identity | `attested` | A receipt was verified and bound to the judgment. A local key does **not** prove that a hostile same-UID process could not use it. |
-| Reviewer diversity | `cross-harness` | A different model lineage reviewed the work, reducing correlated blind spots. It is not a cryptographic security principal. |
+| Reviewer diversity | `adaptive` | Uses `cross-harness` when the other product is available; otherwise reports lower-assurance pseudo `same-harness`. Neither is a cryptographic security principal. |
 | Writer mediation | `process_mediated` | Enabled hooks and the ledger path enforce the normal workflow inside the host harness's trust boundary. |
 | Record integrity | tamper-evident | The hash chain detects rewriting; it does not make a caller-writable file immutable. |
 

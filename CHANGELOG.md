@@ -6,6 +6,22 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## Unreleased — adaptive reviewer routing
+
+### Breaking changes
+
+- `judges.harness` now declares both `claude` and `codex` secondary configurations. The previous
+  role-only shape is removed; this release is intended for a 2.0.0 version after merge.
+
+### Added
+
+- `judges.lineage: adaptive` detects whether the running agent is Claude Code or Codex and selects
+  the opposite product as the secondary reviewer.
+- Users with one subscription retain the maker/gate/skeptic workflow through an explicitly
+  lower-assurance pseudo `same-harness` fallback. The fallback is never recorded as cross-harness.
+- The admission-recording path uses the same adaptive resolution as judge launch, preventing a
+  fallback review from being upgraded to a cross-harness claim later in the workflow.
+
 ## 1.0.0 — governance for existing coding-agent teams
 
 ### Breaking changes

@@ -1139,20 +1139,96 @@ def test_judge_lineage_defaults_to_same_harness(tmp_path, monkeypatch):
     assert _judge_lineage("gate") == ("same-harness", None)
 
 
-def test_judge_lineage_reads_harness_config(tmp_path, monkeypatch):
+_HARNESS_CFG = (
+    "      claude:\n"
+    "        gate: { cli: claude }\n"
+    "        skeptic: { cli: claude }\n"
+    "      codex:\n"
+    "        gate: { cli: codex, effort: high }\n"
+    "        skeptic: { cli: codex, effort: high }"
+)
+
+
+@pytest.mark.parametrize(
+    "primary,secondary",
+    [("claude", "codex"), ("codex", "claude")],
+)
+def test_judge_lineage_selects_the_opposite_harness(tmp_path, monkeypatch, primary, secondary):
     sys.path.insert(0, str(TOOLS))
     from orgcycle.judge import _judge_lineage
     (tmp_path / "constitution.yaml").write_text(
-        "enforcement:\n  judges:\n    lineage: cross-harness\n"
-        "    harness:\n      skeptic: { cli: codex, model: \"gpt-5.5\", effort: high }\n",
+        "enforcement:\n  judges:\n    lineage: adaptive\n"
+        f"    harness:\n{_HARNESS_CFG}\n",
         encoding="utf-8")
     (tmp_path / ".orgforge" / "ledger").mkdir(parents=True)
+    monkeypatch.setenv("ORGFORGE_ACTIVE_HARNESS", primary)
+    monkeypatch.setenv(f"ORGFORGE_{secondary.upper()}_AVAILABLE", "true")
     monkeypatch.chdir(tmp_path)
     lineage, cfg = _judge_lineage("skeptic")
     assert lineage == "cross-harness"
-    assert cfg["cli"] == "codex" and cfg["model"] == "gpt-5.5"
-    # gate は未指定 → None（宣言していない役は既定のまま）
-    assert _judge_lineage("gate")[1] is None
+    assert cfg["cli"] == secondary
+    assert _judge_lineage("gate")[1]["cli"] == secondary
+
+
+@pytest.mark.parametrize("primary,secondary", [("claude", "codex"), ("codex", "claude")])
+def test_adaptive_lineage_falls_back_honestly_with_one_subscription(
+        tmp_path, monkeypatch, primary, secondary):
+    sys.path.insert(0, str(TOOLS))
+    from orgcycle.judge import _judge_lineage
+    (tmp_path / ".orgforge" / "ledger").mkdir(parents=True)
+    (tmp_path / "constitution.yaml").write_text(
+        "enforcement:\n  judges:\n    lineage: adaptive\n"
+        f"    harness:\n{_HARNESS_CFG}\n", encoding="utf-8")
+    monkeypatch.setenv("ORGFORGE_ACTIVE_HARNESS", primary)
+    monkeypatch.setenv(f"ORGFORGE_{secondary.upper()}_AVAILABLE", "false")
+    monkeypatch.chdir(tmp_path)
+    assert _judge_lineage("gate") == ("same-harness", None)
+
+
+@pytest.mark.parametrize("available,expected", [("true", "cross-harness"),
+                                                   ("false", "same-harness")])
+def test_recording_uses_the_same_adaptive_lineage_resolution(
+        tmp_path, monkeypatch, available, expected):
+    sys.path.insert(0, str(TOOLS))
+    from ghsync.record import _org_lineage
+    (tmp_path / ".orgforge" / "ledger").mkdir(parents=True)
+    (tmp_path / "constitution.yaml").write_text(
+        "enforcement:\n  judges:\n    lineage: adaptive\n", encoding="utf-8")
+    monkeypatch.setenv("ORGFORGE_ACTIVE_HARNESS", "codex")
+    monkeypatch.setenv("ORGFORGE_CLAUDE_AVAILABLE", available)
+    monkeypatch.chdir(tmp_path)
+    assert _org_lineage() == expected
+
+
+@pytest.mark.parametrize(
+    "harness,expected",
+    [
+        ("      gate: { cli: codex }", "claude / codex 両方"),
+        (_HARNESS_CFG.replace("cli: claude", "cli: codex"), "同じハーネスを2回"),
+    ],
+)
+def test_judge_lineage_fails_closed_on_invalid_cross_routing(
+        tmp_path, monkeypatch, harness, expected):
+    sys.path.insert(0, str(TOOLS))
+    from orgcycle.judge import _judge_lineage
+    (tmp_path / ".orgforge" / "ledger").mkdir(parents=True)
+    (tmp_path / "constitution.yaml").write_text(
+        "enforcement:\n  judges:\n    lineage: cross-harness\n"
+        f"    harness:\n{harness}\n", encoding="utf-8")
+    monkeypatch.setenv("ORGFORGE_ACTIVE_HARNESS", "codex")
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(SystemExit, match=expected):
+        _judge_lineage("gate")
+
+
+def test_active_harness_rejects_ambiguous_nested_signals(monkeypatch):
+    sys.path.insert(0, str(TOOLS))
+    from harness import active_harness
+    monkeypatch.delenv("ORGFORGE_ACTIVE_HARNESS", raising=False)
+    monkeypatch.setenv("CLAUDECODE", "1")
+    monkeypatch.setenv("CODEX_THREAD_ID", "thread-1")
+    with pytest.raises(SystemExit, match="同時"):
+        active_harness()
 
 
 def test_headless_reports_missing_cli_instead_of_falling_back(tmp_path, monkeypatch):
