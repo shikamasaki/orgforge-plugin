@@ -6,6 +6,17 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 2.0.16 — stable installed-organ binding
+
+### Added
+
+- Bind each organization at SessionStart to the Claude Code or Codex organ that is actually
+  installed, and expose a version-stable organization-side launcher in session and judge context.
+- Rebind that launcher atomically after a plugin update/restart without embedding cache paths in
+  judge instructions.
+- Refuse ledger mutations from an unrelated development checkout with the expected/observed tools
+  roots and the exact stable invocation needed to recover.
+
 ## 2.0.15 — bounded judge environment preflights
 
 ### Added

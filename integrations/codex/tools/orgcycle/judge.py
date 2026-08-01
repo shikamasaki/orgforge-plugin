@@ -12,6 +12,8 @@ import tempfile
 import re
 import sys
 
+from organ_binding import BindingError
+
 from ._core import (
     HERE,
     review_subject,
@@ -57,6 +59,28 @@ def _verdict_schema(role):
     """
     return os.path.normpath(
         os.path.join(HERE, "..", "template", "schemas", f"{role}-verdict.json"))
+
+
+def _stable_organ_invocation():
+    """Return the org-side launcher; installed bundles fail closed if SessionStart did not bind."""
+    from discover import org_root
+    from organ_binding import BindingError, installation_kind, invocation
+    root = org_root()
+    harness = installation_kind(HERE)
+    stable = invocation(root, harness) if root else None
+    if root and harness in ("claude-code", "codex") and not stable:
+        raise BindingError(
+            "installed plugin で動いているが organization-side launcher が未登録。"
+            "SessionStart hookを有効にしてhost sessionを再起動すること")
+    return stable
+
+
+def _organ_command(stable, organ):
+    """Render a stable public invocation, retaining a source-checkout fallback for development."""
+    if stable:
+        return f'"{stable}" {organ.replace("_", "-")}'
+    filename = organ.replace("-", "_") + ".py"
+    return f'python3 "{os.path.join(HERE, filename)}"'
 
 
 def _seam(role, issue, title):
@@ -174,6 +198,13 @@ def cmd_verify(a):
         print("judge preflight が失敗したため、judge は起動していない。\n"
               "  上の measured result を直し、同じ verify を再実行すること。", file=sys.stderr)
         return 8
+    try:
+        stable_organ = _stable_organ_invocation()
+    except BindingError as exc:
+        print(f"installed-organ binding がREADYでない: {exc}\n"
+              "  別checkoutを代用せず、host sessionを再起動してから verify をやり直すこと。",
+              file=sys.stderr)
+        return 9
     seam = _seam(role, a.issue, title)
     prior = _prior_gate(a.issue) if role == "skeptic" else None
     history = _judgment_history(a.issue)
@@ -184,6 +215,11 @@ def cmd_verify(a):
     out = []
     out.append(f"===== {role} subagent への投入プロンプト（#{a.issue}: {title}）=====\n")
     out.append(seam or "(seam contract の生成に失敗 — handoff.py を確認)")
+    if stable_organ:
+        out.append("\n## OrgForge organ の呼び出し契約（**この固定launcherだけを使う**）\n")
+        out.append(f"`{stable_organ} <organ> [args...]`\n\n"
+                   "version付きcache pathや別のdevelopment checkoutを探索しない。"
+                   "plugin更新後の実体はSessionStartがこのlauncherへ再束縛する。")
     if preflight_evidence:
         out.append("\n## judge dispatch 前の environment preflight（監督が実測）\n")
         out.extend(preflight_evidence)
@@ -237,7 +273,7 @@ def cmd_verify(a):
         # 「走らなかった」が最も危ない失敗形。
         out.append("\n## 機械バー（**このコマンドをそのまま実行すること。未実行は reject 事由**）\n")
         out.append("```")
-        out.append(f'python3 "{os.path.join(HERE, "repro_lint.py")}" check . --phase implement')
+        out.append(f'{_organ_command(stable_organ, "repro-lint")} check . --phase implement')
         out.append("```")
         out.append("HOLD（exit 10）なら reject。パスが通らない場合はそう報告すること — "
                    "「ツールが無いので未実行」は、機械バーが効いていないという最も重い所見。")
@@ -276,7 +312,7 @@ def cmd_verify(a):
             out.append("\n## 未 admit の doctrine（maker が差し出した学び）\n")
             out.append(pend.strip()[:2000])
             out.append("\n> 次のサイクルに渡す価値があるものだけ admit すること:\n"
-                       f"> `python3 {os.path.join(HERE, 'doctrine.py')} admit "
+                       f"> `{_organ_command(stable_organ, 'doctrine')} admit "
                        f"{_sub('doctrine')} <role> <claim-id> --by gate`\n"
                        "> admit しなければ、この学びは次の Issue に渡らない。"
                        "実地では同じ失敗を3回繰り返した。")
@@ -358,7 +394,7 @@ def cmd_verify(a):
           f"  記録のときにこの値を --subject に渡すこと。**judge に作らせない。**",
           file=sys.stderr)
     print(f"\n===== 監督（あなた）が打つコマンド — {role} が返した値を入れる =====\n"
-          f'python3 "{os.path.join(HERE, "github_sync.py")}" decide --issue {a.issue} '
+          f'{_organ_command(stable_organ, "github-sync")} decide --issue {a.issue} '
           f"--event {ev} \\\n"
           f"  --verdict <{role} が返した verdict> --by {role} \\\n"
           f"  --why \"<{role} の why をそのまま>\" \\\n"
@@ -375,7 +411,7 @@ def cmd_verify(a):
     # 運用で reject/refuted の多くに対し rework_requested が台帳に無く、show の警告が沈黙した。
     bad = "reject" if role == "gate" else "refuted"
     print(f"===== {bad} だった場合 — rework の発注も記録する =====\n"
-          f'python3 "{os.path.join(HERE, "org_cycle.py")}" rework --issue {a.issue} '
+          f'{_organ_command(stable_organ, "org-cycle")} rework --issue {a.issue} '
           f"--after {bad} --by <あなたの役割> \\\n"
           f'  --reason "<{role} の指摘のうち、maker に直させることを1行で>" '
           f"--round {len(rounds) + 1 if 'rounds' in dir() else '<何周目か>'}\n"
@@ -399,7 +435,7 @@ def cmd_verify(a):
         # headless（下で起動する）。片方でも reject/refuted なら reject —
         # AND ではなく厳しい側に倒す。実測（#11 の認可穴・#42 の Testing Library 欠落）で
         # **2件とも厳しい側が正しかった**。多数決にすると 1:1 で決まらず、監督の裁量に戻る。
-        rc = _run_headless(role, a.issue, "\n".join(out), _hcfg, _schema)
+        rc = _run_headless(role, a.issue, "\n".join(out), _hcfg, _schema, stable_organ)
         print(f"\n===== judge は2人いる（judges.lineage = cross-harness）=====\n"
               f"  1. 同一ハーネスの {role} subagent — 上の材料をそのまま渡す\n"
               f"  2. 別ハーネスの {role} — " +
@@ -408,7 +444,7 @@ def cmd_verify(a):
               f"  **片方でも {bad} なら {bad} として扱う。** 一致を要求する形なので、"
               f"admit を記録するには両方の admit が要る（decide が検査する）。\n"
               f"  判定が食い違ったら、食い違いそのものを記録すること —\n"
-              f'    python3 "{os.path.join(HERE, "ledger.py")}" append '
+              f'    {_organ_command(stable_organ, "ledger")} append '
               f"--class judges_disagreed --actor <あなたの役割> \\\n"
               f"      --payload '{{\"issue\": {a.issue}, \"role\": \"{role}\", "
               f"\"same_harness\": \"<verdict>\", \"cross_harness\": \"<verdict>\"}}'\n"
@@ -457,7 +493,7 @@ _TRUNCATED = (r"^\s*(now|next|then)\b", r"(しましょう|します)。?\s*$",
 
 
 
-def _run_headless(role, issue, material, cfg, schema):
+def _run_headless(role, issue, material, cfg, schema, stable_organ=None):
     """judge を別ハーネスで実際に起動し、構造化された verdict を持ち帰る。
 
     **案内を出すだけにしない。** 打つかどうかを監督が選べるなら、それは「検査を呼ぶかどうかを
@@ -548,7 +584,7 @@ def _run_headless(role, issue, material, cfg, schema):
     print(f"\n[{role}] 別ハーネス（{cli}"
           + (f" / {model}" if model else "") + f"）の判定を持ち帰った。**まだ記録していない。**\n"
           f"  内容の側から検査する:\n"
-          f'    python3 "{os.path.join(HERE, "org_cycle.py")}" intake --issue {issue} '
+          f'    {_organ_command(stable_organ, "org-cycle")} intake --issue {issue} '
           f"--role {role} --report {out_json if os.path.isfile(out_json) else '-'}\n"
           f"  検査を通ったら記録する（verdict / why は判定した側のもの。監督が書き換えない）。",
           file=sys.stderr)

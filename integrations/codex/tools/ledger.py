@@ -2912,6 +2912,22 @@ def main(argv):
     # root は省略可能: 省略時はカレントから自動発見する（.envrc 不要 — tools/discover.py）
     if hasattr(a, "root"):
         a.root = resolve_root(a.root)
+    # A long-running judge can forget the installed plugin path and find an unrelated development
+    # checkout. Read-only inspection remains useful from anywhere, but every mutation must come
+    # from the organ registered by SessionStart (or carry an explicit developer bypass).
+    mutating = a.cmd in {"append", "reserve-exposure", "derive-admission",
+                         "trip-halt", "release-halt"}
+    mutating = mutating or (a.cmd == "schema" and getattr(a, "fix", False))
+    if mutating:
+        try:
+            from organ_binding import BindingError, foreign_invocation_error
+            mismatch = foreign_invocation_error(a.root, os.path.dirname(os.path.abspath(__file__)))
+        except BindingError as exc:
+            print(f"ledger: installed-organ binding を検証できない: {exc}", file=sys.stderr)
+            return 12
+        if mismatch:
+            print(f"ledger: {mismatch}", file=sys.stderr)
+            return 12
     return a.fn(a)
 
 
