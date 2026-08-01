@@ -1474,7 +1474,10 @@ def _class_field_span(text, cls):
     非貪欲な正規表現だと、値の中の `{...}` の最初の `}` を終端と誤認し、
     修復が別の場所に入って **直ったように見えて直っていない**（Codex の指摘、実測で再現）。
     見つからなければ None。"""
-    m = re.search(rf"\n  {re.escape(cls)}: \{{", text)
+    # field alignment uses a variable number of spaces before ``{``.  Requiring exactly one
+    # meant repair worked for e.g. ``integration_admitted: {`` but silently skipped aligned
+    # names such as ``verdict_provisional:  {`` and ``halt_tripped:         {``.
+    m = re.search(rf"\n  {re.escape(cls)}:[ \t]*\{{", text)
     if not m:
         return None
     i = m.end() - 1                     # 開き `{` の位置
@@ -1629,17 +1632,15 @@ def cmd_schema(a):
     # （実測: 実 org tatekae が「差分なし」と表示されたまま全 metered 操作がデッドロックしていた）。
     _src_txt = open(plug_p, encoding="utf-8").read()
     _dst_txt = open(org_p, encoding="utf-8").read()
-    def _cls_fields(txt):
-        out = {}
-        for m in re.finditer(r"\n  ([a-z_]+): \{", txt):
-            sp = _class_field_span(txt, m.group(1))
-            if not sp:
-                continue
-            out[m.group(1)] = [x.split(":")[0].strip()
-                               for x in txt[sp[0]:sp[1]].replace("\n", " ").split(",")
-                               if x.strip() and not x.strip().startswith("#")]
-        return out
-    _sf, _df = _cls_fields(_src_txt), _cls_fields(_dst_txt)
+    # **field は YAML の構造から読む。** inline-map の途中にコメントがあると、文字列を
+    # comma split する実装では `# ...\n phase, decision_by, ...` が1 chunkになり、コメント
+    # 以降の正当な field までまとめて捨てていた。その結果 ``schema --fix`` が「最新」と
+    # 誤報したまま、writer が生成する identity field を closed-world schema が拒否した
+    # （OBS-008）。safe_load 済みの map が、ここで比較すべき規範的な構造である。
+    def _fields_from_doc(doc):
+        return {name: list(spec.keys()) for name, spec in
+                ((doc.get("event_classes") or {}).items()) if isinstance(spec, dict)}
+    _sf, _df = _fields_from_doc(plug), _fields_from_doc(org)
     fgaps = []
     for _c, _want in _sf.items():
         _have = _df.get(_c)
@@ -1714,21 +1715,25 @@ def cmd_schema(a):
     # デッドロック（実測: 実 org tatekae がこの状態だった）。
     # `--fix` は「クラスを足すだけ」だったので、この経路を直せていなかった。
     field_added = []
-    for cls in sorted(set(re.findall(r"\n  ([a-z_]+): \{", src))):
+    for cls in sorted(set(_sf) & set(_df)):
         ss = _class_field_span(src, cls)
         ds = _class_field_span(dst, cls)
         if not ss or not ds:
             continue
-        def _names(blob):
-            return [x.split(":")[0].strip() for x in blob.replace("\n", " ").split(",")
-                    if x.strip() and not x.strip().startswith("#")]
-        want, have = _names(src[ss[0]:ss[1]]), _names(dst[ds[0]:ds[1]])
+        want, have = _sf[cls], _df[cls]
         missing_f = [f for f in want if f and f not in have]
         if not missing_f:
             continue
         # 既存の並びは壊さず、閉じ括弧の直前に足すだけ
         body = dst[ds[0]:ds[1]].rstrip()
-        sep = ",\n                             " if "\n" in body else ", "
+        if "\n" in body:
+            # 手書きschemaの揃え方を保持する。固定幅だと意味は同じでも、修復のたびに
+            # org-owned specへ不要なindent差分を作る。
+            last_line = body.rsplit("\n", 1)[-1]
+            indent = re.match(r"[ \t]*", last_line).group(0)
+            sep = ",\n" + indent
+        else:
+            sep = ", "
         dst = dst[:ds[0]] + body + sep + ", ".join(missing_f) + " " + dst[ds[1]:]
         field_added.append(f"{cls}: +{', '.join(missing_f)}")
     if field_added:

@@ -319,7 +319,7 @@ event_classes:
                           identity_assurance, recorder_assurance, workload_isolation,
                           # **writer の隔離は judge の隔離ではない。** 欄を分ける（0.39.2）。
                           writer_isolation,
-                          signer_id, key_id,
+                          signer_id, key_id, risk_accepted,
 
                           review_subject_id: "digest of (issue, role, phase, base_sha,
                                               reviewed_tree_sha, dirty, requirements_digest) — generated

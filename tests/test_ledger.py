@@ -2836,6 +2836,95 @@ def test_schema_fix_repairs_existing_class_fields(tmp_path):
     assert '"reason": "reserved"' in r2.stdout or '"decision"' in r2.stdout
 
 
+def test_schema_fix_repairs_fields_after_inline_comments_and_unblocks_provisional(tmp_path):
+    """OBS-008: comments inside a multiline inline-map must not hide later fields.
+
+    Tatekae's copied schema predated the identity fields.  The plugin template already had
+    them after inline comments, but ``schema --fix`` parsed comma chunks as text: a chunk
+    beginning with ``#`` caused every field after that comment to disappear from the diff.
+    It then reported "latest" while the real provisional command remained blocked.
+    """
+    import subprocess, sys, yaml
+    org = tmp_path / "org"
+    (org / ".orgforge" / "ledger").mkdir(parents=True)
+    (org / "constitution.yaml").write_text(
+        "enforcement:\n  judges:\n    lineage: cross-harness\n", encoding="utf-8")
+    schema = (TEMPLATE / "ledger-schema.yaml").read_text(encoding="utf-8")
+    block = re.compile(
+        r"                          # phase は receipt の束縛に入る（どの段階の判定か）\n"
+        r"                          phase,\n"
+        r"                          decision_by, recorded_by, committed_by,\n"
+        r"                          identity_assurance, recorder_assurance, workload_isolation,\n"
+        r"                          # \*\*writer の隔離は judge の隔離ではない。\*\* 欄を分ける（0.39.2）。\n"
+        r"                          writer_isolation,\n"
+        r"                          signer_id, key_id(?:, risk_accepted)?,\n")
+    broken, substitutions = block.subn("", schema, count=1)
+    assert substitutions == 1, "テストの壊し方がテンプレートと合っていない"
+    (org / "ledger-schema.yaml").write_text(broken, encoding="utf-8")
+    led = str(org / ".orgforge" / "ledger")
+
+    before = subprocess.run(
+        [sys.executable, str(TOOLS / "github_sync.py"), "provisional",
+         "--issue", "9999", "--role", "skeptic", "--lineage", "cross-harness",
+         "--verdict", "survives", "--subject", "obs008-subject",
+         "--why", "別血統で対象を独立に再導出し、既知の反証経路と境界条件をすべて確認したが、具体的な反例は成立しなかった。",
+         "--evidence", "隔離した一時orgで実コマンドを実行した出力",
+         "--by", "skeptic"],
+        capture_output=True, text=True, cwd=str(org), timeout=60)
+    assert before.returncode != 0
+    assert "宣言の無い field" in before.stdout + before.stderr
+
+    fixed = subprocess.run(
+        [sys.executable, str(TOOLS / "ledger.py"), "schema", "--fix", led],
+        capture_output=True, text=True, cwd=str(org), timeout=60)
+    assert fixed.returncode == 0, fixed.stdout + fixed.stderr
+    doc = yaml.safe_load((org / "ledger-schema.yaml").read_text(encoding="utf-8"))
+    declared = set(doc["event_classes"]["verdict_provisional"])
+    expected = {"phase", "decision_by", "recorded_by", "committed_by",
+                "identity_assurance", "recorder_assurance", "workload_isolation",
+                "writer_isolation", "signer_id", "key_id"}
+    assert expected <= declared, expected - declared
+
+    after = subprocess.run(
+        [sys.executable, str(TOOLS / "github_sync.py"), "provisional",
+         "--issue", "9999", "--role", "skeptic", "--lineage", "cross-harness",
+         "--verdict", "survives", "--subject", "obs008-subject",
+         "--why", "別血統で対象を独立に再導出し、既知の反証経路と境界条件をすべて確認したが、具体的な反例は成立しなかった。",
+         "--evidence", "隔離した一時orgで実コマンドを実行した出力",
+         "--by", "skeptic"],
+        capture_output=True, text=True, cwd=str(org), timeout=60)
+    assert after.returncode == 0, after.stdout + after.stderr
+    events = [json.loads(line) for line in
+              (org / ".orgforge" / "ledger" / "ledger.jsonl").read_text().splitlines()]
+    provisional = [e for e in events if e["class"] == "verdict_provisional"]
+    assert len(provisional) == 1
+
+
+def test_provisional_risk_is_declared_and_persisted(tmp_path):
+    """OBS-008 residual: the CLI's documented ``--risk`` field must fit its own schema."""
+    import subprocess, sys
+    org = tmp_path / "org"
+    (org / ".orgforge" / "ledger").mkdir(parents=True)
+    (org / "constitution.yaml").write_text(
+        "enforcement:\n  judges:\n    lineage: cross-harness\n", encoding="utf-8")
+    (org / "ledger-schema.yaml").write_text(
+        (TEMPLATE / "ledger-schema.yaml").read_text(encoding="utf-8"), encoding="utf-8")
+    result = subprocess.run(
+        [sys.executable, str(TOOLS / "github_sync.py"), "provisional",
+         "--issue", "9999", "--role", "skeptic", "--lineage", "cross-harness",
+         "--verdict", "survives", "--subject", "obs008-risk-subject",
+         "--why", "別血統で対象を独立に再導出し、既知の反証経路と境界条件をすべて確認したが、具体的な反例は成立しなかった。",
+         "--evidence", "隔離した一時orgで実コマンドを実行した出力",
+         "--risk", "残余リスクを確認済み", "--by", "skeptic"],
+        capture_output=True, text=True, cwd=str(org), timeout=60)
+    assert result.returncode == 0, result.stdout + result.stderr
+    events = [json.loads(line) for line in
+              (org / ".orgforge" / "ledger" / "ledger.jsonl").read_text().splitlines()]
+    provisional = [e for e in events if e["class"] == "verdict_provisional"]
+    assert len(provisional) == 1
+    assert provisional[0]["payload"]["risk_accepted"] is True
+
+
 def test_template_schema_declares_fields_in_both_places():
     """**同じことを2箇所で宣言している。片方だけ直すと、静かに壊れる。**
 
@@ -2854,11 +2943,8 @@ def test_template_schema_declares_fields_in_both_places():
     txt = (TEMPLATE / "ledger-schema.yaml").read_text(encoding="utf-8")
     doc = yaml.safe_load(txt)
     required = (doc.get("validation") or {}).get("required") or {}
-    fields = {}
-    for m in re.finditer(r"\n  ([a-z_]+): \{(.*?)\}", txt, re.S):
-        fields[m.group(1)] = {x.split(":")[0].strip()
-                              for x in m.group(2).replace("\n", " ").split(",")
-                              if x.strip() and not x.strip().startswith("#")}
+    fields = {name: set(spec) for name, spec in (doc.get("event_classes") or {}).items()
+              if isinstance(spec, dict)}
     drift = {}
     for cls, req in required.items():
         declared = fields.get(cls)
