@@ -424,6 +424,85 @@ def test_create_does_not_remint_a_closed_delivered_issue(monkeypatch):
     assert "CLOSED" in buf.getvalue()
 
 
+def test_stage_ready_reopens_a_closed_issue_before_labeling(monkeypatch):
+    snapshot = '{"state":"CLOSED","labels":[{"name":"orgforge:done"}]}'
+    fake = FakeGh(replies={"issue view": (0, snapshot)})
+    monkeypatch.setattr(GS, "gh", fake)
+
+    rc = GS.cmd_stage(_ns(repo="o/r", issue=42, stage="ready"))
+
+    assert rc == 0
+    reopen = fake.calls_matching("issue reopen")
+    edit = fake.calls_matching("issue edit")
+    assert len(reopen) == 1
+    assert len(edit) == 1
+    assert fake.calls.index(reopen[0]) < fake.calls.index(edit[0])
+    assert "orgforge:ready" in edit[0]
+    assert "orgforge:done" in edit[0]
+
+
+def test_stage_ready_keeps_an_open_issue_open(monkeypatch):
+    snapshot = '{"state":"OPEN","labels":[{"name":"orgforge:in-progress"}]}'
+    fake = FakeGh(replies={"issue view": (0, snapshot)})
+    monkeypatch.setattr(GS, "gh", fake)
+
+    rc = GS.cmd_stage(_ns(repo="o/r", issue=42, stage="ready"))
+
+    assert rc == 0
+    assert not fake.calls_matching("issue reopen")
+    assert len(fake.calls_matching("issue edit")) == 1
+
+
+def test_stage_ready_stops_when_reopen_fails(monkeypatch):
+    snapshot = '{"state":"CLOSED","labels":[{"name":"orgforge:done"}]}'
+    fake = FakeGh(replies={"issue view": (0, snapshot),
+                           "issue reopen": (1, "permission denied")})
+    monkeypatch.setattr(GS, "gh", fake)
+
+    rc = GS.cmd_stage(_ns(repo="o/r", issue=42, stage="ready"))
+
+    assert rc == 2
+    assert not fake.calls_matching("issue edit"), "reopen failure must not claim a ready transition"
+
+
+def test_stage_ready_recloses_when_relabel_fails_after_reopen(monkeypatch):
+    snapshot = '{"state":"CLOSED","labels":[{"name":"orgforge:done"}]}'
+    fake = FakeGh(replies={"issue view": (0, snapshot),
+                           "issue edit": (1, "label API unavailable")})
+    monkeypatch.setattr(GS, "gh", fake)
+
+    rc = GS.cmd_stage(_ns(repo="o/r", issue=42, stage="ready"))
+
+    assert rc == 2
+    assert len(fake.calls_matching("issue reopen")) == 1
+    assert len(fake.calls_matching("issue close")) == 1
+
+
+def test_stage_ready_reports_partial_failure_when_compensating_close_fails(monkeypatch):
+    snapshot = '{"state":"CLOSED","labels":[{"name":"orgforge:done"}]}'
+    fake = FakeGh(replies={"issue view": (0, snapshot),
+                           "issue edit": (1, "label API unavailable"),
+                           "issue close": (1, "close API unavailable")})
+    monkeypatch.setattr(GS, "gh", fake)
+
+    rc = GS.cmd_stage(_ns(repo="o/r", issue=42, stage="ready"))
+
+    assert rc == 10
+    assert len(fake.calls_matching("issue close")) == 1
+
+
+def test_stage_done_does_not_close_an_already_closed_issue_again(monkeypatch):
+    snapshot = '{"state":"CLOSED","labels":[{"name":"orgforge:done"}]}'
+    fake = FakeGh(replies={"issue view": (0, snapshot)})
+    monkeypatch.setattr(GS, "gh", fake)
+
+    rc = GS.cmd_stage(_ns(repo="o/r", issue=42, stage="done"))
+
+    assert rc == 0
+    assert not fake.calls_matching("issue reopen")
+    assert not fake.calls_matching("issue close")
+
+
 # ── the audit record: judgments + granular work log (docs/11 §4f) ────────────
 # Human diff review is retired, so an unrecorded judgment is indistinguishable from no judgment, and a
 # terse work log records nothing recoverable. Both degradations are closed at the tool, not left to

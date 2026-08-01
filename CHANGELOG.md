@@ -6,6 +6,17 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 2.0.11 — coherent rework transitions
+
+### Fixed
+
+- Reopen a closed GitHub Issue when a governed lifecycle stage moves it back to ready,
+  in-progress, blocked, or needs-human, while leaving already-open transitions idempotent.
+- Make `org_cycle rework` restore the Issue to OPEN / ready before recording
+  `rework_requested`, so a failed GitHub transition cannot advance the ledger alone.
+- Keep `done` close idempotent and cover open, closed, replay, and reopen-failure paths in both
+  harness projections.
+
 ## 2.0.10 — measured mutation evidence
 
 ### Fixed

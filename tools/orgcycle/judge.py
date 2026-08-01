@@ -721,6 +721,10 @@ def cmd_rework(a):
                "verdict": "rework", "reason": a.reason,
                "from_verdict": a.after, "to_role": a.to or ""}
     rc = _execute([
+        # GitHub を先に作業可能な状態へ戻す。ここが失敗したら台帳へ rework を記録しない —
+        # CLOSED/COMPLETED のまま ledger だけ次周へ進む分岐が実地で起きた。
+        (f"stage ready / reopen → #{a.issue}",
+         lambda: _gh_sync("stage", "--issue", str(a.issue), "--stage", "ready")),
         (f"rework_requested #{a.issue}（{a.after} を受けて）",
          lambda: _ledger("append", "--actor", a.by, "--class", "rework_requested",
                          "--natural-key", f"rework-{a.issue}-{a.round}",
@@ -733,8 +737,8 @@ def cmd_rework(a):
                           "--result", a.reason[:2000])),
     ], f"record rework #{a.issue}")
     if rc == 0:
-        print(f"\n  これで `show --issue {a.issue}` の rework 警告が正しく数えられる"
-              f"（台帳に材料が入っていないと、閾値に届かず沈黙する）。")
+        print(f"\n  Issue は OPEN / ready に戻り、`show --issue {a.issue}` の rework 警告も"
+              f"正しく数えられる（台帳に材料が入っていないと、閾値に届かず沈黙する）。")
     return rc
 
 
