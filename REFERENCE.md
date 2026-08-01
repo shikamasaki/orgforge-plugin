@@ -69,7 +69,7 @@ irreversible patterns draw down a budget.
 | `ORG_MAX_CYCLES` | Per-window cap on a role's loop cycles (each `Agent`/`Task` spawn = one cycle). When set, a spawn that would exceed it is **held** — the enforcement-layer runaway kill ("$3-5, not $180"). Needs `ORG_ROLE`. | *(unset → no cycle cap)* |
 | `ORG_MAX_TOKENS` | Per-window cap on a role's cumulative reported tokens (from `cycle_completed`). Same enforcement as `ORG_MAX_CYCLES`. | *(unset → no token cap)* |
 | `ORG_ALLOW_MANUAL_MERGE` | `1` で保護ブランチ（`develop`/`main`/`master`）への直接の `git merge`/`rebase`/`cherry-pick` を通す。**通した事実は台帳に `bypass_declared` として残る** — 統合は `org_cycle integrate` を通すのが既定（gate の admit と skeptic の survives を確認する） | *(off — hold する)* |
-| `ORG_ALLOW_MANUAL_GH` | `1` で `gh issue create|close|edit|reopen` を通す（同様に台帳に残る）。読み取り（`view`/`list`）と `gh pr *` は元から止めない | *(off — hold する)* |
+| `ORG_ALLOW_MANUAL_GH` | `1` で `gh issue create|close|edit|reopen` を通す（同様に台帳に残る）。Claude Code の PreToolUse は Bash より先に走るため、一度だけ通す場合は同じ Bash 呼び出しで `ORG_ALLOW_MANUAL_GH=1 gh issue …`（または `export ORG_ALLOW_MANUAL_GH=1` の次行で `gh issue …`）と宣言する。1呼び出しにつき1件の mutation だけを許し、複数件は個別に宣言・実行・記録する。読み取り（`view`/`list`）と `gh pr *` は元から止めない | *(off — hold する)* |
 | `ORG_QUIET` | `1` で「実行中のバージョンと cwd」の1行（stderr）を抑制する。`view`/`census`/`digest` と内部呼び出しでは自動で抑制されるので、通常は不要 | *(off — 1行出す)* |
 | `ORG_HOOK_FAIL_OPEN` | `1` allows a tool call when the guardrail organ errors, instead of blocking. **Dev only** — the safe default is fail-closed. | *(off / fail-safe)* |
 | `ORG_ALLOW_CATASTROPHIC` | `1` disables the catastrophic denylist (the hard block on `rm -rf /`-class, `mkfs`, `dd`-to-disk, fork bombs). **Disposable sandbox only** — never in an environment with real data. | *(off / catastrophic blocked)* |

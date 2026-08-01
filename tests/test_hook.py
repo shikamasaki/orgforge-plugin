@@ -608,6 +608,77 @@ def test_bypass_that_cannot_be_recorded_is_denied(tmp_path):
     assert "記録できなかったので通さない" in (r.stdout + r.stderr)
 
 
+@pytest.mark.parametrize("command", [
+    "ORG_ALLOW_MANUAL_GH=1 gh issue create --title x --body y",
+    "env ORG_ALLOW_MANUAL_GH=1 gh issue edit 42 --add-label triage",
+    "env -i ORG_ALLOW_MANUAL_GH=1 gh issue edit 42 --add-label triage",
+    "export ORG_ALLOW_MANUAL_GH=1; gh issue close 42",
+    "export ORG_ALLOW_MANUAL_GH=1 && gh issue reopen 42",
+    "export ORG_ALLOW_MANUAL_GH=1\ngh issue close 42",
+    "ORG_ALLOW_MANUAL_GH=1 gh issue close 42 # gh issue close 43",
+])
+def test_command_scoped_manual_gh_bypass_is_honored_and_recorded(
+        tmp_path, command):
+    """The documented one-shot declaration must reach a PreToolUse hook.
+
+    Bash has not started when PreToolUse runs, so reading only the hook process's ``os.environ``
+    makes both a prefix assignment and an in-command export impossible to use.
+    """
+    repo = _org_repo(tmp_path)
+    led = repo / ".orgforge" / "ledger"; led.mkdir(parents=True, exist_ok=True)
+    shutil.copy(REPO / "template" / "ledger-schema.yaml", repo / "ledger-schema.yaml")
+    ev = {"hook_event_name": "PreToolUse", "session_id": "s",
+          "tool_use_id": f"toolu_gh{_next_tu():04d}", "tool_name": "Bash",
+          "tool_input": {"command": command}, "cwd": str(repo)}
+    env = dict(os.environ, ORG_LEDGER_ROOT=str(led), ORG_TOOLS_DIR=str(TOOLS))
+    env.pop("ORG_ALLOW_MANUAL_GH", None)
+
+    result = subprocess.run([sys.executable, str(HOOK)], input=json.dumps(ev),
+                            capture_output=True, text=True, env=env, cwd=str(repo))
+    assert result.returncode == 0, result.stdout + result.stderr
+    rows = [json.loads(line) for line in (led / "ledger.jsonl").read_text(
+        encoding="utf-8").splitlines()]
+    assert rows[-1]["class"] == "bypass_declared"
+    assert rows[-1]["payload"]["what"] == "manual gh issue write"
+
+
+@pytest.mark.parametrize("command", [
+    "echo ORG_ALLOW_MANUAL_GH=1 gh issue create --title x",
+    "ORG_ALLOW_MANUAL_GH=1 echo allowed; gh issue create --title x",
+    "export ORG_ALLOW_MANUAL_GH=1; unset ORG_ALLOW_MANUAL_GH; gh issue close 42",
+    "export ORG_ALLOW_MANUAL_GH=1 | cat; gh issue edit 42 --title x",
+    "ORG_ALLOW_MANUAL_GH=0 gh issue reopen 42",
+    "ORG_ALLOW_MANUAL_GH=1 gh issue close 1; gh issue close 2",
+    ("ORG_ALLOW_MANUAL_GH=1 gh issue close 1 && "
+     "ORG_ALLOW_MANUAL_GH=1 gh issue close 2"),
+    "ORG_ALLOW_MANUAL_GH=1 gh issue close 1; sh -c 'gh issue close 2'",
+    "ORG_ALLOW_MANUAL_GH=1 gh issue close 1; bash -lc 'gh issue close 2'",
+    "ORG_ALLOW_MANUAL_GH=1 gh issue close 1 && eval 'gh issue close 2'",
+    "ORG_ALLOW_MANUAL_GH=1 gh issue close 1; xargs gh issue close",
+    "ORG_ALLOW_MANUAL_GH=1 gh issue close 1 |& gh issue close 2",
+    "ORG_ALLOW_MANUAL_GH=1 gh issue close 1; echo safe",
+    "ORG_ALLOW_MANUAL_GH=1 gh issue close 1 $(gh issue close 2)",
+    "ORG_ALLOW_MANUAL_GH=1 gh issue close 1 `gh issue close 2`",
+])
+def test_command_scoped_manual_gh_bypass_cannot_be_declared_out_of_scope(
+        tmp_path, command):
+    """Mentioning or setting the variable for another command must not unlock the write."""
+    repo = _org_repo(tmp_path)
+    led = repo / ".orgforge" / "ledger"; led.mkdir(parents=True, exist_ok=True)
+    shutil.copy(REPO / "template" / "ledger-schema.yaml", repo / "ledger-schema.yaml")
+    ev = {"hook_event_name": "PreToolUse", "session_id": "s",
+          "tool_use_id": f"toolu_gh{_next_tu():04d}", "tool_name": "Bash",
+          "tool_input": {"command": command}, "cwd": str(repo)}
+    env = dict(os.environ, ORG_LEDGER_ROOT=str(led), ORG_TOOLS_DIR=str(TOOLS))
+    env.pop("ORG_ALLOW_MANUAL_GH", None)
+
+    result = subprocess.run([sys.executable, str(HOOK)], input=json.dumps(ev),
+                            capture_output=True, text=True, env=env, cwd=str(repo))
+    assert result.returncode == 2, result.stdout + result.stderr
+    log = led / "ledger.jsonl"
+    assert not log.exists() or "bypass_declared" not in log.read_text(encoding="utf-8")
+
+
 def test_reservation_is_persisted_before_the_call_is_allowed(tmp_path):
     """**書けた判断だけが allow になる。** 台帳が壊れていれば metered action は通らない。"""
     shutil.copy(REPO / "template" / "ledger-schema.yaml", tmp_path / "ledger-schema.yaml")

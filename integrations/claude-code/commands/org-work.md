@@ -391,7 +391,11 @@ python3 "${CLAUDE_PLUGIN_ROOT}/tools/org_cycle.py" integrate --issue <N> [--test
   呼ばれなければ何も検査しないので、**呼ばなかったことを検出できるのはフックだけ**である。
   同じ理由で `gh issue create|close|edit` も hold する（organ を通さないと `dept`/`objective`/
   `parent`/冪等キーが付かず、`cycle_completed` の `domain_model` が飛ぶ）。
-  壊れて詰まったときは `ORG_ALLOW_MANUAL_MERGE=1` / `ORG_ALLOW_MANUAL_GH=1` で通せるが、
+  壊れて詰まったときは `ORG_ALLOW_MANUAL_MERGE=1` / `ORG_ALLOW_MANUAL_GH=1` で通せる。
+  GH の一度だけの迂回は、同じ Bash 呼び出しで
+  `ORG_ALLOW_MANUAL_GH=1 gh issue …` と宣言する（PreToolUse は Bash より先に走るため）。
+  1呼び出しにつき1件の Issue mutation だけを実行する — 複数件は個別に宣言して、
+  `bypass_declared` と mutation を1対1で記録する。
   **通した事実は台帳に `bypass_declared` として残る。**Issue にコメントが
   あっても台帳に無ければ「記録されていない」— 実地では refutation_attempted が台帳に1件も無い
   まま統合され、`integration_admitted` も記録されなかった。二重記録の片側だけが落ちるのが
