@@ -22,7 +22,7 @@
       **何も実行せず**、打つイベント列を印字する（--dry-run 相当）
 
 Exit: 0 ok / 3 台帳が拒否（順序違反など）/ 8 judge preflight 失敗 /
-      10 contended / 2 usage・設定エラー
+      9 installed-organ binding 不備 / 10 contended / 2 usage・設定エラー
 """
 import argparse
 import json

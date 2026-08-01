@@ -54,6 +54,33 @@ CONV_ROOT = _discover("conventions", "ORG_CONVENTIONS_ROOT")
 LEDGER_ROOT = _discover("ledger", "ORG_LEDGER_ROOT")
 
 
+def _installed_organ_contract():
+    """Bind this host's actual bundled tools to a version-stable organization-side launcher."""
+    if not LEDGER_ROOT:
+        return ""
+    try:
+        sys.path.insert(0, TOOLS)
+        import discover                                   # noqa: E402
+        from organ_binding import bind                    # noqa: E402
+        root = discover.org_root()
+        if not root:
+            return ""
+        record = bind(root, TOOLS)
+        return (
+            "## Installed OrgForge organ invocation (use this exact stable surface)\n"
+            f"`\"{record['launcher']}\" <organ> [args...]`\n\n"
+            f"Examples: `\"{record['launcher']}\" org-cycle verify ...`, "
+            f"`\"{record['launcher']}\" github-sync decide ...`, "
+            f"`\"{record['launcher']}\" ledger verify`. The launcher resolves the organ bound by "
+            "this SessionStart; "
+            "do not search for another OrgForge checkout or reuse a versioned plugin-cache path. "
+            "After a plugin update, restart this host session so the binding advances.")
+    except Exception as exc:
+        return ("## Installed OrgForge organ binding is NOT READY\n"
+                f"SessionStart could not establish the stable invocation contract: {exc}. "
+                "Do not use a development checkout as a substitute; repair or restart the session.")
+
+
 def _work_in_progress():
     """Read the role's started-but-unfinished candidates + latest progress from the ledger. Returns a
     human-readable resume block, or "" if there is nothing in flight (a clean role = clean no-op)."""
@@ -109,6 +136,9 @@ def main():
     except Exception:
         pass
     parts = []
+    binding = _installed_organ_contract()
+    if binding.strip():
+        parts.append(binding)
     if ROLE and DOCTRINE_ROOT:
         out = os.path.join(DOCTRINE_ROOT, f"{ROLE}.DOCTRINE.md")
         doc = _render("doctrine.py", DOCTRINE_ROOT,

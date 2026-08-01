@@ -283,10 +283,11 @@ def test_integrate_allows_when_both_recorded(tmp_path):
         os.environ.pop("ORG_LEDGER_ROOT", None)
 
 
-def test_verify_gate_embeds_absolute_repro_lint_path():
-    """repro_lint がパス解決できず一度も走っていなかった。絶対パスを埋める。"""
+def test_verify_gate_uses_the_stable_organ_for_repro_lint():
+    """installed promptはcache pathでなくbinding launcher、source開発時だけHEREを使う。"""
     src = _cycle_src()
-    assert 'repro_lint.py' in src and 'HERE' in src, "repro_lint の絶対パス埋め込みが無い"
+    assert '_organ_command(stable_organ, "repro-lint")' in src
+    assert 'os.path.join(HERE, filename)' in src, "source checkout 用 fallback が無い"
 
 
 def test_worktree_cleanup_keeps_dirty_tree(tmp_path):

@@ -185,6 +185,26 @@ any headless judge is started. Successful measured evidence (command, exit code,
 stdout, and stderr) is included in the judge material. OrgForge does not infer a particular daemon
 implementation from the result.
 
+### Stable installed-organ invocation
+
+At SessionStart, each harness atomically binds the organization to its actual bundled tools and
+creates a harness-specific launcher under Git's untracked common dir
+(`.git/orgforge/runtime/<harness>/bin/orgforge`; a ledger-only non-Git org falls back to
+`.orgforge/runtime/<harness>/bin/orgforge`). Session and judge context use that organization-side
+launcher instead of a versioned Claude Code or Codex cache path:
+
+```bash
+"/absolute/org/.git/orgforge/runtime/claude-code/bin/orgforge" org-cycle verify --issue 11 --role skeptic
+"/absolute/org/.git/orgforge/runtime/claude-code/bin/orgforge" github-sync decide --issue 11 ...
+"/absolute/org/.git/orgforge/runtime/codex/bin/orgforge" ledger verify
+```
+
+The launcher reads the adjacent `installed-organ.json`, so the public invocation stays fixed
+while a host restart advances the bound plugin root and version. Ledger mutations compare the
+executing tools root with that binding. A different development checkout is rejected with both
+paths and the recovery command; read-only inspection remains available. This is drift/provenance
+detection within one user account, not a hostile-process security boundary.
+
 Two layers, deliberately: `--output-schema` enforces the *shape* of the verdict (a report cannot
 come back missing `verdict` or `evidence`), and `intake` checks the *content* (a field present but
 empty is still incomplete). A judge runs `--sandbox read-only`, so it cannot write regardless of
