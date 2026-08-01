@@ -43,6 +43,12 @@ def test_repository_release_metadata_is_consistent():
     assert result["codex_archive"].endswith(".tar.gz")
 
 
+def test_published_checksums_use_downloadable_asset_names():
+    workflow = (REPO / ".github/workflows/publish.yml").read_text(encoding="utf-8")
+    assert "(cd dist && shasum -a 256 *.tar.gz > SHA256SUMS)" in workflow
+    assert "shasum -a 256 dist/*.tar.gz" not in workflow
+
+
 @pytest.mark.parametrize(
     "index,mutation,match",
     [

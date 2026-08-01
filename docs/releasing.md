@@ -34,3 +34,6 @@ Each new release contains:
 - `orgforge-codex-<version>.tar.gz`
 - `SHA256SUMS`
 - GitHub artifact provenance attestations for both archives
+
+`SHA256SUMS` uses archive basenames, so it can be checked directly in the directory produced by
+`gh release download` with `shasum -a 256 -c SHA256SUMS`.
