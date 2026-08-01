@@ -1051,7 +1051,11 @@ def test_intake_catches_a_truncated_report():
 def test_intake_passes_a_complete_report():
     """必須要素が揃っていれば通す。途中で 'Now ...' と書いていても完走とみなす。"""
     for report, role in (
-            ("verdict: survives。npm test → 60 passed。ミューテーション6種を撃った。", "skeptic"),
+            (json.dumps({"verdict": "survives",
+                         "why": "静的な境界分析と実テストの結果から、反例が成立しないことを確認した。",
+                         "evidence": "npm test → 60 passed; relevant branches were inspected",
+                         "mutations": [], "out_of_scope": [], "risk": "なし"},
+                        ensure_ascii=False), "skeptic"),
             ("実装完了。コミット 7550451。npm test → Tests 60 passed (60)。", "maker"),
             ("verdict: reject。npm ci が失敗し exit=1。MUST 3 が満たされていない。", "gate")):
         p = subprocess.run([sys.executable, str(TOOLS / "org_cycle.py"), "intake",
@@ -1147,9 +1151,30 @@ def test_intake_emits_a_machine_readable_verdict_line():
     assert "INCOMPLETE" in p.stderr, p.stderr
     q = subprocess.run([sys.executable, str(TOOLS / "org_cycle.py"), "intake",
                         "--issue", "30", "--role", "skeptic",
-                        "--report", "verdict: survives。npm test → 60 passed。"],
+                        "--report", json.dumps({
+                            "verdict": "survives",
+                            "why": "静的な境界分析と実テストの結果から、反例が成立しないことを確認した。",
+                            "evidence": "npm test → 60 passed; relevant branches were inspected",
+                            "mutations": [], "out_of_scope": [], "risk": "なし"},
+                            ensure_ascii=False)],
                        capture_output=True, text=True, timeout=60)
     assert q.returncode == 0 and "INCOMPLETE" not in q.stderr
+
+
+@pytest.mark.parametrize("claim", [
+    "mutations: []",
+    "mutations: none attempted",
+    "mutations: trigger disabled, detected=true",
+    "applied: true\npostcondition: changed\nrestore_postcondition: restored",
+    "mutations: []\n撃った変異: trigger削除 → detected=false",
+])
+def test_intake_rejects_prose_mutation_claims(claim):
+    result = subprocess.run([sys.executable, str(TOOLS / "org_cycle.py"), "intake",
+                             "--issue", "30", "--role", "skeptic", "--report",
+                             "verdict: survives。npm test → 60 passed。\n" + claim],
+                            capture_output=True, text=True, timeout=60)
+    assert result.returncode == 10
+    assert "構造化 JSON" in result.stderr
 
 
 # ── 0.29.0: CI を触る統合で job 構成を見せる ──────────────────────────────
@@ -1269,7 +1294,10 @@ def test_intake_reads_a_structured_verdict():
         "verdict": "survives",
         "why": "3経路で試し、いずれも security definer を経由して拒否された。詳細は以下。",
         "evidence": "psql -c \"update …\" → ERROR: violates row-level security / npm test → 78 passed",
-        "mutations": [{"what": "is_group_member を select true に", "detected": True, "note": None}],
+        "mutations": [{"what": "is_group_member を select true に", "applied": True,
+                       "postcondition": "select prosrc → true を返した", "detected": True,
+                       "restore_postcondition": "select prosrc → original body を返した",
+                       "note": None}],
         "out_of_scope": [], "risk": "中間積の上限チェックが無い"}, ensure_ascii=False)
     p = subprocess.run([sys.executable, str(TOOLS / "org_cycle.py"), "intake",
                         "--issue", "11", "--role", "skeptic", "--report", "-"],
@@ -1282,6 +1310,88 @@ def test_intake_reads_a_structured_verdict():
                         "--issue", "11", "--role", "skeptic", "--report", "-"],
                        input=empty, capture_output=True, text=True, timeout=60)
     assert q.returncode == 10, "欄が空の構造化返り値を通した"
+
+
+@pytest.mark.parametrize("mutation", [
+    {"what": "trigger disable", "applied": False,
+     "postcondition": "select tgenabled → O", "restore_postcondition": "select → O",
+     "detected": False, "note": "変化なし"},
+    {"what": "trigger disable", "applied": True,
+     "postcondition": "", "restore_postcondition": "select → O",
+     "detected": False, "note": "読取なし"},
+    {"what": "trigger disable", "applied": True,
+     "postcondition": 1234567890123, "restore_postcondition": "select → O",
+     "detected": False, "note": "型が不正"},
+    {"what": "trigger disable", "applied": True,
+     "postcondition": "select tgenabled → D", "restore_postcondition": "",
+     "detected": False, "note": "復元未確認"},
+    {"what": "trigger disable", "detected": False, "note": "旧形式"},
+])
+def test_intake_rejects_unproven_mutations(mutation):
+    report = json.dumps({
+        "verdict": "survives",
+        "why": "MUSTの防御を変異検査で確認したという主張だが、適用成立の証拠を検査する。",
+        "evidence": "mutation command and test output were captured for independent review",
+        "mutations": [mutation], "out_of_scope": [], "risk": "適用不能なら未測定"},
+        ensure_ascii=False)
+    result = subprocess.run([sys.executable, str(TOOLS / "org_cycle.py"), "intake",
+                             "--issue", "11", "--role", "skeptic", "--report", "-"],
+                            input=report, capture_output=True, text=True, timeout=60)
+    assert result.returncode == 10, result.stdout + result.stderr
+    assert any(word in (result.stdout + result.stderr) for word in ("適用", "復元"))
+
+
+@pytest.mark.parametrize("bad_mutations", [None, "all applied", {"applied": False}])
+def test_intake_rejects_non_array_or_missing_mutations(bad_mutations):
+    report = {
+        "verdict": "survives",
+        "why": "MUSTの防御を独立に確認したという主張だが、構造化された変異一覧の型を検査する。",
+        "evidence": "mutation command and test output were captured for independent review",
+        "out_of_scope": [], "risk": "不正な構造は判定成果物にしない"}
+    if bad_mutations is not None:
+        report["mutations"] = bad_mutations
+    result = subprocess.run([sys.executable, str(TOOLS / "org_cycle.py"), "intake",
+                             "--issue", "11", "--role", "skeptic", "--report", "-"],
+                            input=json.dumps(report, ensure_ascii=False),
+                            capture_output=True, text=True, timeout=60)
+    assert result.returncode == 10, result.stdout + result.stderr
+    assert "array" in (result.stdout + result.stderr)
+
+
+def test_intake_accepts_static_skeptic_report_without_mutations():
+    """A static proof can be complete without pretending a mutation was attempted."""
+    report = json.dumps({
+        "verdict": "survives",
+        "why": "仕様の不変条件を実装と境界条件から独立に再導出し、反例が成立しないことを確認した。",
+        "evidence": "対象コードと既存テストの具体的な分岐を読み、境界入力の結果を照合した。",
+        "mutations": [], "out_of_scope": [], "risk": "動的変異は不要な静的判定"},
+        ensure_ascii=False)
+    result = subprocess.run([sys.executable, str(TOOLS / "org_cycle.py"), "intake",
+                             "--issue", "11", "--role", "skeptic", "--report", "-"],
+                            input=report, capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_verify_prompt_requires_mutation_postconditions_and_restore():
+    src = _cycle_src("judge")
+    segment = src[src.index("def cmd_verify"):src.index("def _judge_lineage")]
+    for phrase in ("baseline → mutate → postcondition → test → restore",
+                   "空振りした変異の GREEN は証拠ではない", "適用後状態", "未測定"):
+        assert phrase in segment
+
+
+def test_cross_harness_verdict_schemas_are_bundled_and_resolved():
+    """OBS-009: source and both installed projections must carry the same contracts."""
+    judge = _cycle_mod("judge")
+    roots = [TEMPLATE / "schemas",
+             REPO / "integrations" / "claude-code" / "template" / "schemas",
+             REPO / "integrations" / "codex" / "template" / "schemas"]
+    for role in ("gate", "skeptic"):
+        copies = [root / f"{role}-verdict.json" for root in roots]
+        assert all(path.is_file() for path in copies), copies
+        contents = [path.read_bytes() for path in copies]
+        assert contents[0] == contents[1] == contents[2]
+        assert pathlib.Path(judge._verdict_schema(role)).resolve() == copies[0].resolve()
 
 
 def test_verify_offers_the_headless_route():

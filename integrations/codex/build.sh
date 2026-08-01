@@ -59,6 +59,10 @@ done
 for f in ledger-schema.yaml constitution.yaml sensors.yaml moves.yaml role-settings.yaml; do
   sync_one "$REPO/template/$f" "$HERE/template/$f" || rc=1
 done
+# Structured-output contracts used by cross-harness judges.
+for f in "$REPO"/template/schemas/*.json; do
+  sync_one "$f" "$HERE/template/schemas/$(basename "$f")" || rc=1
+done
 
 if [ "$CHECK" = "--check" ]; then
   [ "$rc" = 0 ] && echo "codex plugin bundle is in sync with the neutral source"
