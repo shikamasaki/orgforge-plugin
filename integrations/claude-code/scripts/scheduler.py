@@ -470,8 +470,18 @@ def cmd_install(args) -> int:
         return OK
     record = _base_record(args, backend, python, plugin_root, root, workdir, role, binding)
     record.update({key: value for key, value in detail.items() if key not in {"smoke", "run"}})
+    proof = detail.get("run") or detail.get("smoke") or {}
+    coverage = proof.get("coverage") if isinstance(proof, dict) else None
+    if isinstance(coverage, dict):
+        record["coverage"] = coverage
     _atomic_json(_registry(root), record)
     print(f"installed: {backend} tick every {args.tick_min}m for role {role}")
+    if isinstance(coverage, dict):
+        print("unattended coverage: " + ", ".join(coverage.get("unattended") or []))
+        attended = coverage.get("attended_only") or []
+        if attended:
+            print("attended-only schedule checks (not claimed by this scheduler): "
+                  + ", ".join(attended))
     print(f"verify: {Path(__file__).resolve()} status --root {shlex.quote(str(root))}")
     return OK
 

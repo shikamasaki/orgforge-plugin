@@ -121,6 +121,8 @@ validation:
     recovery_probe_recorded: [circuit_id, activation_id, result, evidence, confidence, session_id]
     artifact_revalidated: [artifact, activation_id, checks, result, evidence, verified_by,
                            session_id]
+    scheduled_check_completed: [check_id, scheduled_for_min, execution_id, result, exit_code,
+                                command_sha256, plugin_version]
   # **相関キーはどれか1つあればよい。** deliverable / candidate_id / claim_id / issue はどれも
   # 正当な相関キーで（`_same_work` が union-find で束ねる）、どれを使うかは経路によって違う。
   # 1つに固定すると正当な書き込みを弾く（実際に統制のテストを弾いた）。
@@ -143,7 +145,8 @@ validation:
                                 acceptable_outcome_recorded, microexperiment_concluded,
                                 circuit_state_changed, operational_state_transitioned,
                                 operational_escalated, artifact_tainted,
-                                recovery_probe_recorded, artifact_revalidated]
+                                recovery_probe_recorded, artifact_revalidated,
+                                scheduled_check_completed]
   # **writer 専用のクラス。** generic append では書けない。
   #
   # 上限の予約を通常の append で書ける状態は、上限そのものを無効化する — 実測で
@@ -152,7 +155,8 @@ validation:
   #
   # これは identity の認証ではない（H1 は別問題）。同じ UID なら writer を騙れる。
   # ただし「通常の append 経路で偶然にも意図的にも書けてしまう」ことは、これで塞がる。
-  writer_only: [exposure_budget_checked, halt_tripped, halt_released]
+  writer_only: [exposure_budget_checked, halt_tripped, halt_released,
+                scheduled_check_completed]
   # enum。**存在する場合に**検証する（欠けているかは required が見る）。
   enums:
     verdict_provisional:
@@ -170,6 +174,8 @@ validation:
     goal_host_synced:
       native_state: [active, complete, blocked, unavailable, failed]
       assurance: [reported, observed]
+    scheduled_check_completed:
+      result: [ok, escalate]
   # 型。同上、存在する場合に検証する。
   types:
     correction:          { corrects: list, target_classes: list, target_issues: list }
@@ -192,6 +198,7 @@ validation:
     artifact_tainted: { revalidation_scope: list }
     recovery_probe_recorded: { evidence: list, confidence: number }
     artifact_revalidated: { checks: list, evidence: list }
+    scheduled_check_completed: { scheduled_for_min: int, exit_code: int }
 
 
 
@@ -589,6 +596,9 @@ event_classes:
                           delta_magnitude, delta_sign, department, recurrence_count } # OUTCOME-DELTA
   tick_planned:         { now_min, night: bool, due: [check_id], suspended: [check_id],
                           missed: [check_id] }   # tick.py's own run — a gap proves the host cron died
+  scheduled_check_completed: { check_id, scheduled_for_min, execution_id,
+                               result: ok|escalate, exit_code, command_sha256,
+                               plugin_version } # proof the scheduler ran a check; never its domain result
   # intra-department attention allocation (docs/09) — how ONE dept picks what to work on next
   attention_allocated:  { role, wip_limit, in_flight, ranking_id,
                           selected: [{candidate_id, objective, score, in_ranking, source}],

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -23,6 +24,11 @@ import uuid
 OK = 0
 ESCALATE = 10
 BROKEN = 12
+
+_UNATTENDED = {
+    "machine_sensors": ("sensors.py", "eval"),
+    "chain_verify": ("ledger.py", "verify"),
+}
 
 
 def _atomic_json(path: Path, value: dict) -> None:
@@ -92,6 +98,83 @@ def _run(name: str, command: list[str], results: list[dict]) -> subprocess.Compl
     return completed
 
 
+def _payload_digest(value: object) -> str:
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":"),
+                         ensure_ascii=False).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _append_command(tools: Path, root: Path, append_args: list[str]) -> list[str]:
+    if os.environ.get("ORG_WRITER_SOCKET"):
+        return [sys.executable, str(tools / "writer_client.py"),
+                "record-scheduled-check", "--", *append_args]
+    return [sys.executable, str(tools / "ledger.py"), "record-scheduled-check", str(root),
+            *append_args]
+
+
+def _check_receipt(events: list[dict], check_id: str, now_min: int,
+                   execution_id: str) -> dict | None:
+    matches = [event for event in events
+               if event.get("class") == "scheduled_check_completed"
+               and (event.get("payload") or {}).get("check_id") == check_id
+               and (event.get("payload") or {}).get("scheduled_for_min") == now_min
+               and (event.get("payload") or {}).get("execution_id") == execution_id]
+    return matches[-1] if matches else None
+
+
+def _persist_check_receipt(*, tools: Path, root: Path, check_id: str, now_min: int,
+                           command: list[str], returncode: int,
+                           plugin_version: str) -> tuple[dict | None, str | None]:
+    # Cache roots change on plugin update and tests deliberately relocate an otherwise identical
+    # bundle. Hash the installed command shape, not its ephemeral absolute cache prefix.
+    plugin_root = str(tools.parent)
+    canonical_command = ["$PLUGIN_ROOT" + item[len(plugin_root):]
+                         if item.startswith(plugin_root + os.sep) else item
+                         for item in command]
+    command_sha256 = _payload_digest(canonical_command)
+    execution_id = _payload_digest({"check_id": check_id, "scheduled_for_min": now_min,
+                                    "command_sha256": command_sha256})[:24]
+    payload = {
+        "check_id": check_id,
+        "scheduled_for_min": now_min,
+        "execution_id": execution_id,
+        "result": "ok" if returncode == OK else "escalate",
+        "exit_code": returncode,
+        "command_sha256": command_sha256,
+        "plugin_version": plugin_version,
+    }
+    append_args = ["--check-id", check_id, "--scheduled-for-min", str(now_min),
+                   "--execution-id", execution_id, "--result", payload["result"],
+                   "--exit-code", str(returncode), "--command-sha256", command_sha256,
+                   "--plugin-version", plugin_version]
+    appended = subprocess.run(_append_command(tools, root, append_args), capture_output=True,
+                              text=True, encoding="utf-8", errors="replace",
+                              timeout=_check_timeout())
+    if appended.returncode != OK:
+        detail = ((appended.stdout or "") + (appended.stderr or "")).strip()
+        return None, (f"could not persist {check_id} receipt (exit {appended.returncode}): "
+                      f"{detail[:500]}")
+    receipt = _check_receipt(_events(root), check_id, now_min, execution_id)
+    if receipt is None:
+        return None, f"no exact {check_id} receipt readback for now_min={now_min}"
+    return receipt, None
+
+
+def _load_schedule(path: Path) -> dict:
+    import yaml
+    value = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict) or not isinstance(value.get("checks"), list):
+        raise ValueError(f"invalid schedule: {path}")
+    return value
+
+
+def _coverage(schedule: dict) -> tuple[list[str], list[str]]:
+    clock = [str(check.get("id")) for check in schedule.get("checks", [])
+             if isinstance(check, dict) and str(check.get("cadence") or "").startswith("every_")]
+    return ([check_id for check_id in clock if check_id in _UNATTENDED],
+            [check_id for check_id in clock if check_id not in _UNATTENDED])
+
+
 def _overall(results: list[dict]) -> int:
     errors = [item["returncode"] for item in results
               if item["returncode"] not in (OK, ESCALATE)]
@@ -148,7 +231,11 @@ def main(argv: list[str] | None = None) -> int:
                   root / "scheduler-state.json")
     now = dt.datetime.now(dt.timezone.utc)
     now_min = args.now_min if args.now_min is not None else int(now.timestamp() // 60)
-    now_iso = args.now or now.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    # Bind repeated invocations in one scheduler minute to the same logical command.  Wall-clock
+    # seconds are not part of the cadence identity and made an install smoke + immediate kick use
+    # the same natural key with different payloads.
+    scheduled_time = dt.datetime.fromtimestamp(now_min * 60, tz=dt.timezone.utc)
+    now_iso = args.now or scheduled_time.isoformat().replace("+00:00", "Z")
     run_id = args.run_id or uuid.uuid4().hex
 
     def preflight_error(message: str) -> int:
@@ -164,9 +251,13 @@ def main(argv: list[str] | None = None) -> int:
         })
         return BROKEN
 
+    org_root = (Path(str(binding.get("org_root"))).expanduser().resolve()
+                if binding and binding.get("org_root") else None)
+    schedule_path = (org_root / "schedule.yaml" if org_root and
+                     (org_root / "schedule.yaml").is_file() else template / "schedule.yaml")
     required = [scripts / "tick_host.py", tools / "sensors.py", tools / "ledger.py",
                 tools / "guardrails.py", tools / "learning.py", tools / "conventions.py",
-                template / "schedule.yaml", template / "sensors.yaml"]
+                schedule_path, template / "sensors.yaml"]
     missing = [str(path) for path in required if not path.is_file()]
     if missing:
         return preflight_error(
@@ -177,6 +268,21 @@ def main(argv: list[str] | None = None) -> int:
         return preflight_error(
             f"scheduler_tick: {sys.executable} cannot import PyYAML; refusing to misreport "
             "dependency failure as ledger corruption")
+    try:
+        schedule = _load_schedule(schedule_path)
+        covered_checks, attended_only_checks = _coverage(schedule)
+    except (OSError, ValueError) as exc:
+        return preflight_error(f"scheduler_tick: schedule preflight failed: {exc}")
+    if not covered_checks:
+        return preflight_error(
+            "scheduler_tick: schedule declares no clock check supported by the unattended "
+            "adapter; refusing a scheduler that would prove no work")
+
+    manifest_path = plugin_root / ".claude-plugin" / "plugin.json"
+    try:
+        plugin_version = str(json.loads(manifest_path.read_text(encoding="utf-8"))["version"])
+    except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
+        return preflight_error(f"scheduler_tick: plugin version is unreadable: {exc}")
 
     started = now_iso
     _atomic_json(state_file, {
@@ -187,16 +293,37 @@ def main(argv: list[str] | None = None) -> int:
     })
 
     results: list[dict] = []
-    tick_command = [sys.executable, str(scripts / "tick_host.py"),
-                    str(template / "schedule.yaml"), "--root", str(root),
-                    "--now-min", str(now_min), "--verbose"]
+    commands = {
+        "machine_sensors": [sys.executable, str(tools / "sensors.py"), "eval", str(root),
+                            str(template / "sensors.yaml"), "--now", now_iso],
+        "chain_verify": [sys.executable, str(tools / "ledger.py"), "verify", str(root)],
+    }
+    check_receipts = []
+    for check_id in covered_checks:
+        command = commands[check_id]
+        completed = _run(check_id, command, results)
+        if completed.returncode not in (OK, ESCALATE):
+            continue
+        try:
+            receipt, error = _persist_check_receipt(
+                tools=tools, root=root, check_id=check_id, now_min=now_min,
+                command=command, returncode=completed.returncode, plugin_version=plugin_version)
+        except subprocess.TimeoutExpired:
+            receipt, error = None, f"{check_id} receipt append timed out"
+        if error:
+            print(f"scheduler_tick: {error}", file=sys.stderr)
+            results.append({"name": f"receipt:{check_id}", "returncode": BROKEN})
+        elif receipt:
+            check_receipts.append({"check_id": check_id, "seq": receipt.get("seq"),
+                                   "hash": receipt.get("hash")})
+
+    tick_command = [sys.executable, str(scripts / "tick_host.py"), str(schedule_path),
+                    "--root", str(root), "--now-min", str(now_min), "--verbose"]
+    for check_id in covered_checks:
+        tick_command.extend(["--only-check", check_id, "--receipt-check", check_id])
     if args.night:
         tick_command.append("--night")
     _run("tick_plan", tick_command, results)
-    _run("machine_sensors", [sys.executable, str(tools / "sensors.py"), "eval", str(root),
-                              str(template / "sensors.yaml"), "--now", now_iso], results)
-    _run("chain_verify", [sys.executable, str(tools / "ledger.py"), "verify", str(root)],
-         results)
     view = _run("work_in_progress", [sys.executable, str(tools / "ledger.py"), "view",
                                       str(root), "work_in_progress"], results)
     if view.returncode == OK:
@@ -230,6 +357,8 @@ def main(argv: list[str] | None = None) -> int:
         "exit_code": code, "pid": os.getpid(), "python": sys.executable,
         "plugin_root": str(plugin_root), "binding": str(binding_path) if binding_path else None,
         "checks": results,
+        "coverage": {"unattended": covered_checks, "attended_only": attended_only_checks},
+        "check_receipts": check_receipts,
         "receipt_seq": receipt.get("seq") if receipt else None,
         "receipt_hash": receipt.get("hash") if receipt else None,
     }

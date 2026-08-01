@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as dt
 import json
 import os
 import plistlib
@@ -106,7 +107,7 @@ def _fixture(tmp_path: Path) -> tuple[dict[str, str], Path, Path, Path]:
     binding.parent.mkdir(parents=True, exist_ok=True)
     binding.write_text(json.dumps({
         "schema": "orgforge-installed-organ/v1",
-        "version": "2.0.24",
+        "version": "2.0.25",
         "plugin_root": str(PLUGIN),
         "org_root": str(workdir),
         "harness": "claude-code",
@@ -197,10 +198,13 @@ def test_cron_install_smokes_receipt_and_verifies_exact_readback(tmp_path):
     receipt = [json.loads(line) for line in (ledger / "ledger.jsonl").read_text(
         encoding="utf-8").splitlines() if line]
     assert receipt[-1]["class"] == "tick_planned"
+    assert [event["class"] for event in receipt].count("scheduled_check_completed") == 2
     run = json.loads((ledger / "scheduler-state.json").read_text(encoding="utf-8"))
     assert run["receipt_seq"] == receipt[-1]["seq"]
     registry = json.loads((ledger / "scheduler-installation.json").read_text(encoding="utf-8"))
     assert registry["backend"] == "cron" and registry["cycles"] == ["tick"]
+    assert registry["coverage"]["unattended"] == ["machine_sensors", "chain_verify"]
+    assert "attended-only schedule checks" in result.stdout
 
     status = subprocess.run([str(STATUS), "--root", str(ledger)], text=True,
                             capture_output=True, env=env)
@@ -427,4 +431,51 @@ def test_scheduler_tick_duplicate_minute_is_receipt_backed_and_idempotent(tmp_pa
         encoding="utf-8").splitlines()]
     assert [event["class"] for event in events].count("tick_planned") == 1
     state = json.loads((ledger / "scheduler-state.json").read_text(encoding="utf-8"))
-    assert state["receipt_seq"] == 1
+    assert state["receipt_seq"] == 3
+    assert state["coverage"]["unattended"] == ["machine_sensors", "chain_verify"]
+    assert len(state["check_receipts"]) == 2
+
+
+def test_scheduler_check_receipts_keep_repeated_relative_cadence_healthy(tmp_path):
+    ledger = tmp_path / "ledger"
+    ledger.mkdir()
+    for now_min in (100, 130, 160, 190, 220):
+        timestamp = dt.datetime.fromtimestamp(
+            now_min * 60, tz=dt.timezone.utc).isoformat().replace("+00:00", "Z")
+        result = subprocess.run(
+            [sys.executable, str(TICK), "--root", str(ledger), "--plugin-root", str(PLUGIN),
+             "--now-min", str(now_min), "--now", timestamp],
+            text=True, capture_output=True,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    events = [json.loads(line) for line in (ledger / "ledger.jsonl").read_text(
+        encoding="utf-8").splitlines()]
+    assert [event["class"] for event in events].count("scheduled_check_completed") == 10
+    assert [event["class"] for event in events].count("tick_planned") == 5
+    assert not [event for event in events if event["class"] in {"sensor_reading", "heartbeat"}]
+    assert all(not (event.get("payload") or {}).get("missed")
+               for event in events if event["class"] == "tick_planned")
+
+
+def test_scheduler_gap_eventually_escalates_despite_current_run_receipts(tmp_path):
+    ledger = tmp_path / "ledger"
+    ledger.mkdir()
+    base = [sys.executable, str(TICK), "--root", str(ledger),
+            "--plugin-root", str(PLUGIN)]
+    first = subprocess.run(
+        [*base, "--now-min", "100", "--now", "1970-01-01T01:40:00Z"],
+        text=True, capture_output=True,
+    )
+    assert first.returncode == 0, first.stdout + first.stderr
+
+    # Five 30-minute opportunities were skipped. The current run is receipted before planning,
+    # but that one success cannot erase the missing windows.
+    resumed = subprocess.run(
+        [*base, "--now-min", "280", "--now", "1970-01-01T04:40:00Z"],
+        text=True, capture_output=True,
+    )
+    assert resumed.returncode == 10
+    assert "scheduled-check receipt window(s)" in resumed.stdout + resumed.stderr
+    state = json.loads((ledger / "scheduler-state.json").read_text(encoding="utf-8"))
+    assert state["status"] == "escalate"
