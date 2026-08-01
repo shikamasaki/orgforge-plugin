@@ -686,8 +686,9 @@ the exact failure this layer exists to remove. So each check declares a `verify_
 event class whose presence *proves it ran* in its window. `tick.py` computes, for every due check,
 whether that proof exists — a due check with no matching event within the grace window is a
 **MISS**, and consecutive misses **escalate** (`wake_up_push` — a missing schedule is a page). And
-`tick.py`'s own run emits `tick_planned`, so a gap in *that* stream proves the host cron itself died
-— the outermost **dead-man's switch**. Verified: with `chain_verify` due every 30 min but zero
+`tick.py`'s own run emits `tick_planned`, and the host adapter (`tick_host.py`) persists that receipt,
+so a gap in *that* stream proves the host cron itself died — the outermost **dead-man's switch**.
+Verified: with `chain_verify` due every 30 min but zero
 `heartbeat` events in the ledger, `tick.py plan` reports the miss and exits 10 (escalate). The tools
 don't *assume* the host called them; the planner *detects* when it didn't and pages. Fail-safe by
 construction.

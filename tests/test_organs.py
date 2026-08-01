@@ -10,6 +10,8 @@ from conftest import (REPO, TOOLS, TEMPLATE, run, seed, _cycle_src, _gh_src,
                       _cycle_mod, _propose_full, _admitted_claim, _sched,
                       _ledger_with, _led, _append, _status, _write_ledger)
 
+TICK_HOST = REPO / "integrations" / "common" / "tick_host.py"
+
 
 def test_report_up_requires_prior_conformance(tmp_path):
     # A4 (docs/09): a manager may not report subordinate work up without a prior A3 conforms —
@@ -267,15 +269,174 @@ def test_alignment_sunk_abandons(tmp_path):
 
 
 def test_tick_no_miss_when_fresh(tmp_path):
-    # a low now-min: nothing is overdue enough to miss yet
-    code, out = run("tick.py", "plan", str(tmp_path), _sched(), "--now-min", "5")
+    # The first tick establishes the monitoring baseline.  A host passing Unix-epoch minutes
+    # must not make a newly enabled schedule look as though it has been missing since 1970.
+    code, out = run("tick.py", "plan", str(tmp_path), _sched(),
+                    "--now-min", "29759222")
+    assert code == 0 and "495987" not in out
+
+
+def test_tick_uses_first_planned_tick_as_monitoring_origin(tmp_path):
+    seed(tmp_path, "registrar", "tick_planned",
+         {"now_min": 29759220, "night": False, "due": [], "suspended": [], "missed": []})
+
+    # Only two minutes have elapsed since monitoring started, regardless of the absolute epoch.
+    code, out = run("tick.py", "plan", str(tmp_path), _sched(),
+                    "--now-min", "29759222")
+    assert code == 0 and "495987" not in out
+
+
+def _host_tick(root, now, *extra, env=None):
+    return subprocess.run(
+        [sys.executable, str(TICK_HOST), _sched(), "--root", str(root),
+         "--now-min", str(now), *extra], capture_output=True, text=True, env=env)
+
+
+def _tick_host_module():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("orgforge_tick_host_test", TICK_HOST)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_tick_host_persists_origin_and_detects_later_real_miss(tmp_path):
+    origin = 29759220
+    first = _host_tick(tmp_path, origin)
+    assert first.returncode == 0, first.stdout + first.stderr
+    event = json.loads((tmp_path / "ledger.jsonl").read_text(
+        encoding="utf-8").splitlines()[0])
+    assert event["class"] == "tick_planned"
+    assert event["payload"]["now_min"] == origin
+
+    missed = _host_tick(tmp_path, origin + 180)
+    assert missed.returncode == 10
+    assert "MISS" in missed.stdout + missed.stderr
+
+
+def test_tick_rejects_backwards_clock_domain(tmp_path):
+    seed(tmp_path, "registrar", "tick_planned",
+         {"now_min": 29759220, "night": False, "due": [], "suspended": [], "missed": []})
+    code, out = run("tick.py", "plan", str(tmp_path), _sched(), "--now-min", "100")
+    assert code == 10 and "clock domain moved backwards" in out
+
+
+def test_tick_rejects_malformed_monitoring_origin(tmp_path):
+    seed(tmp_path, "registrar", "tick_planned",
+         {"now_min": "180", "night": False, "due": [], "suspended": [], "missed": []})
+    code, out = run("tick.py", "plan", str(tmp_path), _sched(), "--now-min", "180")
+    assert code == 10 and "origin is malformed" in out
+
+
+def test_tick_host_repairs_malformed_origin_on_next_receipt(tmp_path):
+    seed(tmp_path, "registrar", "tick_planned",
+         {"now_min": "broken", "night": False, "due": [], "suspended": [], "missed": []})
+    repair = _host_tick(tmp_path, 180)
+    assert repair.returncode == 10 and "origin is malformed" in repair.stdout + repair.stderr
+
+    # A retry inside the same minute emits a repaired payload. Its natural key must not collide
+    # with the first (clock-error) payload merely because ``now_min`` is unchanged.
+    recovered = _host_tick(tmp_path, 180)
+    assert recovered.returncode == 0, recovered.stdout + recovered.stderr
+    assert "origin is malformed" not in recovered.stdout + recovered.stderr
+    assert "could not persist tick_planned" not in recovered.stdout + recovered.stderr
+
+
+def test_tick_malformed_later_receipt_keeps_real_miss_accounting(tmp_path):
+    seed(tmp_path, "registrar", "tick_planned",
+         {"now_min": 0, "night": False, "due": [], "suspended": [], "missed": []})
+    seed(tmp_path, "registrar", "tick_planned",
+         {"now_min": "broken", "night": False, "due": [], "suspended": [], "missed": []})
+
+    code, out = run("tick.py", "plan", str(tmp_path), _sched(), "--now-min", "180")
+    assert code == 10
+    assert "origin is malformed" in out
+    assert "machine_sensors" in out and "chain_verify" in out
+
+
+def test_tick_backwards_clock_without_compatible_origin_is_globally_visible(tmp_path):
+    seed(tmp_path, "registrar", "tick_planned",
+         {"now_min": 29759220, "night": False, "due": [], "suspended": [], "missed": []})
+    code, out = run("tick.py", "plan", str(tmp_path), _sched(), "--now-min", "100")
+    assert code == 10
+    assert "tick_clock" in out and "cannot prove scheduled checks ran" in out
+
+
+def test_tick_host_routes_receipt_through_writer_client(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    module = _tick_host_module()
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        if command[1].endswith("tick.py"):
+            return SimpleNamespace(
+                returncode=0,
+                stdout=('LEDGER-EVENT {"class":"tick_planned","payload":'
+                        '{"now_min":180,"night":false,"due":[],"suspended":[],"missed":[]}}\n'),
+                stderr="",
+            )
+        return SimpleNamespace(returncode=0, stdout='{"ok":true}\n', stderr="")
+
+    monkeypatch.setenv("ORG_WRITER_SOCKET", str(tmp_path / "writer.sock"))
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+    code = module.main([_sched(), "--root", str(tmp_path), "--now-min", "180"])
     assert code == 0
+    assert any(command[1].endswith("writer_client.py") and command[2:4] == ["append", "--"]
+               for command in calls)
+    assert not any(command[1].endswith("ledger.py") for command in calls)
+
+
+def test_tick_host_append_failure_is_visible(monkeypatch, tmp_path, capsys):
+    from types import SimpleNamespace
+    module = _tick_host_module()
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        if len(calls) == 1:
+            return SimpleNamespace(
+                returncode=0,
+                stdout=('LEDGER-EVENT {"class":"tick_planned","payload":'
+                        '{"now_min":180,"night":false,"due":[],"suspended":[],"missed":[]}}\n'),
+                stderr="",
+            )
+        return SimpleNamespace(returncode=4, stdout="", stderr="writer unavailable")
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+    code = module.main([_sched(), "--root", str(tmp_path), "--now-min", "180"])
+    captured = capsys.readouterr()
+    assert code == 10
+    assert "could not persist tick_planned" in captured.err
+    assert "writer unavailable" in captured.err
+
+
+def test_night_tick_persists_origin_without_resetting_it(tmp_path):
+    origin = 29759220
+    first = _host_tick(tmp_path, origin, "--night")
+    assert first.returncode == 0, first.stdout + first.stderr
+
+    missed = _host_tick(tmp_path, origin + 180)
+    assert missed.returncode == 10
+    assert "MISS" in missed.stdout + missed.stderr
+
+
+def test_shipped_claude_tick_paths_use_persisting_host_adapter():
+    command = (REPO / "integrations/claude-code/commands/org-tick.md").read_text(encoding="utf-8")
+    registrar = (REPO / "integrations/claude-code/agents/registrar.md").read_text(encoding="utf-8")
+    assert "scripts/tick_host.py" in command
+    assert "scripts/tick_host.py" in registrar
+    shipped = list((REPO / "integrations/claude-code/commands").glob("*.md"))
+    shipped += list((REPO / "integrations/claude-code/agents").glob("*.md"))
+    assert not [path for path in shipped if "tools/tick.py plan" in path.read_text(encoding="utf-8")]
 
 
 def test_tick_detects_miss(tmp_path):
-    # now-min must land on a check's interval boundary for it to be DUE and thus miss-checkable.
-    # 180 is a multiple of the 30-min machine_sensors/chain_verify cadence; an empty ledger has
-    # produced 0 of an expected 6 -> shortfall 6 > grace 2 and >= esc_after 3 -> MISS + escalate.
+    # Miss accounting begins when the host first planned a tick, not at Unix epoch zero.
+    seed(tmp_path, "registrar", "tick_planned",
+         {"now_min": 0, "night": False, "due": [], "suspended": [], "missed": []})
+    # 180 is a multiple of the 30-min machine_sensors/chain_verify cadence. Since monitoring
+    # began at t=0, six runs were expected and none were verified, so this is a real MISS.
     code, out = run("tick.py", "plan", str(tmp_path), _sched(), "--now-min", "180")
     assert code == 10 and ("MISS" in out or "ESCALATE" in out)
 

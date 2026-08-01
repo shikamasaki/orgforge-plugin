@@ -201,9 +201,11 @@ python3 integrations/runner/run_department.py --harness claude --role gate \
   --task "Review the candidate; admit or reject" --ledger $ORG_LEDGER_ROOT \
   --tools "read,grep,run_tests" --dry-run
 
-# drive the cadence with cron (R0: the schedule's CONTENT is ours, the DRIVE is the host's):
-#   */30 * * * *  python3 tools/tick.py plan $ORG_LEDGER_ROOT template/schedule.yaml --now-min $(...)
-# tick.py says which checks are due and DETECTS a missed one (a due check with no proof-of-run) —
+# drive the cadence with cron (R0: the schedule's CONTENT is ours, the DRIVE is the host's).
+# Use the host adapter, not the pure planner, so tick_planned is persisted:
+#   */30 * * * *  python3 integrations/common/tick_host.py template/schedule.yaml \
+#     --root "$ORG_LEDGER_ROOT" --now-min $(...)
+# tick_host runs tick.py, records its receipt, and preserves missed-check detection across runs —
 # so "the cron stopped firing" becomes a paged fact, not silent drift.
 ```
 
