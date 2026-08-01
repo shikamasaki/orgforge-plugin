@@ -601,6 +601,140 @@ _GH_WRITE = {
 }
 
 
+_SHELL_ASSIGNMENT = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$", re.S)
+
+
+def _command_scoped_manual_gh(cmd):
+    """Whether this Bash call gives its sole ``gh issue`` write the one-shot bypass.
+
+    PreToolUse runs before Bash, so ``ORG_ALLOW_MANUAL_GH=1 gh ...`` cannot affect the hook
+    process's ``os.environ``. Read the declaration from the command while preserving shell scope:
+    a prefix assignment applies to that simple command, and ``export`` persists across later
+    ``;``/``&&``/newline segments but not out of a pipeline. Merely echoing the declaration,
+    assigning it to another command, or unsetting it before ``gh`` must not unlock the write.
+    Exactly one issue mutation is allowed per Bash call so one audit row always represents one
+    mutation; a declared write cannot piggyback an undeclared (or second declared) write.
+    """
+    if not isinstance(cmd, str) or len(cmd) > 64 * 1024:
+        return False
+    # Do not attempt to prove scope through command/process substitution. A direct mutation plus
+    # ``$(...)`` or backticks can execute another hidden mutation inside the same shell segment.
+    if re.search(r"`|\$\(|(?:^|\s)[<>]\(", cmd):
+        return False
+    try:
+        lexer = shlex.shlex(cmd, posix=True, punctuation_chars=";&|\n")
+        lexer.whitespace = " \t\r"
+        lexer.whitespace_split = True
+        lexer.commenters = "#"  # shell comments are not executable segments
+        tokens = list(lexer)
+    except (TypeError, ValueError):
+        return False
+
+    exported = False
+    segment = []
+
+    def evaluate(parts, separator):
+        nonlocal exported
+        if not parts:
+            return "empty", None
+
+        if parts[0] == "export":
+            declared = None
+            for token in parts[1:]:
+                match = _SHELL_ASSIGNMENT.match(token)
+                if match and match.group(1) == "ORG_ALLOW_MANUAL_GH":
+                    declared = match.group(2) == "1"
+            # Each side of a pipeline runs in its own environment; an export there does not
+            # establish the variable for a later command in the parent shell.
+            if declared is not None and separator != "|":
+                exported = declared
+            return "state", None
+
+        if parts[0] == "unset" and "ORG_ALLOW_MANUAL_GH" in parts[1:]:
+            if separator != "|":
+                exported = False
+            return "state", None
+
+        index = 0
+        shell_local = None
+        while index < len(parts):
+            match = _SHELL_ASSIGNMENT.match(parts[index])
+            if not match:
+                break
+            if match.group(1) == "ORG_ALLOW_MANUAL_GH":
+                shell_local = match.group(2) == "1"
+            index += 1
+
+        env_clears = False
+        env_unsets = False
+        if index < len(parts) and parts[index] == "env":
+            index += 1
+            while index < len(parts):
+                token = parts[index]
+                if token == "--":
+                    index += 1
+                    break
+                if token in {"-i", "--ignore-environment"}:
+                    env_clears = True
+                    index += 1
+                    continue
+                if token in {"-u", "--unset", "-C", "--chdir", "-S", "--split-string"}:
+                    if index + 1 >= len(parts):
+                        return "other", None
+                    if token in {"-u", "--unset"} and parts[index + 1] == "ORG_ALLOW_MANUAL_GH":
+                        env_unsets = True
+                    index += 2
+                    continue
+                if token.startswith("--unset="):
+                    env_unsets = token.split("=", 1)[1] == "ORG_ALLOW_MANUAL_GH"
+                    index += 1
+                    continue
+                if token.startswith("--chdir=") or token.startswith("--split-string="):
+                    index += 1
+                    continue
+                if token.startswith("-"):
+                    # Unknown/combined env flags cannot establish the declaration themselves.
+                    index += 1
+                    continue
+                break
+
+        env_local = None
+        while index < len(parts):
+            match = _SHELL_ASSIGNMENT.match(parts[index])
+            if not match:
+                break
+            if match.group(1) == "ORG_ALLOW_MANUAL_GH":
+                env_local = match.group(2) == "1"
+            index += 1
+        if index + 2 >= len(parts):
+            return "other", None
+        is_write = (parts[index:index + 2] == ["gh", "issue"]
+                    and parts[index + 2] in {action for _, action in _GH_WRITE})
+        if not is_write:
+            return "other", None
+        if env_local is not None:
+            return "write", env_local
+        if env_clears or env_unsets:
+            return "write", False
+        if shell_local is not None:
+            return "write", shell_local
+        return "write", exported
+
+    writes = []
+    has_other_command = False
+    for token in tokens + [";"]:
+        if token in {";", "&&", "||", "|", "|&", "&", "\n"}:
+            kind, decision = evaluate(segment, token)
+            if kind == "write":
+                writes.append(decision)
+            elif kind == "other":
+                has_other_command = True
+            segment = []
+        else:
+            segment.append(token)
+    return not has_other_command and writes == [True]
+
+
 def _gh_bypass(tool_name, ti):
     """organ を通さない Issue の書き換えか。理由（と打つべきコマンド）を返す。"""
     if tool_name != "Bash":
@@ -632,7 +766,9 @@ def _gh_bypass(tool_name, ti):
                 f"起票が objective に紐づかず、`cycle_completed` の `domain_model` が飛ぶ"
                 f"（すべて運用で起きた）。\n"
                 f"  読み取り（`gh issue view` / `gh issue list`）は止めていない。"
-                f"手で書き換えるなら `ORG_ALLOW_MANUAL_GH=1` を付けること（台帳に残る）。")
+                f"手で書き換えるなら同じ Bash 呼び出しで "
+                f"`ORG_ALLOW_MANUAL_GH=1 gh issue …` と宣言すること。"
+                f"1呼び出し1 mutation とし、複数件は個別に実行する（台帳に1対1で残る）。")
     return None
 
 
@@ -1423,7 +1559,8 @@ def main():
             _deny(f"org guardrail HELD this {tool_name}: {byp}")
 
     # 同じ形で、organ を通さない Issue の書き換えも hold する
-    if os.environ.get("ORG_ALLOW_MANUAL_GH") == "1":
+    if (os.environ.get("ORG_ALLOW_MANUAL_GH") == "1"
+            or _command_scoped_manual_gh(_command_text(tool_input))):
         ghb = _gh_bypass(tool_name, tool_input)
         if ghb and LEDGER_ROOT:
             # **記録できなければ通さない。** 宣言は記録されるから許されるのであって、

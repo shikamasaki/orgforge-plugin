@@ -6,6 +6,15 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 2.0.3 — usable one-shot GitHub bypass
+
+### Fixed
+
+- Honor `ORG_ALLOW_MANUAL_GH=1` when it is scoped to the actual `gh issue` command in the same
+  Claude Code Bash call, where PreToolUse can verify and record it before Bash starts.
+- Preserve the guardrail for mentions, assignments to other commands, pipeline-local exports,
+  explicit unsets, and command-local overrides that disable the bypass.
+
 ## 2.0.2 — reliable missed-tick monitoring
 
 ### Fixed
