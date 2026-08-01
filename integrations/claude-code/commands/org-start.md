@@ -65,8 +65,17 @@ Check on the org any time with **`/org`** (the status board). Stop a cycle by en
 ## For a genuinely 24/7 org (no session open)
 
 `/loop` and the session end when Claude Code closes. To run unattended with no session, install the
-cadence on the OS cron instead — `integrations/claude-code/scheduler-install.sh --role ${1:-supervisor}`
-(see [SCHEDULER.md](../SCHEDULER.md)). That is the one case that needs the heavier setup; for an attended
+cadence on the OS cron instead. Preserve read-only-first staging until the acting preflight and local
+resource isolation are proven:
+
+```
+integrations/claude-code/scheduler-install.sh --role ${1:-supervisor} \
+  --cycles tick --tick-min ${2:-15}
+```
+
+If backlog writes are approved before asset-touching work, `--cycles tick,discover` is the intermediate
+shape. Then enable `--cycles tick,work,discover` (or omit `--cycles` for the compatible default).
+See [SCHEDULER.md](../SCHEDULER.md). This is the one case that needs the heavier setup; for an attended
 or kept-open session, the three `/loop`s above are all you need.
 
 ## Why the monitoring stays with the org
