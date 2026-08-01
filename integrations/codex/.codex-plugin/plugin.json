@@ -1,6 +1,6 @@
 {
   "name": "orgforge",
-  "version": "2.0.6+codex.20260801190940",
+  "version": "2.0.7+codex.20260801103734",
   "description": "A governance layer for existing coding-agent teams: explicit roles, maker/checker boundaries, a non-skippable SDLC, human-held irreversible decisions, evidence records, and bounded organization evolution without replacing the Codex runtime.",
   "author": {
     "name": "shikamasaki",

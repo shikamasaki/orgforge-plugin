@@ -718,6 +718,67 @@ def test_command_scoped_manual_gh_bypass_cannot_be_declared_out_of_scope(
     assert not log.exists() or "bypass_declared" not in log.read_text(encoding="utf-8")
 
 
+@pytest.mark.parametrize("command", [
+    "ORG_ALLOW_MANUAL_MERGE=1 git merge feat/issue-42",
+    "env ORG_ALLOW_MANUAL_MERGE=1 git rebase feat/issue-42",
+    "env -i ORG_ALLOW_MANUAL_MERGE=1 git cherry-pick abc1234",
+    "export ORG_ALLOW_MANUAL_MERGE=1; git merge feat/issue-42",
+    "export ORG_ALLOW_MANUAL_MERGE=1 && git rebase feat/issue-42",
+    "export ORG_ALLOW_MANUAL_MERGE=1\ngit cherry-pick abc1234",
+])
+def test_command_scoped_manual_merge_bypass_is_honored_and_recorded(
+        tmp_path, command):
+    """The documented one-shot merge declaration must reach a PreToolUse hook."""
+    repo = _org_repo(tmp_path)
+    led = repo / ".orgforge" / "ledger"; led.mkdir(parents=True, exist_ok=True)
+    shutil.copy(REPO / "template" / "ledger-schema.yaml", repo / "ledger-schema.yaml")
+    ev = {"hook_event_name": "PreToolUse", "session_id": "s",
+          "tool_use_id": f"toolu_merge{_next_tu():04d}", "tool_name": "Bash",
+          "tool_input": {"command": command}, "cwd": str(repo)}
+    env = dict(os.environ, ORG_LEDGER_ROOT=str(led), ORG_TOOLS_DIR=str(TOOLS))
+    env.pop("ORG_ALLOW_MANUAL_MERGE", None)
+
+    result = subprocess.run([sys.executable, str(HOOK)], input=json.dumps(ev),
+                            capture_output=True, text=True, env=env, cwd=str(repo))
+    assert result.returncode == 0, result.stdout + result.stderr
+    rows = [json.loads(line) for line in (led / "ledger.jsonl").read_text(
+        encoding="utf-8").splitlines()]
+    assert rows[-1]["class"] == "bypass_declared"
+    assert rows[-1]["payload"]["what"] == "manual merge into a protected branch"
+
+
+@pytest.mark.parametrize("command", [
+    "echo ORG_ALLOW_MANUAL_MERGE=1 git merge feat/x",
+    "ORG_ALLOW_MANUAL_MERGE=1 echo allowed; git merge feat/x",
+    "export ORG_ALLOW_MANUAL_MERGE=1; unset ORG_ALLOW_MANUAL_MERGE; git merge feat/x",
+    "export ORG_ALLOW_MANUAL_MERGE=1 | cat; git merge feat/x",
+    "ORG_ALLOW_MANUAL_MERGE=0 git merge feat/x",
+    "ORG_ALLOW_MANUAL_MERGE=1 git merge feat/x; git rebase feat/y",
+    ("ORG_ALLOW_MANUAL_MERGE=1 git merge feat/x && "
+     "ORG_ALLOW_MANUAL_MERGE=1 git cherry-pick abc1234"),
+    "ORG_ALLOW_MANUAL_MERGE=1 git merge feat/x; echo safe",
+    "ORG_ALLOW_MANUAL_MERGE=1 git merge feat/x $(git cherry-pick abc1234)",
+    "ORG_ALLOW_MANUAL_MERGE=1 git merge feat/x `git cherry-pick abc1234`",
+])
+def test_command_scoped_manual_merge_bypass_cannot_be_declared_out_of_scope(
+        tmp_path, command):
+    """A declaration for another or compound command must not unlock integration."""
+    repo = _org_repo(tmp_path)
+    led = repo / ".orgforge" / "ledger"; led.mkdir(parents=True, exist_ok=True)
+    shutil.copy(REPO / "template" / "ledger-schema.yaml", repo / "ledger-schema.yaml")
+    ev = {"hook_event_name": "PreToolUse", "session_id": "s",
+          "tool_use_id": f"toolu_merge{_next_tu():04d}", "tool_name": "Bash",
+          "tool_input": {"command": command}, "cwd": str(repo)}
+    env = dict(os.environ, ORG_LEDGER_ROOT=str(led), ORG_TOOLS_DIR=str(TOOLS))
+    env.pop("ORG_ALLOW_MANUAL_MERGE", None)
+
+    result = subprocess.run([sys.executable, str(HOOK)], input=json.dumps(ev),
+                            capture_output=True, text=True, env=env, cwd=str(repo))
+    assert result.returncode == 2, result.stdout + result.stderr
+    log = led / "ledger.jsonl"
+    assert not log.exists() or "bypass_declared" not in log.read_text(encoding="utf-8")
+
+
 def test_reservation_is_persisted_before_the_call_is_allowed(tmp_path):
     """**書けた判断だけが allow になる。** 台帳が壊れていれば metered action は通らない。"""
     shutil.copy(REPO / "template" / "ledger-schema.yaml", tmp_path / "ledger-schema.yaml")
