@@ -600,6 +600,30 @@ def _log_ns(**kw):
     return _ns(**base)
 
 
+def test_progress_receipt_uses_declared_blocked_by_field(monkeypatch):
+    """The projection must not emit the undeclared legacy ``blocker`` key."""
+    captured = {}
+
+    class Result:
+        returncode = 0
+        stdout = "appended seq=1\n"
+        stderr = ""
+
+    def fake_run(args, **kwargs):
+        captured["args"] = args
+        return Result()
+
+    monkeypatch.delenv("ORG_WRITER_SOCKET", raising=False)
+    monkeypatch.setattr(_gh_record.subprocess, "run", fake_run)
+    ok, out = GS._append_progress_receipt(
+        _log_ns(blocked_by="reviewer unavailable", next_step="retry with Codex"))
+    assert ok, out
+    args = captured["args"]
+    payload = json.loads(args[args.index("--payload") + 1])
+    assert payload["blocked_by"] == "reviewer unavailable"
+    assert "blocker" not in payload
+
+
 def test_log_records_the_command_and_its_real_output(monkeypatch):
     """A log of only successes is a fiction — a failing result must round-trip verbatim."""
     fake = CommentGh(); monkeypatch.setattr(GS, "gh", fake)

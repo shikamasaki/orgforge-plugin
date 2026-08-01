@@ -75,7 +75,7 @@ def _append_progress_receipt(a):
                "phase": a.phase or "", "milestone": a.event,
                "done_so_far": (a.detail or "")[:2000],
                "next_step": getattr(a, "next_step", None) or "",
-               "blocker": getattr(a, "blocked_by", None) or "",
+               "blocked_by": getattr(a, "blocked_by", None) or "",
                "issue": a.issue}
     if getattr(a, "command", None):
         payload["command"] = a.command

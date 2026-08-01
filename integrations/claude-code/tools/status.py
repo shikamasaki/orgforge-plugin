@@ -89,11 +89,32 @@ def _needs_human_issues():
     return out
 
 
+def _governance_divergence_notice():
+    """Return an AMBER notice when this linked worktree embeds stale governance."""
+    try:
+        import discover
+        rows = discover.governance_divergences()
+    except Exception:
+        return None
+    if not rows:
+        return None
+    names = ", ".join(r["path"] for r in rows[:5])
+    if len(rows) > 5:
+        names += f", +{len(rows) - 5} more"
+    return (f"governance divergence: {len(rows)} file(s) differ in the subject worktree "
+            f"({names}); enforcement uses the authoritative primary checkout")
+
+
 def cmd_status(a):
     try:
         events = read_events(a.root)
     except Exception as e:
         print(f"RED — the ledger could not be read ({e}). The org's state is unknown; a human must look.")
+        return OK
+    governance_notice = _governance_divergence_notice()
+    if not events and governance_notice:
+        print("AMBER — running")
+        print(f"  watch: {governance_notice}")
         return OK
     if not events:
         print("GREEN — no activity yet. The org is founded but has done nothing; drop work on the "
@@ -135,6 +156,8 @@ def cmd_status(a):
 
     # amber signals
     amber = []
+    if governance_notice:
+        amber.append(governance_notice)
     open_backlog = counts.get("candidate_submitted", 0) - counts.get("cycle_completed", 0)
     if in_progress:
         amber.append(f"{len(in_progress)} item(s) in progress")
