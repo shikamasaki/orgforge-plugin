@@ -358,8 +358,8 @@ event_classes:
   # integrate phase (docs/11 §4c): the fanned-out siblings merged to `develop` and pass the COMBINED
   # suite together. Green CI on develop is its machine form; result_deployed should require it (the
   # develop→main promotion). Owned by the supervising manager (A3 extended to cross-deliverable).
-  integration_admitted: { integration_branch, deliverables: [ref], combined_ci_ref, verdict: pass|fail,
-                          admitter }
+  integration_admitted: { integration_branch, integration_subject_sha, deliverables: [ref],
+                          combined_ci_ref, verdict: pass|fail, admitter }
   # A result may only deploy AFTER the skeptic refuted-and-failed (verdict: survives) for it.
   # requires_prior makes the skeptic load-bearing: without a `survives` for this candidate_id,
   # a result_deployed event is INVALID (the deploy path cannot skip adversarial review).

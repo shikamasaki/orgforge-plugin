@@ -21,7 +21,109 @@ from ._core import (
 )
 
 
-def _integrate_preview(issue, branch, base, test):
+def _resolve_integration_branch(issue, requested=None):
+    """Resolve one durable local branch + commit for an Issue, or return an actionable error.
+
+    The deterministic title slug is a creation convention, not durable identity: a branch can be
+    renamed or recreated after the Issue title changes. Never turn a missing ref into a zero-change
+    preview. Exact explicit ``--branch`` values are existence-checked; implicit resolution may use a
+    sole ``feat/issue-N[-…]`` candidate, but ambiguity and local/tracking divergence always stop.
+    A tracking-only ref is diagnostic, not a merge target: without a local branch we cannot know
+    whether the last fetch is fresh, so the operator must fetch/checkout explicitly.
+    """
+    derived = requested or _branch_for(issue)
+    prefix = f"feat/issue-{issue}"
+    requested_logical = derived[len("origin/"):] if derived.startswith("origin/") else derived
+    code, out = _raw([
+        "git", "for-each-ref", "--format=%(refname:short)",
+        "refs/heads", "refs/remotes/origin",
+    ])
+    if code != 0:
+        return None, None, "git branch refs を列挙できないため、統合対象を確認できない。"
+
+    entries = {}
+
+    def add(logical, ref, available):
+        is_issue_candidate = logical == prefix or logical.startswith(prefix + "-")
+        if not is_issue_candidate and not (requested and logical == requested_logical):
+            return
+        entry = entries.setdefault(logical, {"local": None, "tracking": None})
+        if available == "local":
+            entry["local"] = ref
+        elif available == "tracking":
+            entry["tracking"] = ref
+
+    for ref in (out or "").splitlines():
+        ref = ref.strip()
+        if not ref:
+            continue
+        if ref.startswith("origin/"):
+            add(ref[len("origin/"):], ref, "tracking")
+        else:
+            add(ref, ref, "local")
+
+    def resolve(logical):
+        entry = entries.get(logical) or {}
+        local, tracking = entry.get("local"), entry.get("tracking")
+
+        def sha(ref):
+            if not ref:
+                return None
+            rc, value = _raw(["git", "rev-parse", "--verify", f"{ref}^{{commit}}"])
+            return value.strip() if rc == 0 and value.strip() else None
+
+        local_sha, tracking_sha = sha(local), sha(tracking)
+        if local and not local_sha:
+            return None, None, f"local ref {local} の commit を解決できない。"
+        if tracking and not tracking_sha:
+            return None, None, f"tracking ref {tracking} の commit を解決できない。"
+        if local_sha and tracking_sha and local_sha != tracking_sha:
+            return None, None, (f"{logical} の local/tracking が分岐している: "
+                                f"local={local_sha[:12]}, tracking={tracking_sha[:12]}。"
+                                "fetch/rebase/merge で一致させるか、確認済みcommit SHAを "
+                                "--branch で明示してから統合すること。")
+        if local_sha:
+            return local, local_sha, None
+        if tracking_sha:
+            return None, None, (f"候補 {tracking} は tracking ref のみにある。"
+                                "`git fetch --prune origin` と checkout を行い、"
+                                "local branch として内容を確認してから統合すること。")
+        return None, None, None
+
+    exact_ref, exact_sha, exact_error = resolve(requested_logical)
+    if exact_error:
+        return None, None, exact_error
+    if exact_ref:
+        return exact_ref, exact_sha, None
+
+    candidate_names = sorted(entries)
+    candidate_text = ", ".join(candidate_names) if candidate_names else "なし"
+    if requested:
+        # An immutable commit SHA (or tag) is a valid explicit override even when it is not an Issue
+        # branch. The merge below uses this resolved SHA, so a later ref move cannot change subject.
+        rc, explicit_sha = _raw(["git", "rev-parse", "--verify", f"{derived}^{{commit}}"])
+        if rc == 0 and explicit_sha.strip():
+            return derived, explicit_sha.strip(), None
+        return None, None, (f"--branch {derived} がlocal/tracking refsに存在しない。"
+                            f" Issue候補: {candidate_text}。必要なら `git fetch --prune origin` 後に"
+                            "再実行すること。")
+
+    if len(candidate_names) == 1:
+        only = candidate_names[0]
+        ref, subject_sha, error = resolve(only)
+        if error:
+            return None, None, error
+        if ref:
+            return ref, subject_sha, None
+    if not candidate_names:
+        return None, None, (f"導出した branch {derived} が存在せず、local/tracking refsに "
+                            f"{prefix}* の候補も無い。`git fetch --prune origin` 後に再実行するか、"
+                            "先に begin/handback するか、--branch を渡すこと。")
+    return None, None, (f"導出した branch {derived} が存在せず、候補が複数ある: "
+                        f"{candidate_text}。統合対象を --branch で明示すること。")
+
+
+def _integrate_preview(issue, branch, subject_sha, base, test):
     """統合前に「何を統合するか」を見せる。**衝突しそうな箇所の予告が主目的。**
 
     統合後に失敗が出ても、その多くが worktree 走査の偽陽性で、切り分けに時間がかかる。
@@ -29,17 +131,33 @@ def _integrate_preview(issue, branch, base, test):
     複数の Issue が並行して同じマニフェストを触っている状態では、「後で分かる」より
     「先に見える」ほうが安い。
     """
-    L = []
-    code, files = _raw(["git", "diff", "--name-only", f"{base}...{branch}"])
+    code, base_sha = _raw(["git", "rev-parse", "--verify", f"{base}^{{commit}}"])
+    if code != 0 or not base_sha.strip():
+        return (f"{branch} → {base}\n  ✗ base ref {base} が存在しない。",
+                {}, "base ref missing")
+    code, verified_subject = _raw([
+        "git", "rev-parse", "--verify", f"{subject_sha}^{{commit}}",
+    ])
+    if code != 0 or verified_subject.strip() != subject_sha:
+        return (f"{branch} → {base}\n  ✗ 解決済み subject {subject_sha[:12]} が利用できない。",
+                {}, "subject commit missing")
+
+    L = [f"{branch} @ {subject_sha[:12]} → {base}"]
+    code, files = _raw(["git", "diff", "--name-only", f"{base_sha.strip()}...{subject_sha}"])
+    if code != 0:
+        return ("\n".join(L + ["  ✗ refs は存在するが git diff に失敗した。"]),
+                {}, "git diff failed")
     changed = [f for f in (files or "").split("\n") if f.strip()]
-    L.append(f"{branch} → {base}")
     L.append(f"  変更: {len(changed)} files")
     for f in changed[:12]:
         L.append(f"    {f}")
     if len(changed) > 12:
         L.append(f"    … 他 {len(changed) - 12} 件")
 
-    code, ahead = _raw(["git", "log", "--oneline", f"{base}..{branch}"])
+    code, ahead = _raw(["git", "log", "--oneline", f"{base_sha.strip()}..{subject_sha}"])
+    if code != 0:
+        return ("\n".join(L + ["  ✗ commit range を読めない。branch の実在を再確認すること。"]),
+                {}, "git log failed")
     n = len([x for x in (ahead or "").split("\n") if x.strip()])
     L.append(f"  コミット: {n} 件")
 
@@ -69,7 +187,7 @@ def _integrate_preview(issue, branch, base, test):
     for f in changed:
         if not re.search(r"\.github/workflows/.+\.ya?ml$", f):
             continue
-        code, ci = _raw(["git", "show", f"{branch}:{f}"])
+        code, ci = _raw(["git", "show", f"{subject_sha}:{f}"])
         if code != 0:
             continue
         # **`jobs:` 配下だけを見る。** トップレベルには `on:` `permissions:` などがあり、
@@ -105,12 +223,15 @@ def _integrate_preview(issue, branch, base, test):
 
     # develop の現状（統合先が既に壊れていないか）
     L.append(f"  統合後に走るもの: {test}")
-    return "\n".join(L), overlaps
+    return "\n".join(L), overlaps, None
 
 
-def _plan_integrate(a, branch, base):
-    body, overlaps = _integrate_preview(a.issue, branch, base, a.test)
+def _plan_integrate(a, branch, subject_sha, base):
+    body, overlaps, preview_error = _integrate_preview(
+        a.issue, branch, subject_sha, base, a.test)
     print(body)
+    if preview_error:
+        return 3
     av, aseq, _ = _admission_for(a.issue)
     rv, rseq, _ = _refutation_for(a.issue)
     print(f"  gate: {av or '記録なし'}" + (f"（seq {aseq}）" if aseq else "")
@@ -135,7 +256,15 @@ def cmd_handback(a):
     body に `Closes #N` を入れるので、develop へのマージで Issue が自動 close される。
     マージするかどうかは判定しない — PR を作るところまでが配管。
     """
-    branch = a.branch or _branch_for(a.issue)
+    branch, subject_sha, branch_error = _resolve_integration_branch(a.issue, a.branch)
+    if branch_error:
+        print(f"handback branch を解決できない（#{a.issue}）: {branch_error}", file=sys.stderr)
+        return 3
+    local_code, _ = _raw(["git", "show-ref", "--verify", f"refs/heads/{branch}"])
+    if local_code != 0:
+        print(f"handback は push できる local branch が必要だが、{branch} は local branch "
+              "ではない。branch を checkout してから再実行すること。", file=sys.stderr)
+        return 3
     base = a.base or "develop"
 
     # 前提: gate の admit（PR は「見せる」ためのものなので skeptic 前でも作れてよい）
@@ -144,11 +273,6 @@ def cmd_handback(a):
     title, body = _issue_body(a.issue)
     if title is None:
         title = f"Issue #{a.issue}"
-
-    code, out = _raw(["git", "rev-parse", "--verify", branch])
-    if code != 0:
-        print(f"ブランチ {branch} が無い。--branch で渡すか、先に begin すること。", file=sys.stderr)
-        return 3
 
     # 既に PR があれば作り直さない（冪等）
     code, out = _raw(["gh", "pr", "list", "--head", branch, "--json", "number,url", "--limit", "1"]
@@ -228,7 +352,11 @@ def cmd_integrate(a):
     最も抜けやすいのは統合の直前なので、そこを配管にする。
     """
     if getattr(a, "plan", False):
-        return _plan_integrate(a, a.branch or _branch_for(a.issue), a.base or "develop")
+        branch, subject_sha, branch_error = _resolve_integration_branch(a.issue, a.branch)
+        if branch_error:
+            print(f"統合対象 branch を解決できない（#{a.issue}）: {branch_error}", file=sys.stderr)
+            return 3
+        return _plan_integrate(a, branch, subject_sha, a.base or "develop")
     av, aseq, _ = _admission_for(a.issue)
     rv, rseq, _ = _refutation_for(a.issue)
     problems = []
@@ -248,7 +376,10 @@ def cmd_integrate(a):
               "前提を承知で進めるなら --force（理由は --why に書くこと）。", file=sys.stderr)
         return 4
 
-    branch = a.branch or _branch_for(a.issue)
+    branch, subject_sha, branch_error = _resolve_integration_branch(a.issue, a.branch)
+    if branch_error:
+        print(f"統合対象 branch を解決できない（#{a.issue}）: {branch_error}", file=sys.stderr)
+        return 3
     base = a.base or "develop"
     # 統合テストの実出力を保持する。**integrate 自身が log の必須検査に引っかかっていた** —
     # マイルストーンの log は --command/--result を要求するのに、integrate はそれを渡さず、
@@ -264,8 +395,8 @@ def cmd_integrate(a):
     steps = [
         (f"{base} に切り替え",
          lambda: _raw(["git", "checkout", base])),
-        (f"{branch} を --no-ff でマージ",
-         lambda: _raw(["git", "merge", "--no-ff", branch,
+        (f"{branch} @ {subject_sha[:12]} を --no-ff でマージ",
+         lambda: _raw(["git", "merge", "--no-ff", subject_sha,
                        "-m", f"Merge {branch} into {base} (#{a.issue})"])),
         (f"統合後の全体テスト: {a.test}", _run_test),
     ]
@@ -283,14 +414,16 @@ def cmd_integrate(a):
                          "--payload", json.dumps({"integration_branch": base,
                                                   "deliverables": [str(a.issue)],
                                                   "issue": a.issue,
+                                                  "integration_subject_sha": subject_sha,
                                                   "combined_ci_ref": a.test,
                                                   "verdict": "pass"}, ensure_ascii=False))),
         (f"log → #{a.issue}",
          lambda: _gh_sync("log", "--issue", str(a.issue), "--event", "integration_admitted",
                           "--event-id", f"integrate-{a.issue}",
-                          "--detail", f"{branch} → {base} に統合、統合後 `{a.test}` green",
+                          "--detail", (f"{branch} @ {subject_sha[:12]} → {base} に統合、"
+                                       f"統合後 `{a.test}` green"),
                           "--command", a.test,
                           "--result", (test_out["text"] or "(統合テストの出力が空)")[-4000:],
-                          "--files", branch)),
+                          "--files", f"{branch}@{subject_sha}")),
     ]
     return _execute(rec, f"record integrate #{a.issue}")
