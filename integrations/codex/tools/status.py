@@ -156,6 +156,26 @@ def cmd_status(a):
 
     # amber signals
     amber = []
+    adaptive_rows = []
+    try:
+        from adaptation import fold as fold_adaptation, load_contract
+        contract, _, _ = load_contract(a.root)
+        adaptive = fold_adaptation(events, contract=contract)
+        envelope_specs = {row.get("id"): row for row in contract.get("adaptive_envelopes", [])}
+        for row in adaptive["activations"]:
+            spec = envelope_specs.get(row.get("envelope_id"), {})
+            row = {**row, "forbidden_actions": spec.get("forbidden_actions") or [],
+                   "revalidation_scope": spec.get("revalidation_scope") or []}
+            adaptive_rows.append(row)
+            if row.get("status") == "expired":
+                red.append(f"adaptive envelope {row['envelope_id']} expired — only safe diagnosis/stop remains")
+            elif row.get("status") == "active":
+                amber.append(f"adaptive envelope active: {row['envelope_id']} until {row.get('expires_at')}")
+            elif row.get("status") == "reverted" and row.get("tainted_artifacts"):
+                amber.append(f"adaptive envelope reverted with {len(row['tainted_artifacts'])} tainted "
+                             "artifact(s) awaiting declared revalidation")
+    except Exception:
+        adaptive_rows = []
     if governance_notice:
         amber.append(governance_notice)
     open_backlog = counts.get("candidate_submitted", 0) - counts.get("cycle_completed", 0)
@@ -276,6 +296,15 @@ def cmd_status(a):
         for cid, role in list(in_progress.items())[:8]:
             ns = latest.get(cid)
             print(f"    - {cid} ({role})" + (f" — next: {ns}" if ns else ""))
+    if adaptive_rows:
+        print("  adaptive envelopes:")
+        for row in adaptive_rows[-5:]:
+            print(f"    - {row['envelope_id']}: {row['status']} | critical: "
+                  f"{','.join(row.get('affected_critical_functions') or [])} | taint: "
+                  f"{len(row.get('tainted_artifacts') or [])} | revalidate: "
+                  f"{','.join(row.get('revalidation_scope') or [])}")
+            if row.get("forbidden_actions"):
+                print(f"      forbidden: {','.join(row['forbidden_actions'])}")
     if amber and not red:
         print("  watch: " + "; ".join(amber))
     if light == "GREEN":

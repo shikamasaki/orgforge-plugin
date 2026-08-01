@@ -125,6 +125,13 @@ required to run the Quickstart or claim the supported guarantees.
 Scheduling these on a cadence: see [integrations/claude-code/SCHEDULER.md](integrations/claude-code/SCHEDULER.md)
 (`/schedule` cron routines for unattended runs, `/loop` for attended ones).
 
+The neutral `orgforge adaptation ...` launcher exposes the same bounded-adaptation contract in both
+harnesses. `doctor` validates critical functions, invariants, practices, and envelopes; `status`
+distinguishes `proposed | active | expired | reverted | adopted`; `activate`, `authorize`, and
+`deviate` enforce trigger evidence, scope, blast radius, retries, expiry, taint, and revalidation;
+`outcome` records safe stop, scope reduction, goal abandonment, human handback, and observe-only as
+valid outcomes; `experiment` plus receipt-backed `adopt` keeps permanent practice changes human-held.
+
 ---
 
 ## 3. The org's files

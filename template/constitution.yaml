@@ -84,6 +84,7 @@ charter:
     - intent_block_revision             # org-wide priorities under an unchanged purpose (docs/07 §2.1)
     - purpose_revision                  # Organ 1 is human-held, always
     - delegation_bounds                 # this file's Tier-1 contents themselves
+    - adaptive_practice_revision        # permanent adoption of a temporary envelope
     - moves_catalog                     # adding/changing legal moves
     - add_layer                         # hierarchy is charter-tier: the last resort
     - refound                           # tear down & rebuild the whole chart, assets intact — a
@@ -107,6 +108,7 @@ charter:
 irreversible:
   held_actions:
     - production_deploy
+    - production_credential_use          # credentials remain in the host platform's custody
     - external_publication              # anything leaving the boundary is published
     - asset_movement                    # funds, credentials, data exports
     - ledger_schema_change
@@ -163,6 +165,100 @@ invariants:
                                                # environment provides. The lint verifies the
                                                # DECLARATION; the host must verify authorship —
                                                # (docs/05 §2.4; docs/01 R2, C4).
+
+# ── Resilience contract — what must survive and what may adapt ──────────────
+# The four resilience potentials are an evaluation lens, not four product modules. This domain
+# contract separates constitutional invariants (never weakenable by an agent) from practices the
+# field may change inside a bounded, expiring envelope. An envelope is not a bypass: every action
+# remains scoped, evidenced, reversible/revalidated, and visible in the ledger.
+#
+# The ledger is Work-as-Recorded, not Work-as-Done. Together with agent/human reports and external
+# traces it provides partial observations from which WAD may be inferred; absence from this ledger
+# never proves an action did not happen. The contract and workflow remain Work-as-Imagined.
+resilience:
+  schema_version: 1
+  critical_functions:
+    - id: governed_delivery
+      description: preserve a verifiable delivery decision under variability
+      acceptable_outcomes: [verified_delivery, safe_stop, scope_reduction, goal_abandonment,
+                            human_handback, observe_only]
+      required_controls: [human_control, independent_review, evidence_integrity]
+    - id: human_control
+      description: preserve the human decision line and protected host custody
+      acceptable_outcomes: [safe_stop, scope_reduction, goal_abandonment, human_handback,
+                            observe_only]
+      required_controls: [human_control, evidence_integrity]
+  constitutional_invariants:
+    - { id: human_decision_line, source: charter.items }
+    - { id: production_credential_custody, source: irreversible.held_actions }
+    - { id: no_self_approval, source: invariants.maker_never_own_checker }
+    - { id: evidence_integrity, source: invariants.ledger_append_only }
+  adaptive_practices:
+    - { id: reviewer_route, description: reviewer harness/model/backend selection }
+    - { id: review_procedure, description: steps inside a required independent review }
+    - { id: evidence_collection, description: how required evidence is collected }
+    - { id: retry_policy, description: bounded retry and failover sequence }
+    - { id: work_scope, description: reversible scope reduction within the current objective }
+  safe_diagnostic_actions: [safe_stop, observe_only, human_handback]
+  globally_forbidden_actions: [silent_skip_required_review, self_approval,
+                               production_credential_use, rewrite_evidence]
+  adaptive_envelopes:
+    - id: required-reviewer-outage
+      version: 1
+      trigger:
+        kind: required_reviewer_unavailable
+        evidence_sources: [judge_preflight, host_liveness]
+        minimum_confidence: 0.8
+      affected_critical_functions: [governed_delivery, human_control]
+      mutable_practices: [reviewer_route, review_procedure, evidence_collection, retry_policy,
+                          work_scope]
+      preserves_invariants: [human_decision_line, production_credential_custody,
+                             no_self_approval, evidence_integrity]
+      allowed_actions: [safe_stop, observe_only, cross_harness_failover, scope_reduction,
+                        human_handback]
+      forbidden_actions: [silent_skip_required_review, self_approval, production_credential_use,
+                          rewrite_evidence, same_harness_claimed_as_independent,
+                          merge_without_required_review]
+      scope:
+        phases: [implement, test, integrate]
+        artifact_patterns: ["*"]
+      blast_radius: { max_deviations: 3, max_tainted_artifacts: 10 }
+      retry_budget: 2
+      missing_evidence_policy: record_and_revalidate
+      expires_after_minutes: 60
+      required_evidence: [outage_receipt, affected_artifact_inventory]
+      revert_condition: required_reviewer_available
+      revalidation_scope: [review_decision, tainted_artifacts, integration_gate]
+      adoption:
+        human_decision: adaptive_practice_revision
+        requires_microexperiment: true
+    - id: required-provider-outage
+      version: 1
+      trigger:
+        kind: required_provider_unavailable
+        evidence_sources: [dependency_preflight, host_liveness]
+        minimum_confidence: 0.8
+      affected_critical_functions: [governed_delivery, human_control]
+      mutable_practices: [evidence_collection, retry_policy, work_scope]
+      preserves_invariants: [human_decision_line, production_credential_custody,
+                             no_self_approval, evidence_integrity]
+      allowed_actions: [safe_stop, observe_only, scope_reduction, human_handback]
+      forbidden_actions: [silent_skip_required_review, self_approval, production_credential_use,
+                          rewrite_evidence, unverified_provider_substitution,
+                          merge_without_required_review]
+      scope:
+        phases: [research, plan, design, implement, test, integrate]
+        artifact_patterns: ["*"]
+      blast_radius: { max_deviations: 3, max_tainted_artifacts: 10 }
+      retry_budget: 0
+      missing_evidence_policy: record_and_revalidate
+      expires_after_minutes: 60
+      required_evidence: [outage_receipt, affected_artifact_inventory]
+      revert_condition: required_provider_available
+      revalidation_scope: [provider_dependent_evidence, tainted_artifacts, integration_gate]
+      adoption:
+        human_decision: adaptive_practice_revision
+        requires_microexperiment: true
 
 # ── Mandate precedence — which mandate governs when two collide (docs/05 §6.4) ──
 # When two departments each act INSIDE their granted authority but reach decisions that cannot

@@ -1,7 +1,7 @@
 {
   "name": "orgforge-plugin",
-  "version": "2.0.17",
-  "description": "A governance layer for existing coding-agent teams. OrgForge projects explicit roles, maker/checker boundaries, a non-skippable SDLC, human-held irreversible decisions, and evidence records into Claude Code, then uses that evidence to evolve the organization with the product. Adopt an existing repository with one command; no daemon, sudo, or key infrastructure is required.",
+  "version": "2.0.18",
+  "description": "Resilience engineering for coding-agent teams. OrgForge is a portable governance plane that helps teams sustain acceptable outcomes under variability, degrade and recover safely, and adapt from evidence without losing human control.",
   "author": {
     "name": "shikamasaki"
   },
@@ -10,6 +10,7 @@
     "multi-agent",
     "guardrails",
     "governance",
+    "resilience-engineering",
     "hooks",
     "organization",
     "sdlc",

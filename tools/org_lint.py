@@ -579,6 +579,10 @@ def check_control_awake(roles, control_ids, lint):
 REQUIRED_INVARIANTS = ["ledger_append_only", "no_knowledge_outside_ledger",
                        "control_never_dormant_while_exploring", "maker_never_own_checker",
                        "no_agent_writes_this_file"]
+ACCEPTABLE_RESILIENCE_OUTCOMES = {
+    "verified_delivery", "safe_stop", "scope_reduction", "goal_abandonment",
+    "human_handback", "observe_only",
+}
 
 
 def walk_for_placeholder(node, path, lint):
@@ -591,6 +595,117 @@ def walk_for_placeholder(node, path, lint):
     elif isinstance(node, list):
         for i, v in enumerate(node):
             walk_for_placeholder(v, f"{path}[{i}]", lint)
+
+
+def _unique_ids(rows, path, lint):
+    found = {}
+    if not isinstance(rows, list) or not rows:
+        lint.fail("RE", f"{path} must be a non-empty list")
+        return found
+    for row in rows:
+        if not isinstance(row, dict) or not row.get("id"):
+            lint.fail("RE", f"{path} contains an item without id")
+            continue
+        rid = row["id"]
+        if rid in found:
+            lint.fail("RE", f"{path} duplicates id '{rid}'")
+        found[rid] = row
+    return found
+
+
+def lint_resilience(con, present_invariants, charter_items, held, lint):
+    """Keep bounded adaptation from becoming an agent-controlled constitutional bypass."""
+    contract = con.get("resilience")
+    if not isinstance(contract, dict):
+        lint.fail("RE", "constitution has no resilience contract")
+        return
+    if contract.get("schema_version") != 1:
+        lint.fail("RE", "resilience.schema_version must be 1")
+    critical = _unique_ids(contract.get("critical_functions"),
+                           "resilience.critical_functions", lint)
+    invariants = _unique_ids(contract.get("constitutional_invariants"),
+                             "resilience.constitutional_invariants", lint)
+    practices = _unique_ids(contract.get("adaptive_practices"),
+                            "resilience.adaptive_practices", lint)
+    for cid, row in critical.items():
+        outcomes = set(row.get("acceptable_outcomes") or [])
+        if not outcomes or not outcomes <= ACCEPTABLE_RESILIENCE_OUTCOMES:
+            lint.fail("RE", f"critical function '{cid}' has unknown/empty acceptable_outcomes: "
+                            f"{sorted(outcomes - ACCEPTABLE_RESILIENCE_OUTCOMES)}")
+        if not row.get("required_controls"):
+            lint.fail("RE", f"critical function '{cid}' has no required_controls")
+    for iid, row in invariants.items():
+        source = row.get("source")
+        if source == "charter.items" and not charter_items:
+            lint.fail("RE", f"constitutional invariant '{iid}' points to an empty charter")
+        elif source == "irreversible.held_actions" and "production_credential_use" not in held:
+            lint.fail("RE", f"constitutional invariant '{iid}' claims credential custody but "
+                            "production_credential_use is not held")
+        elif isinstance(source, str) and source.startswith("invariants."):
+            key = source.split(".", 1)[1]
+            if present_invariants.get(key) is not True:
+                lint.fail("RE", f"constitutional invariant '{iid}' points to inactive {source}")
+        elif source not in {"charter.items", "irreversible.held_actions"}:
+            lint.fail("RE", f"constitutional invariant '{iid}' has unknown source {source!r}")
+    safe = set(contract.get("safe_diagnostic_actions") or [])
+    forbidden_global = set(contract.get("globally_forbidden_actions") or [])
+    if not safe:
+        lint.fail("RE", "resilience.safe_diagnostic_actions must preserve a diagnosis/stop path")
+    if safe & forbidden_global:
+        lint.fail("RE", f"safe diagnostic actions are globally forbidden: {sorted(safe & forbidden_global)}")
+    envelopes = _unique_ids(contract.get("adaptive_envelopes"),
+                            "resilience.adaptive_envelopes", lint)
+    for eid, envelope in envelopes.items():
+        if not isinstance(envelope.get("version"), int) or envelope["version"] < 1:
+            lint.fail("RE", f"adaptive envelope '{eid}' needs a positive integer version")
+        trigger = envelope.get("trigger") or {}
+        confidence = trigger.get("minimum_confidence")
+        if not trigger.get("kind") or not trigger.get("evidence_sources") or \
+                not isinstance(confidence, (int, float)) or not 0 <= confidence <= 1:
+            lint.fail("RE", f"adaptive envelope '{eid}' has an incomplete trigger/evidence/confidence")
+        affected = set(envelope.get("affected_critical_functions") or [])
+        mutable = set(envelope.get("mutable_practices") or [])
+        preserves = set(envelope.get("preserves_invariants") or [])
+        if not affected or not affected <= set(critical):
+            lint.fail("RE", f"adaptive envelope '{eid}' references unknown critical functions")
+        if not mutable or not mutable <= set(practices):
+            lint.fail("RE", f"adaptive envelope '{eid}' references unknown adaptive practices")
+        if preserves != set(invariants):
+            missing = sorted(set(invariants) - preserves)
+            lint.fail("RE", f"adaptive envelope '{eid}' does not preserve every constitutional "
+                            f"invariant; missing {missing}")
+        allowed = set(envelope.get("allowed_actions") or [])
+        forbidden = set(envelope.get("forbidden_actions") or [])
+        if not allowed:
+            lint.fail("RE", f"adaptive envelope '{eid}' has no allowed_actions")
+        if allowed & forbidden:
+            lint.fail("RE", f"adaptive envelope '{eid}' both allows and forbids "
+                            f"{sorted(allowed & forbidden)}")
+        if not forbidden_global <= forbidden:
+            lint.fail("RE", f"adaptive envelope '{eid}' omits globally forbidden actions "
+                            f"{sorted(forbidden_global - forbidden)}")
+        scope = envelope.get("scope") or {}
+        if not scope.get("phases") or not scope.get("artifact_patterns"):
+            lint.fail("RE", f"adaptive envelope '{eid}' has an unbounded phase/artifact scope")
+        radius = envelope.get("blast_radius") or {}
+        for key in ("max_deviations", "max_tainted_artifacts"):
+            if not isinstance(radius.get(key), int) or radius[key] < 1:
+                lint.fail("RE", f"adaptive envelope '{eid}' has no positive blast_radius.{key}")
+        if not isinstance(envelope.get("retry_budget"), int) or envelope["retry_budget"] < 0:
+            lint.fail("RE", f"adaptive envelope '{eid}' has invalid retry_budget")
+        if envelope.get("missing_evidence_policy") not in {"safe_only", "record_and_revalidate"}:
+            lint.fail("RE", f"adaptive envelope '{eid}' has invalid missing_evidence_policy")
+        if not isinstance(envelope.get("expires_after_minutes"), int) or \
+                envelope["expires_after_minutes"] < 1:
+            lint.fail("RE", f"adaptive envelope '{eid}' must expire after a positive duration")
+        if not envelope.get("required_evidence") or not envelope.get("revert_condition") or \
+                not envelope.get("revalidation_scope"):
+            lint.fail("RE", f"adaptive envelope '{eid}' lacks evidence/revert/revalidation contract")
+        adoption = envelope.get("adoption") or {}
+        if adoption.get("human_decision") not in charter_items or \
+                adoption.get("requires_microexperiment") is not True:
+            lint.fail("RE", f"adaptive envelope '{eid}' permanent adoption is not gated by a "
+                            "charter human decision and microexperiment")
 
 
 def lint_constitution(con, lint):
@@ -614,6 +729,7 @@ def lint_constitution(con, lint):
     if "sunset" not in held:
         lint.fail("CH", "sunset is not on the irreversible hold list — an org must not "
                         "adjudicate its own death (docs/05 §4.3)")
+    lint_resilience(con, present, charter_items, held, lint)
     rules = (con.get("charter") or {}).get("queue_rules", {}) or {}
     for rule in ("one_concern_per_proposal", "one_open_proposal_per_subject",
                  "dedup_identical_diffs"):
