@@ -6,6 +6,15 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 2.0.8 — worktree-aware integration guard
+
+### Fixed
+
+- Resolve a statically declared leading `cd <worktree> && git …` or `git -C <worktree> …` before
+  deciding which checked-out branch an integration command would mutate.
+- Allow feature-worktree updates such as `git rebase main` while continuing to hold commands that
+  target a protected checkout; ambiguous, dynamic, missing, and multiple targets fail closed.
+
 ## 2.0.7 — usable one-shot integration bypass
 
 ### Fixed

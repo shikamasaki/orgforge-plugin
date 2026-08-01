@@ -11,6 +11,7 @@ import os
 import pathlib
 import re
 import pytest
+import shlex
 import shutil
 import subprocess
 import sys
@@ -540,12 +541,92 @@ def test_merge_on_a_feature_branch_is_allowed(tmp_path, monkeypatch):
     assert h._integration_bypass("Bash", {"command": "git merge develop"}) is None
 
 
+def test_worktree_rebase_uses_the_command_target_not_the_hook_cwd(tmp_path, monkeypatch):
+    """A leading cd or git -C targets the feature worktree, not the main checkout.
+
+    PreToolUse runs before Bash, so merely checking ``os.getcwd()`` sees main and used to hold these
+    feature-side update operations as if they mutated main.
+    """
+    h = _hook()
+    repo = _org_repo(tmp_path, "main")
+    worktree = tmp_path / "feature-wt"
+    subprocess.run(["git", "worktree", "add", "-q", "-b", "feat/issue-25", str(worktree), "main"],
+                   cwd=repo, capture_output=True, text=True, check=True)
+    monkeypatch.chdir(repo)
+
+    commands = (
+        f"cd {shlex.quote(str(worktree))} && git rebase main",
+        f"git -C {shlex.quote(str(worktree))} rebase main",
+        f"cd {shlex.quote(str(worktree.parent))} && git -C {shlex.quote(worktree.name)} rebase main",
+    )
+    for command in commands:
+        assert h._integration_bypass("Bash", {"command": command}) is None, command
+
+
+def test_command_targeting_a_protected_checkout_is_held(tmp_path, monkeypatch):
+    """Resolving command cwd must not let a feature-side hook mutate main."""
+    h = _hook()
+    repo = _org_repo(tmp_path, "main")
+    worktree = tmp_path / "feature-wt"
+    subprocess.run(["git", "worktree", "add", "-q", "-b", "feat/issue-25", str(worktree), "main"],
+                   cwd=repo, capture_output=True, text=True, check=True)
+    monkeypatch.chdir(worktree)
+
+    commands = (
+        f"cd {shlex.quote(str(repo))} && git merge feat/issue-25",
+        f"git -C {shlex.quote(str(repo))} cherry-pick abc1234",
+    )
+    for command in commands:
+        result = h._integration_bypass("Bash", {"command": command})
+        assert result is not None and "org_cycle" in result, command
+
+
+@pytest.mark.parametrize("command", [
+    'cd "$TARGET_WORKTREE" && git rebase main',
+    'git -C "$(pwd)" merge feat/x',
+    "git merge feat/x; git rebase feat/y",
+])
+def test_ambiguous_integration_target_fails_closed_in_an_org(
+        tmp_path, monkeypatch, command):
+    h = _hook()
+    repo = _org_repo(tmp_path, "main")
+    monkeypatch.chdir(repo)
+    result = h._integration_bypass("Bash", {"command": command})
+    assert result is not None, command
+    assert "静的に解決できない" in result, result
+
+
+def test_chained_cd_cannot_resolve_against_the_wrong_checkout(tmp_path, monkeypatch):
+    """A second relative cd is relative to the first at runtime, never to the hook cwd.
+
+    Resolving only the cd immediately before git made ``wt && cd ..`` point at the parent of the org
+    during inspection even though Bash lands back on the protected main checkout.
+    """
+    h = _hook()
+    repo = _org_repo(tmp_path, "main")
+    worktree = repo / "wt"
+    subprocess.run(["git", "worktree", "add", "-q", "-b", "feat/issue-25", str(worktree), "main"],
+                   cwd=repo, capture_output=True, text=True, check=True)
+    monkeypatch.chdir(repo)
+
+    commands = (
+        f"cd {shlex.quote(str(worktree))} && cd .. && git merge feat/issue-25",
+        f"cd {shlex.quote(str(worktree))} && cd ../ && git cherry-pick abc1234",
+        f"cd {shlex.quote(str(repo))}; git rebase feat/issue-25",
+    )
+    for command in commands:
+        result = h._integration_bypass("Bash", {"command": command})
+        assert result is not None, command
+        assert "静的に解決できない" in result, result
+
+
 def test_read_only_git_and_gh_are_allowed(tmp_path, monkeypatch):
     """読み取りは止めない（`git merge-base` / `gh issue view` / `gh issue list`）。"""
     h = _hook()
     repo = _org_repo(tmp_path, "develop")
     monkeypatch.chdir(repo)
     assert h._integration_bypass("Bash", {"command": "git merge-base develop main"}) is None
+    assert h._integration_bypass("Bash", {"command": "git status; echo merge"}) is None
     for cmd in ("gh issue view 42", "gh issue list --state open", "gh pr create --base develop"):
         assert h._gh_bypass("Bash", {"command": cmd}) is None, cmd
 
