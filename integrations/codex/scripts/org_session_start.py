@@ -54,18 +54,18 @@ CONV_ROOT = _discover("conventions", "ORG_CONVENTIONS_ROOT")
 LEDGER_ROOT = _discover("ledger", "ORG_LEDGER_ROOT")
 
 
-def _installed_organ_contract():
+def _installed_organ_contract(event):
     """Bind this host's actual bundled tools to a version-stable organization-side launcher."""
     if not LEDGER_ROOT:
-        return ""
+        return "", None
     try:
         sys.path.insert(0, TOOLS)
         import discover                                   # noqa: E402
         from organ_binding import bind                    # noqa: E402
         root = discover.org_root()
         if not root:
-            return ""
-        record = bind(root, TOOLS)
+            return "", None
+        record = bind(root, TOOLS, session_id=(event or {}).get("session_id"))
         return (
             "## Installed OrgForge organ invocation (use this exact stable surface)\n"
             f"`\"{record['launcher']}\" <organ> [args...]`\n\n"
@@ -74,11 +74,61 @@ def _installed_organ_contract():
             f"`\"{record['launcher']}\" ledger verify`. The launcher resolves the organ bound by "
             "this SessionStart; "
             "do not search for another OrgForge checkout or reuse a versioned plugin-cache path. "
-            "After a plugin update, restart this host session so the binding advances.")
+            "After a plugin update, restart this host session so the binding advances.", record)
     except Exception as exc:
-        return ("## Installed OrgForge organ binding is NOT READY\n"
-                f"SessionStart could not establish the stable invocation contract: {exc}. "
-                "Do not use a development checkout as a substitute; repair or restart the session.")
+        return (("## Installed OrgForge organ binding is NOT READY\n"
+                 f"SessionStart could not establish the stable invocation contract: {exc}. "
+                 "Do not use a development checkout as a substitute; repair or restart the session."),
+                None)
+
+
+def _goal_resume_context(binding):
+    """Inject the portable unfinished Goal and an honest host-specific resume route."""
+    if not (binding and LEDGER_ROOT):
+        return ""
+    try:
+        sys.path.insert(0, TOOLS)
+        from _organ import read_events                       # noqa: E402
+        from ledger import goal_states_from_events           # noqa: E402
+        goals = goal_states_from_events(read_events(LEDGER_ROOT))
+    except Exception:
+        return ""
+    if not goals or goals[-1].get("status") == "complete":
+        return ""
+    goal = goals[-1]
+    launcher = binding["launcher"]
+    session_id = binding.get("session_id")
+    lines = [
+        "## Persistent OrgForge Goal (recovered from the shared ledger)",
+        f"- id: `{goal['goal_id']}`",
+        f"- status: **{goal['status']}**",
+        f"- objective: {goal['objective']}",
+    ]
+    progress = goal.get("progress") or {}
+    if progress.get("summary"):
+        lines.append(f"- latest progress: {progress['summary']}")
+    if progress.get("next_step"):
+        lines.append(f"- next step: **{progress['next_step']}**")
+    blocker = goal.get("blocker") or {}
+    if blocker:
+        lines.append(f"- blocker ({blocker.get('occurrences', 0)}/3): {blocker.get('reason')}")
+    if goal.get("session_id") != session_id and goal.get("status") != "blocked":
+        lines.extend([
+            "",
+            "This is a new host session. Acquire the goal with compare-and-swap before mutating it:",
+            f"`\"{launcher}\" org-goal resume --reason \"SessionStart handoff\"`",
+        ])
+    elif goal.get("status") == "blocked":
+        lines.append("Do not auto-resume a blocked goal; first obtain user direction or evidence that the "
+                     "external condition changed, then record the resume reason.")
+    if binding.get("harness") == "codex":
+        lines.append("Use the `org-goal` skill to reconcile this portable state with Codex's native Goal. "
+                     "The native Goal is an adapter projection, not the source of truth.")
+    elif binding.get("harness") == "claude-code":
+        lines.append("For periodic attention while this Claude Code session remains open, register "
+                     "`/loop 30m /org-goal status`. The loop is session-scoped and stops when the host "
+                     "closes; OrgForge does not claim background execution without a live host.")
+    return "\n".join(lines)
 
 
 def _work_in_progress():
@@ -130,15 +180,20 @@ def _render(tool, root, subcmd_args, out_path):
 
 
 def main():
-    # read (and ignore) the event; SessionStart carries no decision we need
+    # SessionStart's host session id is the compare-and-swap token used by persistent goals.  It is
+    # observation, not caller-authenticated identity, but it prevents two resumed sessions from
+    # silently owning the same goal at once.
     try:
-        sys.stdin.read()
+        event = json.loads(sys.stdin.read() or "{}")
     except Exception:
-        pass
+        event = {}
     parts = []
-    binding = _installed_organ_contract()
-    if binding.strip():
-        parts.append(binding)
+    binding_text, binding = _installed_organ_contract(event)
+    if binding_text.strip():
+        parts.append(binding_text)
+    goal = _goal_resume_context(binding)
+    if goal.strip():
+        parts.append(goal)
     if ROLE and DOCTRINE_ROOT:
         out = os.path.join(DOCTRINE_ROOT, f"{ROLE}.DOCTRINE.md")
         doc = _render("doctrine.py", DOCTRINE_ROOT,

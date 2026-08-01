@@ -25,6 +25,12 @@ The product has six parts:
 6. **Organization evolution** — turn observed bottlenecks and failures into reviewable changes to
    roles, contracts, context, and controls without letting agents rewrite the human-held purpose.
 
+An explicit objective can also survive a Claude Code/Codex restart through `org-goal`: its state,
+next action, blocker observations, completion evidence, and owning host session live in the shared
+ledger. Codex's native Goal is synchronized as an adapter projection; Claude Code resumes from
+SessionStart and can use a session-scoped `/loop`. Neither path claims execution while its host is
+closed.
+
 For an existing repository, adoption is one command: `/orgforge-plugin:org-adopt`. It requires no
 daemon, sudo, separate OS user, or signing infrastructure. orgforge addresses ordinary agent
 failure—drift, skipped checks, self-approval, lost decisions—not hostile-process containment.

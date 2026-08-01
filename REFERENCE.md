@@ -107,6 +107,7 @@ required to run the Quickstart or claim the supported guarantees.
 | `/org-adopt [残りの要求]` | **既存リポジトリへのone-command導入.** 事前の`org-init`は不要。local stateを安全に準備し、実在するコードから`ARCHITECTURE.md`と`organization.yaml`を*読み取って*書き、**未実装分だけ**をmanifestへ載せ、`repro_lint baseline`で既知の負債を記録し、readiness doctorまで同じinvocationで完了する。network、branch、Issue、daemon、sudo、鍵は不要。 |
 | `/org-decompose [objective-id]` | **Step 3 — decompose.** Turn the approved `coverage-manifest.md` + `ARCHITECTURE.md` into **atomic SPEC task Issues**, one per independently-completable unit, each a native sub-issue of its objective and each carrying the full spec (so any environment can pick it up). Gated by `coverage-check`: exits non-zero if a must-have never became an Issue. |
 | `/org-start [role] [tick] [work] [discover]` | Bring the org to its **running state**: register this session's recurring cycles via the scheduler. Idempotent. The SessionStart hook prompts it for you. |
+| `/org-goal <operation> ...` | Operate one **portable persistent objective** across Claude Code and Codex: `start`, `status`, `progress`, `pause`, CAS-protected `resume`, three-observation `block`, evidence-audited `complete`, or `doctor`. SessionStart re-injects unfinished state; it does not claim work continues while the host is closed. |
 | `/orgforge-plugin:org` `[role]` | The **status board** — "how's my org?" in one GREEN/AMBER/RED answer (done / in progress with next steps / what needs you), in your language. Read-only. |
 | `/org-triage <signal>` | The **front door**: turn an external bug/issue/feedback into a triaged backlog item (or reject it). Feeds `/orgforge-plugin:org-work`. |
 | `/org-mandate <subjectA,subjectB> <decision>` | Adjudicate a **mandate conflict** against the constitution's human-authored precedence: precedence applies, both integrate, or escalate. |
@@ -301,6 +302,8 @@ python3 tools/harness_probe.py           # ガードレールが実際にブロ�
 python3 tools/status.py     status [--role R]   # 健康ボード（GREEN/AMBER/RED）
 python3 tools/attention.py  select --role R [--aspiration N]  # バックログからの選択
 python3 tools/conventions.py ...         # 確立した内部先例（ドメインモデルの半分）
+python3 tools/org_goal.py status --json  # harness共通の持続Goal。通常はSessionStartが注入した
+                                        # stable launcher経由で `orgforge org-goal ...` と呼ぶ
 ```
 
 Exit `0` = all artifacts required *for that phase* are present · `10` = one or more missing (the gate
@@ -411,6 +414,9 @@ The backlog and progress live in the ledger. The events that drive the metabolis
 | `candidate_submitted` | `maker, candidate_id, contract_ref, source: mandate\|self` | a backlog item enters (top-down mandate or self-raised) |
 | `cycle_started` | `role, candidate_id, pack_manifest_id` | a role began working a specific backlog item |
 | `progress_recorded` | `role, candidate_id, fraction, phase, done_so_far, next_step, blocked_by, artifacts` | a **checkpoint** — the memory of "how far", so a context wipe doesn't lose it |
+| `goal_started / goal_progressed / goal_resumed / goal_completed` | `goal_id, session_id, objective/summary/next_step/evidence` | one portable objective and its session ownership. Resume uses the prior session as a compare-and-swap expectation; completion accepts only resolvable `file:`, `git:`, or `ledger:` evidence. |
+| `goal_blocker_observed / goal_blocked` | `goal_id, session_id, blocker, occurrences, evidence` | a blocker observation; only the third consecutive observation of the same blocker transitions the goal to `blocked`. |
+| `goal_host_synced` | `goal_id, harness, native_state, assurance` | the explicitly-assured projection into a host-native Goal; never the portable source of truth. |
 | `cycle_completed` | `role, candidate_id, outputs, …` | the item is done and drains from the backlog |
 | `exposure_budget_checked` | `dimension, committed_so_far, delta_requested, cap, decision` | one blast-radius cap decision (allow / hold) |
 
@@ -431,6 +437,7 @@ The backlog and progress live in the ledger. The events that drive the metabolis
 Views (read with `python3 tools/ledger.py view <root> <view>`):
 - `open_experiments` — the backlog (submitted, not yet completed).
 - `work_in_progress` — started-but-not-completed candidates with their latest checkpoint (the resume source).
+- `goal_state` — the folded persistent objective, owning session, progress, blockers, completion evidence, and per-host synchronization.
 
 **Idempotent append** (docs/11 §0 reproducibility): `ledger.py append … --natural-key <key>` makes a
 write **idempotent** — if an event of the same class with that natural key already exists in history,

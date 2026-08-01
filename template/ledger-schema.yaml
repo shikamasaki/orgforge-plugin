@@ -88,6 +88,14 @@ validation:
     halt_tripped:            [trigger, scope, reason, tripped_by]
     halt_released:           [releases_seq, reason, released_by, recovery_verified,
                               identity_assurance]
+    goal_started:            [goal_id, objective, session_id, harness]
+    goal_progressed:         [goal_id, session_id, summary, next_step]
+    goal_paused:             [goal_id, session_id, reason, next_step]
+    goal_blocker_observed:   [goal_id, session_id, blocker, evidence]
+    goal_blocked:            [goal_id, session_id, blocker, occurrences, evidence]
+    goal_resumed:            [goal_id, from_session_id, session_id, reason, harness]
+    goal_completed:          [goal_id, session_id, summary, evidence]
+    goal_host_synced:        [goal_id, session_id, harness, native_state, assurance]
   # **相関キーはどれか1つあればよい。** deliverable / candidate_id / claim_id / issue はどれも
   # 正当な相関キーで（`_same_work` が union-find で束ねる）、どれを使うかは経路によって違う。
   # 1つに固定すると正当な書き込みを弾く（実際に統制のテストを弾いた）。
@@ -102,7 +110,9 @@ validation:
     result_deployed:      [deliverable, claim_id, candidate_id, issue]
   # 未宣言 field を拒否するクラス（closed world）。統制の中核だけに絞る。
   additional_properties_false: [verdict_provisional, judges_disagreed, exposure_budget_checked,
-                                halt_tripped, halt_released]
+                                halt_tripped, halt_released, goal_started, goal_progressed,
+                                goal_paused, goal_blocker_observed, goal_blocked, goal_resumed,
+                                goal_completed, goal_host_synced]
   # **writer 専用のクラス。** generic append では書けない。
   #
   # 上限の予約を通常の append で書ける状態は、上限そのものを無効化する — 実測で
@@ -125,11 +135,17 @@ validation:
       kind:    [probe, mistake, backfill, superseded]
     phase_admitted:
       verdict: [pass, fail]
+    goal_host_synced:
+      native_state: [active, complete, blocked, unavailable, failed]
+      assurance: [reported, observed]
   # 型。同上、存在する場合に検証する。
   types:
     correction:          { corrects: list }
     admission_decided:   { from_seqs: list, agreed_by: list }
     verdict_provisional: { issue: int_or_str }
+    goal_blocker_observed: { evidence: list }
+    goal_blocked:          { evidence: list, occurrences: int }
+    goal_completed:        { evidence: list }
 
 
 
@@ -212,6 +228,26 @@ event_classes:
 
   progress_recorded:    { role, candidate_id, fraction, phase, done_so_far, next_step,
                           blocked_by, artifacts: [ref] }
+
+  # Persistent objective state shared by every harness.  The ledger is the portable source of
+  # truth; a host-native goal is an adapter projection whose synchronization assurance is recorded
+  # separately.  `session_id` is a compare-and-swap ownership token: after SessionStart changes it,
+  # work must append goal_resumed before progress/complete/block may mutate the goal.  This prevents
+  # two old/new sessions from silently continuing one objective at once; it is coordination, not a
+  # hostile-user identity boundary.
+  goal_started:          { goal_id, objective, session_id, harness }
+  goal_progressed:       { goal_id, session_id, summary, next_step, evidence: [ref] }
+  goal_paused:           { goal_id, session_id, reason, next_step }
+  goal_blocker_observed: { goal_id, session_id, blocker, evidence: [ref] }
+  goal_blocked:          { goal_id, session_id, blocker, occurrences, evidence: [ref] }
+  goal_resumed:          { goal_id, from_session_id, session_id, reason, harness }
+  goal_completed:        { goal_id, session_id, summary, evidence: [ref] }
+  # Native host state is not silently treated as fact.  Codex synchronization is skill-mediated;
+  # Claude Code has no native Goal primitive.  `assurance` says whether the adapter merely reported
+  # the state or observed the host result.
+  goal_host_synced:      { goal_id, session_id, harness,
+                           native_state: active|complete|blocked|unavailable|failed,
+                           native_ref, detail, assurance: reported|observed }
   # accountable_supervisor (docs/09 §A1): which supervising role owns this output up the chain,
   # set from the runtime supervision edge (never the payload — a manager cannot forge who owns a
   # result, mirroring actor_identity_source). Empty for the top (human-owned) tier.
@@ -511,6 +547,11 @@ views:
   combination_history:  { from: [candidate_submitted, admission_decided], shape: tried combinations and outcomes }
   open_experiments:     { from: [candidate_submitted, cycle_completed], shape: backlog awaiting execution }
   work_in_progress:     { from: [cycle_started, progress_recorded, cycle_completed], shape: candidates STARTED but not yet completed, each with its latest progress checkpoint (how far / next step / blocker) — the recovery source after a context wipe (/org-resume) }
+  goal_state:           { from: [goal_started, goal_progressed, goal_paused,
+                                 goal_blocker_observed, goal_blocked, goal_resumed,
+                                 goal_completed, goal_host_synced],
+                          shape: the one portable persistent goal, its owning session, latest progress,
+                                 blocker observations, evidence, and host-adapter synchronization }
   reusable_modules:     { from: [cycle_completed], shape: shared implementation assets }
   gate_input_spec:      { from: [intent_revised, proposal_adjudicated], shape: the current candidate submission format }
   doctrine_gaps:        { from: [doctrine_diff_admitted, cycle_completed], shape: roles whose doctrine is thin or expiring }
