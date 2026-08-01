@@ -25,29 +25,22 @@ The base interval must be **≤ the smallest cadence** in `schedule.yaml` (its o
 ### Wiring the external front door (the factory intake)
 
 To make the org a factory that work flows *into* (not a workshop a human types tasks into), feed
-`/org-triage` from an issue tracker. The org ships no ingestion service (R0) — the host feeds it. E.g. a
-cron that lists newly-labeled issues and pipes each to a headless triage:
+`/org-triage` from an issue tracker through an attended harness loop or a tested tracker adapter. Do
+not place slash commands behind `claude -p`: current Claude Code releases may return exit 0 while the
+command is unknown or unexpanded. The human's whole input can still be **applying one label** to an
+issue, but the adapter must verify the resulting backlog receipt rather than trusting process exit.
 
-```
-*/10 * * * *  gh issue list --label 'orgforge:ready' --state open --json number,title,body \
-  | jq -c '.[]' | while read -r issue; do \
-      claude -p "/org-triage $issue" --plugin-dir <plugin> ; done
-```
-
-The human's whole input is then **applying one label** to an issue. orgforge supplies the triage; the
-host supplies the feed.
-
-## Firing the cadence: `/loop` by default, OS cron only when unattended
+## Firing the cadence: `/loop` by default, OS scheduler for unattended machine checks
 
 The drive is delegated to the harness (R0). Claude Code's **`/loop`** is the simplest driver and the
-default; the OS cron is the heavier fallback for the one case `/loop` can't cover — running with no
-session open. **Whichever drives, the org keeps the monitoring** (`tick.py`'s missed-check detection), so
+default; the OS scheduler is the fallback for the machine checks `/loop` cannot keep alive after the
+session closes. **Whichever drives, the org keeps the monitoring** (`tick.py`'s missed-check detection), so
 "the loop stopped" is a detected fact, not silence (see the last section).
 
 | | Runs when | Survives closing Claude Code? | Use for |
 |---|---|---|---|
 | **`/loop`** (default) | while THIS session is open | no | an attended or kept-open session — the everyday driver |
-| **OS cron** (`scheduler-install.sh`) | always, headless (`claude -p`) | **yes** — true 24/7 unattended | the one case that needs no session open |
+| **OS scheduler** (`scheduler-install.sh`) | always, deterministic machine tick | **yes** — true 24/7 monitoring | read-only health monitoring with no session open |
 
 ### `/loop` — the default (simplest)
 
@@ -91,38 +84,30 @@ orphaned and old-version records without Claude's task metadata. Stop one exact 
 `redline_monitor.py stop <record-id> --root "$ORG_LEDGER_ROOT"`; the token-bound cooperative request
 does not signal a reused PID or kill another session. Run `rearm-check` again before replacing it.
 
-### OS cron — only for genuinely unattended (no session open)
+### OS scheduler — genuinely unattended machine monitoring
 
-`/loop` ends when Claude Code closes. Start unattended operation with the cycles whose authority has
-actually been proven. The strict read-only-first form keeps health monitoring alive without letting
-the discovery or PM cycles write external/backlog state or delegate work:
-
-```
-integrations/claude-code/scheduler-install.sh --role <role> \
-  --cycles tick --tick-min 30
-# preview:  add --dry-run   |   remove:  scheduler-uninstall.sh --role <role>
-```
-
-When backlog discovery has separate approval but asset-touching work is still unsafe, use
-`--cycles tick,discover`. This is the useful staged shape for a repository whose worktree resources
-are not isolated yet; it is not called read-only because discovery appends backlog evidence.
-
-After the acting preflight and local resource-isolation checks pass, enable all three cycles. Omitting
-`--cycles` remains the backward-compatible spelling for the same selection:
+`/loop` ends when Claude Code closes. The OS adapter keeps the deterministic, receipt-backed machine
+tick alive without starting an LLM or relying on slash-command expansion:
 
 ```
 integrations/claude-code/scheduler-install.sh --role <role> \
-  --cycles tick,work,discover --tick-min 30 --work-min 60 --discover-hours 24
+  --cycles tick --tick-min 30 --backend auto
+# preview: add --dry-run
+# inspect: scheduler-status.sh --root "$ORG_LEDGER_ROOT"
+# remove:  scheduler-uninstall.sh --root "$ORG_LEDGER_ROOT" --role <role>
 ```
 
-Re-running the installer for the same role replaces its prior set, so moving from all cycles back to
-`--cycles tick` removes the old work/discover entries. Unknown or empty cycle selections fail instead
-of degrading silently. Intervals must be exactly representable by wall-clock cron (for example 15m,
-30m, 1h, 2h, 6h, 12h, or 24h); an inexact request such as 90m is rejected.
+`auto` selects a per-user LaunchAgent on macOS and cron elsewhere. Both backends use bounded commands,
+read the installed definition back, run a zero-LLM smoke tick, and require a matching `tick_planned`
+receipt. Every run writes atomic `scheduler-state.json`; `scheduler-status.sh` checks the definition,
+last result, receipt sequence, and age. Interpreter preflight selects a Python that can load PyYAML,
+so a missing dependency is not mislabeled as a broken ledger.
 
-The installer writes crontab entries that run headless with the plugin attached; output streams to
-`$ORG_LEDGER_ROOT/cron.log`, each tagged `# orgforge:<role>`. Use it only when you truly need the org
-running while no session is open — for everything else, the `/loop`s above are all you need.
+Persistent `work` and `discover` are deliberately rejected for now. Claude Code 2.1.x can silently
+no-op a slash command passed to `claude -p`; replacing that with an unconstrained natural-language
+prompt would be expensive and would widen unattended acting authority. Keep those cycles on `/loop`
+until a receipt-verifying tracker/executor adapter exists. A request for `--cycles tick,work` fails
+closed instead of installing a schedule that only appears alive.
 
 ## The stop/night discipline still holds
 

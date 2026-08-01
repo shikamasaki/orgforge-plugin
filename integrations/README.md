@@ -247,11 +247,10 @@ python3 integrations/runner/run_department.py --harness claude --role gate \
   --tools "read,grep,run_tests" --dry-run
 
 # drive the cadence with cron (R0: the schedule's CONTENT is ours, the DRIVE is the host's).
-# Use the host adapter, not the pure planner, so tick_planned is persisted:
-#   */30 * * * *  python3 integrations/common/tick_host.py template/schedule.yaml \
-#     --root "$ORG_LEDGER_ROOT" --now-min $(...)
-# tick_host runs tick.py, records its receipt, and preserves missed-check detection across runs —
-# so "the cron stopped firing" becomes a paged fact, not silent drift.
+# Use the installed scheduler adapter, not a slash command or the pure planner:
+#   integrations/claude-code/scheduler-install.sh --role supervisor --cycles tick
+# It selects launchd/cron, runs the deterministic machine checks, persists tick_planned, verifies
+# backend readback, and keeps an atomic last-run receipt. Process exit alone is not accepted as proof.
 ```
 
 ## What is neutral vs. what is per-harness (the R0 line)

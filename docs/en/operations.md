@@ -61,15 +61,17 @@ orgforge resilience-exercise reviewer-outage --expect GREEN
 
 The deterministic fixture must prove detection, degradation, independent failover, half-open probe,
 taint revalidation, circuit closure, and return to `NORMAL` without network or real-repository writes.
-For unattended read-only-first operation, install only the non-acting cycles until this preflight and
-the subject repository's resource-isolation checks pass:
+For unattended read-only-first operation, install the deterministic machine tick:
 
 ```bash
 integrations/claude-code/scheduler-install.sh --role supervisor --cycles tick
 ```
 
-Add `discover` when backlog writes are approved, and add `work` only after the acting conditions are
-proven. Re-running the installer replaces the selected cycle set for that role.
+On macOS `--backend auto` uses launchd; elsewhere it uses cron. Installation is complete only after a
+bounded smoke run writes a matching `tick_planned` receipt and backend readback succeeds. Inspect it
+with `scheduler-status.sh --root "$ORG_LEDGER_ROOT"`. Persistent `work` and `discover` currently fail
+closed; run those acting cycles only through an attended harness loop until a receipt-verifying
+executor adapter exists.
 
 ## 5. Effect caps
 

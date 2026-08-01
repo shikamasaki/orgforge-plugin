@@ -6,6 +6,18 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 2.0.22 — receipt-backed native host scheduling
+
+### Fixed
+
+- Replace unattended `claude -p '/org-tick'` with a deterministic, zero-LLM machine-tick entrypoint
+  that requires a matching `tick_planned` receipt and records atomic run state.
+- Select native per-user launchd on macOS and cron elsewhere, with bounded subprocesses, exact
+  definition readback, a real smoke tick, safe replacement/removal, and status freshness checks.
+- Fail closed for persistent `work` and `discover` while Claude Code can return exit 0 without
+  expanding their slash commands; attended `/loop` remains their supported driver.
+- Preflight the Python/PyYAML interpreter so dependency drift cannot masquerade as ledger corruption.
+
 ## 2.0.21 — staged persistent scheduling
 
 ### Fixed
