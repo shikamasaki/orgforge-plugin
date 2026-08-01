@@ -53,10 +53,12 @@ LABEL="com.orgforge.writerd.${ORG_NAME}"
 LED="$ORG_ROOT/.orgforge/ledger"
 T="$(cd "$(dirname "$0")" && pwd)"
 
-PASS=0; FAIL=0
+PASS=0; FAIL=0; SKIPPED=0
 ok()   { printf '  ✓ %s\n' "$*"; PASS=$((PASS+1)); }
 bad()  { printf '  ✗ %s\n' "$*"; FAIL=$((FAIL+1)); }
 note() { printf '    %s\n' "$*"; }
+# **飛ばした検査を数える。** 数えないと「不合格 0」と「全部測った」が区別できない。
+skip() { printf '  — %s\n' "$*"; SKIPPED=$((SKIPPED+1)); }
 
 echo "── 前提"
 if [ "$(id -u)" = "0" ]; then
@@ -74,10 +76,10 @@ echo "── ① 台帳の所有者が別 UID か"
 if [ -d "$LED" ]; then
   OWNER="$(stat -f '%Su' "$LED")"; MODE="$(stat -f '%Lp' "$LED")"
   if [ "$OWNER" = "$(whoami)" ]; then
-    bad "台帳が自分の所有である（$OWNER, mode $MODE） — separate_uid ではない"
+    bad "台帳が自分の所有である（$OWNER, mode ${MODE}） — separate_uid ではない"
     note "install を実行していないか、uninstall で戻っている"
   else
-    ok "台帳は $OWNER 所有（mode $MODE）— 自分ではない"
+    ok "台帳は $OWNER 所有（mode ${MODE}）— 自分ではない"
   fi
 else
   bad "台帳が無い: $LED"
@@ -133,16 +135,16 @@ echo "── ③ chmod で権限を戻せないか"
 # chmod できるのは所有者と root だけなので、**所有者を見れば同じことが分かる**。
 LED_UID="$(stat -f '%u' "$LED")"
 if [ "$LED_UID" = "$(id -u)" ]; then
-  bad "台帳ディレクトリの所有者が自分（uid=$LED_UID）— **chmod で権限を戻せる**"
+  bad "台帳ディレクトリの所有者が自分（uid=${LED_UID}）— **chmod で権限を戻せる**"
 else
-  ok "台帳ディレクトリの所有者が自分でない（uid=$LED_UID）— chmod できない"
+  ok "台帳ディレクトリの所有者が自分でない（uid=${LED_UID}）— chmod できない"
 fi
 
 echo
 echo "── ④ 鍵 registry / schema を差し替えられないか"
 for f in "$ORG_ROOT/.orgforge/trust/keys.json" "$ORG_ROOT/ledger-schema.yaml" \
          "$AUTHORITATIVE/trust/keys.json" "$AUTHORITATIVE/ledger-schema.yaml"; do
-  [ -f "$f" ] || { note "$（無い）: $f"; continue; }
+  [ -f "$f" ] || { note "（無い）: $f"; continue; }
   # **1バイトも書かない。** 上書きを試すと本物の鍵 registry / schema を壊す。
   if python3 -c "
 import os, sys
@@ -160,11 +162,11 @@ echo "── ⑤ socket の親ディレクトリを差し替えられないか"
 PARENT="$(dirname "$SOCK")"
 if [ -d "$PARENT" ]; then
   POWNER="$(stat -f '%Su' "$PARENT")"; PMODE="$(stat -f '%Lp' "$PARENT")"
-  note "親: $PARENT （$POWNER, mode $PMODE）"
+  note "親: $PARENT （$POWNER, mode ${PMODE}）"
   # **leaf は writer 所有が正しい。** daemon が socket を作るには親への書き込み権限が要る
   # （実測: root 所有 0755 では bind できない）。root 所有を期待するのは anchor である。
   if [ "$POWNER" = "$(whoami)" ]; then
-    bad "leaf が自分の所有（$POWNER）— **socket を差し替えられる**"
+    bad "leaf が自分の所有（${POWNER}）— **socket を差し替えられる**"
   else
     ok "leaf は $POWNER 所有（自分ではない）"
   fi
@@ -172,7 +174,7 @@ if [ -d "$PARENT" ]; then
   if [ "$GRAND_OWNER" = "root" ]; then
     ok "anchor（$(dirname "$PARENT")）は root 所有"
   else
-    bad "anchor が root 所有でない（$GRAND_OWNER）— **leaf ごと差し替えられる**"
+    bad "anchor が root 所有でない（${GRAND_OWNER}）— **leaf ごと差し替えられる**"
   fi
   # **移動を実際にやらない。** 成功すれば daemon の socket が消え、戻す前に何かが起きうる。
   # 移動できるのは **その親の親** に書ける主体なので、そちらの権限を見る。
@@ -206,7 +208,7 @@ for p in "$ORG_ROOT/.orgforge/ledger" "$ORG_ROOT/.orgforge/trust" "$ORG_ROOT/led
   if [ -L "$p" ]; then
     REAL="$(readlink "$p")"
     case "$REAL" in
-      "$AUTHORITATIVE"/*) ok "$(basename "$p") は org 外の権威データを指す（$REAL）" ;;
+      "$AUTHORITATIVE"/*) ok "$(basename "$p") は org 外の権威データを指す（${REAL}）" ;;
       *) bad "$(basename "$p") の symlink 先が権威データの外: $REAL" ;;
     esac
   else
@@ -247,7 +249,7 @@ echo
 echo "── ⑧ writerd 経由なら書けるか（**止めるだけでは意味が無い**）"
 export ORG_WRITER_SOCKET="$SOCK"
 if [ "$NO_WRITE" = 1 ]; then
-  note "--no-write が指定されたので飛ばす（台帳に1件も足さない）"
+  skip "--no-write なので書き込み検査を飛ばした（台帳に1件も足さない）"
   note "**書けることを確かめていない** — 止まるだけの org は運用できない。別途確かめること。"
 else
 OUT="$(python3 "$T/writer_client.py" append -- --actor verify --class progress_recorded \
@@ -338,7 +340,16 @@ fi
 
 echo
 echo "════════════════════════════════════════════"
-printf '  合格 %d / 不合格 %d\n' "$PASS" "$FAIL"
+printf '  合格 %d / 不合格 %d / 未測定 %d\n' "$PASS" "$FAIL" "$SKIPPED"
+if [ "$FAIL" = 0 ] && [ "$SKIPPED" != 0 ]; then
+  cat <<'PARTIAL'
+
+  ！不合格は無いが、**測っていない項目が残っている**。
+    「不合格 0」は「全部確かめた」ではない。**separate_uid を主張してはいけない。**
+    --no-write を外して、書けることまで含めて測り直すこと。
+PARTIAL
+  exit 2
+fi
 if [ "$FAIL" = 0 ]; then
   cat <<'DONE'
 

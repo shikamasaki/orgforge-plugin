@@ -1013,9 +1013,9 @@ git -C <plugin> rev-parse --short HEAD             # 検証対象の版を記録
 
 ### G. 署名 receipt と認可（0.37.0, 0.38.0）
 
-- 成功: 非対称 receipt で `identity_assurance: authenticated`
+- 成功: local非対称receiptで `identity_assurance: attested`
 - receipt 無しなら `claimed`（**昇格しない**）
-- 共有鍵なら `attested`（**authenticated にならない**）
+- 共有鍵も `attested` が上限だが、検証側が署名も作れるため非対称鍵と同じ意味には読まない
 - 拒否: 再利用（別 issue / 別 subject / 別血統）・改変・失効鍵・trust store 読込失敗
 - **代理記録でも `decision_by` が judge のまま**であること
 - 職務分離が `decision_by` を比べ、`recorded_by` を比べないこと
@@ -1023,7 +1023,13 @@ git -C <plugin> rev-parse --short HEAD             # 検証対象の版を記録
 - **同一 signer の二血統が `same_signer` として記録される**こと（独立性の証拠に数えない）
 - trust store に秘密鍵があれば読み込みを拒否すること
 
-### H. writer 隔離（0.39.0, 段階A）
+`authenticated` は外部custodyとcaller認証をhostが保証するdeployment向け予約値。
+非対称署名であることだけでは選ばない。
+
+### H. 同一UID writer mediation実験（0.39.0）
+
+> **supported coreではない。** 同一UID daemonは通常運用に不要であり、R0の既存harness
+> 境界を越えて常駐runtimeを増やす。以下は実装済みmechanismの検証記録として残す。
 
 - 成功: writerd 経由で書ける
 - 拒否: 直接 append／改変／再送／パス指定／未知 org／非書き込み op
@@ -1033,17 +1039,294 @@ git -C <plugin> rev-parse --short HEAD             # 検証対象の版を記録
 - peer credential が `recorded_by` にだけ入り、`decision_by` に流れないこと
 - ラッチ・鍵 registry・schema の権限が監査されること
 
-### I. 段階B（別 UID）— **あなたが sudo で実行する部分**
+### I. separate-UID writer isolation — **非サポートの実験記録**
+
+> **通常運用では実行しない。** separate-UID writer isolationはsupported coreへ採用しない。
+> 以下は過去の実験とfailure-mode検証を保存するためのrunbookであり、Quickstart、release、
+> local開発の
+> 前提ではない。production資産の境界はhost platformのsandbox、CI protected environment、
+> IAM、approval、credential custodyへ委譲する。
+>
+> repositoryにinstaller/writer daemonが存在してもsupported runtimeを意味しない。
+> `separate_uid`未実測はrelease blockerではない。
+
+同一UID writer mediationで強制できるのは「台帳への経路が1つであること」までである。
+同じ UID の caller はdaemon を止められ、`chmod` で権限を戻せる。
+**separate-UID writer isolationの主張は「通常の caller UID から
+台帳のファイルに書けない」ことであり、それは OS 権限でしか作れない。**
+
+> **実験で確認した保証範囲**
+>
+> この実験が別 UID 化するのは **writer の資産**（台帳・trust store = 公開鍵）だけである。
+> `writer-install.sh` には **judge 秘密鍵に言及する行が1つも無い**。秘密鍵は
+> `identity.py keygen --private-out` が置いた場所（caller の UID 所有 0600）に残る。
+>
+> したがって個別deploymentでOS権限を実測できても、主張できるのはwriter資産の
+> `separate_uid`だけである。judge identityはlocal operationの`attested`のままで、
+> cross-harnessはreview非相関化の記録である。この限界はcore releaseのblockerではない。
+
+以下は**非サポート実験を再現する場合だけ**のhistorical runbookである。通常利用者は実行しない。
+再現する場合もagentはsudoを実行せず、隔離した試験orgだけを使う。
+
+#### I-0. 前提条件（sudo 不要。**ここで落ちるなら install しない**）
+
+このinstallは、次の2つが揃っていないと **起動しない daemon を作る**か、
+**正規経路を全停止させる**。install の前に、この2つを先に確かめる。
+
+**① daemon が使う python に PyYAML があること。**
 
 ```bash
-sudo <plugin>/tools/writer-install.sh --org-root <org> --dry-run   # 先に差分を見る
-sudo <plugin>/tools/writer-install.sh --org-root <org>
-<plugin>/tools/writer-verify.sh --org-root <org>                   # root で実行しない
+PYTHONNOUSERSITE=1 /usr/bin/python3 -c 'import yaml'   # これが通らなければ install しない
 ```
 
-`writer-verify.sh` が全項目通るまで **`workload_isolation` は `process_mediated` のまま**にする。
+`PYTHONNOUSERSITE=1` を付けるのは、`~/Library/Python/*/site-packages` にある PyYAML が
+**daemon からは見えない**からである（daemon は別 UID で走る）。利用者の `python3` で
+`import yaml` が通ることは根拠にならない。
 
-戻すとき: `sudo <plugin>/tools/writer-install.sh --uninstall`
+無ければ、**システム python を書き換えず**に root 所有の専用 venv を作る:
+
+```bash
+sudo /usr/bin/python3 -m venv /usr/local/libexec/orgforge/venv
+sudo /usr/local/libexec/orgforge/venv/bin/pip install pyyaml
+sudo chown -R root:wheel /usr/local/libexec/orgforge/venv
+# 以降 install / verify には必ず --daemon-python を渡す
+```
+
+PyYAML が無いと `ledger.py` が schema を読めず、**すべての append が fail-closed で拒否**
+される。省略できる前提条件ではない。
+
+**② trust store（鍵 registry）が在って、中身が使えること。**
+
+```bash
+ls -l <org>/.orgforge/trust/keys.json
+python3 -c "import sys; sys.path.insert(0,'<plugin>/tools'); import writerd; \
+  print(writerd._trust_store_defect('<org>/.orgforge/trust/keys.json'))"   # None なら健全
+```
+
+`writerd` は trust store が無い／壊れているとき **socket を作る前に exit 2 する**
+（0.39.5 でこの検査を bind の前へ移した）。`--trust` を渡さないまま install すると、
+daemon は `cwd=/` で鍵 registry を探せず、**正しく署名された receipt もすべて拒否**する
+= separate-UID writerの正規経路が完全に停止する。
+
+#### I-1. 現状の記録（sudo 不要。**install 前に必ず1回**）
+
+```bash
+<plugin>/tools/writer-verify.sh --org-root <org> --no-write        # root で実行しない
+python3 <plugin>/tools/ledger.py verify <org>/.orgforge/ledger | tail -1
+wc -l < <org>/.orgforge/ledger/ledger.jsonl                        # 件数を控える
+cat <org>/.orgforge/ledger/HEAD                                    # seq と hash を控える
+```
+
+install 前は **不合格が並ぶのが正しい**（まだ隔離していないのだから）。ここで控えた
+「件数 / seq / hash」が、install 後の判定の基準線になる。**控えずに install しない** —
+後から「増えていないこと」を言えなくなる。
+
+`--no-write` を付けると `⑧ writerd 経由で書けるか` を飛ばし、**台帳に1件も足さない**。
+飛ばした項目は `未測定` として数えられ、終了コードは 2 になる（不合格 0 でも
+「全部測った」とは言わせない）。
+
+#### I-2. install（**sudo。人間が実行する**）
+
+```bash
+sudo <plugin>/tools/writer-install.sh --org-root <org> --dry-run \
+     --daemon-python /usr/local/libexec/orgforge/venv/bin/python3   # 先に差分を見る
+sudo <plugin>/tools/writer-install.sh --org-root <org> \
+     --daemon-python /usr/local/libexec/orgforge/venv/bin/python3
+```
+
+`--dry-run` は root 不要である。**打つ前に必ず dry-run を読む。** install は台帳・鍵・
+schema を org tree の外（`/usr/local/var/orgforge/orgs/<ns>/`）へ移し、org 側を symlink に
+置き換える。何がどこへ動くのかを見ないまま実行しない。
+
+install が固定するもの（いずれも **caller が書けない場所**に置く）:
+
+| 対象 | なぜ固定するのか |
+|---|---|
+| `ledger-schema.yaml` | 渡さないと `ledger.py` が cwd から探し、**org の規則ではなくテンプレートの規則**で検証する |
+| `constitution.yaml` | daemon は org の外で動くので cwd から探せない。届かないと `require_attested_identity` が子に伝わらず **未認証 admission が通る** |
+| `trust/keys.json` | 渡さないと鍵 registry が見つからず **正規の receipt も全拒否**される |
+| `--allow-uid` | socket は 0666 なので繋げること自体は誰でもできる。**繋げることと書けることは別** |
+
+**constitution は写しである。** install 後に org 側の `constitution.yaml` を編集しても
+daemon には届かない（届いたら caller が強制を消せてしまう）。宣言を変えたら installer を
+**再実行して固定し直す**。食い違いは writerd が起動時に警告する。
+
+#### I-3. verify（**sudo 不要。root で実行しない**）
+
+```bash
+<plugin>/tools/writer-verify.sh --org-root <org>
+```
+
+**root で走らせない。** root なら全部できてしまうので、検証にならない。通常の caller として
+走らせる。この検証は台帳・鍵・schema・socket を **破壊しない**（書き込みモードで開けるか
+だけを見て、1バイトも書かない）。唯一の副作用は ⑧ の `progress_recorded` が1件増えること。
+
+verify が満たさなければならないこと:
+
+**1. caller UID が `ORG_INSIDE_WRITER` に任意の64桁 hex を設定しても、直接 append /
+   直接 admission が OS 権限で拒否され、台帳が増えないこと。**
+
+```bash
+BEFORE=$(wc -l < <org>/.orgforge/ledger/ledger.jsonl)
+FAKE=$(python3 -c "print('a'*64)")
+
+# ① 直接 append
+ORG_INSIDE_WRITER=$FAKE python3 <plugin>/tools/ledger.py append <org>/.orgforge/ledger \
+  --actor spoof --class progress_recorded \
+  --payload '{"role":"spoof","candidate_id":"spoof-1","phase":"operate"}'; echo "exit=$?"
+
+# ② 直接 admission（最も強い権限の記録）
+ORG_INSIDE_WRITER=$FAKE python3 <plugin>/tools/ledger.py derive-admission \
+  <org>/.orgforge/ledger --issue 1 --event admission_decided; echo "exit=$?"
+
+AFTER=$(wc -l < <org>/.orgforge/ledger/ledger.jsonl)
+echo "before=$BEFORE after=$AFTER"    # **必ず等しいこと**
+```
+
+**ここがseparate-UID実験の核心なので、判定の根拠を取り違えないこと。**
+64桁 hex は `_inside_writer()` を**通る**。実測（今回、sudo 無しで確認済み）:
+
+```
+_inside_writer() with fake 64-hex: True
+require_writer_path: None            ← アプリ層の gate は通過する
+```
+
+コード自身がそう書いている（`ledger.py::_inside_writer` の docstring）:
+「**これは境界ではない。** 同じ UID の caller は自分で 64 桁の hex を作って名乗れる …
+**本当の境界は別 UID**（OS 権限で台帳に書けない）である。」
+
+したがって **この項目の合格根拠は「exit≠0」ではなく「台帳が増えていないこと」であり、
+止めているのは Python の判定ではなく `EACCES` である。** 別UID境界が効いていれば、
+アプリ層を素通りした書き込みが **OS 権限で** 落ちる。権限の側を直接見る:
+
+```bash
+python3 - <<'PY'
+import os
+p = "<org>/.orgforge/ledger/ledger.jsonl"
+try:
+    fd = os.open(p, os.O_WRONLY | os.O_APPEND); os.close(fd)
+    print("✗ caller が書き込みモードで開けた — separate_uid ではない")
+except PermissionError as e:
+    print("✓ OS 権限で拒否:", e)
+PY
+```
+
+**install 前にこれを走らせると「開けた」になる**（I-1 で実測済み）。install 後に
+「拒否」へ変わることが、別UID境界が効いた唯一の証拠である。
+
+**2. writer socket 経由の正規 append は成功し、台帳が1件増えること。**
+
+```bash
+BEFORE=$(wc -l < <org>/.orgforge/ledger/ledger.jsonl)
+ORG_WRITER_SOCKET=/usr/local/var/orgforge/run/<ns>/writer.sock \
+python3 <plugin>/tools/writer_client.py append -- --actor verify \
+  --class progress_recorded \
+  --payload '{"role":"verify","candidate_id":"wv-manual","phase":"operate"}'
+AFTER=$(wc -l < <org>/.orgforge/ledger/ledger.jsonl)
+echo "before=$BEFORE after=$AFTER"    # **ちょうど +1 であること**
+```
+
+**止めるだけの org は運用できない。** 1 だけを確かめて「隔離した」と言わない。
+書けなくなっただけの状態は、隔離ではなく故障である。
+
+**3. daemon 再起動後も同じであること。**
+
+```bash
+sudo launchctl kickstart -k system/com.orgforge.writerd.<ns>   # 人間が実行
+sleep 2
+sudo launchctl print system/com.orgforge.writerd.<ns> | head -20
+```
+
+再起動後に **1 と 2 をもう一度**通す。とくに nonce の再送拒否は、プロセス内だけに
+持っていると **daemon を落として上げれば同じ要求を再送できる**（そのため nonce は
+writer が所有する台帳の隣に永続化してある）。再起動後に ⑨ の再送検査が通ることまで見る。
+
+**4. policy / trust / schema / manifest / ledger を caller UID で変更できないこと。**
+
+```bash
+python3 - <<'PY'
+import os
+targets = [
+    "<org>/.orgforge/ledger/ledger.jsonl",
+    "<org>/.orgforge/ledger/HEAD",
+    "/usr/local/var/orgforge/orgs/<ns>/ledger-schema.yaml",
+    "/usr/local/var/orgforge/orgs/<ns>/constitution.yaml",
+    "/usr/local/var/orgforge/orgs/<ns>/trust/keys.json",
+    "/usr/local/etc/orgforge/<ns>.conf",
+    "/usr/local/libexec/orgforge/tools/writerd.py",
+    "/Library/LaunchDaemons/com.orgforge.writerd.<ns>.plist",
+]
+for p in targets:
+    if not os.path.exists(p):
+        print("  （無い）", p); continue
+    try:
+        fd = os.open(p, os.O_WRONLY | os.O_APPEND); os.close(fd)
+        print("  ✗ 書き込みモードで開けた:", p)
+    except PermissionError:
+        print("  ✓ 開けない:", p)
+PY
+```
+
+**1バイトも書かない。** 上書きを試すと本物の鍵 registry / schema を壊す。
+「開けるか」だけを見る。**検証が検証対象を壊すのは最悪の形である。**
+
+symlink の向き先も見る（`writer-verify.sh ⑤'`）。org tree の中に実体が残っていると、
+**入れ物ごと差し替えられる** — 中身が守られていても意味が無い。
+
+**5. chain / HEAD / seq が健全であること。**
+
+```bash
+python3 <plugin>/tools/ledger.py verify <org>/.orgforge/ledger | tail -3
+cat <org>/.orgforge/ledger/HEAD
+```
+
+`chain intact: N event(s), tip <hash>… — hash chain replays clean` が出ること。
+`HEAD` の `seq` が I-1 で控えた値 + （2 で足した分だけ）であること。
+**1 で試した spoof の分が入っていないこと** — 入っていたら 1 は不合格である。
+
+#### I-4. 判定
+
+`writer-verify.sh` は末尾に `合格 N / 不合格 N / 未測定 N` を出す。
+
+| 状態 | 終了コード | 主張してよいこと |
+|---|---|---|
+| 不合格あり | 1 | **`process_mediated` のまま。** 隔離したと書かない |
+| 不合格 0、未測定あり | 2 | **まだ何も主張しない。** 「不合格 0」は「全部確かめた」ではない |
+| 不合格 0、未測定 0 | 0 | `workload_isolation: separate_uid` を主張してよい |
+
+**保証の範囲は「通常の agent / caller UID から writer の資産を変更できない」ことである。**
+ホストの管理者（root）は脅威モデルの外 — daemon を止め、所有者を戻し、plist を書き換え
+られる。これは限界ではなく **境界の定義**である。
+
+#### I-5. rollback（**sudo。人間が実行する**）
+
+```bash
+sudo <plugin>/tools/writer-install.sh --org-root <org> --uninstall --dry-run   # 先に読む
+sudo <plugin>/tools/writer-install.sh --org-root <org> --uninstall
+```
+
+uninstall は **台帳を消さない**。順序が安全性そのものである:
+
+1. daemon を止める（**停止を確認する**。止まっていない writer が、書き戻している最中に書く）
+2. 権威側の内容を org へ書き戻す
+3. symlink を実体に置き換える
+4. 所有者を戻す（**書き戻したあとに行う** — 先に戻すと writer が書けなくなる）
+5. この org の socket / 権威データ / backup / 設定だけを消す
+
+**復元できていないなら、5 は実行されない。** `RESTORE_OK=0` のとき uninstall は
+socket だけ消して **exit 1 で止まり、権威データと backup を残す**。org root が移動・消失
+していたり、org 側に権威側と中身の違う実体が置かれていた場合がこれにあたる
+（「在ること」を「戻っていること」と読まない。中身の digest で比べる）。
+その場合は原因を確かめてから **同じコマンドを再実行する** — uninstall は冪等である。
+
+rollback 後に確かめること:
+
+```bash
+python3 <plugin>/tools/ledger.py verify <org>/.orgforge/ledger | tail -1   # chain intact
+wc -l < <org>/.orgforge/ledger/ledger.jsonl                                # 件数が減っていない
+ls -l <org>/.orgforge/ledger                                               # 実体（symlink でない）
+ls -l <org>/.orgforge/*.pre-writer <org>/*.pre-writer 2>/dev/null          # 控えは手で消す
+```
 
 ### J. Issue 投影
 

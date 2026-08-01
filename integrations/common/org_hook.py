@@ -152,7 +152,7 @@ def _record_bypass(what, tool_input):
     if not LEDGER_ROOT:
         return "ORG_LEDGER_ROOT が無いので迂回を記録できない"
     payload = {"what": what,
-               "command": ((tool_input or {}).get("command") or "")[:400],
+               "command": _command_text(tool_input)[:400],
                "declared_by": os.environ.get("ORG_ROLE") or "unknown"}
     try:
         r = subprocess.run([sys.executable, os.path.join(TOOLS_DIR, "ledger.py"), "append",
@@ -217,6 +217,16 @@ def _tokenize(cmd):
     once and test token membership instead. shlex is used for correctness; if the command is not
     valid shell (unbalanced quotes, etc.) we fall back to a whitespace split so we still gate it
     rather than silently passing an unparseable — and thus opaque — command."""
+    # **shlex だけが遅い。** 100万文字で 11秒かかり、hook が返らなくなる（実測）。
+    # トークン化は語境界の判定に使うだけなので、先頭 N 文字で十分
+    # （危険な語は行の先頭側に現れる）。**正規表現による照合は全体に効かせる** —
+    # そちらは 100万文字でも 10ms で、切ると真ん中に隠されてしまう。
+    # **長すぎるときは shlex を諦め、正規表現で語に割る。**
+    # 切り詰めると、切った先に置かれた語が見えなくなる — 実測で
+    # `echo <7万文字>; <破壊的コマンド>; echo <7万文字>` の真ん中が素通しした。
+    # 語境界での分割は正規表現でも十分で、100万文字でも実測 10ms 程度である。
+    if len(cmd) > _MAX_TOKENIZE_CHARS:
+        return re.findall(r"[^\s;&|()`'\"]+", cmd)
     try:
         return shlex.split(cmd, posix=True)
     except ValueError:
@@ -300,7 +310,7 @@ def _asset_dimension(tool_name, ti):
     the reviewers recommended — the single check that unblocks a legit build while keeping
     overwrite metered. Fail-safe: unknown shell is charged, ambiguous destroys are max-cost."""
     if isinstance(ti, dict):
-        cmd = ti.get("command") or ti.get("cmd") or ""
+        cmd = _command_text(ti)
         path = ti.get("file_path") or ti.get("path") or ""
     elif isinstance(ti, str):
         cmd, path = ti, ""
@@ -316,7 +326,7 @@ def _asset_dimension(tool_name, ti):
         if tool_name == "Write" and not path:
             return ("file_mutations", 1)     # can't tell → fail-safe meter
         return ("file_mutations", 1)         # overwrote/edited an existing file
-    if tool_name not in ("Bash", "Shell", "Terminal"):
+    if not _is_shell_tool(tool_name):
         return None                          # non-shell, non-write tools touch no asset here
     if not cmd.strip():
         return None                          # an empty command touches no asset — not blast radius
@@ -331,7 +341,21 @@ def _asset_dimension(tool_name, ti):
     # or a flag like `grep -f` never masquerades as `rm`/`-f`. Operators (`|`, `>`) and dotted calls
     # (`shutil.rmtree`) don't tokenize as clean words, so those few are matched on the raw string
     # with tight anchors. See _tokenize/_has_token/_has_seq above and the tests that pin this.
+    # **入れ物の中身も見る。** `psql -c 'DROP TABLE users'` は shlex ではクォート全体が
+    # 1トークンになるため、`DROP` として一致しない。つまり **SQL の破壊操作は、実際に
+    # 使われる形（-c / -e にクォートで渡す形）では cap に一度も計上されていなかった**
+    # （実測: 素の `DROP TABLE users` だけが計上され、`psql -c '…'` は素通し）。
+    # 数えられないものは上限で止められない。
     toks = _tokenize(cmd)
+    for _inner in re.findall(r"\$\(([^)]*)\)|`([^`]*)`", cmd):
+        toks += " ".join(x for x in _inner if x).split()
+    _dec = _decode_escapes(cmd)
+    if _dec != cmd:
+        toks += re.sub(r"[$'\"]", " ", _dec).split()
+    if _EXECUTES_STRING.search(cmd) or _SQL_CLIENT.search(cmd):
+        # `psql -c 'DROP …'` は **クォートの中身がそのまま実行される**。
+        # 実行される文字列だけを開く（`grep 'DROP …'` は開かない）。
+        toks += re.sub(r"['\"]", " ", cmd).split()
     destructive = (
         _has_token(toks, "rm", "dd", "truncate", "mkfs", "shred")                 # dangerous binaries
         or _has_token(toks, "DROP", "DELETE", "TRUNCATE")                         # SQL (as whole tokens)
@@ -426,10 +450,31 @@ def _enforcement():
         return _ENFORCEMENT_CACHE
     _ENFORCEMENT_CACHE = {}
     path = os.environ.get("ORG_CONSTITUTION")
+    if not path:
+        # **org root を探す。** constitution.yaml は org root（= .orgforge の親）に置かれる
+        # （/org-init がそこに書く）。ledger root の親は `.orgforge/` なので、そこを見ても
+        # **絶対に見つからない**。見つからないと {} を返し、宣言した cap も window も
+        # 効かないまま built-in default で動く — しかも hook は正常に見える。
+        # 実測: 実 org (tatekae) で _enforcement() が空だった。
+        try:
+            sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
+                os.path.dirname(os.path.abspath(__file__)))), "tools"))
+            import discover                               # noqa: E402
+            cand = discover.constitution()
+            if cand and os.path.exists(cand):
+                path = cand
+        except Exception:
+            pass
     if not path and LEDGER_ROOT:
-        cand = os.path.join(os.path.dirname(LEDGER_ROOT.rstrip("/")), "constitution.yaml")
-        if os.path.exists(cand):
-            path = cand
+        # discover が使えないときの保険。**org root（.orgforge の親の親）** を見る。
+        for cand in (
+            os.path.join(os.path.dirname(os.path.dirname(
+                LEDGER_ROOT.rstrip("/"))), "constitution.yaml"),
+            os.path.join(os.path.dirname(LEDGER_ROOT.rstrip("/")), "constitution.yaml"),
+        ):
+            if os.path.exists(cand):
+                path = cand
+                break
     if path and os.path.exists(path):
         try:
             import yaml  # yaml may be absent in a minimal interpreter; degrade to defaults
@@ -514,7 +559,7 @@ def _integration_bypass(tool_name, ti):
     """
     if tool_name != "Bash":
         return None
-    cmd = (ti or {}).get("command") or ""
+    cmd = _command_text(ti)
     toks = _tokenize(cmd)
     if not any(_has_seq(toks, v) for v in _MERGE_VERBS):
         return None
@@ -560,7 +605,7 @@ def _gh_bypass(tool_name, ti):
     """organ を通さない Issue の書き換えか。理由（と打つべきコマンド）を返す。"""
     if tool_name != "Bash":
         return None
-    cmd = (ti or {}).get("command") or ""
+    cmd = _command_text(ti)
     toks = _tokenize(cmd)
     if not _has_token(toks, "gh"):
         return None
@@ -591,16 +636,231 @@ def _gh_bypass(tool_name, ti):
     return None
 
 
+# **クォートの中身が「実行される」形か。** `sh -c '…'` `eval "…"` `xargs` や
+# シェルへのパイプは中身をコマンドとして実行する。`grep '…'` や `echo "…"` は実行しない。
+# この区別が無いと、危険語を **検索・文書化することすらできなくなる**（実測で3件誤検知した）。
+# **エスケープで綴りを隠せてはいけない。** `$'\x72\x6d'` は shell が `rm` に展開する。
+# 綴りが違えば token 一致は外れるので、判定の前に**復号してから**見る（Codex の指摘、実測で素通し）。
+def _decode_escapes(cmd):
+    def _hex(m):
+        try:
+            return bytes.fromhex(m.group(1)).decode("utf-8", "replace")
+        except Exception:
+            return m.group(0)
+    out = re.sub(r"(?:\\x([0-9a-fA-F]{2}))+",
+                 lambda m: re.sub(r"\\x([0-9a-fA-F]{2})", _hex, m.group(0)), cmd)
+    out = re.sub(r"\\0([0-7]{2,3})", lambda m: chr(int(m.group(1), 8)), out)
+    return out
+
+
+# **harness の綴り・型の揺れで統制が外れてはいけない。**
+# 実測: `tool_name` が `"bash"`（小文字）だと3つの判定すべてが素通しし、
+# `command` が配列（`["rm","-rf","/"]`）だと **hook が AttributeError で落ちた**
+# ——落ちた hook は判定を返さないので、fail-open になりうる。
+# 判定に使う hook event の上限。これを超えると正規表現が実質停止する（実測）。
+_MAX_TOKENIZE_CHARS = 64 * 1024   # shlex に渡す上限（shlex だけが遅い）
+
+_SHELL_TOOLS = ("bash", "shell", "terminal", "sh", "zsh")
+
+
+def _is_shell_tool(tool_name):
+    return str(tool_name or "").strip().lower() in _SHELL_TOOLS
+
+
+def _command_text(ti):
+    """tool_input からコマンド文字列を取り出す。**型の揺れをここで吸収する。**
+    dict / str / list、`command` / `cmd` のどれで来ても落ちない。"""
+    if isinstance(ti, str):
+        return ti
+    if isinstance(ti, (list, tuple)):
+        return " ".join(str(x) for x in ti)
+    if not isinstance(ti, dict):
+        return ""
+    v = ti.get("command")
+    if v is None:
+        v = ti.get("cmd")
+    if isinstance(v, (list, tuple)):
+        return " ".join(str(x) for x in v)
+    if isinstance(v, dict):
+        # **入れ子でも中身を見る。** `{"command": {"c": "…"}}` のような形で
+        # 危険が隠れると、判定に一度も渡らない。
+        return " ".join(_command_text(x) if isinstance(x, (dict, list, tuple)) else str(x)
+                        for x in v.values())
+    # **切り詰めない。** 先頭＋末尾だけを見る実装にしたところ、**真ん中に隠せた**
+    # （`echo <7万文字>; <破壊的コマンド>; echo <7万文字>` が素通し。実測）。
+    # そもそも遅かったのは正規表現ではなく `shlex.split` だった（実測: 100万文字で
+    # 正規表現 10ms に対し shlex は 11秒）。**遅い方を切り、照合は全体に効かせる。**
+    return v if isinstance(v, str) else ("" if v is None else str(v))
+
+
+# **中身を静的に読めない実行。** 復号・ダウンロードした結果をそのままシェルへ流す形。
+_OPAQUE_EXEC = re.compile(
+    # ⓪ **文字列をシェルに流し込む形そのもの。** `echo '…' | sh` は、中身が何であれ
+    #    「別のコマンドを組み立てて実行する」形である。静的には中身の位置関係を
+    #    追えない（実測: `echo '<破壊的コマンド>' | sh` が位置判定をすり抜けた）。
+    #    **中身を確かめられないなら通さない。** 一度ファイルに落とせばよい。
+    r"\b(?:echo|printf|cat)\b[^|]*\|\s*(?:ba|z|k|da)?sh\b"
+    # ① 復号／取得の結果をシェルへ直接パイプする
+    r"|\b(?:base64|openssl\s+enc|xxd|uudecode|curl|wget)\b[^|]*\|\s*(?:ba|z|k|da)?sh\b"
+    # ② `sh -c "$( … 復号 … )"` のように **置換の中で復号してから実行**する
+    #    （Codex の例。パイプが置換の内側にあるので ① では捕まらない）
+    r"|\b(?:ba|z|k|da)?sh\b\s+-c[^\n]*\$\([^)]*"
+    r"(?:base64|openssl\s+enc|xxd|uudecode|curl|wget)"
+    r"|\beval\b[^\n]*\$\([^)]*(?:base64|openssl\s+enc|xxd|uudecode|curl|wget)", re.I)
+
+
+# SQL クライアントは `-c` / `-e` に渡した文字列を **実行する**。
+_SQL_CLIENT = re.compile(r"\b(?:psql|mysql|mariadb|sqlite3|mongo|redis-cli)\b", re.I)
+_EXECUTES_STRING = re.compile(
+    r"(?:\b(?:ba|z|k|da)?sh\b\s+-c|\beval\b|\bxargs\b|\bsource\b|"
+    r"\|\s*(?:ba|z|k|da)?sh\b|\|\s*python3?\b)", re.I)
+
+
 def _catastrophic_reason(tool_name, ti):
-    if tool_name not in ("Bash", "Shell", "Terminal"):
+    if not _is_shell_tool(tool_name):
         return None
-    cmd = ti.get("command") or ti.get("cmd") or "" if isinstance(ti, dict) else (ti if isinstance(ti, str) else "")
+    cmd = _command_text(ti)
     if not cmd.strip():
         return None
+    # **入れ子の中身も見る。ただし「実行される中身」だけ。**
+    # shlex は `$(rm` や `` `rm `` を1トークンとして残すので、token 一致だけでは
+    # 置換・backtick 経由が素通しする（実測）。一方、クォートを無条件に開くと
+    # `grep -n "…" notes.txt` や `echo "… は危険"` まで hard-block してしまい、
+    # **危険語を検索することも文書化することもできなくなる**（これも実測。統制ではなく妨害）。
+    # 区別は「その文字列が実行されるか」である:
+    #   - `$( )` / backtick … 必ず実行される → 常に開く
+    #   - クォート           … `sh -c` `eval` `xargs` やシェルへのパイプに渡るときだけ実行される
+    # `$( )` / backtick の **中身だけ** を取り出す（クォートの中は開かない）。
+    # 素朴に記号を空白へ置換すると、クォート内の文字列まで単語に割れてしまい、
+    # `echo "… は危険" >> README.md` のような **書くだけのコマンドまで hard-block** する。
     toks = _tokenize(cmd)
-    recursive_rm = _has_token(toks, "rm") and _has_token(toks, "-rf", "-fr", "-r", "-R", "--recursive")
+    for _inner in re.findall(r"\$\(([^)]*)\)|`([^`]*)`", cmd):
+        toks += " ".join(x for x in _inner if x).split()
+    _dec = _decode_escapes(cmd)
+    if _dec != cmd:
+        toks += re.sub(r"[$'\"]", " ", _dec).split()
+    if _EXECUTES_STRING.search(cmd):
+        toks += re.sub(r"['\"]", " ", cmd).split()
+    # **中身が読めない実行**は、中身を確かめられないまま通すことになる。
+    # `base64 -d | sh` / `curl … | sh` の類は、静的には何を実行するか決められない
+    # （Codex の指摘、実測で hard-block を素通しした）。**読めないなら通さない。**
+    if _OPAQUE_EXEC.search(cmd):
+        return ("中身を静的に確かめられない実行（復号やダウンロードをシェルに直接流す形）— "
+                "何が実行されるか分からないものは通さない。一度ファイルに落として中身を確かめること")
+    # **絶対パス指定の rm も rm である。** `/bin/rm` はトークンとしては `rm` と一致しない
+    # ので、素の `rm` だけを見ていると素通しした（実測）。末尾が `/rm` の語も同じ扱いにする。
+    # **記号がくっついた語も rm である。** shlex は `<(rm` `/bin/rm` `(rm` を
+    # そのまま1語として残すので、素の `rm` としか比べないと素通しする（実測:
+    # `cat <(rm -rf /)` — プロセス置換の中身は **実行される**）。
+    # 語頭の記号を剥がしてから比べる。
+    _is_rm = _has_token(toks, "rm") or any(
+        isinstance(x, str) and re.sub(r"^[^\w/]+", "", x).lstrip("/").split("/")[-1] == "rm"
+        for x in toks)
+    recursive_rm = _is_rm and _has_token(toks, "-rf", "-fr", "-r", "-R", "--recursive")
     # rm -rf targeting root, home, or a root glob — the unambiguously catastrophic forms
-    if recursive_rm and re.search(r"(?:^|\s)(/\s|/\*|/$|~/?\s|~/?$|\$HOME)", cmd + " "):
+    # **区切り文字も境界として扱う。** `$( )` や backtick の中では `/` の直後が `)` や
+    # `` ` `` になるため、空白・行末しか見ないと一致しない。実測で、素の形は deny なのに
+    # コマンド置換・バッククォート・`| sh` 経由が **素通し**していた。
+    # **不可視・不正な文字も境界として扱う。** 末尾に U+FFFD（不正 UTF-8 の置換文字）や
+    # ゼロ幅スペースを付けるだけで境界一致が外れ、**素通しした**（実測）。
+    # それらは実行を妨げない — シェルは `rm -rf /` を実行する。見えない差で統制が外れてはいけない。
+    _BND = r"[\s;&|()`'\"�​-‍⁠﻿ ]"
+    # **`rm` と根の指定が「つながっている」ことまで見る。**
+    # 単に同じ行のどこかに `rm` `-rf` `/` が在るだけで hard-block すると、
+    # `echo rm -rf foo / bar` のような **実行しても何も壊さない行まで止める**（実測）。
+    # hard-block は最も強い拒否なので、ここを広く取ると通常の作業が止まる。
+    # `rm` から根の指定までの間に **別のコマンド区切りが無い** ことを条件にする。
+    # `rm` が **コマンドの位置に在る** ことを見る。行頭・区切りの直後・置換の直後だけが
+    # 実行位置である。`echo rm -rf foo / bar` の `rm` は echo の引数であって実行されない。
+    # **「実行位置の形」を数え上げる方式は破綻する。**
+    # 行頭・区切り・sudo・env だけを許した実装は、`{ … }` `( … )` `if…then` ループ
+    # `time` `timeout` `xargs` `/bin/rm` `\rm` など **18通り中15通りを素通しした**（実測）。
+    # 前置詞は無限に増やせるので、列挙では追いつかない。
+    #
+    # 逆にする: **`rm` が「引数として消費される」数少ない形だけを除外し、残りは実行とみなす。**
+    # `echo` / `printf` / `grep` の類は引数を実行しない。それ以外の位置に現れた `rm` は
+    # 実行されうるものとして扱う。**危険側に倒す。**
+    # `#` から行末まではコメントで、**シェルは何も実行しない**。
+    # 「危険なので絶対にやるな」と書いたメモまで hard-block していた（実測）。
+    # 危険を隠す用途には使えない — コメントにした時点で実行されないからである。
+    _ARG_CONSUMERS = r"(?:echo|printf|cat|grep|rg|egrep|fgrep|sed|awk|comm|diff|test|\[)"
+    _RM_AT_CMD = (
+        rf"(?<!\w)(?:{_ARG_CONSUMERS}\b(?:(?![;&|`\n]).)*?)?"        # 引数を食う語（あれば）
+        rf"(?<!\w)rm\b(?:(?![;&|`\n]).)*?"
+        rf"(?:^|{_BND})(/{_BND}|/\*|/$|~/?{_BND}|~/?$|\$HOME)")
+    # **隠された形も、開いてから位置を見る。** `'rm -rf /' | sh` や `$'\x72\x6d'` では
+    # 生の文字列上の `rm` はコマンド位置に来ないが、**シェルはそれを実行する**。
+    # 引用符を外した形・エスケープを復号した形にも、同じ「実行位置か」の判定をかける。
+    _variants = [cmd]
+    if _EXECUTES_STRING.search(cmd) or _OPAQUE_EXEC.search(cmd):
+        _variants.append(re.sub(r"['\"|]", " ", cmd))
+    if _dec != cmd:
+        _variants.append(re.sub(r"['\"$]", " ", _dec))
+    # **引数として消費される rm は実行されない。** `echo rm -rf foo / bar` の rm は
+    # echo の引数であって、シェルは rm を起動しない。それだけを除外する。
+    _ARG_ONLY = re.compile(
+        rf"(?:^|[;&|`\n]|\$\(|<\()\s*(?:\w+=\S+\s+)*{_ARG_CONSUMERS}\b"
+        rf"(?:(?![;&|`\n]).)*$", re.S)
+    # **xargs は削除対象を左から受け取る。** 区間を分けると rm 側に根の指定が無く、
+    # 見逃す（実測）。「左が根を出し、xargs で rm を起動する」形をひとつの危険とみなす。
+    if re.search(rf"(?:^|{_BND})(/{_BND}|/\*|~/?{_BND})(?:(?!\|).)*\|\s*xargs\b"
+                 rf"(?:(?![;&|`\n]).)*?(?<![\w-])(?:/\S*/)?rm\b", cmd + " ", re.S):
+        return ("recursive delete of a root/home/glob path "
+                "(`rm -rf /` class) — unrecoverable")
+    # **後で実行される形も実行である。**
+    #   `bash <<< '…'`   … 標準入力から読んで実行する
+    #   `trap '…' EXIT`  … 終了時に実行される
+    #   `alias x='…'`    … 呼ばれた時点で実行される
+    # いずれも引用符の中に危険が入るため、素の位置判定では見えない（実測で素通し）。
+    if re.search(rf"(?:<<<|\btrap\b|\balias\b)(?:(?![;&|`\n]).)*?"
+                 rf"(?<![\w-])(?:/\S*/)?rm\b(?:(?![;`\n]).)*?"
+                 rf"(?:^|{_BND})(/{_BND}|/\*|/$|~/?{_BND}|~/?$|\$HOME)",
+                 cmd + " ", re.S):
+        return ("recursive delete of a root/home/glob path "
+                "(`rm -rf /` class) — unrecoverable")
+    _rm_to_root = None
+    for _v in _variants:
+        # **シングルクォートの中は展開されない。** `echo '$(…)'` の `$(` で区間を割ると、
+        # 展開されない文字列が実行位置に見えてしまう（実測で誤検知した）。
+        # 引用の内側を1つの語として保つため、素の cmd では割らずに残す。
+        # **エスケープされた引用符はクォートを開かない。** `echo \\'$(…)\\'` の
+        # `$(…)` は **展開される**。本物の（エスケープされていない）シングルクォートだけを見る。
+        _sq = re.sub(r"(?<!\\)'[^']*(?<!\\)'",
+                     lambda m: m.group(0).replace("$(", "\x00("), _v)
+        for _seg in re.split(r"[;&|`\n]|\$\(|<\(", _sq):
+            _seg = _seg.replace("\x00(", "$(")
+            # **コメントは実行されない。** `#` 以降を落としてから判定する。
+            _seg = re.sub(r"(?:^|\s)#.*$", " ", _seg, flags=re.S)
+            if not re.search(r"(?<![\w-])(?:/\S*/)?rm\b", _seg):
+                continue
+            # その区間で **rm より前に「引数を食う語」が在る**なら、rm は実行されない。
+            # 先頭だけを見ていると、`find … -exec echo rm -rf / …` や
+            # `xargs echo rm -rf /` のように **echo が途中に来る形**を拾えず、
+            # 何も実行しない行まで hard-block した（Codex が指摘、実測で確認）。
+            # 起動されるのは echo であって rm ではない。
+            _rm_at = re.search(r"(?<![\w-])(?:/\S*/)?rm\b", _seg)
+            # **消費語も「コマンドの位置」に在るときだけ数える。**
+            # `X=echo rm -rf /`（代入値）、`>echo rm -rf /`（リダイレクト先）、
+            # `case echo in echo) rm -rf /;;`（比較語）では echo はコマンドではなく、
+            # **rm は実行される**。単に「前に echo が在る」で除外すると素通しした
+            # （Codex が指摘、実測で4件成立）。
+            _before = _seg[:_rm_at.start()] if _rm_at else ""
+            _consumer_is_cmd = re.search(
+                rf"(?:^|\s)(?:\w+=\S+\s+)*{_ARG_CONSUMERS}(?:\s|$)", _before) and not (
+                re.search(rf"=\s*{_ARG_CONSUMERS}\b", _before)          # X=echo
+                or re.search(rf"[<>]\s*{_ARG_CONSUMERS}\b", _before)    # >echo
+                or re.search(rf"\bcase\b", _before)                     # case … in
+            )
+            if _rm_at and _consumer_is_cmd:
+                continue
+            if re.search(rf"(?<![\w-])(?:/\S*/)?rm\b(?:(?![;&|`\n]).)*?"
+                         rf"(?:^|{_BND})(/{_BND}|/\*|/$|~/?{_BND}|~/?$|\$HOME)",
+                         _seg + " ", re.S):
+                _rm_to_root = True
+                break
+        if _rm_to_root:
+            break
+    if recursive_rm and _rm_to_root:
         return "recursive delete of a root/home/glob path (`rm -rf /` class) — unrecoverable"
     # whole-disk / filesystem destroyers
     if _has_token(toks, "mkfs") or re.search(r"\bmkfs\.\w+", cmd):
@@ -860,15 +1120,43 @@ RULES = [rule_blast_radius, rule_iteration_cap]
 _RECOVERY_READONLY = re.compile(
     r"^\s*(?:"
     r"git\s+(?:status|log|diff|show|branch\s*$|rev-parse|remote\s+-v|fsck)\b"
-    r"|(?:cat|head|tail|less|wc|grep|rg|find|ls|stat|file|du|df)\b"
+    r"|(?:cat|head|tail|less|wc|grep|rg|ls|stat|file|du|df)\b"
+    # **`find` は「読む」だけのコマンドではない。** `-exec` / `-execdir` / `-delete` /
+    # `-ok` を持つので、**任意のコマンドの入口**であり、消せる（実測: HALT 中に
+    # `find . -maxdepth 0 -exec python3 -c '...' {} +` が通り、中身が実行された）。
+    # `env` を外したのと同じ理由。読むだけなら `ls` と `grep` で足りる。
+    # 引数の形で判定しない — **危険な綴りを1つずつ潰すのは、この監査で3回失敗した。**
+    r"|find\s+(?![^|;&\n]*-(?:exec|execdir|delete|ok|fprint|fls))[^|;&\n]*$"
     r"|python3?\s+\S*(?:ledger|status|guardrails|org_lint|repro_lint)\.py\s+"
     r"(?:verify|halt-status|schema|census|digest|view|status|check|cat)\b"
     r"|gh\s+(?:issue|pr)\s+(?:view|list)\b"
-    r"|echo\b|pwd\b|env\b|which\b"
+    # **`env` は外した。** `env FOO=1 <破壊的コマンド>` の形で
+    # **任意のコマンドの入口**になる（Codex の指摘、実測で HALT 中に通った）。
+    # 環境変数を見たいだけなら `printenv` を使えばよい。
+    r"|echo\b|pwd\b|printenv\b|which\b"
     r")", re.I)
 # 安全な修復 — 台帳の健全性を戻す操作だけ。**halt の解除はここに入れない**（H4b / H1 依存）。
+# `python3` / `/usr/bin/python3` / `python` に、`-B` `-u` などのフラグが付いた形までを
+# 1つの前置きとして扱う。**復旧の綴りを1通りに限定しない。**
+_PY = r"^\s*(?:\S*/)?python[0-9.]*(?:\s+-[A-Za-z]+)*"
+
 _RECOVERY_REPAIR = re.compile(
-    r"^\s*python3?\s+\S*ledger\.py\s+(?:schema\s+--fix|append\s+.*--class\s+correction)\b",
+    # **解除コマンド自身を通す。** HALT 中に `release-halt` まで止めると、
+    # 一度止まった org は二度と動かせない（実測: allowlist に無く deny されていた）。
+    # 解除は receipt 署名で守られているので、ここを通しても統制は緩まない
+    # ——「止められること」と「戻せること」は両方そろって初めて統制である。
+    # **interpreter の書き方で復旧できなくなってはいけない。** 実測（再監査）:
+    # `/usr/bin/python3`、`python3 -B`、引用符付きの script path はすべて誤拒否されていた。
+    # 復旧経路が「1通りの綴りでしか動かない」なら、それは実質デッドロックである。
+    # 解釈子のパス・`-B` などのフラグ・引用符を、ここ1箇所で吸収する。
+    _PY + r"\s+['\"]?\S*ledger\.py['\"]?\s+"
+    r"(?:schema\s+--fix|append\s+.*--class\s+correction|release-halt)\b"
+    # **Stage B では解除も writer を通る。** direct `ledger.py release-halt` は
+    # single-writer gate に拒否されるので（実測 exit=4）、`writer_client.py release-halt`
+    # を通さないと **解除手段がゼロ**になり、一度止めた org は二度と動かせない。
+    # 解除そのものは receipt 署名で守られているので、ここを通しても統制は緩まない。
+    # **止める側（trip-halt）は復旧ではないので通さない。**
+    r"|" + _PY + r"\s+['\"]?\S*writer_client\.py['\"]?\s+release-halt\b",
     re.I)
 
 
@@ -878,10 +1166,45 @@ def _halt_recovery_allowed(tool_name, tool_input):
     通常の作業は止める — 止まっているとは、作業が進まないことである。ここを広く取ると
     「halt したが実行は止まらない」に戻る。
     """
-    if tool_name not in ("Bash", "Shell"):
+    if not _is_shell_tool(tool_name):
         return False           # Write / Edit / ApplyPatch は halt 中は通さない
-    cmd = ((tool_input or {}).get("command") or "").strip()
+    cmd = _command_text(tool_input).strip()
     if not cmd:
+        return False
+    # **shell が実行する形で照合する。** 実測（再監査5回目）: `-e""xec` は quote 除去後に
+    # `-exec` になり、`find . -maxdepth 0 -e""xec echo Q {} +` が allowlist を通って
+    # **実際に実行された**（`QUOTED_EFFECT .` を確認）。allowlist が「書かれた文字列」を見て、
+    # shell が「quote を外した文字列」を実行する限り、この差は必ず突かれる
+    # ——同じ形の迂回はこの監査で4回起きている。
+    # よって **照合の前に空 quote を畳む**。ここを直すと、find だけでなく
+    # 今後 allowlist に載るすべての規則が同じ保護を受ける。
+    # **quote の畳み方を自作しない。** 空 quote だけを畳む実装では `-e""xec` は塞げても
+    # `-ex"ec"` が残った（実測）。shell と同じ字句解析（shlex）で token に割り、
+    # **shell が実際に渡す引数**で照合する。解釈できない綴りは通さない。
+    # **メタ文字の判定は生の文字列で先に行う。** shlex は改行を空白として畳むので、
+    # token 化した後に見ると `git status\ngit push --force` の改行連結を見逃す（実測で回帰した）。
+    # 「連結・置換・リダイレクトを含むなら通さない」は、**shell が読む前の姿**で判断する。
+    if re.search(r"[;&|`\n><]|\$\(", cmd):
+        return False
+    try:
+        _toks = shlex.split(cmd)
+    except ValueError:
+        return False           # quote が閉じていない等 — 解釈できないなら通さない
+    if not _toks:
+        return False
+    cmd = " ".join(_toks)
+    # **allowlist は先頭一致である。** つまり `git status; <破壊的コマンド>` のように
+    # 連結すれば、先頭だけ安全に見せて後ろで何でも実行できる。実測で7通りの回避が通った
+    # （`;` `&&` `||` 改行 パイプ `$( )` バッククォート）。
+    # **HALT 中は「1つの安全なコマンド」だけを通す。** 連結・置換を含むなら、
+    # 中身が何であれ通さない。復旧は1コマンドずつ行えばよい。
+    # `>` `>>` も足す。**読み取りコマンドでもリダイレクトすればファイルを壊せる**
+    # （実測: HALT 中に `git status > important` が通った）。
+    # `<` も同じ理由で足す。**process substitution `<(cmd)` は任意コマンドを実行できる**
+    # （実測: HALT 中に `--receipt <(python3 -c ...)` が通り、中の python3 が走った）。
+    # `<` 単体のリダイレクトも、通す理由が無い。**同じ穴が3回開いたので、
+    # 個別の記法を1つずつ塞ぐのをやめ、ここを「メタ文字があれば通さない」境界にした。**
+    if re.search(r"[;&|`\n><]|\$\(", cmd):
         return False
     return bool(_RECOVERY_READONLY.match(cmd) or _RECOVERY_REPAIR.match(cmd))
 
@@ -961,15 +1284,86 @@ def _check_halt(tool_name, tool_input):
           f"  **解除は自動では行われない。** 何が起きたかを確かめ、復旧を検証してから解除する。")
 
 
+
+def _org_root_of_targets(tool_input):
+    """コマンド/引数に現れる **絶対パス** をたどり、gated org（`.orgforge/ledger` を持つ祖先）
+    を返す。**cwd に org が無くても、操作先が org なら統制を効かせる**ため。
+    見つからなければ None。判定に使うだけで、ここでは何も実行しない。"""
+    import re as _re_mod
+    blob = " ".join(str(v) for v in tool_input.values() if isinstance(v, (str, int, float)))
+    # **相対パスも解決する。** 絶対パスだけを見ていたので、`cd ./halted && npm run build` が
+    # 通っていた（実測: 再監査で HALT 中の org に対して exit=0、しかも理由は
+    # 「org state が無いので allow」——**見つからなければ全部通す**という最悪の形）。
+    # `cd ../halted` も同じ。cwd から解決すれば同じ org に着く以上、区別する理由がない。
+    _abs = _re_mod.findall(r"(?:^|[\s'\"=])(/[^\s'\";|&)]+)", blob)
+    _rel = _re_mod.findall(r"(?:^|[\s'\"=])(\.{1,2}/[^\s'\";|&)]*)", blob)
+    # **`cd halted` のように `./` すら付かない形も解決する。** 実測（再監査4回目）:
+    # `./halted` と `../halted` だけを足したので `cd halted && npm run build` が素通りし、
+    # しかも理由は「org state 無し→allow」だった。**綴りを1つずつ足すのは3回失敗している。**
+    # cwd 直下に実在するディレクトリを指す語は、すべて候補として解決する。
+    _bare = []
+    for _w in _re_mod.findall(r"(?:^|[\s'\"=])([A-Za-z0-9._-]+(?:/[^\s'\";|&)]*)?)", blob):
+        try:
+            if os.path.isdir(os.path.join(os.getcwd(), _w.rstrip("/"))):
+                _bare.append(_w)
+        except Exception:
+            pass
+    for raw in _abs + _rel + _bare:
+        cand = os.path.abspath(raw.rstrip("/"))
+        # そのパス自身と祖先をたどる（存在しなくてよい — 消す先が対象だから）
+        for _ in range(40):
+            if os.path.isdir(os.path.join(cand, ".orgforge", "ledger")):
+                return cand
+            nxt = os.path.dirname(cand)
+            if nxt == cand:
+                break
+            cand = nxt
+    return None
+
 def main():
-    raw = sys.stdin.read()
+    # **不正な UTF-8 でも落ちない。** sys.stdin.read() は decode 失敗で
+    # UnicodeDecodeError を投げ、hook がそこで落ちていた（実測 exit=1）。
+    # バイト列で読んで、置換しながら decode する。
+    try:
+        raw = sys.stdin.buffer.read().decode("utf-8", "replace")
+    except Exception:
+        raw = ""
+    # **長い event を「大きいから」という理由で拒否しない。**
+    # 最初の実装は 64KB を超えた event を deny していたが、それは
+    # `echo <70,000文字>` のような **正当な長いコマンドを止める**（Codex が実測で指摘）。
+    # 長いファイル一覧、base64 の埋め込み、SQL スクリプトは現実に存在する。
+    # 止めたいのは「正規表現が事実上停止すること」であって、長さそのものではない。
+    # よって **event はそのまま解析し、危険語の照合だけを先頭 N 文字に限る**
+    # （危険なコマンドは先頭に現れる — 後ろに何万文字あっても実行されるのは同じ1行）。
     try:
         event = json.loads(raw) if raw.strip() else {}
     except json.JSONDecodeError:
         event = {}
+    # **object でない JSON でも落ちない。** `[1,2,3]` や `null` は json.loads を通るので
+    # 上の except では拾えず、直後の `.get()` が AttributeError になって **hook が落ちた**
+    # （実測 exit=1）。落ちた hook は判定を返さない = fail-open になりうる。
+    if not isinstance(event, dict):
+        event = {}
     # only gate PreToolUse; anything else passes (the hook may be wired to several events)
     if event.get("hook_event_name") not in (None, "PreToolUse"):
         _allow()
+    # **event の cwd を使って org を決め直す。**
+    # LEDGER_ROOT は import 時にプロセスの cwd から解決される。だが harness は hook を
+    # org の外から起動しうるので（だからこそ event に `cwd` が入っている）、そのままだと
+    # **org が見つからず、宣言した cap も判定も built-in default に落ちる** — hook は
+    # 動いているように見えるのに、その org の統制で判定していない（実測: プラグイン dir から
+    # 起動すると宣言 6 に対して cap=150 が使われた）。env の明示指定があればそれを優先する。
+    _ev_cwd = event.get("cwd") or ""
+    if _ev_cwd and not os.environ.get("ORG_LEDGER_ROOT") and os.path.isdir(_ev_cwd):
+        try:
+            os.chdir(_ev_cwd)                              # 以降の discover はこの org を見る
+        except OSError:
+            pass
+        global LEDGER_ROOT, _ENFORCEMENT_CACHE
+        _rediscovered = _discover_ledger()
+        if _rediscovered and _rediscovered != LEDGER_ROOT:
+            LEDGER_ROOT = _rediscovered
+            _ENFORCEMENT_CACHE = None                      # 別 org の宣言を読み直す
     tool_name = event.get("tool_name", "")
     tool_input = event.get("tool_input", {})
     # 冪等キーの材料。**(session_id, tool_use_id, rule, event_class) で一意にする** —
@@ -1048,6 +1442,32 @@ def main():
     # cap の予約を試すことにも意味が無い（そして予約は台帳に書く＝止まっているのに書く）。
     _check_halt(tool_name, tool_input)
 
+    if not LEDGER_ROOT:
+        # **cwd に org が無いことは「統制の対象が無い」ことではない。**
+        # 空のディレクトリから harness を起動し、**管理下の org を絶対パスで操作する**と、
+        # 台帳が見つからず fail-open で素通しになっていた（実測: 空 cwd から
+        # `rm -rf <実 org>/.orgforge/ledger` が exit 0 で通った）。`rm -rf /` は止まるのに
+        # 実 org は消せる、という穴である。
+        # そこで **コマンドが触るパスの側から org を探す**。触る先が gated org なら、
+        # その org の統制で判定する。
+        _target_root = _org_root_of_targets(tool_input)
+        if _target_root:
+            try:
+                os.chdir(_target_root)
+            except OSError:
+                pass
+            _re = _discover_ledger()
+            if _re:
+                LEDGER_ROOT = _re
+                _ENFORCEMENT_CACHE = None
+                print(f"org_hook: cwd に org は無いが、操作先 {_target_root} の統制で判定する",
+                      file=sys.stderr)
+                # **org を解決したら、その台帳に対して HALT を確かめ直す。**
+                # `_check_halt()` は org が判明する *前* に一度走っている。cwd が org の外だと
+                # そのとき見る台帳が無く、**HALT 中の org へ絶対パスで書き込めた**
+                # （実測 B3: Bash / Write / Edit の4経路すべてが素通しした）。
+                # 止まっている org は、どこから呼ばれても止まっていなければならない。
+                _check_halt(tool_name, tool_input)
     if not LEDGER_ROOT:
         # no ledger configured => the org has no state to judge against. Fail-safe: allow, but
         # say so loudly on stderr so a misconfiguration is visible, not silent.

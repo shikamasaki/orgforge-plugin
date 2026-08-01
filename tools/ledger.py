@@ -178,6 +178,19 @@ def corrected_seqs(events, kinds=("probe", "mistake")):
     return out
 
 
+def norm_issue(x):
+    """issue 番号の正規化。**比べる場所ごとに違う正規化をしてはいけない。**
+
+    `7` / `#7` / `007` / `" 7 "` は同じ issue である。ところが実装は3箇所で
+    別々に比べていた（`lstrip("#")` だけの場所と、先頭ゼロまで落とす場所）。
+    その食い違いで、**provisional は `007`、呼び出しは `7` だと「判定が足りない」**
+    と言われて admission を作れなくなっていた（Codex が指摘、実測で成立）。
+    同じものを同じと判定できないなら、鍵として使えない。
+    """
+    s = str(x if x is not None else "").strip().lstrip("#").strip()
+    return s.lstrip("0") or s or ""
+
+
 def _same_deliverable(a, b):
     """Do two payloads name the same deliverable? Compared as NORMALIZED STRINGS, not by ==.
 
@@ -188,7 +201,7 @@ def _same_deliverable(a, b):
     for an unattended run, so the comparison normalizes instead of trusting the writer's JSON type."""
     if a is None or b is None:
         return False
-    return str(a).strip().lstrip("#") == str(b).strip().lstrip("#")
+    return norm_issue(a) == norm_issue(b)
 
 
 def _prior_phase(phase):
@@ -438,6 +451,125 @@ def _enforce_attested():
             f"  本当に無効にするなら constitution に `require_attested_identity: false` と"
             f"明示し、この痕跡を消すこと。")
     return bool(declared)
+
+
+
+# **統制の中核となる judgment は、入口で認証を要求する。**
+# 元はこの判定が `_distinct_actor_violation()` の中にあり、その関数は
+# `DISTINCT_ACTOR` にクラスが無いと即 return するため、**`verdict_provisional`
+# には一度も適用されていなかった**（実測: B1 — receipt 無しの provisional を
+# 2件書いて joint admission を作れた）。
+# SoD（同じ actor か）と attestation（主体を確かめたか）は別の統制なので、
+# 片方の適用条件に相乗りさせない。
+_ATTESTED_REQUIRED = ("admission_decided", "refutation_attempted", "verdict_provisional")
+
+
+def _attestation_violation(ev):
+    """authenticated mode で、検証済み receipt 由来の identity が無ければ拒否理由を返す。"""
+    if ev.get("class") not in _ATTESTED_REQUIRED:
+        return None
+    if not _enforce_attested():
+        return None
+    if (ev.get("_verified_identity") or {}).get("decision_by"):
+        return None
+    return (f"{ev['class']} は generic append では記録できない"
+            f"（require_attested_identity が有効）。\n"
+            f"  **payload に identity_assurance を書いても証拠にならない** — "
+            f"書けるものを検査に使ってはいけない。\n"
+            f"  judgment は **receipt を検証した経路** からのみ記録できる:\n"
+            f"    github_sync.py provisional --receipt <judge が署名した receipt> …\n"
+            f"  その経路が receipt を検証し、identity fields を生成する。")
+
+
+
+def _declared_lineage():
+    """org が宣言した lineage（`enforcement.judges.lineage`）。宣言が無ければ None。
+
+    **caller が消せる設定を根拠にしない** — `_enforce_attested()` と同じく
+    root 所有 policy / constitution から読む。読めない・壊れているは「強制なし」ではない。
+    """
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from discover import constitution as _constitution
+        path = os.environ.get("ORG_POLICY_FILE") or _constitution()
+    except Exception:
+        return None
+    if not path or not os.path.exists(path):
+        return None
+    try:
+        import yaml
+        with open(path, encoding="utf-8") as f:
+            doc = yaml.safe_load(f) or {}
+    except Exception:
+        return None
+    if not isinstance(doc, dict):
+        return None
+    j = (((doc.get("enforcement") or {}) if isinstance(doc.get("enforcement"), dict) else {})
+         .get("judges") or {})
+    v = j.get("lineage") if isinstance(j, dict) else None
+    return v if isinstance(v, str) else None
+
+
+# **肯定的な判断だけが独立性を要する。**
+# `admit` と `survives` は「通す」判断であり、これが単独で書けるなら二血統は強制されていない。
+# `reject` / `park` / `refuted` は通さない方向なので、単独でも記録できてよい
+# （止めると、判定を記録する手段そのものが無くなる）。
+_POSITIVE_VERDICTS = {"admission_decided": {"admit"},
+                      "refutation_attempted": {"survives"}}
+
+
+def _dual_lineage_violation(ev):
+    """cross-harness を宣言した org で、generic append の肯定判断を拒否する理由を返す。
+
+    実測（B4）: 有効な receipt 1枚を generic append すると `admission_decided` が
+    直接1件記録された。joint 派生の経路が在っても、**それを通らなくても書けるなら
+    二血統は強制されていない。**
+    """
+    cls = ev.get("class")
+    positives = _POSITIVE_VERDICTS.get(cls)
+    if not positives:
+        return None
+    if (ev.get("payload") or {}).get("verdict") not in positives:
+        return None                      # 否定的な判断は単独で記録してよい
+    if _declared_lineage() != "cross-harness":
+        return None                      # same-harness org の互換経路は変えない
+    if _inside_writer():
+        return None                      # writer 自身の派生（derive-admission）は通す
+    return (f"{cls} の肯定的な判断（{(ev.get('payload') or {}).get('verdict')}）は "
+            f"generic append では記録できない。\n"
+            f"  この org は **cross-harness**（二血統）を宣言している。"
+            f"1人の署名者で通せるなら、二血統は強制されていない。\n"
+            f"  二血統の provisional を記録してから、writer に派生させること:\n"
+            f"    github_sync.py provisional --receipt <judge の receipt> …  （血統ごとに1件）\n"
+            f"    ledger.py derive-admission --issue <n> --event {cls}\n"
+            f"  否定的な判断（reject / park / refuted）は単独で記録できる。")
+
+
+def _inside_writer():
+    """**writer の内側から呼ばれているか。** caller が名乗れない形で判定する。
+
+    実測（再監査）: `ORG_INSIDE_WRITER=1` を環境に足すだけで、単独署名者が
+    cross-harness の admission を直接書けたし、single-writer gate も素通りした。
+    **検査の入力を、検査される側が書けてはいけない。**
+
+    writerd は起動ごとに推測できない token を作り、子プロセスにだけ渡す。
+    よって「値が 1 である」ではなく「**当てられない長さの token である**」を条件にする。
+    `1` や `true` のような当てられる値は、writer の内側の証拠にならない。
+
+    **これは境界ではない。** 同じ UID の caller は自分で 64 桁の hex を作って名乗れる —
+    子プロセスは token が writerd 由来かを検証できないからである。ここで上がるのは
+    「当てずっぽうで通る」から「意図的に偽装する必要がある」までで、
+    **本当の境界は Stage B の別 UID**（OS 権限で台帳に書けない）である。
+    段階A でこれを `separate_uid` と呼んではいけない。
+    """
+    v = os.environ.get("ORG_INSIDE_WRITER") or ""
+    if len(v) < 32:
+        return False
+    try:
+        int(v, 16)
+    except ValueError:
+        return False
+    return True
 
 
 def _distinct_actor_violation(ev, hist):
@@ -1009,7 +1141,7 @@ def require_writer_path(op):
 
     返り値: None なら続行してよい。文字列なら拒否の理由。
     """
-    if os.environ.get("ORG_INSIDE_WRITER") == "1":
+    if _inside_writer():
         return None                     # writerd 自身が呼んでいる
     sock = os.environ.get("ORG_WRITER_SOCKET")
     if not sock:
@@ -1303,6 +1435,14 @@ def cmd_append(a):
             print(f"append: {a.cls} rejected — requires a prior event that does not exist: {why} "
                   f"(ledger-schema §event_classes {a.cls}.requires_prior)", file=sys.stderr)
             return 3
+        dl = _dual_lineage_violation(ev)
+        if dl:
+            print(f"append: {dl}", file=sys.stderr)
+            return 3
+        att = _attestation_violation(ev)
+        if att:
+            print(f"append: {att}", file=sys.stderr)
+            return 3
         sod = _distinct_actor_violation(ev, hist)
         if sod:
             print(f"append: {sod}", file=sys.stderr)
@@ -1327,6 +1467,27 @@ def cmd_append(a):
 
 
 
+
+
+def _class_field_span(text, cls):
+    """`  <cls>: { ... }` の中身の span を返す。**波括弧の深さを数える** —
+    非貪欲な正規表現だと、値の中の `{...}` の最初の `}` を終端と誤認し、
+    修復が別の場所に入って **直ったように見えて直っていない**（Codex の指摘、実測で再現）。
+    見つからなければ None。"""
+    m = re.search(rf"\n  {re.escape(cls)}: \{{", text)
+    if not m:
+        return None
+    i = m.end() - 1                     # 開き `{` の位置
+    depth = 0
+    for j in range(i, len(text)):
+        c = text[j]
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                return (i + 1, j)       # 中身だけの span
+    return None
 
 
 def _yaml_block_span(text, key):
@@ -1462,10 +1623,41 @@ def cmd_schema(a):
     except Exception:
         pass
 
+    # **クラス数が同じでも、field が欠けていれば最新ではない。**
+    # snapshot が読むのは `event_classes` の `fields:` 行なので、ここが古いと
+    # validation を直しても snapshot は古い形で固定され、正規経路が拒否される
+    # （実測: 実 org tatekae が「差分なし」と表示されたまま全 metered 操作がデッドロックしていた）。
+    _src_txt = open(plug_p, encoding="utf-8").read()
+    _dst_txt = open(org_p, encoding="utf-8").read()
+    def _cls_fields(txt):
+        out = {}
+        for m in re.finditer(r"\n  ([a-z_]+): \{", txt):
+            sp = _class_field_span(txt, m.group(1))
+            if not sp:
+                continue
+            out[m.group(1)] = [x.split(":")[0].strip()
+                               for x in txt[sp[0]:sp[1]].replace("\n", " ").split(",")
+                               if x.strip() and not x.strip().startswith("#")]
+        return out
+    _sf, _df = _cls_fields(_src_txt), _cls_fields(_dst_txt)
+    fgaps = []
+    for _c, _want in _sf.items():
+        _have = _df.get(_c)
+        if _have is None:
+            continue
+        _miss = [f for f in _want if f and f not in _have]
+        if _miss:
+            fgaps.append(f"{_c}: {', '.join(_miss)}")
+
     print(f"org schema : {org_p}")
     print(f"テンプレート: {plug_p}")
     print(f"  org {len(oc)} クラス / テンプレート {len(pc)} クラス")
-    if not missing and not vgaps and not vconf:
+    if fgaps:
+        print(f"\n**既存クラスに足りない field: {len(fgaps)}**"
+              " — snapshot はここを読む。欠けていると正規経路が拒否される。")
+        for _g in fgaps:
+            print(f"    {_g}")
+    if not missing and not vgaps and not vconf and not fgaps:
         print("  差分なし — この org の schema は最新である"
               "（クラス宣言と validation 規則の両方）。")
         return 0
@@ -1515,6 +1707,35 @@ def cmd_schema(a):
             break
         dst = dst.replace(anchor, "\n" + m.group(1).rstrip() + "\n" + anchor, 1)
         added.append(c)
+    # ── **既存クラスの field 不足も直す。** ────────────────────────────────
+    # snapshot が読むのは `event_classes` の `fields:` 行であって validation ではない。
+    # ここが古いままだと、validation を直しても **snapshot は古い形で固定され続け**、
+    # 正規の `reserve-exposure` が schema_rejected で拒否される = 全 metered 操作の
+    # デッドロック（実測: 実 org tatekae がこの状態だった）。
+    # `--fix` は「クラスを足すだけ」だったので、この経路を直せていなかった。
+    field_added = []
+    for cls in sorted(set(re.findall(r"\n  ([a-z_]+): \{", src))):
+        ss = _class_field_span(src, cls)
+        ds = _class_field_span(dst, cls)
+        if not ss or not ds:
+            continue
+        def _names(blob):
+            return [x.split(":")[0].strip() for x in blob.replace("\n", " ").split(",")
+                    if x.strip() and not x.strip().startswith("#")]
+        want, have = _names(src[ss[0]:ss[1]]), _names(dst[ds[0]:ds[1]])
+        missing_f = [f for f in want if f and f not in have]
+        if not missing_f:
+            continue
+        # 既存の並びは壊さず、閉じ括弧の直前に足すだけ
+        body = dst[ds[0]:ds[1]].rstrip()
+        sep = ",\n                             " if "\n" in body else ", "
+        dst = dst[:ds[0]] + body + sep + ", ".join(missing_f) + " " + dst[ds[1]:]
+        field_added.append(f"{cls}: +{', '.join(missing_f)}")
+    if field_added:
+        print("  既存クラスに field を足した（snapshot が読む箇所）:", file=sys.stderr)
+        for f in field_added:
+            print(f"    {f}", file=sys.stderr)
+
     conflicts = vconf
     if vgaps or vconf:
         # **deep-add でマージする。** ブロックごと差し替えると、org 独自の厳格規則が消える
@@ -2160,6 +2381,16 @@ def cmd_derive_admission(a):
     生成する identity は `system:joint(...)` であり、**judge の identity ではない** —
     誰かの判断として記録しない。
     """
+    # **writer が居るなら、ここも RPC を通す。** 他の書き込み経路（append /
+    # reserve-exposure / trip-halt / release-halt）は writer 経由を要求していたのに、
+    # **この経路だけ直接書けていた**（実測: writer 稼働中に台帳が 2 → 3 件に増えた）。
+    # しかもここが書くのは `admission_decided` — 最も強い権限の記録である。
+    # 単一 writer の保証は、**全部の経路が通って初めて成り立つ**。
+    _wp = require_writer_path("derive-admission")
+    if _wp:
+        print(json.dumps({"ok": False, "reason": "writer_required", "detail": _wp},
+                         ensure_ascii=False))
+        return 4
     with _LedgerLock(a.root) as lk:
         if lk.error:
             print(json.dumps({"ok": False, "reason": "lock_failed", "detail": lk.error},
@@ -2187,11 +2418,51 @@ def cmd_derive_admission(a):
             if e.get("class") != "verdict_provisional" or e.get("seq") in voided:
                 continue
             pl = e.get("payload") or {}
-            if str(pl.get("issue", "")).lstrip("#") != str(a.issue).lstrip("#"):
+            if norm_issue(pl.get("issue")) != norm_issue(a.issue):
                 continue
             if pl.get("for_event") != a.event:
                 continue
             found[pl.get("lineage")] = {**pl, "seq": e.get("seq")}
+        # 今回の一致がどの対象についてのものかを先に決める（同一性の鍵）。
+        _subject_now = None
+        for e in evs:
+            if e.get("class") != "verdict_provisional" or e.get("seq") in voided:
+                continue
+            _p = e.get("payload") or {}
+            if (norm_issue(_p.get("issue")) == norm_issue(a.issue)
+                    and _p.get("for_event") == a.event):
+                _subject_now = _p.get("review_subject_id")
+        # **同じ一致から2件目を作らない。** joint は「2つの判定が一致した」という
+        # *事実の関数* であって、新しい判断ではない。事実は一度きりなので、
+        # 同じ issue / event に admission が既に在るなら、もう作ってはいけない。
+        # 作れてしまうと、1つの成果物が2回 admit されたように見える（二重計上）。
+        # 実測: derive-admission を2回呼ぶと admission が2件になっていた。
+        for e in evs:
+            if e.get("class") != "admission_decided":
+                continue
+            # **訂正・取り消しされた admission は「既にある」に数えない。**
+            # 数えると、対象を差し替えて訂正したあと **二度と admit できない**
+            # （実測: superseded にしても already_admitted で拒否された）。
+            # 訂正できない統制は、間違えたら詰む統制である。
+            if e.get("seq") in voided:
+                continue
+            _pl = e.get("payload") or {}
+            # **同じ「対象」に対する二重計上だけを止める。**
+            # (issue, event) だけを鍵にすると、**同じ issue の別リビジョンを
+            # 二度と admit できない**（実測: S1 を admit したあと S2 が
+            # already_admitted で拒否された）。判定の同一性は
+            # `review_subject_id` が決める — それが subject という概念の意味である。
+            if (norm_issue(_pl.get("issue")) == norm_issue(a.issue)
+                    and _pl.get("for_event", a.event) == a.event
+                    and _pl.get("review_subject_id") == _subject_now):
+                print(json.dumps(
+                    {"ok": False, "reason": "already_admitted",
+                     "seq": e.get("seq"),
+                     "detail": f"#{a.issue} / {a.event} の admission は seq="
+                               f"{e.get('seq')} に既にある。**一致は事実なので、"
+                               f"同じ一致から2件目は作らない**（二重計上になる）。"},
+                    ensure_ascii=False))
+                return 6
         if len(found) < 2:
             print(json.dumps({"ok": False, "reason": "not_enough_verdicts",
                               "detail": f"#{a.issue} / {a.event} の provisional が "
@@ -2214,7 +2485,13 @@ def cmd_derive_admission(a):
         # 「一致した」という事実に、確かめていない identity の重みが乗る。
         weak = {lin: v.get("identity_assurance") or "claimed" for lin, v in found.items()
                 if (v.get("identity_assurance") or "claimed") == "claimed"}
-        if weak and a.require_attested:
+        # **強制するかどうかを caller に尋ねない。**
+        # 元は `a.require_attested`（caller が渡す flag）だけを見ていたので、
+        # flag を省略するだけで claimed な判定から admission を作れた（実測: B1）。
+        # 宣言（constitution / root-owned policy）が真なら、flag の有無に関わらず強制する。
+        # flag は「宣言していない org でも厳しくしたい」ときの *上乗せ* としてのみ残す。
+        _must_attest = bool(a.require_attested) or _enforce_attested()
+        if weak and _must_attest:
             print(json.dumps({"ok": False, "reason": "unattested_verdicts",
                               "detail": f"identity が claimed の判定がある: {weak}。"
                                         f"**確かめていない identity から joint を作らない。**"},
