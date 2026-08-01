@@ -48,6 +48,7 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -304,6 +305,221 @@ REQUIRES_PRIOR = {
         and ("updated" in ev["payload"]["domain_model"] or "none_asserted" in ev["payload"]["domain_model"])
     ),
 }
+
+
+_GOAL_CLASSES = {
+    "goal_started", "goal_progressed", "goal_paused", "goal_blocker_observed",
+    "goal_blocked", "goal_resumed", "goal_completed", "goal_host_synced",
+}
+
+
+def goal_states_from_events(events):
+    """Fold portable goal events into deterministic current states, oldest goal first."""
+    states = {}
+    for event in events:
+        if event.get("class") not in _GOAL_CLASSES:
+            continue
+        payload = event.get("payload") or {}
+        goal_id = str(payload.get("goal_id") or "")
+        if not goal_id:
+            continue
+        if event["class"] == "goal_started":
+            state = {
+                "goal_id": goal_id,
+                "objective": payload.get("objective"),
+                "status": "active",
+                "session_id": payload.get("session_id"),
+                "harness": payload.get("harness"),
+                "started_seq": event.get("seq"),
+                "updated_seq": event.get("seq"),
+                "progress": None,
+                "blocker": None,
+                "evidence": [],
+                "host_sync": {},
+            }
+            states[goal_id] = state
+            continue
+        state = states.get(goal_id)
+        if not state:
+            continue
+        state["updated_seq"] = event.get("seq")
+        if event["class"] == "goal_progressed":
+            state["status"] = "active"
+            state["progress"] = {
+                key: payload.get(key) for key in ("summary", "next_step", "evidence")
+            }
+            state["blocker"] = None
+        elif event["class"] == "goal_paused":
+            state["status"] = "paused"
+            state["progress"] = {"summary": payload.get("reason"),
+                                 "next_step": payload.get("next_step")}
+        elif event["class"] == "goal_blocker_observed":
+            prior = state.get("blocker") or {}
+            occurrences = prior.get("occurrences", 0) + 1 \
+                if prior.get("reason") == payload.get("blocker") else 1
+            state["blocker"] = {"reason": payload.get("blocker"),
+                                "occurrences": occurrences,
+                                "evidence": payload.get("evidence") or []}
+        elif event["class"] == "goal_blocked":
+            state["status"] = "blocked"
+            state["blocker"] = {"reason": payload.get("blocker"),
+                                "occurrences": payload.get("occurrences"),
+                                "evidence": payload.get("evidence") or []}
+        elif event["class"] == "goal_resumed":
+            state["status"] = "active"
+            state["session_id"] = payload.get("session_id")
+            state["harness"] = payload.get("harness")
+            state["blocker"] = None
+        elif event["class"] == "goal_completed":
+            state["status"] = "complete"
+            state["summary"] = payload.get("summary")
+            state["evidence"] = payload.get("evidence") or []
+        elif event["class"] == "goal_host_synced":
+            state.setdefault("host_sync", {})[str(payload.get("harness") or "unknown")] = {
+                "state": payload.get("native_state"),
+                "native_ref": payload.get("native_ref"),
+                "detail": payload.get("detail"),
+                "assurance": payload.get("assurance"),
+                "seq": event.get("seq"),
+            }
+    return sorted(states.values(), key=lambda state: state.get("started_seq") or 0)
+
+
+def _goal_evidence_error(reference, ledger_root, history):
+    """Resolve completion evidence without network access; return None only for a real object."""
+    reference = str(reference or "")
+    if reference.startswith("ledger:"):
+        raw = reference[len("ledger:"):]
+        if not raw.isdigit() or int(raw) <= 0:
+            return f"invalid ledger evidence reference {reference!r}"
+        if not any(event.get("seq") == int(raw) for event in history):
+            return f"ledger evidence does not exist: {reference}"
+        return None
+    org_root = os.path.realpath(os.path.join(ledger_root, "..", ".."))
+    if reference.startswith("file:"):
+        raw = reference[len("file:"):]
+        target = os.path.realpath(raw if os.path.isabs(raw) else os.path.join(org_root, raw))
+        try:
+            inside = os.path.commonpath([org_root, target]) == org_root
+        except ValueError:
+            inside = False
+        if not inside:
+            return f"file evidence escapes the organization root: {reference}"
+        if not os.path.isfile(target):
+            return f"file evidence does not exist: {reference}"
+        return None
+    if reference.startswith("git:"):
+        revision = reference[len("git:"):]
+        if not re.fullmatch(r"[0-9a-fA-F]{7,64}", revision):
+            return f"invalid git evidence reference {reference!r}"
+        try:
+            run = subprocess.run(
+                ["git", "-C", org_root, "cat-file", "-e", revision + "^{commit}"],
+                capture_output=True, text=True, timeout=10)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return f"cannot inspect git evidence {reference}: {exc}"
+        if run.returncode != 0:
+            return f"git evidence does not resolve to a commit: {reference}"
+        return None
+    return (f"unsupported completion evidence {reference!r}; use file:<path>, git:<commit>, "
+            "or ledger:<seq> so the writer can resolve it")
+
+
+def _goal_lifecycle_violation(event, history, ledger_root):
+    """Enforce one unfinished goal and session compare-and-swap inside the ledger lock."""
+    cls = event.get("class")
+    if cls not in _GOAL_CLASSES:
+        return None
+    payload = event.get("payload") or {}
+    goal_id = str(payload.get("goal_id") or "").strip()
+    session_id = str(payload.get("session_id") or "").strip()
+    if not goal_id or not session_id:
+        return f"{cls} rejected — goal_id and session_id must be non-empty"
+    states = goal_states_from_events(history)
+    unfinished = [state for state in states if state.get("status") != "complete"]
+    if cls == "goal_started":
+        if not str(payload.get("objective") or "").strip():
+            return "goal_started rejected — objective must be concrete and non-empty"
+        if not str(payload.get("harness") or "").strip():
+            return "goal_started rejected — harness must be non-empty"
+        if unfinished:
+            current = unfinished[-1]
+            return ("goal_started rejected — an unfinished goal already exists: "
+                    f"{current['goal_id']} ({current['status']}); complete it before starting another")
+        if any(state.get("goal_id") == goal_id for state in states):
+            return f"goal_started rejected — goal_id {goal_id!r} was already used"
+        return None
+    current = next((state for state in reversed(states) if state.get("goal_id") == goal_id), None)
+    if not current:
+        return f"{cls} rejected — goal {goal_id!r} has not been started"
+    if cls == "goal_host_synced":
+        if session_id != current.get("session_id"):
+            return (f"goal_host_synced rejected — session {session_id!r} does not own goal {goal_id}; "
+                    "resume it first")
+        if not str(payload.get("harness") or "").strip():
+            return "goal_host_synced rejected — harness must be non-empty"
+        return None
+    if cls == "goal_resumed":
+        expected = str(payload.get("from_session_id") or "")
+        actual = str(current.get("session_id") or "")
+        if current.get("status") == "complete":
+            return f"goal_resumed rejected — goal {goal_id} is complete"
+        if expected != actual:
+            return (f"goal_resumed rejected — concurrent resume lost compare-and-swap: expected "
+                    f"session {expected!r}, current owner is {actual!r}")
+        if session_id == actual and current.get("status") == "active":
+            return f"goal_resumed rejected — session {session_id!r} already owns goal {goal_id}"
+        if not str(payload.get("reason") or "").strip():
+            return "goal_resumed rejected — reason is required"
+        if not str(payload.get("harness") or "").strip():
+            return "goal_resumed rejected — harness must be non-empty"
+        return None
+    if current.get("status") == "complete":
+        return f"{cls} rejected — goal {goal_id} is complete"
+    if session_id != str(current.get("session_id") or ""):
+        return (f"{cls} rejected — session {session_id!r} does not own goal {goal_id}; current owner "
+                f"is {current.get('session_id')!r}. Run org-goal resume first")
+    if cls in {"goal_progressed", "goal_paused", "goal_blocker_observed", "goal_completed"} \
+            and current.get("status") != "active":
+        return (f"{cls} rejected — goal {goal_id} is {current.get('status')}; resume it before "
+                "recording more work")
+    if cls == "goal_progressed" and (not str(payload.get("summary") or "").strip() or
+                                      not str(payload.get("next_step") or "").strip()):
+        return "goal_progressed rejected — summary and next_step must be non-empty"
+    if cls == "goal_paused" and (not str(payload.get("reason") or "").strip() or
+                                  not str(payload.get("next_step") or "").strip()):
+        return "goal_paused rejected — reason and next_step must be non-empty"
+    if cls == "goal_blocker_observed" and (
+            not str(payload.get("blocker") or "").strip() or not (payload.get("evidence") or [])):
+        return "goal_blocker_observed rejected — blocker and at least one evidence item are required"
+    if cls == "goal_blocked":
+        blocker = str(payload.get("blocker") or "")
+        matching = 0
+        for prior in reversed(history):
+            prior_payload = prior.get("payload") or {}
+            if str(prior_payload.get("goal_id") or "") != goal_id:
+                continue
+            if prior.get("class") == "goal_blocker_observed" and \
+                    str(prior_payload.get("blocker") or "") == blocker:
+                matching += 1
+                continue
+            if prior.get("class") == "goal_host_synced":
+                continue
+            break
+        if current.get("status") != "active" or matching < 3 or payload.get("occurrences") != matching:
+            return (f"goal_blocked rejected — the same blocker needs 3 consecutive observations; "
+                    f"found {matching}")
+    if cls == "goal_completed":
+        if not str(payload.get("summary") or "").strip():
+            return "goal_completed rejected — summary must be non-empty"
+        evidence = payload.get("evidence") or []
+        if not evidence:
+            return "goal_completed rejected — at least one resolvable evidence reference is required"
+        for reference in evidence:
+            error = _goal_evidence_error(reference, ledger_root, history)
+            if error:
+                return f"goal_completed rejected — evidence audit failed: {error}"
+    return None
 
 # ── separation of duties, enforced at WRITE time (docs/03 §3.1, docs/11 §4f) ──────────────────────
 # REQUIRES_PRIOR asks "did the right events happen in the right order?" — it never asks WHO wrote them.
@@ -1430,6 +1646,10 @@ def cmd_append(a):
               "schema_version": LEDGER_SCHEMA_VERSION,
               "schema_sha256": snap["digest"],
               "prev_hash": head["hash"]}
+        goal_error = _goal_lifecycle_violation(ev, hist, a.root)
+        if goal_error:
+            print(f"append: {goal_error}", file=sys.stderr)
+            return 3
         if a.cls in REQUIRES_PRIOR and not REQUIRES_PRIOR[a.cls](ev, hist):
             why = REQUIRES_PRIOR_WHY.get(a.cls, "a required prior event does not exist")
             print(f"append: {a.cls} rejected — requires a prior event that does not exist: {why} "
@@ -2712,6 +2932,12 @@ def cmd_view(a):
                for cid in started if cid not in completed]
         wip.sort(key=lambda w: w["started_seq"])
         print(json.dumps({"view": "work_in_progress", "in_progress": wip}, indent=2, ensure_ascii=False))
+        return 0
+    if a.view_id == "goal_state":
+        goals = goal_states_from_events(events)
+        print(json.dumps({"view": "goal_state", "goals": goals,
+                          "current": goals[-1] if goals else None},
+                         indent=2, ensure_ascii=False))
         return 0
     # generic projection: the events feeding the view, newest last, payloads intact.
     rows = [{"seq": e["seq"], "ts": e.get("ts", ""), "class": e["class"], "payload": e["payload"]}

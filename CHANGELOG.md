@@ -6,6 +6,21 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 2.0.17 — portable persistent goals
+
+### Added
+
+- Add a ledger-backed `org-goal` lifecycle shared by Claude Code and Codex: start, status,
+  progress, pause, compare-and-swap resume, repeated-blocker escalation, and evidence-audited
+  completion survive process and host restarts.
+- Bind the host session identifier at SessionStart, reject concurrent takeover and unfinished-goal
+  overwrite inside the ledger lock, and re-inject the objective and next action on restart.
+- Project the same state through a Claude Code command and a Codex skill that explicitly reconciles
+  native Goal state without treating it as the portable source of truth or claiming execution while
+  the host is closed.
+- Add `org-goal doctor` capability reporting for both adapters, including the real SessionStart,
+  session-scoped loop, native-skill, installed-binding, and no-background-execution boundaries.
+
 ## 2.0.16 — stable installed-organ binding
 
 ### Added

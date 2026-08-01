@@ -112,11 +112,13 @@ def test_session_start_binds_each_installed_harness_and_injects_contract(tmp_pat
                ORG_TOOLS_DIR=str(bundle / "tools"))
     run = subprocess.run(
         [sys.executable, str(bundle / "scripts" / "org_session_start.py")],
-        input="{}", capture_output=True, text=True, cwd=org, env=env)
+        input=json.dumps({"session_id": f"{harness}-session"}),
+        capture_output=True, text=True, cwd=org, env=env)
     assert run.returncode == 0, run.stderr
     context = json.loads(run.stdout)["hookSpecificOutput"]["additionalContext"]
     record = json.loads(pathlib.Path(BINDING.binding_path(org, harness)).read_text(encoding="utf-8"))
     assert record["harness"] == harness
+    assert record["session_id"] == f"{harness}-session"
     assert record["launcher"] in context
     assert "do not search for another OrgForge checkout" in context
     assert ".claude/plugins/cache" not in context

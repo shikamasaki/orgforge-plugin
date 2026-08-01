@@ -38,6 +38,12 @@ orgforge combines six small, composable capabilities:
 6. **Organization evolution** — turn measured bottlenecks and failures into reviewable structural
    changes while preserving the human-held decision line.
 
+`org-goal` keeps one explicit objective portable across Claude Code and Codex restarts. The shared
+ledger holds its progress, next action, blocker observations, completion evidence, and owning host
+session. Codex's native Goal is a reconciled adapter projection; Claude Code resumes through
+SessionStart and may use a session-scoped loop. Neither adapter claims execution while its host is
+closed.
+
 For an existing repository, `/orgforge-plugin:org-adopt` performs local adoption in one bounded
 workflow. It does not require sudo, a daemon, separate OS users, keys, a branch, a GitHub Issue, or
 network access.

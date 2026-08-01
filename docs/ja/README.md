@@ -36,6 +36,11 @@ orgforgeは次の6機能を小さく組み合わせます。
 5. **Operational insight** — status、drift、cap、HALT、remaining workを表示する
 6. **Organization evolution** — 観測したbottleneckと失敗から、判断線を守った構造変更を提案する
 
+`org-goal`は明示したobjectiveをClaude Code／Codexの再起動をまたいで持続させます。progress、
+next action、blocker観測、完了証拠、所有host sessionは共通ledgerへ置きます。Codex native Goalは
+同期されるadapter projectionであり、Claude CodeはSessionStartとsession-scoped loopで再開します。
+どちらもhostが閉じている間の実行を主張しません。
+
 既存repoでは`/orgforge-plugin:org-adopt`が1回のbounded workflowでlocal導入を完了します。
 sudo、daemon、別OS UID、鍵、branch、GitHub Issue、network accessは不要です。
 

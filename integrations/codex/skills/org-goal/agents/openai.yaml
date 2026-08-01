@@ -1,0 +1,4 @@
+interface:
+  display_name: "OrgForge Goal"
+  short_description: "Persist and synchronize an OrgForge objective"
+  default_prompt: "Use $org-goal to start, resume, inspect, complete, or block the repository’s persistent OrgForge goal."

@@ -17,6 +17,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import uuid
 
 
 SCHEMA = "orgforge-installed-organ/v1"
@@ -58,6 +59,8 @@ if not tools_root or os.path.dirname(target) != tools_root or not os.path.isfile
           file=sys.stderr)
     raise SystemExit(12)
 os.environ["ORG_INSTALLED_ORGAN_BINDING"] = binding_path
+os.environ["ORG_ORGAN_SESSION_ID"] = str(binding.get("session_id") or "")
+os.environ["ORG_ORGAN_HARNESS"] = str(binding.get("harness") or "unknown")
 os.execv(sys.executable, [sys.executable, target, *sys.argv[2:]])
 '''
 
@@ -105,7 +108,7 @@ def installation_kind(tools_root):
 
 def _fingerprint(tools_root):
     digest = hashlib.sha256()
-    for name in ("organ_binding.py", "ledger.py", "org_cycle.py", "github_sync.py"):
+    for name in ("organ_binding.py", "ledger.py", "org_goal.py", "org_cycle.py", "github_sync.py"):
         path = os.path.join(tools_root, name)
         digest.update(name.encode("utf-8"))
         try:
@@ -148,13 +151,16 @@ def runtime_root(org_root):
     return os.path.join(org_root, ".orgforge", "runtime")
 
 
-def bind(org_root, tools_root):
+def bind(org_root, tools_root, session_id=None):
     """Atomically register this installed organ and ensure the path-stable launcher exists."""
     org_root = os.path.realpath(org_root)
     tools_root = os.path.realpath(tools_root)
     if not os.path.isfile(os.path.join(tools_root, "ledger.py")):
         raise BindingError(f"tools root に ledger.py が無い: {tools_root}")
     harness, version, plugin_root = _manifest(tools_root)
+    session_id = str(session_id or os.environ.get("ORG_ORGAN_SESSION_ID") or uuid.uuid4().hex)
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}", session_id):
+        raise BindingError(f"invalid host session id: {session_id!r}")
     record = {
         "schema": SCHEMA,
         "org_root": org_root,
@@ -162,6 +168,7 @@ def bind(org_root, tools_root):
         "tools_root": tools_root,
         "harness": harness,
         "version": version,
+        "session_id": session_id,
         "tools_fingerprint": _fingerprint(tools_root),
         "bound_at_unix": time.time(),
         "launcher": launcher_path(org_root, harness),
