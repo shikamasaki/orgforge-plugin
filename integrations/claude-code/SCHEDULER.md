@@ -71,14 +71,14 @@ orgforge no longer builds one.
 to reach you. Arm a Monitor that streams only the RED signal:
 
 ```
-# tools/status.py redline prints ONE line only when the org is RED (needs you), nothing when healthy
-Monitor: while true; do python3 <plugin>/tools/status.py redline "$ORG_LEDGER_ROOT"; sleep 60; done   (persistent)
+# redline_monitor retains the previous signal: first/changed RED only, quiet while unchanged or healthy
+Monitor: python3 <plugin>/scripts/redline_monitor.py "$ORG_LEDGER_ROOT"   (persistent)
 ```
 
-Each RED line becomes a notification the moment it appears — a wedged cycle, a repeated death, a broken
-chain — so you learn it without opening `/org`. `/org-tick` also sends a `PushNotification` on a genuine
-escalation when it runs. Healthy ticks stay silent (fail-quiet); a notification you didn't need erodes
-trust.
+The first RED and each changed RED become notifications — a wedged cycle, a repeated death, a broken
+chain — while an unchanged RED stays quiet. GREEN resets the remembered signal, so a later recurrence
+notifies again. `/org-tick` also sends a `PushNotification` on a genuine escalation when it runs.
+Healthy ticks stay silent (fail-quiet); a notification you didn't need erodes trust.
 
 ### OS cron — only for genuinely unattended (no session open)
 

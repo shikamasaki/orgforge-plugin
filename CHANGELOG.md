@@ -6,6 +6,15 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 2.0.4 — quiet RED monitoring
+
+### Fixed
+
+- Add a state-aware Claude Code Monitor adapter that emits the first or changed RED signal, suppresses
+  identical polls, and resets after GREEN so a later recurrence still notifies.
+- Keep `status.py redline` as a stateless probe and surface probe failures as deduplicated RED alerts.
+  This adapter is Claude Code-specific; Codex has no corresponding Monitor recipe or runtime.
+
 ## 2.0.3 — usable one-shot GitHub bypass
 
 ### Fixed
