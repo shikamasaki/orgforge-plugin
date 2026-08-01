@@ -32,7 +32,7 @@ sync_one() {  # $1 = src file, $2 = dest file
 
 rc=0
 # the shared hook adapters (source of truth: integrations/common/)
-for f in org_hook.py org_session_start.py tick_host.py redline_monitor.py; do
+for f in org_hook.py org_session_start.py tick_host.py scheduler.py scheduler_bootstrap.py scheduler_tick.py redline_monitor.py; do
   sync_one "$REPO/integrations/common/$f" "$HERE/scripts/$f" || rc=1
 done
 # the organ tools (source of truth: tools/)

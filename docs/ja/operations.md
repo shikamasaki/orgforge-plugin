@@ -60,15 +60,17 @@ orgforge resilience-exercise reviewer-outage --expect GREEN
 
 決定的fixtureは、networkや実repositoryへのwriteを使わず、検知、縮退、独立failover、half-open
 probe、taint再検証、circuit close、`NORMAL`復帰を証明しなければなりません。
-無人運転をread-only-firstで始める場合は、このpreflightと対象repositoryの資源分離が通るまで、
-非acting周期だけを登録します。
+無人運転をread-only-firstで始める場合は、決定的なmachine tickだけを登録します。
 
 ```bash
 integrations/claude-code/scheduler-install.sh --role supervisor --cycles tick
 ```
 
-backlogへのwriteが承認されたら`discover`を追加し、acting条件を実証した後にだけ`work`を追加します。
-同じroleでインストーラを再実行すると、選択した周期集合へ置き換わります。
+macOSでは`--backend auto`がlaunchd、それ以外ではcronを使います。bounded smoke runが対応する
+`tick_planned` receiptを書き、backend readbackが成功して初めてinstall完了です。
+`scheduler-status.sh --root "$ORG_LEDGER_ROOT"`で確認できます。persistentな`work`と`discover`は
+現在fail closedです。receiptを検証するexecutor adapterが入るまでは、acting周期をattendedな
+harness loopだけで実行します。
 
 ## 5. Effect cap
 
