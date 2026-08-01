@@ -6,6 +6,15 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 2.0.5 — executable shell data boundaries
+
+### Fixed
+
+- Stop hook policies from treating the body of a standalone, quoted `cat` heredoc as executable
+  shell source, so observation files can quote held GitHub, integration, and destructive commands.
+- Keep interpreter input, shell pipelines/process substitutions, unquoted expanding heredocs, and
+  ambiguous multi-command forms fail-closed.
+
 ## 2.0.4 — quiet RED monitoring
 
 ### Fixed
