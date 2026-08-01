@@ -6,6 +6,18 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 2.0.19 — deterministic resilience exercise
+
+### Added
+
+- Add a sub-three-minute reviewer-outage fixture using a temporary workspace, injected dependency,
+  local tracker artifact, and the production judge-preflight, adaptive-envelope, and ledger paths.
+- Require a fault receipt proving the injected marker reached the decision boundary, reject no-op
+  faults, and assert allowed/forbidden actions, critical functions, missing evidence, taint, and the
+  declared acceptable outcome without using a resilience score.
+- Preserve the missing `DEGRADED` operational-state transition as one intentional Phase-A RED gap
+  that Issue #45 must turn GREEN through the same fixture.
+
 ## 2.0.18 — bounded adaptation contract
 
 ### Added

@@ -144,6 +144,22 @@ overrides** over that spec — see [REFERENCE.md](REFERENCE.md).)
 
 ## 5. Run a department (headless)
 
+### Three-minute reviewer-outage exercise
+
+Before enabling an acting scheduler, run the deterministic resilience fixture. It uses a temporary
+workspace, local tracker artifact, injected dependency failure, and the real judge-preflight,
+adaptive-envelope, and ledger paths; it needs no network, model subscription, credential, or real
+repository mutation:
+
+```bash
+orgforge resilience-exercise reviewer-outage --expect RED
+```
+
+From a source checkout, use `python3 tools/resilience_exercise.py reviewer-outage --expect RED`.
+Phase A intentionally reports `RED` only for the missing `DEGRADED` operational-state transition;
+safe stop is recorded as an acceptable outcome, not counted as the failure. Issue #45 turns this
+same fixture GREEN rather than replacing it with a second test path.
+
 A "department" is a Claude Code (or Codex) turn pointed at one role's profile. Use the runner —
 it projects the role onto the harness and attaches the plugin so the guardrails apply:
 

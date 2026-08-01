@@ -132,6 +132,13 @@ distinguishes `proposed | active | expired | reverted | adopted`; `activate`, `a
 `outcome` records safe stop, scope reduction, goal abandonment, human handback, and observe-only as
 valid outcomes; `experiment` plus receipt-backed `adopt` keeps permanent practice changes human-held.
 
+`orgforge resilience-exercise reviewer-outage --expect RED` runs the bounded Phase-A fault fixture
+through production judge preflight, adaptive authorization, and the ephemeral real ledger. The
+injected marker must appear in a fault receipt or the exercise is `INVALID`; a no-op fault can never
+make it GREEN. Before #45, the sole expected RED gap is the missing `DEGRADED` transition. Output
+separates observed facts, acceptable outcome, multi-potential evidence, and remaining human judgment
+without producing a resilience score.
+
 ---
 
 ## 3. The org's files
