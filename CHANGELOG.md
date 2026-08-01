@@ -6,6 +6,17 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 2.0.9 — reliable org schema migration
+
+### Fixed
+
+- Compare existing event-class fields from parsed YAML rather than comma-splitting inline maps, so
+  comments cannot hide every field that follows them from `ledger schema --fix`.
+- Resolve aligned inline-map declarations regardless of spacing and add every missing field without
+  replacing organization-owned schema rules.
+- Declare the `risk_accepted` field emitted by provisional cross-harness verdicts and verify that an
+  old Tatekae schema can be additively migrated until the real `survives` command succeeds.
+
 ## 2.0.8 — worktree-aware integration guard
 
 ### Fixed
