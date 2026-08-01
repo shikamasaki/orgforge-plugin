@@ -6,6 +6,16 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 2.0.7 — usable one-shot integration bypass
+
+### Fixed
+
+- Honor `ORG_ALLOW_MANUAL_MERGE=1` when it is scoped to the sole direct
+  `git merge`/`rebase`/`cherry-pick` command in the same Bash call, where PreToolUse can verify and
+  record the declaration before Bash starts.
+- Keep compound commands, pipelines, substitutions, multiple integrations, declarations attached
+  to another command, and unrecordable bypasses fail-closed.
+
 ## 2.0.6 — real integration branch resolution
 
 ### Fixed

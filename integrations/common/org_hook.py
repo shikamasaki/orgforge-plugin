@@ -663,16 +663,16 @@ _GH_WRITE = {
 _SHELL_ASSIGNMENT = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$", re.S)
 
 
-def _command_scoped_manual_gh(cmd):
-    """Whether this Bash call gives its sole ``gh issue`` write the one-shot bypass.
+def _command_scoped_declaration(cmd, variable, is_action):
+    """Whether this Bash call gives its sole guarded action a one-shot bypass.
 
-    PreToolUse runs before Bash, so ``ORG_ALLOW_MANUAL_GH=1 gh ...`` cannot affect the hook
+    PreToolUse runs before Bash, so an assignment inside the command cannot affect the hook
     process's ``os.environ``. Read the declaration from the command while preserving shell scope:
     a prefix assignment applies to that simple command, and ``export`` persists across later
     ``;``/``&&``/newline segments but not out of a pipeline. Merely echoing the declaration,
-    assigning it to another command, or unsetting it before ``gh`` must not unlock the write.
-    Exactly one issue mutation is allowed per Bash call so one audit row always represents one
-    mutation; a declared write cannot piggyback an undeclared (or second declared) write.
+    assigning it to another command, or unsetting it before the guarded action must not unlock it.
+    Exactly one guarded action is allowed per Bash call so one audit row always represents one
+    mutation; a declared action cannot piggyback an undeclared (or second declared) action.
     """
     if not isinstance(cmd, str) or len(cmd) > 64 * 1024:
         return False
@@ -701,7 +701,7 @@ def _command_scoped_manual_gh(cmd):
             declared = None
             for token in parts[1:]:
                 match = _SHELL_ASSIGNMENT.match(token)
-                if match and match.group(1) == "ORG_ALLOW_MANUAL_GH":
+                if match and match.group(1) == variable:
                     declared = match.group(2) == "1"
             # Each side of a pipeline runs in its own environment; an export there does not
             # establish the variable for a later command in the parent shell.
@@ -709,7 +709,7 @@ def _command_scoped_manual_gh(cmd):
                 exported = declared
             return "state", None
 
-        if parts[0] == "unset" and "ORG_ALLOW_MANUAL_GH" in parts[1:]:
+        if parts[0] == "unset" and variable in parts[1:]:
             if separator != "|":
                 exported = False
             return "state", None
@@ -720,7 +720,7 @@ def _command_scoped_manual_gh(cmd):
             match = _SHELL_ASSIGNMENT.match(parts[index])
             if not match:
                 break
-            if match.group(1) == "ORG_ALLOW_MANUAL_GH":
+            if match.group(1) == variable:
                 shell_local = match.group(2) == "1"
             index += 1
 
@@ -740,12 +740,12 @@ def _command_scoped_manual_gh(cmd):
                 if token in {"-u", "--unset", "-C", "--chdir", "-S", "--split-string"}:
                     if index + 1 >= len(parts):
                         return "other", None
-                    if token in {"-u", "--unset"} and parts[index + 1] == "ORG_ALLOW_MANUAL_GH":
+                    if token in {"-u", "--unset"} and parts[index + 1] == variable:
                         env_unsets = True
                     index += 2
                     continue
                 if token.startswith("--unset="):
-                    env_unsets = token.split("=", 1)[1] == "ORG_ALLOW_MANUAL_GH"
+                    env_unsets = token.split("=", 1)[1] == variable
                     index += 1
                     continue
                 if token.startswith("--chdir=") or token.startswith("--split-string="):
@@ -762,14 +762,10 @@ def _command_scoped_manual_gh(cmd):
             match = _SHELL_ASSIGNMENT.match(parts[index])
             if not match:
                 break
-            if match.group(1) == "ORG_ALLOW_MANUAL_GH":
+            if match.group(1) == variable:
                 env_local = match.group(2) == "1"
             index += 1
-        if index + 2 >= len(parts):
-            return "other", None
-        is_write = (parts[index:index + 2] == ["gh", "issue"]
-                    and parts[index + 2] in {action for _, action in _GH_WRITE})
-        if not is_write:
+        if not is_action(parts[index:]):
             return "other", None
         if env_local is not None:
             return "write", env_local
@@ -792,6 +788,31 @@ def _command_scoped_manual_gh(cmd):
         else:
             segment.append(token)
     return not has_other_command and writes == [True]
+
+
+def _command_scoped_manual_gh(cmd):
+    """Whether the sole command is a declared ``gh issue`` mutation."""
+    def is_issue_write(parts):
+        return (len(parts) >= 3 and parts[:2] == ["gh", "issue"]
+                and parts[2] in {action for _, action in _GH_WRITE})
+
+    return _command_scoped_declaration(cmd, "ORG_ALLOW_MANUAL_GH", is_issue_write)
+
+
+def _command_scoped_manual_merge(cmd):
+    """Whether the sole command is a declared direct git integration.
+
+    The hook process cannot see ``ORG_ALLOW_MANUAL_MERGE=1 git merge ...`` in ``os.environ``
+    because PreToolUse runs before Bash. Keep the advertised one-shot escape genuinely one-shot:
+    only a direct git merge/rebase/cherry-pick simple command is accepted here. Pipelines, command
+    substitutions, a second command, or a declaration scoped to a different command fail closed.
+    """
+    def is_git_integration(parts):
+        return (len(parts) >= 2 and parts[0] == "git"
+                and parts[1] in {verb[1] for verb in _MERGE_VERBS})
+
+    return _command_scoped_declaration(
+        cmd, "ORG_ALLOW_MANUAL_MERGE", is_git_integration)
 
 
 def _gh_bypass(tool_name, ti):
@@ -1605,7 +1626,8 @@ def main():
 
     # 保護ブランチへの直接統合を hold（台帳の有無に依存しない形状検査）。宣言があれば通すが、
     # **通したことを台帳に残す** — 迂回が記録に残らないまま常用されるのを防ぐ。
-    if os.environ.get("ORG_ALLOW_MANUAL_MERGE") == "1":
+    if (os.environ.get("ORG_ALLOW_MANUAL_MERGE") == "1"
+            or _command_scoped_manual_merge(_command_text(tool_input))):
         byp = _integration_bypass(tool_name, tool_input)
         if byp and LEDGER_ROOT:
             # **迂回そのものを記録する。** 宣言を許すが、記録に残らない迂回は許さない —
