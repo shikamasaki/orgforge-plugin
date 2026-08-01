@@ -116,7 +116,7 @@ if [ "$UNINSTALL" = 0 ]; then
   # **daemon が使う python で検査する。** 利用者の python3 に入っていても、LaunchDaemon が
   # 起動する /usr/bin/python3 に無ければ writerd は schema を読めない（実測で指摘された）。
   if ! PYTHONNOUSERSITE=1 "${DAEMON_PYTHON}" -c 'import yaml' 2>/dev/null; then
-    fail "$(cat <<'EOF' 
+    fail "$(cat <<EOF
 ${DAEMON_PYTHON} に PyYAML が無い（writerd が schema を読むのに要る）。
   LaunchDaemon はここで起動するので、利用者の python3 に入っていても足りない。
   **とくに ~/Library/Python/*/lib/python/site-packages にある場合は無効である** —
@@ -138,7 +138,7 @@ ${DAEMON_PYTHON} に PyYAML が無い（writerd が schema を読むのに要る
          /opt/homebrew/bin/python3 -m pip install pyyaml
          sudo $0 --org-root '<org>' --daemon-python /opt/homebrew/bin/python3
 
-  **`--break-system-packages` でシステム python に入れることは勧めない** — OS の管理下にある
+  **--break-system-packages でシステム python に入れることは勧めない** — OS の管理下にある
   処理系を書き換えると、他の何かが壊れたときに切り分けられなくなる。
   検査したコマンド: PYTHONNOUSERSITE=1 ${DAEMON_PYTHON} -c 'import yaml'
 EOF
@@ -162,14 +162,27 @@ if [ "$UNINSTALL" = 1 ]; then
   LABEL="com.orgforge.writerd.${ORG_NAME}"
   PLIST="/Library/LaunchDaemons/${LABEL}.plist"
   BACKUP_DIR="/usr/local/var/orgforge/backup/${ORG_NAME}"
+  CONFIG="/usr/local/etc/orgforge/${ORG_NAME}.conf"
   say "namespace: ${ORG_NAME}"
   echo
   echo "── uninstall（**台帳は消さない**。順序: daemon停止 → 書戻し → 実体化 → 所有者復元）"
   # ① daemon を止める。**先に止めないと、書き戻している途中に writer が書く。**
   if [ -f "${PLIST}" ]; then
-    run "launchctl bootout system '${PLIST}' 2>/dev/null || true"
+    # **停止の失敗を握り潰さない。** 止まっていない writer が、書き戻している最中に書く。
+    if [ "${DRY_RUN}" = 0 ]; then
+      launchctl bootout system "${PLIST}" 2>/dev/null || true
+      sleep 1
+      if launchctl print "system/${LABEL}" >/dev/null 2>&1; then
+        fail "LaunchDaemon を止められなかった（system/${LABEL} がまだ居る）。
+  **止まっていない writer が、書き戻している最中に台帳へ書く。**
+  手で止めてから再実行すること:
+    sudo launchctl bootout system ${PLIST}"
+      fi
+    else
+      printf '  [dry-run] launchctl bootout system %s（停止を確認する）\n' "${PLIST}"
+    fi
     run "rm -f '${PLIST}'"
-    say "① LaunchDaemon を停止して外した"
+    say "① LaunchDaemon を停止した（停止を確認済み）"
   else
     say "① LaunchDaemon は無い"
   fi
@@ -178,23 +191,101 @@ if [ "$UNINSTALL" = 1 ]; then
   OWNER="$(cat "${BACKUP_DIR}/original-owner" 2>/dev/null || true)"
   if [ -z "$ROOTP" ] && [ -n "${ORG_ROOT}" ]; then ROOTP="${ORG_ROOT}"; fi
 
+  # **既定は「復元していない」。** 復元ループに入らなかったとき（org root が移動・消失した等）に
+  # 「復元済み」と見なすと、権威側にしか無い最新データを消す = 永続データ損失。
+  # 消してよいのは、**戻したことを確かめられたときだけ**である（実測で指摘された）。
+  RESTORE_OK=0
+
   # ②③ 権威側の内容を書き戻し、symlink を実体に置き換える。
   if [ -n "$ROOTP" ] && [ -d "$ROOTP" ]; then
+    RESTORE_OK=1
     for pair in ".orgforge/ledger:ledger" ".orgforge/trust:trust" \
                 "ledger-schema.yaml:ledger-schema.yaml"; do
-      cur="$ROOTP/${pair%%:*}"; src="${AUTHORITATIVE}/${pair##*:}"
-      old_copy="$ROOTP/${pair%%:*}.pre-writer"
-      if [ -L "$cur" ]; then
-        run "rm -f '$cur'"
-        if [ -e "$src" ]; then
-          run "cp -R '$src' '$cur'"
-          say "② $(basename "$cur") に権威側の内容を書き戻した"
-        elif [ -e "$old_copy" ]; then
-          run "mv '$old_copy' '$cur'"
-          say "② $(basename "$cur") を install 前の内容に戻した"
+      cur="${ROOTP}/${pair%%:*}"; src="${AUTHORITATIVE}/${pair##*:}"
+      old_copy="${ROOTP}/${pair%%:*}.pre-writer"
+      # **symlink が無いことを「戻し済み」と読んではいけない。**
+      # caller は自分の org tree を動かせる（例: .orgforge を rename する）。すると symlink は
+      # 消え、権威側だけが唯一の最新の写しになる。ここで continue すると ⑤ がそれを消す
+      # = 永続データ損失（実測で指摘された）。
+      # **「在ること」を「戻っていること」と読んではいけない。**
+      # caller は symlink の代わりに **自分の偽の実体** を置ける。それを「復元済み」と認めると、
+      # ⑤ が権威側の最新版を消し、org 側には caller が置いた古い中身だけが残る
+      # （= 永続データ損失。実測で確認した4つ目の変種）。
+      # 飛ばしてよいのは **権威側に何も無いとき** か、**中身が一致するとき** だけである。
+      if [ ! -L "${cur}" ] && [ -e "${cur}" ]; then
+        if [ ! -e "${src}" ]; then
+          continue                     # 権威側に無い = 戻すものが無い
+        fi
+        # **数は caller が合わせられる。** ファイル数の一致を「同じ中身」と読むと、
+        # 数だけ揃えた偽物で権威側の最新版を消せる（実測で確認した5つ目の変種）。
+        # **中身の digest で比べる** — caller はデータを持っていない限り一致させられない。
+        # `-type f` だけだと **symlink が数えられない** — caller は中身を一致させたまま
+        # symlink を紛れ込ませられる（実測）。名前と種別も digest に入れる。
+        # **名前だけでは足りない。** 同じ名前の「ディレクトリ」と「symlink」は名前が同じなので、
+        # 名前だけを入れると同一と誤認する（実測）。**種別と symlink の向き先**まで入れる。
+        _digest() (
+          cd "$1" 2>/dev/null || return 0
+          { find . -type f -exec shasum -a 256 {} \;
+            find . \! -type f -exec stat -f 'entry %N type=%HT link=%Y' {} \; ; } \
+            | sort | shasum -a 256 | cut -d' ' -f1
+        )
+        d_s="$(_digest "${src}")"
+        d_c="$(_digest "${cur}")"
+        if [ -n "${d_s}" ] && [ "${d_s}" = "${d_c}" ]; then
+          continue                     # 中身が同一 = 戻っている
+        fi
+        say "  ！$(basename "${cur}") に実体が在るが、権威側と中身が違う。"
+        say "    **「在る」を「戻った」と読まない** — 権威側を消さずに退避する"
+        run "mv '${cur}' '${cur}.found-$$'"
+      fi
+      if [ ! -L "${cur}" ]; then
+        if [ -e "${src}" ]; then
+          say "  ！$(basename "${cur}") の symlink が無いのに権威側に実体が在る。"
+          say "    org tree が動かされた可能性がある — **消さずに復元を試みる**"
+          run "mkdir -p '$(dirname "${cur}")'"
+        else
+          continue                     # 権威側にも無い = 消すものが無い
         fi
       fi
-      [ -e "$old_copy" ] && say "  （install 前の控え: $old_copy — 確認して消すこと）"
+      # **順序が安全性である。** 先に symlink を消すと、コピーが失敗した時点で org 側から
+      # 実体が消え、再実行時は `[ -L ]` が偽なので復元を飛ばし、⑤が権威データを消す
+      # （= 唯一の写しを失う）。実測で指摘された。
+      #   ① 隣に新しい実体を作る（cur には触れない）
+      #   ② 中身を検証する
+      #   ③ atomic に差し替える
+      #   ④ そのあとで初めて古い symlink を消す
+      staged="${cur}.restoring.$$"
+      run "rm -rf '${staged}'"
+      if [ -e "${src}" ]; then
+        run "cp -R '${src}' '${staged}'"
+        FROM="権威側"
+      elif [ -e "${old_copy}" ]; then
+        run "cp -R '${old_copy}' '${staged}'"
+        FROM="install 前の控え"
+      else
+        say "  ！$(basename "${cur}") の復元元が無い（権威側も控えも）— **symlink を残す**"
+        RESTORE_OK=0
+        continue
+      fi
+      # ② 検証。**中身を確かめてから差し替える。**
+      if [ "${DRY_RUN}" = 0 ]; then
+        if [ -d "${staged}" ]; then
+          n_src="$(find "${src}" -type f 2>/dev/null | wc -l | tr -d ' ')"
+          n_dst="$(find "${staged}" -type f 2>/dev/null | wc -l | tr -d ' ')"
+          if [ "${n_src}" != "${n_dst}" ]; then
+            say "  ！$(basename "${cur}") のコピーが不完全（${n_src} → ${n_dst}）— **中止**"
+            rm -rf "${staged}"
+            RESTORE_OK=0
+            continue
+          fi
+        fi
+        sync 2>/dev/null || true
+      fi
+      # ③④ atomic に置き換え、そのあとで symlink を消す
+      run "rm -f '${cur}'"
+      run "mv '${staged}' '${cur}'"
+      say "② $(basename "${cur}") を${FROM}の内容で実体化した"
+      [ -e "${old_copy}" ] && say "  （install 前の控え: ${old_copy} — 確認して消すこと）"
     done
     say "③ symlink を実体に置き換えた"
     # ④ 所有者を戻す。**書き戻したあとに行う** — 先に戻すと writer が書けなくなる。
@@ -209,6 +300,22 @@ if [ "$UNINSTALL" = 1 ]; then
   fi
 
   # ⑤ この org のものだけを消す。**共有物は他 org が残る間は消さない。**
+  # **復元できていないなら、権威データも backup も消さない。** 消すと唯一の写しを失う
+  # （実測で指摘された経路）。再実行できる状態のまま止める。
+  if [ -z "$ROOTP" ] || [ ! -d "$ROOTP" ]; then
+    say "！org root が見つからない: ${ROOTP:-（記録なし）}"
+    say "  移動されたか消されている。**権威側にしか無いデータを消さない。**"
+  fi
+  if [ "${RESTORE_OK}" = 0 ]; then
+    run "rm -rf '${SOCK_PARENT}'"
+    say "⑤ socket だけ消した。**権威データと backup は残す** — 復元できていない。"
+    say "  内容: ${AUTHORITATIVE}"
+    say "  控え: ${BACKUP_DIR}"
+    say "  原因を確かめてから、同じコマンドを再実行すること（この uninstall は冪等である）。"
+    echo
+    echo "✗ uninstall は完了していない。**データは消していない。**"
+    exit 1
+  fi
   run "rm -rf '${SOCK_PARENT}' '${AUTHORITATIVE}' '${BACKUP_DIR}' '${CONFIG}'"
   say "⑤ この org（${ORG_NAME}）の socket / 権威データ / backup / 設定を消した"
   REMAINING="$(ls -1 /usr/local/var/orgforge/orgs 2>/dev/null | wc -l | tr -d ' ')"
@@ -234,12 +341,17 @@ echo "── サービスユーザー"
 if id -u "${SERVICE_USER}" >/dev/null 2>&1; then
   say "${SERVICE_USER} は既にある（uid=$(id -u "${SERVICE_USER}")）— 作り直さない"
 else
-  # 500 未満の uid を探す（macOS の役割アカウントの慣習）
+  # 500 未満の uid を探す（macOS の役割アカウントの慣習）。
+  # **uid と gid の両方が空いている番号でなければならない。** 同じ番号を
+  # PrimaryGroupID にも使うので、gid が既存だと **writer の group を他人と共有する**
+  # ことになり、group 権限で台帳へ届く経路ができる（このマシンでは 395-400 が該当した）。
   NEXT_UID=""
   for u in $(seq 300 498); do
-    if ! dscl . -search /Users UniqueID "$u" 2>/dev/null | grep -q .; then NEXT_UID="$u"; break; fi
+    if dscl . -search /Users UniqueID "$u" 2>/dev/null | grep -q .; then continue; fi
+    if dscl . -search /Groups PrimaryGroupID "$u" 2>/dev/null | grep -q .; then continue; fi
+    NEXT_UID="$u"; break
   done
-  [ -n "$NEXT_UID" ] || fail "空いている役割アカウント用 uid が見つからない（300-498）"
+  [ -n "$NEXT_UID" ] || fail "uid と gid が **両方** 空いている番号が見つからない（300-498）"
   say "uid=$NEXT_UID を使う"
   run "dscl . -create '/Groups/${SERVICE_GROUP}'"
   run "dscl . -create '/Groups/${SERVICE_GROUP}' PrimaryGroupID '$NEXT_UID'"
@@ -364,6 +476,28 @@ if [ -d "${ORG_ROOT}/.orgforge/trust" ] && [ ! -L "${ORG_ROOT}/.orgforge/trust" 
   run "ln -s '${AUTHORITATIVE}/trust' '${ORG_ROOT}/.orgforge/trust'"
   say "鍵 registry を ${AUTHORITATIVE}/trust へ移した"
 fi
+# **constitution を root 所有で固定する。**
+# ここに宣言（require_attested_identity など）が入っている。caller が書ける場所に置いたままだと、
+# caller が宣言を偽に書き換えて強制を消せる — **検査の入力を、検査される側が書けてはいけない。**
+# また daemon は org の外で動くので、cwd から探させてはいけない（実測: 導出に失敗し、
+# 未認証 admission が通った）。よってコピーして、パスを明示的に渡す。
+if [ -f "${ORG_ROOT}/constitution.yaml" ] && [ ! -L "${ORG_ROOT}/constitution.yaml" ]; then
+  run "cp '${ORG_ROOT}/constitution.yaml' '${AUTHORITATIVE}/constitution.yaml'"
+  run "chown root:wheel '${AUTHORITATIVE}/constitution.yaml'"
+  run "chmod 0644 '${AUTHORITATIVE}/constitution.yaml'"
+  # **写しは古くなる。** org 側は caller が編集できるまま残す（宣言を読むのは人間でもある）。
+  # だが編集しても daemon には届かない — 届いたら caller が強制を消せてしまうからである。
+  # 「編集したのに効かない」を黙って起こさないよう、**食い違いを見えるようにする**。
+  say "  constitution を root 所有で固定した: ${AUTHORITATIVE}/constitution.yaml"
+  say "  **org 側 (${ORG_ROOT}/constitution.yaml) を編集しても daemon には届かない。**"
+  say "  宣言を変えたら、この installer を再実行して固定し直すこと。"
+  say "  食い違いは writerd が起動時に警告する。"
+elif [ ! -f "${AUTHORITATIVE}/constitution.yaml" ]; then
+  fail "constitution.yaml が無い: ${ORG_ROOT}/constitution.yaml
+  **宣言が無いまま writer を動かさない。** require_attested_identity が子プロセスに届かず、
+  未認証の admission が通る（実測で指摘された経路）。"
+fi
+
 if [ -f "${ORG_ROOT}/ledger-schema.yaml" ] && [ ! -L "${ORG_ROOT}/ledger-schema.yaml" ]; then
   run "cp '${ORG_ROOT}/ledger-schema.yaml' '${AUTHORITATIVE}/ledger-schema.yaml'"
   run "chown root:wheel '${AUTHORITATIVE}/ledger-schema.yaml'"
@@ -412,6 +546,13 @@ else
          プラグインのテンプレートに fallback する — org が変えた規則ではなく、テンプレートの
          規則で検証されることになる（実測で指摘された）。 -->
     <string>--schema</string><string>${AUTHORITATIVE}/ledger-schema.yaml</string>
+    <!-- **宣言を固定する。** daemon は org の外で動くので、台帳のパスから org root を
+         導出することはできない（実測: 導出に失敗し、未認証 admission が通った）。 -->
+    <string>--constitution</string><string>default=${AUTHORITATIVE}/constitution.yaml</string>
+    <!-- **trust store を固定する。** installer は trust を ${AUTHORITATIVE} へ移し、
+         org 側を .pre-writer に改名する。ここで渡さないと daemon（cwd=/）は鍵 registry を
+         見つけられず、**正しく署名された receipt もすべて拒否される**（実測で指摘された）。 -->
+    <string>--trust</string><string>default=${AUTHORITATIVE}/trust/keys.json</string>
     <!-- **caller UID を配線する。** socket は 0666 なので繋げること自体は誰でもできる —
          繋げることと書けることは別である。 -->
     <string>--allow-uid</string><string>${CALLER_UID}</string>

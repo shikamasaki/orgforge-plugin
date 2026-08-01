@@ -56,6 +56,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 PROTOCOL = 1
+# **writer の内側であることの証拠。** 環境変数の値そのものを秘密にする —
+# `=1` のような当てられる値にすると、caller が名乗れてしまう（実測でそうなった）。
+_INSIDE_WRITER_TOKEN = __import__("secrets").token_hex(32)
+
 _MAX_REQUEST = 1 << 20          # 1 MiB。これを超える要求は読まずに拒否する
 _NONCE_TTL = 3600               # 使用済み nonce を覚えておく時間（秒）
 
@@ -402,6 +406,7 @@ class Writer:
         self.caller_uid_differs = caller_uid_differs
         self.sock_path = None                   # serve が設定する
         self.allowed_uids = allowed_uids        # None = 制限なし（段階A）
+        self.org_constitutions = {}             # {org: constitution path}。宣言を子に届けるため
         # **再起動で忘れない。** プロセス内だけに持つと、daemon を落として上げれば同じ要求を
         # 再送できる（実測で指摘された）。writer が所有する台帳の隣に残す。
         self.nonces = _NonceStore(
@@ -501,12 +506,23 @@ class Writer:
             env["ORG_TRUST_STORE"] = self.trust
         if self.policy:
             env["ORG_POLICY_FILE"] = self.policy
+        # **org の宣言を子プロセスに届ける。** daemon は org の外で動くので、cwd から
+        # constitution を探せない。届かないと `_enforce_attested()` が「宣言なし」と判定し、
+        # **writerd 経由なら未認証 admission が通る**（実測で指摘された）。
+        con = self.org_constitutions.get(org)
+        if con:
+            env["ORG_CONSTITUTION"] = con
         # **要求ごとに実測する。** 起動時の判定では caller が誰か分からない。
         env["ORG_WRITER_ISOLATION"] = measured_isolation(
             self.sock_path, list(self.roots.values()), peer_uid=peer_uid)
         env["ORG_WRITER_PEER_UID"] = str(peer_uid) if peer_uid is not None else ""
         env["ORG_WRITER_PEER_PID"] = str(peer_pid) if peer_pid is not None else ""
-        env["ORG_INSIDE_WRITER"] = "1"          # ledger.py がこれを見て直接書き込みを許す
+        # **caller が書ける値を、検査の入力にしない。** 実測（再監査）: `ORG_INSIDE_WRITER=1` を
+        # 環境に足すだけで、単独署名者が cross-harness の admission を直接書けたし、
+        # single-writer gate も素通りした。「1 かどうか」は誰でも書ける。
+        # そこで **起動ごとに推測できない token を作り、それを知っている者だけを writer 内部**
+        # とみなす。token は daemon のメモリにしかなく、caller には渡らない。
+        env["ORG_INSIDE_WRITER"] = _INSIDE_WRITER_TOKEN
         env.pop("ORG_WRITER_SOCKET", None)      # 再帰を防ぐ
         with self.lock:
             try:
@@ -519,6 +535,40 @@ class Writer:
                 "stdout": r.stdout, "stderr": r.stderr,
                 "recorded_by_peer_uid": peer_uid,
                 "workload_isolation": env["ORG_WRITER_ISOLATION"]}, r.returncode == 0
+
+
+def _trust_store_defect(path):
+    """trust store が使えない理由を返す。使えるなら None。
+
+    **検証器を二重に書かない。** 判定は `identity.load_trust_store()` に任せる —
+    ここで独自に「壊れている」の定義を書くと、receipt を実際に検証する側とずれて、
+    「daemon は通したのに検証は落ちる（あるいはその逆）」が起きる。
+    """
+    import os as _os
+    try:
+        _here = _os.path.dirname(_os.path.abspath(__file__))
+        if _here not in sys.path:
+            sys.path.insert(0, _here)
+        import identity as _identity
+    except Exception as e:                      # identity を読めないなら判定できない
+        return f"identity module を読めないので trust を検証できない: {e}"
+    _saved = _os.environ.get("ORG_TRUST_STORE")
+    _os.environ["ORG_TRUST_STORE"] = path
+    try:
+        store, err = _identity.load_trust_store()
+    except Exception as e:
+        return f"trust store を検証できない: {e}"
+    finally:
+        if _saved is None:
+            _os.environ.pop("ORG_TRUST_STORE", None)
+        else:
+            _os.environ["ORG_TRUST_STORE"] = _saved
+    if err:
+        return err
+    if not store or not store.get("keys"):
+        return "trust store に鍵が1つも無い。receipt を検証できない。"
+    return None
+
 
 
 def serve(a):
@@ -564,6 +614,29 @@ def serve(a):
         if err:
             print(f"writerd: {err}", file=sys.stderr)
             return 4
+    # **壊れた trust なら socket を作る前に止める。** 実測（再監査5回目）で計装したところ、
+    # 検証が bind / listen の **後**にあり、socket が一瞬できてから消えていた。
+    # 接続は受け付けないので穴ではないが、**「listen した」という信号を出してから死ぬ**のは
+    # 観測する側にとって嘘である。flag / manifest / env のどれで決まっても、ここを通る。
+    # `w`（Writer）は bind の後で作られるので、ここでは **同じ3つの出所**から直接決める。
+    # 優先順位は下の代入と同じ: 明示 --trust > manifest > env。
+    _flag_trust = None
+    for _pair in (getattr(a, "trust", None) or []):
+        if "=" in _pair:
+            _flag_trust = _pair.split("=", 1)[1]
+    _mani = (manifest or {})
+    _mani_trust = _mani.get("trust")
+    if not _mani_trust and isinstance(_mani.get("orgs"), dict) and _mani["orgs"]:
+        _first = _mani["orgs"].get(sorted(_mani["orgs"])[0]) or {}
+        _mani_trust = _first.get("trust")
+    _effective_trust = _flag_trust or _mani_trust or os.environ.get("ORG_TRUST_STORE")
+    if _effective_trust:
+        _bad = _trust_store_defect(_effective_trust)
+        if _bad:
+            sys.stderr.write(f"writerd: trust store が使えない: {_effective_trust}\n  {_bad}\n"
+                             f"  **壊れた trust で起動すると receipt を検証できないまま"
+                             f"受け付けてしまう。**\n")
+            return 2
     if os.path.exists(sock):
         os.unlink(sock)
     srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -592,6 +665,88 @@ def serve(a):
     w = Writer(roots, require_root_owned=a.require_root_owned, isolation=iso,
                schema=a.schema, allowed_uids=allowed)
     w.sock_path = sock
+    # **constitution は推測しない。** installer は台帳の実体を
+    # /usr/local/var/orgforge/orgs/<ns>/ledger に置くので、「台帳の親の親が org root」
+    # という導出は Stage B では成立しない（実測で指摘された）。導出できないまま起動すると
+    # require_attested_identity が届かず、**未認証 admission が通る**。
+    # よって: 明示フラグ > manifest > 導出、の順に決め、どれも無ければ **起動しない**。
+    # **明示指定は manifest より優先する。** installer は plist で固定して渡す。
+    # 渡されなければ従来どおり manifest を見る。どちらも無ければ trust 無しで起動し、
+    # receipt は検証できない（= authenticated mode では記録できない。fail-closed）。
+    for _pair in (getattr(a, "trust", None) or []):
+        if "=" not in _pair:
+            sys.stderr.write(f"writerd: --trust は NAME=PATH の形で渡すこと: {_pair}\n")
+            return 2
+        _k, _v = _pair.split("=", 1)
+        if not os.path.exists(_v):
+            sys.stderr.write(f"writerd: trust store が無い: {_v}\n")
+            return 2
+        # **在ることと使えることは別である。** 実測（B2 再監査）: 不正な JSON や
+        # 秘密鍵の混入した trust store を渡しても daemon は起動して接続を受け付けた
+        # — 存在確認しかしていなかったため。**壊れた trust で listen するなら、
+        # receipt は検証できないのに検証済みのように振る舞う**（= 信号が壊れていることが
+        # 分からない）。ここで中身まで見て、駄目なら起動しない。
+        _bad = _trust_store_defect(_v)
+        if _bad:
+            sys.stderr.write(f"writerd: trust store が使えない: {_v}\n  {_bad}\n"
+                             f"  **壊れた trust で起動すると receipt を検証できないまま"
+                             f"受け付けてしまう。**\n")
+            return 2
+        w.trust = _v          # 現状 Writer は org ごとの trust を1つだけ持つ
+
+    constitutions = {}
+    for _pair in (getattr(a, "constitution", None) or []):
+        if "=" not in _pair:
+            sys.stderr.write(f"writerd: --constitution は NAME=PATH の形で渡すこと: {_pair}\n")
+            return 2
+        _k, _v = _pair.split("=", 1)
+        constitutions[_k] = _v
+
+    for _n, _led in roots.items():
+        _spec = ((manifest or {}).get("orgs") or {}).get(_n) or {}
+        _con = constitutions.get(_n) or _spec.get("constitution")
+        if not _con:
+            _abs = os.path.abspath(_led)
+            if os.path.basename(os.path.dirname(_abs)) == ".orgforge":
+                _cand = os.path.join(os.path.dirname(os.path.dirname(_abs)), "constitution.yaml")
+                if os.path.exists(_cand):
+                    _con = _cand
+        if _con and not os.path.exists(_con):
+            sys.stderr.write(f"writerd: constitution が無い: {_con}\n")
+            return 2
+        if _con:
+            w.org_constitutions[_n] = os.path.abspath(_con)
+            # **写しが古くなったことを、黙って起こさない。**
+            # 固定した写しは org 側の編集を受け取らない（受け取ったら caller が強制を消せる）。
+            # だが「編集したのに効かない」を無言で起こすと、宣言が効いていると誤認したまま
+            # 運用が続く — **信号が壊れていることが分からない** 形になる。起動時に言う。
+            _org_side = None
+            _abs = os.path.abspath(_led)
+            if os.path.basename(os.path.dirname(_abs)) == ".orgforge":
+                _org_side = os.path.join(os.path.dirname(os.path.dirname(_abs)),
+                                         "constitution.yaml")
+            if _org_side and os.path.exists(_org_side) and \
+                    os.path.abspath(_org_side) != os.path.abspath(_con):
+                try:
+                    with open(_org_side, "rb") as _f1, open(_con, "rb") as _f2:
+                        if _f1.read() != _f2.read():
+                            sys.stderr.write(
+                                f"writerd: 警告 — org 側の constitution が固定した写しと違う。\n"
+                                f"  効いているのは: {_con}\n"
+                                f"  編集されたのは: {_org_side}\n"
+                                f"  **org 側を編集しても daemon には届かない。**"
+                                f" installer を再実行して固定し直すこと。\n")
+                except OSError:
+                    pass
+        else:
+            # **宣言の在り処が分からないまま書き込みを受け付けない。**
+            sys.stderr.write(
+                f"writerd: org '{_n}' の constitution を決められない。\n"
+                f"  台帳: {_led}\n"
+                f"  --constitution {_n}=<path> を渡すか、manifest に constitution を書くこと。\n"
+                f"  **これが無いと require_attested_identity が子プロセスに届かず、\n"
+                f"    未認証の admission が通る**（実測で指摘された経路）。\n")
+            return 2
     if manifest:
         first = manifest["orgs"].get(list(roots)[0]) or {}
         w.trust = first.get("trust") or manifest.get("trust")
@@ -706,6 +861,17 @@ def main(argv):
     q.add_argument("--schema", default=None,
                    help="ledger-schema.yaml のパス。**root 所有の設定から固定する** — "
                         "渡さないと ledger.py が cwd から探し、テンプレートに fallback する")
+    q.add_argument("--constitution", action="append", metavar="NAME=PATH",
+                   dest="constitution",
+                   help="org の constitution.yaml。**root 所有の設定から固定する** — "
+                        "daemon は org の外で動くので cwd から探せない。渡さないと "
+                        "require_attested_identity が子プロセスに届かず、**未認証の "
+                        "admission が通る**（実測で指摘された）")
+    q.add_argument("--trust", action="append", metavar="NAME=PATH", dest="trust",
+                   help="org の trust store（鍵 registry）。**root 所有の設定から固定する** — "
+                        "daemon は org の外（cwd=/）で動くので探索では見つからない。"
+                        "渡さないと **正しく署名された receipt も検証できず**、認証済みの "
+                        "記録が一切残せない（実測: Stage B の正規経路が完全に停止した）")
     q.set_defaults(fn=serve)
     q = sub.add_parser("check", help="socket と親ディレクトリを検証する（書き込みはしない）")
     q.add_argument("--socket", default=None)

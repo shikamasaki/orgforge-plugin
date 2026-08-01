@@ -2541,15 +2541,28 @@ def test_C_namespace_contract_is_shared():
 
 
 def test_C_uninstall_order_is_explicit():
-    """**順序が安全性である。** daemon停止 → 書戻し → 実体化 → 所有者復元。"""
+    """**順序が安全性である。** daemon停止 → 隣に staging → 検証 → atomic 置換 → 所有者復元。
+
+    以前この test は log の文言の並び順を見ていたが、**文言は実装の証拠にならない**。
+    正しい順序で print しながら危険な順序で実行するコードは、その test を通る。
+    ここでは「symlink を消すより前に staging へコピーしている」という
+    実際の危険性を決める性質を見る（実測: cp 失敗 → 再実行で唯一の写しが消えた）。
+    """
     src = (TOOLS / "writer-install.sh").read_text(encoding="utf-8")
-    i_stop = src.index("① LaunchDaemon を停止して外した")
-    i_copy = src.index("② $(basename \"$cur\") に権威側の内容を書き戻した")
-    i_link = src.index("③ symlink を実体に置き換えた")
-    i_own = src.index("④ 所有者を $OWNER に戻した")
-    assert i_stop < i_copy < i_link < i_own, "uninstall の順序が違う"
+    i_stop = src.index("① LaunchDaemon を停止した（停止を確認済み）")
+    i_stage = src.index('staged="${cur}.restoring.$$"')
+    i_copy = src.index('''run "cp -R '${src}' '${staged}'"''')
+    i_rm = src.index('''run "rm -f '${cur}'"''')
+    i_mv = src.index('''run "mv '${staged}' '${cur}'"''')
+    i_own = src.index("④ 所有者を")
+    # 停止 → staging 作成 → コピー → **そのあとで** symlink 削除 → atomic 置換 → chown
+    assert i_stop < i_stage < i_copy < i_rm < i_mv < i_own, "uninstall の順序が違う"
     assert "先に止めないと、書き戻している途中に writer が書く" in src
-    assert "書き戻したあとに行う" in src
+    # 復元できなかったら権威データを消さない
+    # `:-1`（未設定なら「復元済み」扱い）は **消してよい側に倒れる既定**だった。
+    # org root が消えるとループごと飛んで未設定になり、権威データを消していた。
+    assert 'if [ "${RESTORE_OK}" = 0 ]; then' in src
+    assert "**権威データと backup は残す**" in src
 
 
 def test_C_uninstall_keeps_shared_things_while_other_orgs_remain():
@@ -2585,3 +2598,965 @@ def test_C_dry_run_changes_nothing_and_states_the_boundary(tmp_path):
         assert "脅威モデルの外" in r.stdout
     assert sorted(str(p.relative_to(tmp_path))
                   for p in tmp_path.rglob("*")) == before, "dry-run が何かを変えた"
+
+
+# ══ 0.39.6 — Codex 再レビューで見つかった2件 ═══════════════════════════════════
+
+def test_writerd_refuses_to_start_without_constitution():
+    """**宣言の在り処が分からないまま、書き込みを受け付けない。**
+
+    daemon は org の外で動く。installer は台帳を
+    /usr/local/var/orgforge/orgs/<ns>/ledger に置くので、「台帳の親の親が org root」
+    という導出は Stage B では成立しない。導出に失敗したまま起動すると
+    require_attested_identity が子プロセスに届かず、**未認証 admission が通っていた**。
+    """
+    src = (TOOLS / "writerd.py").read_text(encoding="utf-8")
+    # 明示フラグを受けること
+    assert '"--constitution"' in src, "--constitution を受けていない"
+    # 導出できなければ起動しない（fail-closed）
+    assert "の constitution を決められない" in src
+    i_msg = src.index("の constitution を決められない")
+    assert "return 2" in src[i_msg:i_msg + 900], "決められないのに起動している"
+    # 子プロセスへ渡すのは **決まったパス** であって、推測ではない
+    assert 'env["ORG_CONSTITUTION"] = con' in src
+
+
+def test_installer_pins_constitution_root_owned():
+    """**検査の入力を、検査される側が書けてはいけない。**
+
+    constitution には宣言（require_attested_identity）が入っている。caller が書ける場所に
+    置いたままだと、caller が宣言を偽にして強制を消せる。root 所有で固定し、明示的に渡す。
+    """
+    src = (TOOLS / "writer-install.sh").read_text(encoding="utf-8")
+    assert "${AUTHORITATIVE}/constitution.yaml" in src
+    assert "chown root:wheel '${AUTHORITATIVE}/constitution.yaml'" in src
+    assert "--constitution</string><string>default=${AUTHORITATIVE}/constitution.yaml" in src
+    # 宣言が無ければ install しない
+    assert "**宣言が無いまま writer を動かさない。**" in src
+
+
+def test_uninstall_does_not_treat_missing_symlink_as_done():
+    """**symlink が無いことを「戻し済み」と読んではいけない。**
+
+    caller は自分の org tree を動かせる（.orgforge を rename するなど）。すると symlink が
+    消え、権威側だけが唯一の最新の写しになる。そこで復元を飛ばすと、⑤ がそれを消す
+    = 永続データ損失（Codex が実測で指摘した経路）。
+    """
+    src = (TOOLS / "writer-install.sh").read_text(encoding="utf-8")
+    # 素の `|| continue` で済ませていないこと
+    assert '[ -L "${cur}" ] || continue' not in src, "symlink 不在を無条件に飛ばしている"
+    assert "**symlink が無いことを「戻し済み」と読んではいけない。**" in src
+    # 実体が在るときだけ飛ばす
+    # 「実体が在れば飛ばす」は variant 4 で危険と分かったので、**digest が一致したときだけ**
+    # 飛ばす形に変わっている（[[test_uninstall_does_not_trust_a_planted_directory]]）。
+    i = src.index('if [ ! -L "${cur}" ] && [ -e "${cur}" ]; then')
+    seg = src[i:i + 1400]
+    assert "continue" in seg and 'shasum -a 256' in seg
+    # 権威側に実体が在るなら復元を試みる
+    assert "**消さずに復元を試みる**" in src
+
+
+def test_uninstall_defaults_to_not_restored():
+    """**既定は「復元していない」。** 消してよいのは、戻したと確かめられたときだけ。
+
+    復元ループは `if [ -d "$ROOTP" ]` の中で RESTORE_OK=1 を立てていた。org root が
+    移動・消失するとループに入らず、`${RESTORE_OK:-1}` が既定 1（=消してよい）に評価され、
+    **権威側にしか無い最新データを消していた**（Codex が実測で指摘した3つ目の変種）。
+    """
+    src = (TOOLS / "writer-install.sh").read_text(encoding="utf-8")
+    i_default = src.index("  RESTORE_OK=0\n")
+    i_loop = src.index('if [ -n "$ROOTP" ] && [ -d "$ROOTP" ]; then')
+    # 既定 0 は、ループの **外側かつ手前** で立っていること
+    assert i_default < i_loop, "RESTORE_OK の既定がループより後にある"
+    # `:-1`（既定 1 = 消してよい）に戻っていないこと
+    assert '"${RESTORE_OK:-1}"' not in src, "既定が 1（消してよい）に戻っている"
+    assert 'if [ "${RESTORE_OK}" = 0 ]; then' in src
+    # org root が無いときは理由を言う
+    assert "移動されたか消されている。**権威側にしか無いデータを消さない。**" in src
+
+
+def test_uninstall_does_not_trust_a_planted_directory():
+    """**「在ること」を「戻っていること」と読んではいけない。**
+
+    caller は symlink の代わりに自分の偽の実体を置ける。それを「復元済み」と認めると、
+    ⑤ が権威側の最新版を消し、org 側には caller が置いた古い中身だけが残る。
+    飛ばしてよいのは「権威側に何も無い」か「中身が一致する」ときだけ。
+    （Codex が指摘した4つ目の変種。実測で権威データが消えることを確認した。）
+    """
+    src = (TOOLS / "writer-install.sh").read_text(encoding="utf-8")
+    # 「在れば飛ばす」に戻っていないこと
+    assert 'if [ -e "${cur}" ]; then\n          continue' not in src, \
+        "実体が在るだけで復元済みと認めている"
+    assert "**「在ること」を「戻っていること」と読んではいけない。**" in src
+    # 中身を数えてから判断すること
+    i = src.index('if [ ! -L "${cur}" ] && [ -e "${cur}" ]; then')
+    seg = src[i:i + 1400]
+    # **数は caller が合わせられる。** ファイル数の一致を「同じ中身」と読んではいけない
+    # （実測: 数だけ揃えた偽物で権威側の最新版が消せた）。digest で比べること。
+    assert 'shasum -a 256' in seg, "中身の digest ではなくファイル数で判断している"
+    assert '"${d_s}" = "${d_c}"' in seg
+    # **名前だけでは足りない。** 同名の dir と symlink は名前が同じなので、
+    # 名前だけを digest に入れると同一と誤認する（実測で確認）。種別と向き先まで入れること。
+    assert "type=%HT link=%Y" in seg, "種別と symlink の向き先が digest に入っていない"
+    # 食い違うなら権威側を消さずに退避する
+    assert "**「在る」を「戻った」と読まない**" in src
+    assert "${cur}.found-$$" in src
+
+
+def test_writer_verify_completes_under_foreign_locale():
+    """**検証器が locale で落ちてはいけない。**
+
+    `$` の直後に全角文字があると shell が変数名の一部として読み、`set -u` で落ちる。
+    一度 8箇所を直したが **1箇所残っていた**（`"$（無い）: $f"`）。しかも落ちる位置が
+    検査の途中なので、**その先の11項目が一度も走らないまま「完了」に見えていた**。
+    文字列 grep では見落とすので、**実際に走らせて完走を確かめる**。
+    """
+    import subprocess, tempfile, os
+    verify = str(TOOLS / "writer-verify.sh")
+    with tempfile.TemporaryDirectory() as d:
+        os.makedirs(os.path.join(d, ".orgforge", "ledger"))
+        for loc in ("en_US.UTF-8", "C", "ja_JP.UTF-8"):
+            env = dict(os.environ, LC_ALL=loc, LANG=loc)
+            r = subprocess.run(["bash", verify, "--org-root", d],
+                               capture_output=True, text=True, env=env, timeout=120)
+            out = r.stdout + r.stderr
+            assert "unbound variable" not in out, f"{loc} で落ちた:\n{out[-400:]}"
+            # 途中で死んでいないこと（最後の見出しまで到達している）
+            assert "総合" in out or "合格" in out or "不合格" in out, \
+                f"{loc} で最後まで到達していない:\n{out[-400:]}"
+
+
+def test_verify_never_calls_unmeasured_a_pass():
+    """**測っていないものを「測って通った」と書かない。**
+
+    `--no-write` は書き込み検査を飛ばすが、飛ばした項目は PASS にも FAIL にも
+    入らなかったため、FAIL=0 のまま
+    「すべて実測で通った。separate_uid を主張してよい」と出て exit 0 していた。
+    **「不合格 0」は「全部確かめた」ではない**（Codex が指摘し、実測で確認した）。
+    """
+    import subprocess, tempfile, os
+    src = (TOOLS / "writer-verify.sh").read_text(encoding="utf-8")
+    assert "SKIPPED" in src, "飛ばした検査を数えていない"
+    i = src.index("printf '  合格 %d / 不合格 %d / 未測定 %d")
+    tail = src[i:]
+
+    def run(p, f, s):
+        d = tempfile.mkdtemp(); path = os.path.join(d, "t.sh")
+        open(path, "w").write(f"PASS={p}; FAIL={f}; SKIPPED={s}\n" + tail)
+        return subprocess.run(["bash", path], capture_output=True, text=True, timeout=60)
+
+    # 未測定があるなら、合格と言ってはいけない
+    r = run(3, 0, 1)
+    assert r.returncode != 0, "未測定があるのに exit 0（偽の合格）"
+    assert "主張してはいけない" in r.stdout
+
+    # 全部測って全部通ったなら、従来どおり合格できる（デッドロックさせない）
+    r2 = run(14, 0, 0)
+    assert r2.returncode == 0, f"全部通ったのに合格にならない: {r2.stdout}"
+    assert "separate_uid" in r2.stdout and "主張してよい" in r2.stdout
+
+    # 不合格があるなら当然だめ
+    r3 = run(10, 1, 0)
+    assert r3.returncode != 0
+
+
+def test_service_account_requires_free_uid_and_gid():
+    """**uid が空いていても gid が埋まっていることがある。**
+
+    同じ番号を UniqueID と PrimaryGroupID の両方に使うので、gid だけ既存だと
+    **writer の group を他人と共有する** ことになり、group 権限で台帳へ届く経路ができる。
+    このマシンの実測では 395-400 が「uid 空き / gid 使用中」だった。
+    """
+    src = (TOOLS / "writer-install.sh").read_text(encoding="utf-8")
+    i = src.index("NEXT_UID=\"\"")
+    seg = src[i:i + 700]
+    assert "dscl . -search /Users UniqueID" in seg
+    assert "dscl . -search /Groups PrimaryGroupID" in seg, \
+        "gid の空きを確かめずに番号を選んでいる"
+    assert "両方" in src
+
+
+def test_install_keeps_two_copies_until_symlink_is_made():
+    """**install が途中で落ちても、台帳はどこかに必ず残る。**
+
+    `cp -R` → `mv`(元を .pre-writer に退避) → `ln -s` の順なので、
+    どの時点で落ちても最低1箇所、cp 後は2箇所に実体がある。**mv で移し始めない。**
+    """
+    src = (TOOLS / "writer-install.sh").read_text(encoding="utf-8")
+    i_cp = src.index("""run "cp -R '${ORG_ROOT}/.orgforge/ledger/.' '${AUTHORITATIVE}/ledger/'\"""")
+    i_mv = src.index("""run "mv '${ORG_ROOT}/.orgforge/ledger' '${ORG_ROOT}/.orgforge/ledger.pre-writer'\"""")
+    i_ln = src.index("""run "ln -s '${AUTHORITATIVE}/ledger' '${ORG_ROOT}/.orgforge/ledger'\"""")
+    assert i_cp < i_mv < i_ln, "コピーより先に移動・symlink を作っている"
+    # 元を消さずに退避すること
+    assert ".pre-writer" in src and "**消さない**" in src
+
+
+def test_schema_fix_repairs_existing_class_fields(tmp_path):
+    """**snapshot が読むのは `fields:` であって validation ではない。**
+
+    `--fix` は「足りないクラスを足す」だけで、**既存クラスの field 不足を直さなかった**。
+    すると validation を直しても snapshot は古い形で固定され続け、正規の
+    `reserve-exposure` が schema_rejected で拒否される = 全 metered 操作のデッドロック。
+    実測: 実 org (tatekae) が正にこの状態で、`--fix` を通しても直らなかった。
+    """
+    import subprocess, sys, shutil
+    org = tmp_path / "org"
+    (org / ".orgforge" / "ledger").mkdir(parents=True)
+    schema = (TEMPLATE / "ledger-schema.yaml").read_text(encoding="utf-8")
+    # 実 org と同じ壊し方: fields 行から idempotency 4 field を落とす
+    broken = schema.replace(
+        "actor_role, decision: allow|hold, caused_by_event,\n"
+        "                             session_id, tool_use_id, rule, request_digest }",
+        "actor_role, decision: allow|hold, caused_by_event }")
+    assert broken != schema, "テストの壊し方がテンプレートと合っていない"
+    (org / "ledger-schema.yaml").write_text(broken, encoding="utf-8")
+
+    led = str(org / ".orgforge" / "ledger")
+    # 壊れた状態では予約が拒否される
+    r = subprocess.run([sys.executable, str(TOOLS / "ledger.py"), "reserve-exposure", led,
+                        "--dimension", "destructive_ops", "--delta", "1", "--cap", "50",
+                        "--actor", "p", "--session-id", "s", "--tool-use-id", "t",
+                        "--rule", "blast_radius"],
+                       capture_output=True, text=True, cwd=str(org), timeout=60)
+    assert "schema_rejected" in r.stdout, f"壊れた schema で拒否されない: {r.stdout[:200]}"
+
+    # --fix したら通るようになること（= 修復経路が実際に機能する）
+    subprocess.run([sys.executable, str(TOOLS / "ledger.py"), "schema", "--fix", led],
+                   capture_output=True, text=True, cwd=str(org), timeout=60)
+    fixed = (org / "ledger-schema.yaml").read_text(encoding="utf-8")
+    for f in ("session_id", "tool_use_id", "rule", "request_digest"):
+        assert f in fixed.split("exposure_budget_checked: {")[1][:400], \
+            f"--fix が {f} を fields に足していない"
+    r2 = subprocess.run([sys.executable, str(TOOLS / "ledger.py"), "reserve-exposure", led,
+                         "--dimension", "destructive_ops", "--delta", "1", "--cap", "50",
+                         "--actor", "p", "--session-id", "s", "--tool-use-id", "t2",
+                         "--rule", "blast_radius"],
+                        capture_output=True, text=True, cwd=str(org), timeout=60)
+    assert "schema_rejected" not in r2.stdout, f"--fix 後も拒否される: {r2.stdout[:200]}"
+    assert '"reason": "reserved"' in r2.stdout or '"decision"' in r2.stdout
+
+
+def test_template_schema_declares_fields_in_both_places():
+    """**同じことを2箇所で宣言している。片方だけ直すと、静かに壊れる。**
+
+    schema はクラスの field を2箇所で宣言する:
+      - `validation.required` … 検証規則
+      - `event_classes` の `fields:` … **snapshot が読む方**
+    snapshot は後者を固定するので、`validation` だけ新しくしても効かない。
+    実測: 実 org tatekae がこの状態で、**全 metered 操作がデッドロック**していた
+    （`reserve-exposure` が schema_rejected）。しかも `schema --fix` は
+    「差分なし — この org の schema は最新である」と表示していた。
+
+    ここでは **テンプレート自身の2箇所が食い違わない**ことを守る。
+    片方だけ編集した瞬間に落ちるので、org へ配られる前に気づける。
+    """
+    import yaml
+    txt = (TEMPLATE / "ledger-schema.yaml").read_text(encoding="utf-8")
+    doc = yaml.safe_load(txt)
+    required = (doc.get("validation") or {}).get("required") or {}
+    fields = {}
+    for m in re.finditer(r"\n  ([a-z_]+): \{(.*?)\}", txt, re.S):
+        fields[m.group(1)] = {x.split(":")[0].strip()
+                              for x in m.group(2).replace("\n", " ").split(",")
+                              if x.strip() and not x.strip().startswith("#")}
+    drift = {}
+    for cls, req in required.items():
+        declared = fields.get(cls)
+        if declared is None:
+            continue                     # fields 側に無いクラスはここでは見ない
+        missing = [f for f in req if f not in declared]
+        if missing:
+            drift[cls] = missing
+    assert not drift, (
+        "validation.required にあって event_classes の fields: に無い field がある。\n"
+        "**snapshot は fields: を読むので、これは実 org をデッドロックさせる。**\n"
+        f"{drift}")
+
+
+def test_schema_fix_counts_braces_not_first_close(tmp_path):
+    """**非貪欲な正規表現は、値の中の `{...}` の最初の `}` を終端と誤認する。**
+
+    そうなると修復が別の場所に入り、YAML は健全なまま **直っていない** —
+    「直したように見えて直っていない」という、今夜いちばん多く踏んだ形になる。
+    （Codex が静的に指摘し、実測で再現した。）
+    """
+    import subprocess, sys, yaml
+    tpl = (TEMPLATE / "ledger-schema.yaml").read_text(encoding="utf-8")
+    broken = tpl.replace(
+        "actor_role, decision: allow|hold, caused_by_event,\n"
+        "                             session_id, tool_use_id, rule, request_digest }",
+        "actor_role, decision: allow|hold, caused_by_event, nested: {a} }")
+    assert broken != tpl, "テストの壊し方がテンプレートと合っていない"
+    org = tmp_path / "org"
+    (org / ".orgforge" / "ledger").mkdir(parents=True)
+    (org / "ledger-schema.yaml").write_text(broken, encoding="utf-8")
+    led = str(org / ".orgforge" / "ledger")
+
+    subprocess.run([sys.executable, str(TOOLS / "ledger.py"), "schema", "--fix", led],
+                   capture_output=True, text=True, cwd=str(org), timeout=60)
+    out = (org / "ledger-schema.yaml").read_text(encoding="utf-8")
+    yaml.safe_load(out)                      # YAML が壊れていないこと
+    r = subprocess.run([sys.executable, str(TOOLS / "ledger.py"), "reserve-exposure", led,
+                        "--dimension", "destructive_ops", "--delta", "1", "--cap", "50",
+                        "--actor", "p", "--session-id", "s", "--tool-use-id", "t",
+                        "--rule", "blast_radius"],
+                       capture_output=True, text=True, cwd=str(org), timeout=60)
+    assert "schema_rejected" not in r.stdout, (
+        "ネストした {} があると修復が効いていない（最初の } を終端と誤認）:\n" + r.stdout[:300])
+
+
+def test_every_bound_field_actually_binds():
+    """**18項目すべてが本当に束縛されているか。**
+
+    既存の再利用テストは 8 項目（org/ledger/issue/class/subject/digest/verdict/lineage）
+    しか見ていなかった。残り10項目（`signer_id` `key_id` `role` `phase` `receipt_id`
+    `issued_at` `protocol_version` `schema_version` `reasoning_sha256` `judge_workload`）は
+    **束縛されていると書いてあるだけで、一度も測っていなかった**。
+
+    `_RECEIPT_BOUND` に足した項目が実際には署名に入っていない、という食い違いは
+    静かに起きる（署名は通り、検証も通る）。ここで全項目を機械的に確かめる。
+    """
+    import sys as _sys
+    _sys.path.insert(0, str(TOOLS))
+    import identity
+
+    secret = "shared-secret-for-test"
+    base = {
+        "protocol_version": identity.PROTOCOL_VERSION,
+        "schema_version": "1", "receipt_id": "r-1",
+        "org_id": "orgA", "ledger_id": "L1", "issue": "7", "role": "gate",
+        "phase": "operate", "lineage": "cross-harness",
+        "event_class": "admission_decided", "review_subject_id": "S1",
+        "requirements_digest": "D1", "reasoning_sha256": "R1",
+        "verdict": "admit", "judge_workload": "separate_process",
+        "key_id": "k1", "signer_id": "gate-signer",
+        "issued_at": "2026-07-30T12:00:00Z",
+    }
+    expect = {k: base[k] for k in
+              ("org_id", "ledger_id", "review_subject_id", "issue", "role",
+               "lineage", "verdict")}
+    signed = dict(base)
+    signed["signature"] = identity.sign_receipt(signed, secret)
+    store = {"keys": {"k1": {"secret": secret, "signer_id": "gate-signer"}}}
+
+    who, _assurance, err = identity.verify_receipt(signed, dict(expect), store)
+    assert err is None and who == "gate-signer", f"正規の receipt が通らない: {err}"
+
+    # **検査の対象を、検査される側の宣言から取ってはいけない。**
+    # `_RECEIPT_BOUND` を回すと、そこから項目を消した瞬間に「検査しない」ことになり、
+    # テストは通ってしまう（実測: signer_id を外しても通った）。
+    # 守るべき項目は **ここに固定で書く**。増減は意図的な変更としてこの一覧を直す。
+    MUST_BIND = [
+        "event_class", "issue", "issued_at", "judge_workload", "key_id", "ledger_id",
+        "lineage", "org_id", "phase", "protocol_version", "reasoning_sha256",
+        "receipt_id", "requirements_digest", "review_subject_id", "role",
+        "schema_version", "signer_id", "verdict",
+    ]
+    assert set(MUST_BIND) <= set(identity._RECEIPT_BOUND), (
+        "束縛すべき項目が _RECEIPT_BOUND から外された: "
+        + str(sorted(set(MUST_BIND) - set(identity._RECEIPT_BOUND))))
+
+    unbound = []
+    for f in MUST_BIND:
+        t = dict(signed)
+        o = t.get(f)
+        t[f] = (o or 0) + 99 if isinstance(o, int) else "TAMPERED-" + f
+        _w, _a, e = identity.verify_receipt(t, dict(expect), store)
+        if e is None:
+            unbound.append(f)
+    assert not unbound, (
+        "束縛されていると宣言されているのに、書き換えても検証が通る項目がある。\n"
+        "**署名が守っていない項目は、束縛されていない。** " + str(unbound))
+
+
+def test_proxy_recording_separates_decider_from_recorder(tmp_path):
+    """**G2 項目3: 決めた者と記録した者は別に扱う。**
+
+    `decision_by` は **receipt の署名者から**、`recorded_by` は **観測から**来る。
+    代理で記録しても「自分が決めた」ことにはできない — これが職務分離の土台である。
+
+    実測（この test が最初）: `decision_by='gate-signer'`（attested）に対し
+    `recorded_by='unknown'`（recorder_assurance='claimed'）と、
+    **確かさの度合いが別々に記録される**。
+    """
+    import json, os, subprocess, sys, secrets
+    org = tmp_path / "org"
+    (org / ".orgforge" / "ledger").mkdir(parents=True)
+    (org / ".orgforge" / "trust").mkdir(parents=True)
+    (org / "ledger-schema.yaml").write_text(
+        (TEMPLATE / "ledger-schema.yaml").read_text(encoding="utf-8"), encoding="utf-8")
+    (org / "constitution.yaml").write_text(
+        "enforcement:\n  judges:\n    require_attested_identity: true\n"
+        "    lineage: cross-harness\n", encoding="utf-8")
+    led = str(org / ".orgforge" / "ledger")
+    secret = "s-" + secrets.token_hex(8)
+    (org / ".orgforge" / "trust" / "keys.json").write_text(json.dumps(
+        {"keys": {"k1": {"secret": secret, "signer_id": "gate-signer"}}}), encoding="utf-8")
+
+    sys.path.insert(0, str(TOOLS))
+    from ghsync.record import _reasoning_digest
+    # **org の中で解決させる。** org_id は org の実体から導出されるので、
+    # 外から呼ぶと解決できない（cwd に依存する）。実際の経路と同じ場所で計算する。
+    _idr = subprocess.run(
+        [sys.executable, "-c",
+         "import sys;sys.path.insert(0,%r);import ledger;"
+         "print('|'.join(str(x) for x in ledger._org_and_ledger_id(%r)))"
+         % (str(TOOLS), led)],
+        capture_output=True, text=True, cwd=str(org), timeout=60)
+    assert _idr.returncode == 0, _idr.stdout + _idr.stderr
+    org_id, ledger_id = _idr.stdout.strip().split("|")
+
+    why = "受入基準を実測で確認した。並列でcapを超えず、故障注入でallowにならない。"
+    ev = "592 passed"
+    digest = _reasoning_digest(why, ev, None, None, None)
+    env = dict(os.environ, ORG_SIGNING_SECRET=secret, ORG_LEDGER_ROOT=led)
+
+    r = subprocess.run(
+        [sys.executable, str(TOOLS / "identity.py"), "receipt",
+         "--org-id", org_id, "--ledger-id", ledger_id, "--subject", "rev-A",
+         "--issue", "7", "--role", "gate", "--phase", "operate",
+         "--lineage", "cross-harness", "--verdict", "admit",
+         "--event-class", "verdict_provisional", "--requirements-digest", "D1",
+         "--reasoning-sha256", digest, "--issued-at", "2026-07-30T12:00:00Z",
+         "--key-id", "k1"],
+        capture_output=True, text=True, cwd=str(org), env=env, timeout=60)
+    assert r.returncode == 0, r.stdout + r.stderr
+    rc = org / "rc.json"
+    rc.write_text(r.stdout.strip(), encoding="utf-8")
+
+    p = subprocess.run(
+        [sys.executable, str(TOOLS / "github_sync.py"), "provisional", "--issue", "7",
+         "--role", "gate", "--lineage", "cross-harness", "--verdict", "admit",
+         "--subject", "rev-A", "--why", why, "--evidence", ev, "--receipt", str(rc)],
+        capture_output=True, text=True, cwd=str(org), env=env, timeout=60)
+    assert p.returncode == 0, p.stdout + p.stderr
+
+    ev_rec = None
+    for line in open(os.path.join(led, "ledger.jsonl"), encoding="utf-8"):
+        e = json.loads(line)
+        if e.get("class") == "verdict_provisional":
+            ev_rec = e
+    assert ev_rec, "verdict_provisional が記録されていない"
+
+    def g(k):
+        return ev_rec.get(k, (ev_rec.get("payload") or {}).get(k))
+
+    assert g("decision_by") == "gate-signer", f"decision_by が signer でない: {g('decision_by')}"
+    assert g("identity_assurance") == "attested", g("identity_assurance")
+    # **記録者は観測であって、自称ではない。** 決めた者と同じ値になってはいけない。
+    assert g("recorded_by") != g("decision_by"), \
+        "recorded_by が decision_by と同じ — 代理記録が自称になっている"
+    assert g("recorder_assurance") == "claimed", g("recorder_assurance")
+
+
+@pytest.mark.parametrize("order", [
+    (("k1", "same-harness"), ("k2", "cross-harness")),
+    (("k2", "cross-harness"), ("k1", "same-harness")),
+])
+def test_A_joint_works_in_both_orders(tmp_path, order):
+    """**G2 項目2: 両順序。** どちらの血統が先に判定しても joint は1件だけ生成される。
+
+    順序に依存すると、**先に書いた側が勝つ**ことになり、独立性の意味が薄れる。
+    handoff が「両順序」を要求しているのはそのためである。
+    """
+    org, led = _A_org(tmp_path)
+    _A_key(org, "k1", "gate-signer"); _A_key(org, "k2", "skeptic-signer")
+    for key, lin in order:
+        rc = _A_receipt(org, key, lineage=lin, out=f"{key}.json")
+        r = _A_append(org, led, rc, {**_A_PL, "lineage": lin})
+        assert r.returncode == 0, r.stdout + r.stderr
+    r = subprocess.run([sys.executable, str(TOOLS / "ledger.py"), "derive-admission",
+                        str(led), "--issue", "7", "--event", "admission_decided",
+                        "--require-attested"],
+                       cwd=org, capture_output=True, text=True, env=_A_env(org))
+    assert r.returncode == 0, r.stdout + r.stderr
+    d = json.loads(r.stdout.splitlines()[0])
+    assert d["ok"] and d["reviewer_independence"] == "distinct_signer"
+    adm = [json.loads(l) for l in (led / "ledger.jsonl").read_text(encoding="utf-8").splitlines()
+           if l.strip() and json.loads(l)["class"] == "admission_decided"]
+    assert len(adm) == 1, f"順序 {order} で admission が {len(adm)} 件"
+
+
+def test_A_joint_is_not_created_twice(tmp_path):
+    """**2回目の derive で admission が増えない。** 一致は事実なので、何度数えても1件。
+
+    増えるなら、同じ一致から複数の admission を作れる（二重計上）。
+    """
+    org, led = _A_org(tmp_path)
+    _A_key(org, "k1", "gate-signer"); _A_key(org, "k2", "skeptic-signer")
+    for key, lin in (("k1", "same-harness"), ("k2", "cross-harness")):
+        rc = _A_receipt(org, key, lineage=lin, out=f"{key}.json")
+        assert _A_append(org, led, rc, {**_A_PL, "lineage": lin}).returncode == 0
+    for _ in range(2):
+        subprocess.run([sys.executable, str(TOOLS / "ledger.py"), "derive-admission",
+                        str(led), "--issue", "7", "--event", "admission_decided",
+                        "--require-attested"],
+                       cwd=org, capture_output=True, text=True, env=_A_env(org))
+    adm = [l for l in (led / "ledger.jsonl").read_text(encoding="utf-8").splitlines()
+           if l.strip() and json.loads(l)["class"] == "admission_decided"]
+    assert len(adm) == 1, f"derive を2回呼ぶと admission が {len(adm)} 件になった（二重計上）"
+
+
+def test_A_joint_needs_only_one_provisional_to_hold(tmp_path):
+    """**1件だけでは joint を作らない。** 片方の判定だけで通れば、独立性は無い。"""
+    org, led = _A_org(tmp_path)
+    _A_key(org, "k1", "gate-signer")
+    rc = _A_receipt(org, "k1", lineage="same-harness", out="k1.json")
+    assert _A_append(org, led, rc, {**_A_PL, "lineage": "same-harness"}).returncode == 0
+    r = subprocess.run([sys.executable, str(TOOLS / "ledger.py"), "derive-admission",
+                        str(led), "--issue", "7", "--event", "admission_decided",
+                        "--require-attested"],
+                       cwd=org, capture_output=True, text=True, env=_A_env(org))
+    assert r.returncode != 0, "1件の provisional だけで admission ができた"
+    adm = [l for l in (led / "ledger.jsonl").read_text(encoding="utf-8").splitlines()
+           if l.strip() and json.loads(l)["class"] == "admission_decided"]
+    assert not adm
+
+
+def test_derive_admission_also_requires_the_writer_path(tmp_path):
+    """**G2 項目6: 単一 writer は、全部の経路が通って初めて成り立つ。**
+
+    `append` / `reserve-exposure` / `trip-halt` / `release-halt` は writer 経由を
+    要求していたのに、**`derive-admission` だけ直接書けていた**（実測: writer 稼働中に
+    台帳が 2 → 3 件に増えた）。しかもここが書くのは `admission_decided` ——
+    最も強い権限の記録である。
+
+    「経路は1つ」という保証は、**1つでも抜け道があれば無い**のと同じ。
+    """
+    import json, os, subprocess, sys, time, signal
+    org = tmp_path / "org"
+    (org / ".orgforge" / "ledger").mkdir(parents=True)
+    (org / "ledger-schema.yaml").write_text(
+        (TEMPLATE / "ledger-schema.yaml").read_text(encoding="utf-8"), encoding="utf-8")
+    (org / "constitution.yaml").write_text(
+        "enforcement:\n  caps:\n    destructive_ops: 50\n", encoding="utf-8")
+    led = str(org / ".orgforge" / "ledger")
+    env0 = dict(os.environ, ORG_WRITER_TRUST_SELF="1")
+    pl = {"issue": "7", "for_event": "admission_decided", "review_subject_id": "S1",
+          "verdict": "admit", "role": "gate", "phase": "operate",
+          "reasoning_sha256": "deadbeef" * 8}
+    for lin in ("same-harness", "cross-harness"):
+        r = subprocess.run(
+            [sys.executable, str(TOOLS / "ledger.py"), "append", led, "--actor", "gate",
+             "--class", "verdict_provisional",
+             "--payload", json.dumps({**pl, "lineage": lin})],
+            capture_output=True, text=True, cwd=str(org), env=env0, timeout=60)
+        assert r.returncode == 0, r.stdout + r.stderr
+
+    # **AF_UNIX のパス長制限（macOS で 104 byte）。** pytest の tmp_path は長すぎるので、
+    # socket だけは短い場所に作る（このセッションで何度も踏んだ制約）。
+    import tempfile as _tf
+    _short = _tf.mkdtemp(prefix="og")
+    os.chmod(_short, 0o755)
+    parent = os.path.join(_short, "r"); os.makedirs(parent); os.chmod(parent, 0o755)
+    sock = os.path.join(parent, "w.sock")
+    assert len(sock) < 100, f"socket path が長すぎる: {len(sock)}"
+    p = subprocess.Popen(
+        [sys.executable, str(TOOLS / "writerd.py"), "serve", "--org", f"default={led}",
+         "--constitution", "default=" + str(org / "constitution.yaml"),
+         "--socket", sock],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=str(org), env=env0)
+    try:
+        for _ in range(80):
+            if os.path.exists(sock):
+                time.sleep(0.4); break
+            time.sleep(0.2)
+        if not os.path.exists(sock):
+            p.terminate()
+            _o, _e = p.communicate(timeout=10)
+            raise AssertionError("writerd が起動しない:\n" +
+                                 (_e or b"").decode("utf-8", "replace")[-500:])
+        n = lambda: sum(1 for _ in open(os.path.join(led, "ledger.jsonl")))
+        cenv = dict(env0, ORG_WRITER_SOCKET=sock)
+
+        # ① 直接呼びは拒否され、**台帳が増えない**
+        before = n()
+        r = subprocess.run(
+            [sys.executable, str(TOOLS / "ledger.py"), "derive-admission", led,
+             "--issue", "7", "--event", "admission_decided"],
+            capture_output=True, text=True, cwd=str(org), env=cenv, timeout=60)
+        assert n() == before, "writer を迂回して直接書けた（単一 writer が破れている）"
+        assert r.returncode != 0
+
+        # ② **RPC 経由なら通る**（拒否できるだけで通せない、にはしない）
+        r2 = subprocess.run(
+            [sys.executable, str(TOOLS / "writer_client.py"), "derive-admission", "--",
+             "--issue", "7", "--event", "admission_decided"],
+            capture_output=True, text=True, cwd=str(org), env=cenv, timeout=60)
+        if n() <= before:
+            alive = p.poll() is None
+            _err = ""
+            if not alive:
+                _o, _e = p.communicate(timeout=10)
+                _err = (_e or b"").decode("utf-8", "replace")[-600:]
+            raise AssertionError(
+                f"RPC 経由でも通らない（デッドロック）daemon生存={alive}\n"
+                + r2.stdout + r2.stderr + "\n--- daemon stderr ---\n" + _err)
+    finally:
+        p.send_signal(signal.SIGTERM)
+        p.wait(timeout=30)
+
+
+def _AA_org(tmp_path, name="org"):
+    org = tmp_path / name
+    (org / ".orgforge" / "ledger").mkdir(parents=True)
+    (org / "ledger-schema.yaml").write_text(
+        (TEMPLATE / "ledger-schema.yaml").read_text(encoding="utf-8"), encoding="utf-8")
+    (org / "constitution.yaml").write_text(
+        "enforcement:\n  caps:\n    destructive_ops: 50\n", encoding="utf-8")
+    return org, str(org / ".orgforge" / "ledger")
+
+
+_AA_PL = {"for_event": "admission_decided", "verdict": "admit", "role": "gate",
+          "phase": "operate", "reasoning_sha256": "deadbeef" * 8}
+_AA_ENV = dict(os.environ, ORG_WRITER_TRUST_SELF="1")
+
+
+def _AA_prov(org, led, issue, lineage, subject="S1"):
+    return subprocess.run(
+        [sys.executable, str(TOOLS / "ledger.py"), "append", led, "--actor", "gate",
+         "--class", "verdict_provisional",
+         "--payload", json.dumps({**_AA_PL, "issue": issue, "lineage": lineage,
+                                  "review_subject_id": subject})],
+        capture_output=True, text=True, cwd=str(org), env=_AA_ENV, timeout=60)
+
+
+def _AA_derive(org, led, issue):
+    return subprocess.run(
+        [sys.executable, str(TOOLS / "ledger.py"), "derive-admission", led,
+         "--issue", issue, "--event", "admission_decided"],
+        capture_output=True, text=True, cwd=str(org), env=_AA_ENV, timeout=60)
+
+
+def _AA_adm(led):
+    return [json.loads(l) for l in open(os.path.join(led, "ledger.jsonl"), encoding="utf-8")
+            if json.loads(l).get("class") == "admission_decided"]
+
+
+def test_already_admitted_keys_on_subject_not_just_issue(tmp_path):
+    """**判定の同一性は subject が決める。** issue だけを鍵にすると、
+    同じ issue の **別リビジョンを二度と admit できない**（実測でそうなった）。
+    `review_subject_id` があるのは、まさにこれを区別するためである。
+    """
+    org, led = _AA_org(tmp_path)
+    for lin in ("same-harness", "cross-harness"):
+        assert _AA_prov(org, led, "7", lin, "S1").returncode == 0
+    assert _AA_derive(org, led, "7").returncode == 0
+    for lin in ("same-harness", "cross-harness"):
+        _AA_prov(org, led, "7", lin, "S2")
+    r = _AA_derive(org, led, "7")
+    assert r.returncode == 0, f"別 subject が admit できない（デッドロック）: {r.stdout}"
+    assert len(_AA_adm(led)) == 2
+
+
+def test_corrected_admission_does_not_block_forever(tmp_path):
+    """**訂正できない統制は、間違えたら詰む統制である。**
+
+    superseded にした admission を「既にある」と数えると、対象を差し替えても
+    二度と admit できない（Codex が静的読解で指摘、実測で成立）。
+    """
+    org, led = _AA_org(tmp_path)
+    for lin in ("same-harness", "cross-harness"):
+        assert _AA_prov(org, led, "7", lin, "S1").returncode == 0
+    assert _AA_derive(org, led, "7").returncode == 0
+    seq = _AA_adm(led)[0]["seq"]
+    r = subprocess.run(
+        [sys.executable, str(TOOLS / "ledger.py"), "append", led, "--actor", "ceo",
+         "--class", "correction",
+         "--payload", json.dumps({"corrects": [seq], "kind": "superseded",
+                                  "why": "対象が差し替わったので取り消す"})],
+        capture_output=True, text=True, cwd=str(org), env=_AA_ENV, timeout=60)
+    assert r.returncode == 0, r.stdout + r.stderr
+    for lin in ("same-harness", "cross-harness"):
+        _AA_prov(org, led, "7", lin, "S1")
+    r2 = _AA_derive(org, led, "7")
+    assert r2.returncode == 0, f"訂正後も admit できない（デッドロック）: {r2.stdout}"
+
+
+def test_issue_notation_does_not_split_the_dedupe(tmp_path):
+    """`7` / `#7` / `007` は同じ issue。表記の違いで二重計上になってはいけない
+    （実測: `007` を admit したあと `7` で2件目ができた）。"""
+    org, led = _AA_org(tmp_path)
+    for lin in ("same-harness", "cross-harness"):
+        assert _AA_prov(org, led, "007", lin, "S1").returncode == 0
+    assert _AA_derive(org, led, "007").returncode == 0
+    for lin in ("same-harness", "cross-harness"):
+        _AA_prov(org, led, "7", lin, "S1")
+    _AA_derive(org, led, "7")
+    assert len(_AA_adm(led)) == 1, "表記ゆれで二重計上した"
+
+
+def test_issue_normalization_is_the_same_everywhere(tmp_path):
+    """**比べる場所ごとに違う正規化をしてはいけない。**
+
+    issue の比較が3箇所で食い違っていた（`lstrip("#")` だけの場所と、
+    先頭ゼロまで落とす場所）。その結果、**provisional が `007` で呼び出しが `7`**
+    だと「判定が足りない」と言われ、揃っているのに admission を作れなかった
+    （Codex が静的読解で指摘、実測で成立）。
+
+    同じものを同じと判定できないなら、鍵として使えない。`norm_issue` に統一した。
+    """
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("ledger_ni", str(TOOLS / "ledger.py"))
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+
+    # 同じ issue として扱うべきもの
+    for a, b in (("7", "#7"), ("7", "007"), ("#7", "007"), (" 7 ", "7"), (7, "7")):
+        assert m.norm_issue(a) == m.norm_issue(b), f"{a!r} と {b!r} が別扱い"
+    # 別の issue として扱うべきもの
+    for a, b in (("10", "100"), ("7", "70"), ("1", "11"), ("7", "7a"), ("12", "21")):
+        assert m.norm_issue(a) != m.norm_issue(b), f"{a!r} と {b!r} が同一扱い"
+    # _same_deliverable も同じ規則で動くこと（phase chain 全体がこれを使う）
+    assert m._same_deliverable("007", "#7")
+    assert not m._same_deliverable("10", "100")
+
+    # 実際の経路: provisional が 007、derive が 7 でも admission ができる
+    org, led = _AA_org(tmp_path)
+    for lin in ("same-harness", "cross-harness"):
+        assert _AA_prov(org, led, "007", lin, "S1").returncode == 0
+    r = _AA_derive(org, led, "7")
+    assert r.returncode == 0, f"表記が違うだけで admission が作れない: {r.stdout}"
+    assert len(_AA_adm(led)) == 1
+
+
+# ══ B1: attestation は caller flag で無効化できてはいけない ═══════════════════
+
+def _B1_org(tmp_path, attested="true"):
+    org = tmp_path / "b1org"
+    (org / ".orgforge" / "ledger").mkdir(parents=True)
+    (org / "ledger-schema.yaml").write_text(
+        (TEMPLATE / "ledger-schema.yaml").read_text(encoding="utf-8"), encoding="utf-8")
+    (org / "constitution.yaml").write_text(
+        f"enforcement:\n  judges:\n    require_attested_identity: {attested}\n",
+        encoding="utf-8")
+    return org, str(org / ".orgforge" / "ledger")
+
+
+_B1_PL = {"issue": 7, "deliverable": "7", "role": "gate", "verdict": "admit",
+          "for_event": "admission_decided", "phase": "implement",
+          "review_subject_id": "rev-A", "reasoning_sha256": "caller-claimed"}
+_B1_ENV = dict(os.environ, ORG_WRITER_TRUST_SELF="1")
+
+
+def _B1_append(org, led, lineage):
+    return subprocess.run(
+        [sys.executable, str(TOOLS / "ledger.py"), "append", led,
+         "--actor", "caller", "--class", "verdict_provisional",
+         "--payload", json.dumps({**_B1_PL, "lineage": lineage})],
+        capture_output=True, text=True, cwd=str(org), env=_B1_ENV, timeout=60)
+
+
+def _B1_derive(org, led, *extra):
+    return subprocess.run(
+        [sys.executable, str(TOOLS / "ledger.py"), "derive-admission", led,
+         "--issue", "7", "--event", "admission_decided", *extra],
+        capture_output=True, text=True, cwd=str(org), env=_B1_ENV, timeout=60)
+
+
+def _B1_adm(led):
+    p = os.path.join(led, "ledger.jsonl")
+    if not os.path.exists(p):
+        return []
+    return [json.loads(l) for l in open(p, encoding="utf-8")
+            if json.loads(l).get("class") == "admission_decided"]
+
+
+def test_B1_authenticated_mode_refuses_receiptless_provisional(tmp_path):
+    """**authenticated mode では receipt 無しの judgment を記録できない。**
+
+    `require_attested_identity: true` は「判断の主体を確かめる」宣言である。
+    receipt 無しの `verdict_provisional` が書けるなら、その宣言は効いていない。
+    """
+    org, led = _B1_org(tmp_path)
+    r = _B1_append(org, led, "same-harness")
+    assert r.returncode != 0, (
+        "authenticated mode で receipt 無しの verdict_provisional が記録できた\n"
+        + r.stdout + r.stderr)
+
+
+def test_B1_caller_flag_cannot_disable_attestation(tmp_path):
+    """**強制するかどうかを caller に尋ねてはいけない。**
+
+    `--require-attested` を省略すると claimed な provisional 2件から
+    joint admission が作れた（実測）。**検査される側が強制を外せる**形である。
+    """
+    org, led = _B1_org(tmp_path)
+    # 宣言が効いていれば、そもそも provisional が書けない。
+    # 万一書けても、flag の有無で admission の可否が変わってはいけない。
+    for lin in ("same-harness", "cross-harness"):
+        _B1_append(org, led, lin)
+    r = _B1_derive(org, led)                      # flag を省略
+    assert not _B1_adm(led), (
+        "flag を省略すると claimed から admission が作れた（未認証 admission）\n"
+        + r.stdout + r.stderr)
+
+
+def test_B1_control_unattested_org_still_works(tmp_path):
+    """**control: 宣言していない org は従来どおり動く。**（止めすぎない）"""
+    org, led = _B1_org(tmp_path, attested="false")
+    for lin in ("same-harness", "cross-harness"):
+        r = _B1_append(org, led, lin)
+        assert r.returncode == 0, r.stdout + r.stderr
+    r = _B1_derive(org, led)
+    assert r.returncode == 0, f"宣言していない org で joint が作れない: {r.stdout}{r.stderr}"
+    assert len(_B1_adm(led)) == 1
+
+
+# ══ B2: Stage B で trust store が writerd へ届くこと ═════════════════════════
+
+def test_B2_writerd_accepts_explicit_trust_flag():
+    """**trust store は明示的に渡す。** daemon は org の外（cwd=/）で動くので、
+    探索では見つからない。`--trust NAME=PATH` で固定できなければ、
+    installer は正しい receipt を検証させる手段を持たない。"""
+    r = subprocess.run([sys.executable, str(TOOLS / "writerd.py"), "serve", "--help"],
+                       capture_output=True, text=True, timeout=60)
+    assert "--trust" in r.stdout, (
+        "writerd に --trust が無い。installer が authoritative trust を渡せない\n" + r.stdout)
+
+
+def test_B2_installer_passes_trust_to_the_daemon():
+    """**installer が渡さなければ、daemon は永久に検証できない。**
+
+    installer は trust を ${AUTHORITATIVE}/trust へ移し、org 側を .pre-writer に改名する。
+    それなのに plist が trust を渡していなかったため、**正しく署名された receipt も
+    すべて拒否される**（実測: cwd=/ で trust store が見つからない）。
+    """
+    src = (TOOLS / "writer-install.sh").read_text(encoding="utf-8")
+    args = re.findall(r"<string>(--[a-z-]+)</string>", src)
+    assert "--trust" in args, (
+        "plist が writerd に trust を渡していない。渡している引数: " + ", ".join(sorted(set(args))))
+    assert "${AUTHORITATIVE}/trust" in src
+
+
+def test_B2_child_env_gets_the_trust_store(tmp_path):
+    """**子プロセス（ledger.py）に ORG_TRUST_STORE が届くこと。**
+    届かなければ receipt を検証できず、認証済みの記録が一切残せない。"""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("writerd_b2", str(TOOLS / "writerd.py"))
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+
+    trust = tmp_path / "keys.json"
+    trust.write_text(json.dumps({"keys": {"k1": {"secret": "s", "signer_id": "g"}}}),
+                     encoding="utf-8")
+    led = tmp_path / "led"; led.mkdir()
+    w = m.Writer({"default": str(led)})
+    w.trust = str(trust)
+    env = w._child_env("default") if hasattr(w, "_child_env") else None
+    if env is None:
+        # 実装が private な作り方をしている場合は、少なくとも trust を保持していること
+        assert w.trust == str(trust)
+    else:
+        assert env.get("ORG_TRUST_STORE") == str(trust), (
+            "子 env に ORG_TRUST_STORE が入っていない: " + repr(env.get("ORG_TRUST_STORE")))
+
+
+# ══ B4: cross-harness org で単独署名の direct admission を作らせない ═════════
+
+def _B4_org(tmp_path, lineage="cross-harness", name="b4org"):
+    import secrets as _sec
+    org = tmp_path / name
+    (org / ".orgforge" / "ledger").mkdir(parents=True)
+    (org / ".orgforge" / "trust").mkdir(parents=True)
+    (org / "ledger-schema.yaml").write_text(
+        (TEMPLATE / "ledger-schema.yaml").read_text(encoding="utf-8"), encoding="utf-8")
+    (org / "constitution.yaml").write_text(
+        "enforcement:\n  judges:\n    require_attested_identity: true\n"
+        f"    lineage: {lineage}\n", encoding="utf-8")
+    secret = "s-" + _sec.token_hex(8)
+    (org / ".orgforge" / "trust" / "keys.json").write_text(
+        json.dumps({"keys": {"k1": {"secret": secret, "signer_id": "gate-signer"}}}),
+        encoding="utf-8")
+    return org, str(org / ".orgforge" / "ledger"), secret
+
+
+def _B4_ids(org, led):
+    r = subprocess.run(
+        [sys.executable, "-c",
+         "import sys;sys.path.insert(0,%r);import ledger;"
+         "print('|'.join(str(x) for x in ledger._org_and_ledger_id(%r)))" % (str(TOOLS), led)],
+        capture_output=True, text=True, cwd=str(org), timeout=60)
+    assert r.returncode == 0, r.stdout + r.stderr
+    return r.stdout.strip().split("|")
+
+
+def _B4_receipt(org, led, secret, cls, verdict, out="rc.json", lineage="cross-harness"):
+    org_id, ledger_id = _B4_ids(org, led)
+    env = dict(os.environ, ORG_SIGNING_SECRET=secret, ORG_WRITER_TRUST_SELF="1")
+    r = subprocess.run(
+        [sys.executable, str(TOOLS / "identity.py"), "receipt",
+         "--org-id", org_id, "--ledger-id", ledger_id, "--subject", "rev-A",
+         "--issue", "7", "--role", "gate", "--phase", "operate",
+         "--lineage", lineage, "--verdict", verdict, "--event-class", cls,
+         "--requirements-digest", "D1", "--reasoning-sha256", "R1",
+         "--issued-at", "2026-07-30T12:00:00Z", "--key-id", "k1"],
+        capture_output=True, text=True, cwd=str(org), env=env, timeout=60)
+    assert r.returncode == 0, r.stdout + r.stderr
+    (org / out).write_text(r.stdout.strip(), encoding="utf-8")
+    return str(org / out)
+
+
+def _B4_direct(org, led, secret, rc, cls, verdict, lineage="cross-harness"):
+    env = dict(os.environ, ORG_SIGNING_SECRET=secret, ORG_WRITER_TRUST_SELF="1")
+    return subprocess.run(
+        [sys.executable, str(TOOLS / "ledger.py"), "append", led,
+         "--actor", "gate", "--class", cls, "--receipt", rc,
+         "--payload", json.dumps({"issue": "7", "deliverable": "7", "verdict": verdict,
+                                  "review_subject_id": "rev-A", "role": "gate",
+                                  "phase": "operate", "lineage": lineage,
+                                  "requirements_digest": "D1", "reasoning_sha256": "R1",
+                                  "candidate_id": "c1", "claim_id": "c1"})],
+        capture_output=True, text=True, cwd=str(org), env=env, timeout=60)
+
+
+def _B4_count(led, cls):
+    p = os.path.join(led, "ledger.jsonl")
+    if not os.path.exists(p):
+        return 0
+    return sum(1 for l in open(p, encoding="utf-8") if json.loads(l).get("class") == cls)
+
+
+def test_B4_cross_harness_refuses_single_signer_direct_admission(tmp_path):
+    """**二血統を要求する org で、1枚の receipt から admission を作れてはいけない。**
+
+    実測: cross-harness org で有効な receipt 1枚を generic append すると
+    `admission_decided` が直接1件記録された。joint 派生の経路が在っても、
+    **それを通らなくても書けるなら、二血統は強制されていない。**
+    """
+    org, led, secret = _B4_org(tmp_path)
+    rc = _B4_receipt(org, led, secret, "admission_decided", "admit")
+    r = _B4_direct(org, led, secret, rc, "admission_decided", "admit")
+    assert _B4_count(led, "admission_decided") == 0, (
+        "単独署名の direct admission が通った（二血統の迂回）\n" + r.stdout + r.stderr)
+
+
+def test_B4_cross_harness_refuses_single_signer_survives(tmp_path):
+    """`refutation_attempted: survives` も positive な判断なので同じ扱い。"""
+    org, led, secret = _B4_org(tmp_path)
+    rc = _B4_receipt(org, led, secret, "refutation_attempted", "survives")
+    r = _B4_direct(org, led, secret, rc, "refutation_attempted", "survives")
+    assert _B4_count(led, "refutation_attempted") == 0, (
+        "単独署名の direct survives が通った\n" + r.stdout + r.stderr)
+
+
+def test_B4_negative_verdicts_still_recordable(tmp_path):
+    """**control: reject / park / refuted の意味は変えない。**
+
+    否定的な判断は単独でも記録できてよい（通さない方向は独立性を要さない）。
+    ここを一緒に止めると、判定を記録する手段が無くなる。
+    """
+    org, led, secret = _B4_org(tmp_path)
+    rc = _B4_receipt(org, led, secret, "admission_decided", "reject")
+    r = _B4_direct(org, led, secret, rc, "admission_decided", "reject")
+    assert r.returncode == 0, f"reject が記録できない（止めすぎ）: {r.stdout}{r.stderr}"
+    assert _B4_count(led, "admission_decided") == 1
+
+
+def test_B4_same_harness_org_unaffected(tmp_path):
+    """**control: same-harness org の互換経路を壊さない。**"""
+    org, led, secret = _B4_org(tmp_path, lineage="same-harness", name="b4same")
+    rc = _B4_receipt(org, led, secret, "admission_decided", "admit", lineage="same-harness")
+    r = _B4_direct(org, led, secret, rc, "admission_decided", "admit", lineage="same-harness")
+    assert r.returncode == 0, f"same-harness org で admit できない: {r.stdout}{r.stderr}"
+    assert _B4_count(led, "admission_decided") == 1
