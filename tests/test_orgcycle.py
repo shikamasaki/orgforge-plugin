@@ -484,6 +484,173 @@ def test_integrate_plan_executes_nothing_and_warns_on_overlap(tmp_path):
         "--plan がマージ手順より後にある（実行してしまう）"
 
 
+def _ship_module():
+    import importlib
+    if str(TOOLS) not in sys.path:
+        sys.path.insert(0, str(TOOLS))
+    return importlib.import_module("orgcycle.ship")
+
+
+def _branch_repo(tmp_path, *branches):
+    repo = tmp_path / "branch-repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True)
+    (repo / "seed.txt").write_text("seed", encoding="utf-8")
+    subprocess.run(["git", "add", "seed.txt"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "seed"], cwd=repo, check=True)
+    for branch in branches:
+        subprocess.run(["git", "branch", branch], cwd=repo, check=True)
+    return repo
+
+
+def test_integrate_branch_resolution_uses_exact_existing_branch(tmp_path, monkeypatch):
+    ship = _ship_module()
+    exact = "feat/issue-51-current-title"
+    repo = _branch_repo(tmp_path, exact)
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(ship, "_branch_for", lambda _issue: exact)
+    branch, subject_sha, error = ship._resolve_integration_branch(51)
+    assert branch == exact and len(subject_sha) == 40 and error is None
+
+
+def test_integrate_branch_resolution_uses_sole_real_candidate(tmp_path, monkeypatch):
+    ship = _ship_module()
+    actual = "feat/issue-51-original-name"
+    repo = _branch_repo(tmp_path, actual)
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(ship, "_branch_for", lambda _issue: "feat/issue-51-renamed-title")
+    branch, subject_sha, error = ship._resolve_integration_branch(51)
+    assert branch == actual and len(subject_sha) == 40 and error is None
+
+
+def test_integrate_branch_resolution_stops_on_tracking_only_candidate(tmp_path, monkeypatch):
+    ship = _ship_module()
+    actual = "feat/issue-51-remote-name"
+    repo = _branch_repo(tmp_path)
+    subprocess.run(["git", "update-ref", f"refs/remotes/origin/{actual}", "main"],
+                   cwd=repo, check=True)
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(ship, "_branch_for", lambda _issue: "feat/issue-51-renamed-title")
+    branch, subject_sha, error = ship._resolve_integration_branch(51)
+    assert branch is None and subject_sha is None and "tracking ref のみ" in error
+
+
+def test_integrate_branch_resolution_stops_on_local_tracking_divergence(tmp_path, monkeypatch):
+    ship = _ship_module()
+    actual = "feat/issue-51-diverged"
+    repo = _branch_repo(tmp_path, actual)
+    (repo / "tracking.txt").write_text("new", encoding="utf-8")
+    subprocess.run(["git", "add", "tracking.txt"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "tracking"], cwd=repo, check=True)
+    tracking_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True,
+        capture_output=True, text=True).stdout.strip()
+    subprocess.run(["git", "update-ref", f"refs/remotes/origin/{actual}", tracking_sha],
+                   cwd=repo, check=True)
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(ship, "_branch_for", lambda _issue: actual)
+    branch, subject_sha, error = ship._resolve_integration_branch(51)
+    assert branch is None and subject_sha is None and "分岐している" in error
+    assert "local=" in error and "tracking=" in error
+
+
+def test_integrate_branch_resolution_accepts_matching_local_and_tracking(tmp_path, monkeypatch):
+    ship = _ship_module()
+    actual = "feat/issue-51-same"
+    repo = _branch_repo(tmp_path, actual)
+    sha = subprocess.run(
+        ["git", "rev-parse", actual], cwd=repo, check=True,
+        capture_output=True, text=True).stdout.strip()
+    subprocess.run(["git", "update-ref", f"refs/remotes/origin/{actual}", sha],
+                   cwd=repo, check=True)
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(ship, "_branch_for", lambda _issue: actual)
+    branch, subject_sha, error = ship._resolve_integration_branch(51)
+    assert (branch, subject_sha, error) == (actual, sha, None)
+
+
+def test_integrate_branch_resolution_stops_when_missing(tmp_path, monkeypatch):
+    ship = _ship_module()
+    repo = _branch_repo(tmp_path)
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(ship, "_branch_for", lambda _issue: "feat/issue-51-missing")
+    branch, subject_sha, error = ship._resolve_integration_branch(51)
+    assert branch is None and subject_sha is None and "候補も無い" in error
+
+
+def test_integrate_branch_resolution_stops_on_ambiguity(tmp_path, monkeypatch):
+    ship = _ship_module()
+    candidates = ("feat/issue-51-one", "feat/issue-51-two")
+    repo = _branch_repo(tmp_path, *candidates)
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(ship, "_branch_for", lambda _issue: "feat/issue-51-missing")
+    branch, subject_sha, error = ship._resolve_integration_branch(51)
+    assert branch is None and subject_sha is None and "候補が複数" in error
+    assert all(candidate in error for candidate in candidates)
+
+
+def test_integrate_explicit_branch_is_checked_without_fallback(tmp_path, monkeypatch):
+    ship = _ship_module()
+    repo = _branch_repo(tmp_path, "feat/issue-51-other")
+    monkeypatch.chdir(repo)
+    branch, subject_sha, error = ship._resolve_integration_branch(
+        51, "feat/issue-51-explicit-missing")
+    assert branch is None and subject_sha is None and "--branch" in error and "other" in error
+
+
+def test_integrate_explicit_nonstandard_branch_and_sha_are_supported(tmp_path, monkeypatch):
+    ship = _ship_module()
+    repo = _branch_repo(tmp_path, "hotfix/manual-review")
+    sha = subprocess.run(
+        ["git", "rev-parse", "main"], cwd=repo, check=True,
+        capture_output=True, text=True).stdout.strip()
+    monkeypatch.chdir(repo)
+    branch, subject_sha, error = ship._resolve_integration_branch(51, "hotfix/manual-review")
+    assert branch == "hotfix/manual-review" and subject_sha == sha and error is None
+    branch, subject_sha, error = ship._resolve_integration_branch(51, sha)
+    assert branch == sha and subject_sha == sha and error is None
+
+
+def test_integrate_preview_fails_instead_of_reporting_zero_for_missing_ref(tmp_path, monkeypatch):
+    ship = _ship_module()
+    repo = _branch_repo(tmp_path)
+    monkeypatch.chdir(repo)
+    body, overlaps, error = ship._integrate_preview(
+        51, "feat/issue-51-missing", "0" * 40, "main", "true")
+    assert error and overlaps == {}
+    assert "0 files" not in body and "subject" in body
+
+
+def test_integrate_preview_is_pinned_to_resolved_subject_sha(tmp_path, monkeypatch):
+    ship = _ship_module()
+    branch = "feat/issue-51-moving"
+    repo = _branch_repo(tmp_path, branch)
+    subprocess.run(["git", "checkout", "-q", branch], cwd=repo, check=True)
+    (repo / "first.txt").write_text("first", encoding="utf-8")
+    subprocess.run(["git", "add", "first.txt"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "first"], cwd=repo, check=True)
+    first_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True,
+        capture_output=True, text=True).stdout.strip()
+    (repo / "later.txt").write_text("later", encoding="utf-8")
+    subprocess.run(["git", "add", "later.txt"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "later"], cwd=repo, check=True)
+    monkeypatch.chdir(repo)
+
+    body, overlaps, error = ship._integrate_preview(51, branch, first_sha, "main", "true")
+    assert error is None and overlaps == {}
+    assert "first.txt" in body and "later.txt" not in body and first_sha[:12] in body
+
+
+def test_integrate_records_and_merges_immutable_subject_sha():
+    src = _cycle_src("ship")
+    assert '["git", "merge", "--no-ff", subject_sha' in src
+    assert '"integration_subject_sha": subject_sha' in src
+    assert "integration_subject_sha" in (TEMPLATE / "ledger-schema.yaml").read_text(encoding="utf-8")
+
+
 def test_surface_detection_ranks_security_definer_first():
     """SECURITY DEFINER は関数ごとに判定する。ファイル単位だと肝心の1件が沈む。"""
     src = _cycle_src()

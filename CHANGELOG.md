@@ -6,6 +6,19 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 2.0.6 — real integration branch resolution
+
+### Fixed
+
+- Resolve `integrate` targets against real local and origin-tracking refs rather than treating the
+  current Issue-title slug as durable branch identity.
+- Use a sole matching Issue branch when the derived name changed, and stop with actionable missing
+  or ambiguity diagnostics instead of reporting a nonexistent ref as zero files and commits.
+- Existence-check explicit `--branch` overrides and fail if a ref disappears between resolution and
+  preview.
+- Stop on local/tracking divergence, merge the immutable resolved commit rather than a movable ref,
+  and record that subject SHA in integration evidence.
+
 ## 2.0.5 — executable shell data boundaries
 
 ### Fixed
