@@ -606,6 +606,92 @@ def _window_since():
 # **検査を呼ぶかどうかを、検査される側が決められてはいけない。**
 _PROTECTED_BRANCHES = ("develop", "main", "master")
 _MERGE_VERBS = (("git", "merge"), ("git", "rebase"), ("git", "cherry-pick"))
+_MERGE_COMMANDS = {verb for _, verb in _MERGE_VERBS}
+
+
+def _integration_target_cwd(cmd):
+    """Return ``(has_integration, cwd)`` for a statically resolvable git integration.
+
+    PreToolUse runs before Bash, so its process cwd does not reflect a leading ``cd`` and ordinary
+    token matching does not understand ``git -C``. Resolve only the two narrow, deterministic forms
+    used for worktrees. If a target path is dynamic, missing, or there is more than one integration,
+    return ``(True, None)`` so the caller fails closed instead of inspecting the wrong checkout.
+    """
+    if not isinstance(cmd, str):
+        return False, None
+    plain = _tokenize(cmd)
+    direct_integration = any(_has_seq(plain, verb) for verb in _MERGE_VERBS)
+    git_c_integration = any(
+        plain[index] == "git" and index + 1 < len(plain) and plain[index + 1] == "-C"
+        and bool(_MERGE_COMMANDS.intersection(plain[index + 2:index + 6]))
+        for index in range(len(plain)))
+    might_integrate = direct_integration or git_c_integration
+    if not might_integrate:
+        return False, None
+    if len(cmd) > _MAX_TOKENIZE_CHARS or re.search(r"`|\$\(|(?:^|\s)[<>]\(", cmd):
+        return True, None
+    try:
+        lexer = shlex.shlex(cmd, posix=True, punctuation_chars=";&|\n")
+        lexer.whitespace = " \t\r"
+        lexer.whitespace_split = True
+        lexer.commenters = "#"
+        tokens = list(lexer)
+    except (TypeError, ValueError):
+        return True, None
+
+    targets = []
+    for index, token in enumerate(tokens):
+        if token != "git":
+            continue
+        preceding_cds = [pos for pos, word in enumerate(tokens[:index]) if word == "cd"]
+        direct_cd = (index >= 3 and tokens[index - 1] == "&&" and tokens[index - 3] == "cd")
+        # Resolving a shell state machine here would recreate a shell incompletely. Support exactly
+        # one direct ``cd PATH && git``; chained, separated, or otherwise earlier cd commands are
+        # ambiguous and must not make us inspect a checkout different from the one Bash will use.
+        if preceding_cds and not (len(preceding_cds) == 1 and direct_cd
+                                  and preceding_cds[0] == index - 3):
+            return True, None
+        target = os.getcwd()
+        if direct_cd:
+            raw_cd = tokens[index - 2]
+            if (not raw_cd or raw_cd.startswith("-")
+                    or any(mark in raw_cd for mark in ("$", "`", "~"))):
+                return True, None
+            target = raw_cd if os.path.isabs(raw_cd) else os.path.join(os.getcwd(), raw_cd)
+        verb_index = index + 1
+        if verb_index < len(tokens) and tokens[verb_index] == "-C":
+            if verb_index + 2 >= len(tokens):
+                return True, None
+            raw_target = tokens[verb_index + 1]
+            verb_index += 2
+            if (not raw_target or raw_target.startswith("-")
+                    or any(mark in raw_target for mark in ("$", "`", "~"))):
+                return True, None
+            target = raw_target if os.path.isabs(raw_target) else os.path.join(target, raw_target)
+        if verb_index < len(tokens) and tokens[verb_index] in _MERGE_COMMANDS:
+            targets.append(os.path.realpath(target))
+
+    if not targets:
+        # Preserve detection of wrapper forms already held by the old adjacent-token classifier.
+        return True, os.getcwd()
+    if len(targets) != 1 or not os.path.isdir(targets[0]):
+        return True, None
+    return True, targets[0]
+
+
+def _git_integration_context(cwd):
+    """Return ``(branch, repo_root)`` for the checkout an integration would mutate."""
+    try:
+        branch = subprocess.run(
+            ["git", "-C", cwd, "branch", "--show-current"], capture_output=True, text=True,
+            timeout=10).stdout.strip()
+        root_result = subprocess.run(
+            ["git", "-C", cwd, "rev-parse", "--show-toplevel"], capture_output=True, text=True,
+            timeout=10)
+        root = root_result.stdout.strip() if root_result.returncode == 0 else ""
+        return branch, root
+    except Exception:
+        return "", ""
 
 
 def _integration_bypass(tool_name, ti):
@@ -619,19 +705,20 @@ def _integration_bypass(tool_name, ti):
     if tool_name != "Bash":
         return None
     cmd = _without_inert_heredoc_data(_command_text(ti))
-    toks = _tokenize(cmd)
-    if not any(_has_seq(toks, v) for v in _MERGE_VERBS):
+    has_integration, target_cwd = _integration_target_cwd(cmd)
+    if not has_integration:
         return None
-    # 現在のブランチが保護対象なら hold（マージ先は checkout 中のブランチ）
-    try:
-        cur = subprocess.run(["git", "branch", "--show-current"],
-                             capture_output=True, text=True, timeout=10).stdout.strip()
-    except Exception:
-        cur = ""
+    _current_branch, current_root = _git_integration_context(os.getcwd())
+    if target_cwd is None:
+        if current_root and os.path.isdir(os.path.join(current_root, ".orgforge")):
+            return ("統合コマンドの対象 worktree を静的に解決できない。動的な `cd` / `git -C` "
+                    "や複数の統合を1回にまとめず、対象 worktree を cwd にして1件ずつ実行すること。")
+        return None
+    cur, repo_root = _git_integration_context(target_cwd)
     if cur not in _PROTECTED_BRANCHES:
         return None
     # org が無いリポジトリでは黙る（この規律は orgforge の org にだけ適用する）
-    if not os.path.isdir(os.path.join(os.getcwd(), ".orgforge")):
+    if not repo_root or not os.path.isdir(os.path.join(repo_root, ".orgforge")):
         return None
 
     tools_dir = os.environ.get("ORG_TOOLS_DIR") or ""
