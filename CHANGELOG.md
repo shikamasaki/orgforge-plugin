@@ -6,6 +6,14 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 2.0.24 — installed exercise session binding
+
+### Fixed
+
+- Make the deterministic reviewer-outage exercise inherit the current installed-organ session,
+  so the documented pre-scheduler readiness check can complete without weakening stale-session
+  rejection; standalone and CI runs retain their deterministic fixture identity.
+
 ## 2.0.23 — receipt-bound judgment correction authority
 
 ### Fixed

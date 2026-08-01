@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import os
 import pathlib
 import subprocess
 import sys
@@ -38,6 +39,17 @@ def test_reviewer_outage_deterministically_degrades_revalidates_and_recovers():
     assert report["operational_state"]["circuit"]["to_state"] == "CLOSED"
     assert report["operational_state"]["unresolved_taints"] == []
     assert report["recovery"]["probe_reached"] is True
+
+
+def test_reviewer_outage_uses_the_installed_organ_session_binding():
+    env = dict(os.environ, ORG_ORGAN_SESSION_ID="installed-session-73")
+    run = subprocess.run(
+        [sys.executable, str(TOOL), "reviewer-outage", "--expect", "GREEN", "--json"],
+        cwd=REPO, env=env, capture_output=True, text=True, timeout=30)
+    assert run.returncode == 0, run.stdout + run.stderr
+    report = json.loads(run.stdout)
+    assert report["exercise_status"] == "GREEN"
+    assert report["operational_state"]["observed"] == "NORMAL"
 
 
 def test_fault_noop_is_invalid_not_green(tmp_path):
