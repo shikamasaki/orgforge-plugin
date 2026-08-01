@@ -1971,6 +1971,139 @@ def test_xh_disagreement_recorded_in_either_order(tmp_path, first, second):
     assert dis[0]["payload"]["cross_harness"] == second
 
 
+# ══ 2.0.15: judge dispatch 前の bounded environment preflight ═══════════════
+
+def _preflight_constitution(tmp_path, preflights):
+    import yaml
+    path = tmp_path / "constitution.yaml"
+    path.write_text(yaml.safe_dump({"enforcement": {"judges": {
+        "preflights": preflights}}}, sort_keys=False), encoding="utf-8")
+    return path
+
+
+def test_judge_preflight_runs_only_for_matching_issue_phase_and_role(tmp_path, monkeypatch):
+    mod = _cycle_mod("preflight")
+    marker = tmp_path / "ran"
+    path = _preflight_constitution(tmp_path, [{
+        "id": "database",
+        "command": [sys.executable, "-c",
+                    "import os,pathlib; pathlib.Path(os.environ['MARKER']).write_text("
+                    "os.environ['ORG_PREFLIGHT_ISSUE'] + ':' + "
+                    "os.environ['ORG_PREFLIGHT_PHASE'] + ':' + "
+                    "os.environ['ORG_PREFLIGHT_ROLE'])"],
+        "timeout_seconds": 2,
+        "applies_to": {"issues": [36], "phases": ["implement"],
+                       "roles": ["gate"]},
+    }])
+    monkeypatch.setattr(mod, "_constitution_path", lambda: str(path))
+    monkeypatch.setenv("MARKER", str(marker))
+
+    assert mod.run_declared_preflights(7, "gate", "implement", cwd=tmp_path) == (True, [])
+    assert not marker.exists(), "unrelated Issue inherited the database probe"
+    assert mod.run_declared_preflights(36, "skeptic", "implement", cwd=tmp_path) == (True, [])
+    assert not marker.exists(), "unrelated role inherited the database probe"
+    ok, evidence = mod.run_declared_preflights(36, "gate", "implement", cwd=tmp_path)
+    assert ok and len(evidence) == 1
+    assert marker.read_text(encoding="utf-8") == "36:implement:gate"
+    measured = json.loads(evidence[0])
+    assert measured["id"] == "database"
+    assert measured["status"] == "pass"
+    assert measured["exit_code"] == 0
+    assert isinstance(measured["elapsed_ms"], int)
+
+
+def test_judge_preflight_failure_reports_exact_probe_result(tmp_path, monkeypatch, capsys):
+    mod = _cycle_mod("preflight")
+    path = _preflight_constitution(tmp_path, [{
+        "id": "runtime-health",
+        "command": [sys.executable, "-c",
+                    "import sys; print('measured-down'); print('socket refused', file=sys.stderr); "
+                    "raise SystemExit(23)"],
+        "timeout_seconds": 2,
+        "applies_to": {"issues": [36]},
+    }])
+    monkeypatch.setattr(mod, "_constitution_path", lambda: str(path))
+    ok, evidence = mod.run_declared_preflights(36, "gate", "implement", cwd=tmp_path)
+    assert not ok and len(evidence) == 1
+    measured = json.loads(evidence[0])
+    assert measured["status"] == "fail"
+    assert measured["exit_code"] == 23
+    assert measured["stdout"] == "measured-down\n"
+    assert measured["stderr"] == "socket refused\n"
+    assert measured["command"][0] == sys.executable
+    assert "runtime-health" in capsys.readouterr().err
+
+
+def test_judge_preflight_timeout_is_measured_and_stops(tmp_path, monkeypatch):
+    mod = _cycle_mod("preflight")
+    path = _preflight_constitution(tmp_path, [{
+        "id": "slow-runtime",
+        "command": [sys.executable, "-c", "import time; time.sleep(1)"],
+        "timeout_seconds": 0.03,
+    }])
+    monkeypatch.setattr(mod, "_constitution_path", lambda: str(path))
+    ok, evidence = mod.run_declared_preflights(36, "gate", "implement", cwd=tmp_path)
+    measured = json.loads(evidence[0])
+    assert not ok
+    assert measured["status"] == "timeout"
+    assert measured["exit_code"] is None
+    assert measured["timeout_seconds"] == 0.03
+    assert measured["elapsed_ms"] >= 20
+
+
+@pytest.mark.parametrize("probe,fragment", [
+    ({"id": "shell", "command": "docker info", "timeout_seconds": 2}, "argv list"),
+    ({"id": "unbounded", "command": ["true"]}, "timeout_seconds"),
+    ({"id": "bad-scope", "command": ["true"], "timeout_seconds": 2,
+      "applies_to": {"labels": ["db"]}}, "未知の selector"),
+    ({"id": "scope-typo", "command": ["true"], "timeout_seconds": 2,
+      "apply_to": {"issues": [36]}}, "未知の field"),
+])
+def test_judge_preflight_rejects_ambiguous_or_unbounded_contract(
+        tmp_path, monkeypatch, probe, fragment):
+    mod = _cycle_mod("preflight")
+    path = _preflight_constitution(tmp_path, [probe])
+    monkeypatch.setattr(mod, "_constitution_path", lambda: str(path))
+    with pytest.raises(mod.PreflightConfigError, match=fragment):
+        mod.load_probes(36, "gate", "implement")
+
+
+def test_verify_stops_before_any_judge_work_when_preflight_fails(monkeypatch, capsys):
+    judge = _cycle_mod("judge")
+    monkeypatch.setattr(judge, "_role_charter", lambda role: ("charter", "agents/gate.md"))
+    monkeypatch.setattr(judge, "_issue_body", lambda issue: ("title", "MUST: work"))
+    monkeypatch.setattr(judge, "run_declared_preflights",
+                        lambda *args, **kwargs: (False, ['{"id":"db","status":"fail"}']))
+    monkeypatch.setattr(judge, "_seam",
+                        lambda *args: pytest.fail("seam/judge material was built after failure"))
+    args = argparse.Namespace(issue=36, role="gate", phase="implement", print_subject=False)
+    assert judge.cmd_verify(args) == 8
+    err = capsys.readouterr().err
+    assert "judge は起動していない" in err
+
+
+def test_preflight_contract_is_bundled_identically_for_both_harnesses():
+    source = (TOOLS / "orgcycle" / "preflight.py").read_bytes()
+    for harness in ("claude-code", "codex"):
+        bundled = REPO / "integrations" / harness / "tools" / "orgcycle" / "preflight.py"
+        assert bundled.read_bytes() == source
+
+
+def test_org_lint_rejects_invalid_preflight_before_first_judge():
+    import importlib.util
+    import yaml
+    spec = importlib.util.spec_from_file_location("org_lint_preflight", TOOLS / "org_lint.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    constitution = yaml.safe_load((TEMPLATE / "constitution.yaml").read_text(encoding="utf-8"))
+    constitution["enforcement"]["judges"]["preflights"] = [{
+        "id": "unbounded", "command": ["runtime", "status"]}]
+    lint = module.Lint()
+    module.lint_constitution(constitution, lint)
+    assert any(error.startswith("[PF]") and "timeout_seconds" in error
+               for error in lint.errs), lint.errs
+
+
 # ══ 0.32.3: review_subject が作業ツリー全体を束ねる ═══════════════════════════
 
 def _repo(tmp_path):

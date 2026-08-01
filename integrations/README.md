@@ -174,6 +174,17 @@ codex exec --sandbox read-only -m gpt-5.5   --output-schema template/schemas/ske
 python3 tools/org_cycle.py intake --issue 11 --role skeptic --report - < /tmp/sk11.json
 ```
 
+### Judge environment preflight
+
+An organization can declare bounded probes under
+`constitution.yaml: enforcement.judges.preflights`. Each probe uses an argv list (never a shell
+string), requires an explicit `timeout_seconds`, and can be scoped with
+`applies_to.issues`, `applies_to.phases`, and `applies_to.roles`. Selectors are ANDed; values inside
+one selector are ORed. A failed or timed-out matching probe makes `org_cycle verify` exit 8 before
+any headless judge is started. Successful measured evidence (command, exit code, elapsed time,
+stdout, and stderr) is included in the judge material. OrgForge does not infer a particular daemon
+implementation from the result.
+
 Two layers, deliberately: `--output-schema` enforces the *shape* of the verdict (a report cannot
 come back missing `verdict` or `evidence`), and `intake` checks the *content* (a field present but
 empty is still incomplete). A judge runs `--sandbox read-only`, so it cannot write regardless of

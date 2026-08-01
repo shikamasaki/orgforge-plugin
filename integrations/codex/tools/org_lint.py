@@ -623,6 +623,15 @@ def lint_constitution(con, lint):
     if rules.get("batch_adjudication_of_charter_items") is not False:
         lint.fail("CH", "charter.queue_rules.batch_adjudication_of_charter_items must "
                         "be false")
+    # Judge preflight is an enforcement contract, not an arbitrary shell snippet. Validate it at
+    # founding/lint time as well as immediately before dispatch, so an unbounded or ambiguous
+    # probe does not wait until the first real review to stop the organization.
+    try:
+        from orgcycle.preflight import (PreflightConfigError, declared_preflights,
+                                        parse_probes)
+        parse_probes(declared_preflights(con), "*", "*", "*")
+    except PreflightConfigError as exc:
+        lint.fail("PF", f"judge preflight contract invalid: {exc}")
     # mandate_precedence (docs/05 §6.4): the human-authored ordering reconcile.py mandate reads.
     mp = con.get("mandate_precedence")
     if mp is None:
