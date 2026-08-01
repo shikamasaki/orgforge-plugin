@@ -947,6 +947,35 @@ def test_rework_has_a_dedicated_command():
         assert flag in p.stdout, f"{flag} が無い"
 
 
+def _rework_args():
+    return argparse.Namespace(issue=32, after="refuted", by="supervisor", reason="fix the proof",
+                              to="maker", round=2)
+
+
+def test_rework_returns_issue_to_ready_before_recording_ledger(monkeypatch):
+    m = _cycle_mod("judge")
+    calls = []
+    monkeypatch.setattr(m, "_gh_sync", lambda *a: (calls.append(("gh",) + a) or (0, "ok")))
+    monkeypatch.setattr(m, "_ledger", lambda *a: (calls.append(("ledger",) + a) or (0, "ok")))
+
+    assert m.cmd_rework(_rework_args()) == 0
+
+    assert calls[0] == ("gh", "stage", "--issue", "32", "--stage", "ready")
+    assert calls[1][0:3] == ("ledger", "append", "--actor")
+    assert calls[2][0:3] == ("gh", "log", "--issue")
+
+
+def test_rework_does_not_advance_ledger_when_reopen_fails(monkeypatch):
+    m = _cycle_mod("judge")
+    ledger_calls = []
+    monkeypatch.setattr(m, "_gh_sync", lambda *a: ((2, "reopen denied")
+                                                    if a[0] == "stage" else (0, "ok")))
+    monkeypatch.setattr(m, "_ledger", lambda *a: (ledger_calls.append(a) or (0, "ok")))
+
+    assert m.cmd_rework(_rework_args()) == 3
+    assert ledger_calls == []
+
+
 def test_verify_offers_the_rework_command_on_reject():
     """判定の記録と**同じ場所**に rework の発注コマンドを置く（順序が逆転する）。"""
     src = _cycle_src("judge")

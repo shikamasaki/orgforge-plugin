@@ -23,6 +23,25 @@ from ._core import (
 STAGES = ("ready", "in-progress", "blocked", "needs-human", "done")
 
 
+def _issue_state(repo, issue):
+    """GitHub Issue の open/closed 状態。
+
+    stage label は backlog の投影だが、GitHub の Issue state も同じ投影の一部である。
+    片方だけ動かすと `ready` なのに CLOSED、または `done` なのに OPEN という二つの真実が
+    生まれるので、stage 遷移の入口で両方を見る。
+    """
+    code, out = gh(["issue", "view", str(issue), "--repo", repo, "--json", "state"])
+    if code != 0:
+        return None, out
+    try:
+        state = str(json.loads(out).get("state") or "").upper()
+    except Exception as e:
+        return None, f"parse: {e}"
+    if state not in ("OPEN", "CLOSED"):
+        return None, f"unexpected issue state: {state or '(empty)'}"
+    return state, ""
+
+
 def cmd_claim(a):
     labels, err = issue_labels(a.repo, a.issue)
     if labels is None:
@@ -131,6 +150,22 @@ def cmd_stage(a):
     if labels is None:
         print(f"gh error: {err}", file=sys.stderr)
         return 2
+    state, err = _issue_state(a.repo, a.issue)
+    if state is None:
+        print(f"gh error reading issue state: {err}", file=sys.stderr)
+        return 2
+
+    # ready/in-progress/blocked/needs-human はすべて「まだ仕事として存在する」状態。
+    # CLOSED のまま label だけ戻すと `ready --state open` から永久に見えない。rework の
+    # 正式経路も stage ready を通るので、ここで state と label を同じ投影として揃える。
+    reopened = False
+    if a.stage != "done" and state == "CLOSED":
+        rc, ro = gh(["issue", "reopen", str(a.issue), "--repo", a.repo])
+        if rc != 0:
+            print(f"gh error reopening issue: {ro}", file=sys.stderr)
+            return 2
+        state = "OPEN"
+        reopened = True
     _ensure_labels(a.repo, [(f"orgforge:{s}", "c2e0c6") for s in STAGES])
     remove = [l for l in labels if l.startswith("orgforge:") and l[len("orgforge:"):] in STAGES]
     args = ["issue", "edit", str(a.issue), "--repo", a.repo, "--add-label", f"orgforge:{a.stage}"]
@@ -139,9 +174,19 @@ def cmd_stage(a):
             args += ["--remove-label", r]
     code, out = gh(args)
     if code != 0:
+        # Reopen + relabel is not atomic in GitHub. Restore the original CLOSED projection when the
+        # second half fails so an open Issue cannot remain hidden behind its previous `done` label.
+        # A later retry is safe whether this compensation succeeds or not.
+        if reopened:
+            cc, co = gh(["issue", "close", str(a.issue), "--repo", a.repo])
+            if cc != 0:
+                print(f"WARN: reopened issue but relabel and compensating close both failed "
+                      f"({out.strip()[:80]}; {co.strip()[:80]}) — retry stage to reconcile it.",
+                      file=sys.stderr)
+                return 10
         print(f"gh error: {out}", file=sys.stderr)
         return 2
-    if a.stage == "done":
+    if a.stage == "done" and state != "CLOSED":
         cc, co = gh(["issue", "close", str(a.issue), "--repo", a.repo])
         if cc != 0:
             print(f"WARN: labeled done but close failed ({co.strip()[:120]}); a dependent Issue "

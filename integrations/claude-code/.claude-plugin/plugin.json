@@ -1,6 +1,6 @@
 {
   "name": "orgforge-plugin",
-  "version": "2.0.10",
+  "version": "2.0.11",
   "description": "A governance layer for existing coding-agent teams. OrgForge projects explicit roles, maker/checker boundaries, a non-skippable SDLC, human-held irreversible decisions, and evidence records into Claude Code, then uses that evidence to evolve the organization with the product. Adopt an existing repository with one command; no daemon, sudo, or key infrastructure is required.",
   "author": {
     "name": "shikamasaki"
