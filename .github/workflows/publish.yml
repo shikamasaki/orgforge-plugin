@@ -1,0 +1,103 @@
+name: Publish plugins
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+  artifact-metadata: write
+
+concurrency:
+  group: publish-main
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out the exact revision that passed CI
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+
+      - name: Refuse a superseded main run
+        run: |
+          git fetch --no-tags origin main
+          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+
+      - name: Resolve and validate release metadata
+        id: release
+        run: python tools/release_check.py --format github-output >> "$GITHUB_OUTPUT"
+
+      - name: Verify the release bundles are synchronized
+        run: |
+          bash integrations/claude-code/build.sh --check
+          bash integrations/codex/build.sh --check
+
+      - name: Check whether this version is already published
+        id: existing
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          if git rev-parse --verify --quiet "refs/tags/$TAG" >/dev/null; then
+            if git diff --quiet "$TAG" HEAD -- \
+              .claude-plugin integrations/claude-code integrations/codex; then
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              echo "$TAG already contains the same publishable plugin content."
+            else
+              echo "Plugin content changed without a version bump: $TAG already exists." >&2
+              exit 1
+            fi
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build plugin archives
+        if: steps.existing.outputs.skip != 'true'
+        env:
+          CLAUDE_ARCHIVE: ${{ steps.release.outputs.claude_archive }}
+          CODEX_ARCHIVE: ${{ steps.release.outputs.codex_archive }}
+        run: |
+          mkdir -p dist
+          git archive --format=tar.gz --prefix=orgforge-plugin/ \
+            --output="dist/$CLAUDE_ARCHIVE" HEAD:integrations/claude-code
+          git archive --format=tar.gz --prefix=orgforge/ \
+            --output="dist/$CODEX_ARCHIVE" HEAD:integrations/codex
+          tar -tzf "dist/$CLAUDE_ARCHIVE" >/dev/null
+          tar -tzf "dist/$CODEX_ARCHIVE" >/dev/null
+          shasum -a 256 dist/*.tar.gz > dist/SHA256SUMS
+
+      - name: Attest plugin archives
+        if: steps.existing.outputs.skip != 'true'
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4
+        with:
+          subject-path: dist/*.tar.gz
+
+      - name: Publish immutable GitHub release
+        if: steps.existing.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+          VERSION: ${{ steps.release.outputs.version }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: >-
+          gh release create "$TAG" dist/*
+          --target "$SHA"
+          --title "OrgForge $VERSION"
+          --generate-notes

@@ -1767,6 +1767,7 @@ def test_writer_owned_assets_are_audited(tmp_path):
     assert issues and "他者から書き込み可能" in issues[0][1]
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="writer-install.sh is macOS-only")
 def test_install_script_dry_run_changes_nothing(tmp_path):
     """段階B の install は `--dry-run` で何も変えない（root 不要で監査できる）。"""
     led = tmp_path / ".orgforge" / "ledger"; led.mkdir(parents=True)
@@ -2560,6 +2561,7 @@ def test_C_uninstall_keeps_shared_things_while_other_orgs_remain():
     assert "この org（${ORG_NAME}）の socket / 権威データ / backup / 設定を消した" in src
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="writer-install.sh is macOS-only")
 def test_C_uninstall_requires_an_org(tmp_path):
     """拒否系: どの org を外すのか決まらなければ止まる（他 org を巻き込まない）。"""
     r = subprocess.run(["bash", str(TOOLS / "writer-install.sh"), "--uninstall", "--dry-run"],
@@ -2568,6 +2570,7 @@ def test_C_uninstall_requires_an_org(tmp_path):
     assert "どの org を外すのか決まらない" in (r.stdout + r.stderr)
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="writer-install.sh is macOS-only")
 def test_C_dry_run_changes_nothing_and_states_the_boundary(tmp_path):
     """control: --dry-run は何も変えず、境界を明示する。"""
     (tmp_path / ".orgforge" / "ledger").mkdir(parents=True)
