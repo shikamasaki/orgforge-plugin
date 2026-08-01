@@ -82,11 +82,18 @@ def cmd_show(a):
     # 判定の履歴 — 何周目のどの判定かが分かるように全部出す
     judged = [e for e in evs if e["class"] in
               ("admission_decided", "refutation_attempted", "rework_requested",
-               "integration_admitted", "result_deployed")]
+               "integration_admitted", "result_deployed", "correction")]
     if judged:
         print("  判定:")
         for e in judged:
             pl = e.get("payload", {}) or {}
+            if e["class"] == "correction":
+                print(f"     seq {e.get('seq')}: correction kind={pl.get('kind')} "
+                      f"effect={pl.get('effect', '-')} targets={pl.get('corrects')} "
+                      f"by {pl.get('authority_role') or e.get('actor')} "
+                      f"principal={pl.get('authority_principal', '-')} "
+                      f"assurance={pl.get('authority_assurance', 'legacy')}")
+                continue
             mark = "✗" if e.get("seq") in voided else " "
             why = (pl.get("why") or pl.get("reason") or "")[:70]
             note = " ⟨訂正済み⟩" if e.get("seq") in voided else ""

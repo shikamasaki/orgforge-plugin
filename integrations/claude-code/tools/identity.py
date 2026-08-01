@@ -584,7 +584,7 @@ def main(argv):
     q.add_argument("--reason", required=True)
     q.add_argument("--store", default=None)
     q.set_defaults(fn=_cmd_revoke)
-    q = sub.add_parser("receipt", help="判断に署名する（judge が使う）")
+    q = sub.add_parser("receipt", help="判断に署名する（judge / correction authority が使う）")
     for f in ("org-id", "ledger-id", "subject", "role", "lineage", "verdict",
               "reasoning-sha256", "issued-at", "key-id"):
         q.add_argument(f"--{f}", dest=f.replace("-", "_"), required=True)
@@ -594,7 +594,7 @@ def main(argv):
     q.add_argument("--schema-version", dest="schema_version", type=int, default=1)
     q.add_argument("--event-class", dest="event_class", required=True,
                    choices=("admission_decided", "refutation_attempted", "verdict_provisional",
-                            "halt_released", "adaptive_envelope_adopted"),
+                            "halt_released", "adaptive_envelope_adopted", "correction"),
                    help="この receipt が使える台帳クラス。**署名が覆う**ので流用できない")
     q.add_argument("--envelope-id", dest="envelope_id")
     q.add_argument("--human-decision-ref", dest="human_decision_ref")

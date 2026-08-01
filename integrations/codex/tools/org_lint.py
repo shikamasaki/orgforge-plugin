@@ -758,6 +758,31 @@ def lint_constitution(con, lint):
     if "sunset" not in held:
         lint.fail("CH", "sunset is not on the irreversible hold list — an org must not "
                         "adjudicate its own death (docs/05 §4.3)")
+
+    # A judgment correction can remove the only reject/refutation that prevents admission.  Its
+    # authority must therefore be articulated and third-party; hard-coding "supervisor" in the
+    # runtime merely hides the decision line and cannot support different organizations.
+    judges = (((con.get("enforcement") or {})
+               if isinstance(con.get("enforcement"), dict) else {}).get("judges") or {})
+    correction = judges.get("judgment_corrections") if isinstance(judges, dict) else None
+    correction_roles = set()
+    if correction is None:
+        lint.fail("CH", "constitution has no enforcement.judges.judgment_corrections — "
+                        "judgment invalidation has no declared third-party authority")
+    else:
+        if not isinstance(correction, dict):
+            lint.fail("CH", "enforcement.judges.judgment_corrections must be a map")
+        else:
+            roles = correction.get("authority_roles")
+            if (not isinstance(roles, list) or not roles
+                    or any(not isinstance(role, str) or not role.strip() for role in roles)):
+                lint.fail("CH", "judgment_corrections.authority_roles must be a non-empty role list")
+            else:
+                correction_roles = {role.strip() for role in roles}
+                forbidden = sorted(correction_roles & {"gate", "skeptic"})
+                if forbidden:
+                    lint.fail("CH", "judgment correction authority must be third-party; "
+                                    f"judge roles are forbidden: {forbidden}")
     lint_resilience(con, present, charter_items, held, lint)
     rules = (con.get("charter") or {}).get("queue_rules", {}) or {}
     for rule in ("one_concern_per_proposal", "one_open_proposal_per_subject",
@@ -790,6 +815,26 @@ def lint_constitution(con, lint):
                         "nothing")
     walk_for_placeholder(con, "constitution", lint)
     return charter_items
+
+
+def check_judgment_correction_authority(con, roles, lint):
+    """Every declared correction authority is a real, active, non-judging control role."""
+    judges = (((con.get("enforcement") or {})
+               if isinstance(con.get("enforcement"), dict) else {}).get("judges") or {})
+    policy = judges.get("judgment_corrections") if isinstance(judges, dict) else None
+    if not isinstance(policy, dict) or not isinstance(policy.get("authority_roles"), list):
+        return
+    for role_id in policy["authority_roles"]:
+        role = roles.get(role_id) if isinstance(role_id, str) else None
+        if role is None:
+            lint.fail("CH", f"judgment correction authority '{role_id}' is not a declared role")
+            continue
+        if not is_active(role):
+            lint.fail("CH", f"judgment correction authority '{role_id}' is dormant")
+        functions = set(role.get("functions") or [])
+        if functions & {"judge", "review"}:
+            lint.fail("CH", f"judgment correction authority '{role_id}' also judges/reviews; "
+                            "correction must remain third-party")
 
 
 # ── moves.yaml ───────────────────────────────────────────────────────────────
@@ -1232,6 +1277,8 @@ def main(argv):
             check_scale_scope(org, _org_roles, _org_control, mv, lint)
     if org is not None and "roles" in org and _org_roles is not None:
         check_manager_accountability(org, _org_roles, lint)
+        if con is not None:
+            check_judgment_correction_authority(con, _org_roles, lint)
     views, triggers = (set(), set())
     if ls is not None:
         views, triggers = lint_ledger_schema(ls, lint)

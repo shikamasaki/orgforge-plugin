@@ -342,6 +342,13 @@ enforcement:
     # judge が署名を出せるようになってから true にすること。
     # 段階的に移行できるようにするための既定であって、false が安全という意味ではない。
     require_attested_identity: false
+    # Voiding a judgment is itself an authority-bearing act. A gate/skeptic may not erase its own
+    # or the other judge's verdict to manufacture room for a replacement. The role is declared here
+    # instead of being hard-coded in the organ; installations may assign append-only record custody
+    # to another non-judge control role. A voiding correction also requires that role's signed
+    # receipt bound to the ledger, target seqs, and kind; changing only `--actor` is never enough.
+    judgment_corrections:
+      authority_roles: [supervisor]
     # judge を発注する前の組織固有 environment preflight。空なら何も実行しない。
     # command は shell 文字列ではなく argv list、timeout_seconds は必須。実行結果は exit code・
     # elapsed_ms・stdout/stderr として judge の evidence に渡る。特定 daemon の名前から状態を

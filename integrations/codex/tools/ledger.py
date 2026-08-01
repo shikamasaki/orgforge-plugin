@@ -179,6 +179,192 @@ def corrected_seqs(events, kinds=("probe", "mistake")):
     return out
 
 
+# A correction aimed at one of these events changes a governance decision, not merely a factual
+# note.  Letting either judge void such an event gives that judge the power to manufacture the
+# empty slot into which its preferred replacement verdict is written.  Keep the vocabulary here
+# aligned with the judgment surface accepted by github_sync (plus the derived/provisional classes).
+JUDGMENT_CLASSES = frozenset({
+    "verdict_provisional", "admission_decided", "refutation_attempted",
+    "phase_admitted", "conformance_reviewed", "integration_admitted", "deploy_decided",
+    "rework_requested", "scope_decided", "design_decided", "tradeoff_decided",
+    "adaptive_envelope_adopted", "acceptable_outcome_recorded", "microexperiment_concluded",
+})
+VOIDING_CORRECTION_KINDS = frozenset({"probe", "mistake", "superseded"})
+
+
+def _correction_subject(payload):
+    """Return the receipt subject that binds an authority decision to targets and effect.
+
+    A receipt for merely ``event_class=correction`` is replayable onto any correction.  Sequence
+    numbers are unique inside the receipt-bound ledger, so binding the normalized target set and
+    kind closes that replay without pretending the explanatory prose is an authorization token.
+    """
+    targets = []
+    for raw in payload.get("corrects") or []:
+        try:
+            targets.append(int(raw))
+        except (TypeError, ValueError):
+            continue
+    return f"correction:{payload.get('kind')}:{','.join(str(seq) for seq in sorted(set(targets)))}"
+
+
+def _judgment_correction_policy():
+    """Return the constitution-declared correction authority, or an explicit policy error.
+
+    The authority is deliberately not a hard-coded ``supervisor`` string.  Different orgs may
+    assign append-only record custody to a registrar, supervisor, or another non-judge role.  A
+    missing/unreadable declaration is not interpreted as permission: judgment correction is a
+    fail-closed operation while ordinary factual corrections remain available.
+    """
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from discover import constitution as _constitution, org_root as _org_root
+        path = _constitution()
+    except Exception as exc:
+        return None, f"constitution の場所を解決できない: {exc}"
+    if not path or not os.path.isfile(path):
+        return None, "constitution.yaml が無い"
+    try:
+        import yaml
+        with open(path, encoding="utf-8") as handle:
+            doc = yaml.safe_load(handle) or {}
+    except Exception as exc:
+        return None, f"constitution.yaml を読めない: {exc}"
+    if not isinstance(doc, dict):
+        return None, "constitution.yaml が map ではない"
+    enforcement = doc.get("enforcement") or {}
+    judges = enforcement.get("judges") if isinstance(enforcement, dict) else None
+    policy = judges.get("judgment_corrections") if isinstance(judges, dict) else None
+    if not isinstance(policy, dict):
+        return None, ("enforcement.judges.judgment_corrections が宣言されていない")
+    roles = policy.get("authority_roles")
+    if (not isinstance(roles, list) or not roles
+            or any(not isinstance(role, str) or not role.strip() for role in roles)):
+        return None, "judgment_corrections.authority_roles が空または不正"
+    roles = tuple(dict.fromkeys(role.strip() for role in roles))
+    judges_forbidden = sorted(set(roles) & {"gate", "skeptic"})
+    if judges_forbidden:
+        return None, ("判定者を judgment correction authority にできない: "
+                      + ", ".join(judges_forbidden))
+    root = _org_root()
+    organization_path = os.path.join(root, "organization.yaml") if root else None
+    if not organization_path or not os.path.isfile(organization_path):
+        return None, "organization.yaml が無く、authority roleの職務を検証できない"
+    try:
+        with open(organization_path, encoding="utf-8") as handle:
+            organization = yaml.safe_load(handle) or {}
+    except Exception as exc:
+        return None, f"organization.yaml を読めない: {exc}"
+    if not isinstance(organization, dict) or not isinstance(organization.get("roles"), list):
+        return None, "organization.yaml の roles がlistでなく、authority roleを検証できない"
+    declared = {role.get("id"): role for role in organization["roles"]
+                if isinstance(role, dict) and role.get("id")}
+    for role_id in roles:
+        role = declared.get(role_id)
+        if role is None:
+            return None, f"judgment correction authority {role_id!r} はorganizationに無い"
+        if role.get("active") is False:
+            return None, f"judgment correction authority {role_id!r} はdormant"
+        functions = set(role.get("functions") or [])
+        if functions & {"judge", "review"}:
+            return None, (f"judgment correction authority {role_id!r} はjudge/review職務を持つ — "
+                          "第三者authorityではない")
+    return {"authority_roles": roles}, None
+
+
+def _annotate_correction(payload, hist):
+    """Resolve correction targets and add a reconstructable, writer-derived effect."""
+    wanted = []
+    for raw in payload.get("corrects") or []:
+        try:
+            wanted.append(int(raw))
+        except (TypeError, ValueError):
+            return None, "correction.corrects に整数でない seq がある"
+    by_seq = {int(item.get("seq")): item for item in hist if item.get("seq") is not None}
+    missing = sorted(set(wanted) - set(by_seq))
+    if missing:
+        return None, f"correction target seq が台帳に無い: {missing}"
+    targets = [by_seq[seq] for seq in wanted]
+    classes = sorted({str(target.get("class") or "") for target in targets})
+    payload["target_classes"] = classes
+    target_issues = sorted({norm_issue((target.get("payload") or {}).get("issue"))
+                            for target in targets
+                            if (target.get("payload") or {}).get("issue") is not None})
+    payload["target_issues"] = target_issues
+    if (len(target_issues) == 1 and payload.get("issue") is not None
+            and norm_issue(payload.get("issue")) != target_issues[0]):
+        return None, (f"correction.issue={payload.get('issue')!r} が対象イベントのIssue "
+                      f"{target_issues[0]!r} と一致しない")
+    if len(target_issues) == 1:
+        payload["issue"] = target_issues[0]
+    kind = payload.get("kind")
+    payload["effect"] = "voids" if kind in VOIDING_CORRECTION_KINDS else "records_backfill"
+    judgments = [target for target in targets if target.get("class") in JUDGMENT_CLASSES]
+    if judgments and kind in VOIDING_CORRECTION_KINDS:
+        payload["authority_receipt_subject"] = _correction_subject(payload)
+    return judgments, None
+
+
+def _judgment_correction_violation(ev, judgments):
+    """Authorize a voiding correction after its targets and receipt have been resolved.
+
+    ``backfill`` never voids its target, so it does not exercise correction authority.  Probe,
+    mistake, and superseded do remove a judgment from at least one derived decision path and must be
+    performed by a constitution-declared third party with a verified receipt.  A configurable actor
+    name alone is insufficient: the receipt is bound to org, ledger, targets, kind, role, and signer.
+    """
+    payload = ev.get("payload") or {}
+    kind = payload.get("kind")
+    if not judgments or kind not in VOIDING_CORRECTION_KINDS:
+        return None
+
+    policy, error = _judgment_correction_policy()
+    if error:
+        return (f"judgment correction authority を判定できない — {error}。\n"
+                "  constitution.yaml に次を宣言し、org_lint を通すこと:\n"
+                "    enforcement.judges.judgment_corrections.authority_roles: [supervisor]\n"
+                "  **判定できないなら judgment を無効化しない。**")
+    actor = str(ev.get("actor") or "")
+    authority_role = str(payload.get("authority_role") or actor)
+    if payload.get("authority_role") and authority_role != actor:
+        return (f"authority_role={authority_role!r} と envelope actor={actor!r} が一致しない。"
+                "代理の権限名を payload に書いてはいけない")
+    if authority_role not in policy["authority_roles"]:
+        return (f"actor {actor!r} には judgment を {kind} にする権限が無い。\n"
+                f"  constitution が宣言する第三者 authority: "
+                f"{', '.join(policy['authority_roles'])}\n"
+                f"  対象 seq={payload.get('corrects')} / class={payload.get('target_classes')}。"
+                "judge 自身で空きを作らず、"
+                "authority へ handback すること。")
+
+    assurance = payload.get("identity_assurance")
+    authority_principal = payload.get("decision_by")
+    if assurance not in {"attested", "authenticated"} or not authority_principal:
+        return (f"judgment correction authority {authority_role!r} の署名receiptが無い。\n"
+                f"  expected subject: {payload.get('authority_receipt_subject')}\n"
+                "  --actor の役割名だけでは第三者性を証明しない。authorityの鍵で署名し、"
+                "--receipt を渡すこと。")
+
+    def principal(target):
+        target_payload = target.get("payload") or {}
+        return str(target_payload.get("decision_by") or target.get("actor") or "")
+
+    target_principals = sorted({principal(target) for target in judgments})
+    if actor in target_principals or str(authority_principal) in target_principals:
+        return (f"judgment の decision principal {authority_principal!r} は自分の判定を "
+                f"{kind} にできない。\n  対象 seq={payload.get('corrects')}。"
+                "宣言済みの別 authority が訂正すること。")
+    supplied = payload.get("corrected_by")
+    if supplied is not None and str(supplied) != actor:
+        return (f"corrected_by={supplied!r} は envelope actor={actor!r} と一致しない。"
+                "訂正主体は writer が確定する")
+    payload["corrected_by"] = actor
+    payload["authority_role"] = authority_role
+    payload["authority_principal"] = authority_principal
+    payload["authority_assurance"] = assurance
+    return None
+
+
 def norm_issue(x):
     """issue 番号の正規化。**比べる場所ごとに違う正規化をしてはいけない。**
 
@@ -1407,7 +1593,7 @@ def _org_and_ledger_id(root):
     return org_id, led_id
 
 
-def _verify_receipt_for(a, payload, cls):
+def _verify_receipt_for(a, payload, cls, receipt_expect=None):
     """`--receipt` を検証し、identity fields を生成する。(fields, error)。
 
     **環境変数の「検証済み」印は使わない。** caller が立てられるものは証拠にならない —
@@ -1444,6 +1630,8 @@ def _verify_receipt_for(a, payload, cls):
                   ("practice_change_ref", "practice_change_ref")):
         if payload.get(pk) is not None:
             expect[k] = payload[pk]
+    if receipt_expect:
+        expect.update(receipt_expect)
     # org / ledger は台帳の側が持つ。**payload からではなく、書き込み先から取る** —
     # payload の値は caller が書けるので、一致を確かめても意味が無い。
     _org_id, _led_id = _org_and_ledger_id(a.root)
@@ -1500,7 +1688,8 @@ def cmd_append(a):
     # 代わりに **receipt そのものを渡させ、ここで検証する**。検証できたときだけ identity を
     # 生成する（caller が書いた identity fields は常に拒否する）。
     _IDENT = ("identity_assurance", "decision_by", "recorder_assurance", "signer_id", "key_id",
-              "workload_isolation", "writer_isolation")
+              "workload_isolation", "writer_isolation", "authority_principal",
+              "authority_role", "authority_assurance", "authority_receipt_subject")
     if isinstance(payload, dict):
         forged = [k for k in _IDENT if k in payload]
         if forged:
@@ -1556,11 +1745,14 @@ def cmd_append(a):
             return 2
         # **receipt を検証して identity を生成する。** caller は receipt を渡せるだけで、
         # identity fields を書くことはできない（上で拒否済み）。
-        _ident, _ierr = _verify_receipt_for(a, payload, a.cls)
-        if _ierr:
-            print(f"append: receipt を検証できない — {_ierr}\n"
-                  f"  **検証できない receipt では identity を生成しない。**", file=sys.stderr)
-            return 4
+        _ident = {}
+        if a.cls != "correction":
+            _ident, _ierr = _verify_receipt_for(a, payload, a.cls)
+            if _ierr:
+                print(f"append: receipt を検証できない — {_ierr}\n"
+                      f"  **検証できない receipt では identity を生成しない。**",
+                      file=sys.stderr)
+                return 4
         if _ident:
             payload.update(_ident)
         elif a.cls in ("verdict_provisional", "admission_decided", "refutation_attempted",
@@ -1580,8 +1772,6 @@ def cmd_append(a):
         if bad:
             print(f"append: {bad}", file=sys.stderr)
             return 2
-        for w in warns:
-            print(f"append: 注意 — {w}", file=sys.stderr)
         # **健全性の検査を先に置く。** `_read_events` は破損で例外を投げるので、そこに入る前に
         # log を検査して、拒否理由を人が読める形で出す。トレースバックは「壊れている」ことを
         # 伝える手段としては弱く、呼び出し側（hook / organ）も扱えない。
@@ -1597,6 +1787,57 @@ def cmd_append(a):
             print(f"append: HEAD が log と食い違っていたので log から再構築した"
                   f"（HEAD={cached.get('seq')} / log={head['seq']}）— "
                   f"HEAD は cache なので log を正とする。", file=sys.stderr)
+
+        if a.cls == "correction":
+            judgments, correction_error = _annotate_correction(payload, hist)
+            if correction_error:
+                print(f"append: correction rejected — {correction_error}", file=sys.stderr)
+                return 3
+            voids_judgment = bool(judgments and payload.get("kind") in
+                                  VOIDING_CORRECTION_KINDS)
+            if voids_judgment and not str(payload.get("reason") or "").strip():
+                print("append: correction rejected — judgmentを無効化するcorrectionには "
+                      "reason が必要", file=sys.stderr)
+                return 3
+            if voids_judgment or getattr(a, "receipt", None):
+                reason_digest = hashlib.sha256(
+                    str(payload.get("reason") or "").encode("utf-8")).hexdigest()
+                receipt_expect = {
+                    "review_subject_id": (payload.get("authority_receipt_subject") or
+                                          _correction_subject(payload)),
+                    "issue": (payload.get("issue") or
+                              ",".join(payload.get("target_issues") or []) or "ledger"),
+                    "role": a.actor,
+                    "phase": "govern",
+                    "lineage": "authority",
+                    "verdict": payload.get("kind"),
+                    "reasoning_sha256": reason_digest,
+                }
+                _ident, _ierr = _verify_receipt_for(
+                    a, payload, a.cls, receipt_expect=receipt_expect)
+                if _ierr:
+                    print(f"append: receipt を検証できない — {_ierr}\n"
+                          "  **別の対象・kind・理由へreceiptを再利用しない。**",
+                          file=sys.stderr)
+                    return 4
+                if _ident:
+                    payload.update(_ident)
+            correction_error = _judgment_correction_violation(
+                {"actor": a.actor, "class": a.cls, "payload": payload}, judgments)
+            if correction_error:
+                print(f"append: correction rejected — {correction_error}", file=sys.stderr)
+                return 3
+
+            # Target/effect/authority fields are writer-derived after history resolution. Validate
+            # the final payload too; otherwise generated audit fields could silently drift from the
+            # schema even though the caller-provided prefix passed validation.
+            bad, final_warns = validate_event(a.cls, payload, snap)
+            if bad:
+                print(f"append: {bad}", file=sys.stderr)
+                return 2
+            warns.extend(w for w in final_warns if w not in warns)
+        for w in warns:
+            print(f"append: 注意 — {w}", file=sys.stderr)
 
         nk = getattr(a, "natural_key", None)
         if nk:
@@ -1711,6 +1952,12 @@ def cmd_append(a):
         os.replace(tmp, headp)
         _fsync_dir(a.root)
     print(f"appended seq={seq} {a.cls} id={eid} hash={ev['hash'][:12]}…")
+    if a.cls == "correction":
+        print("correction-effect: "
+              f"kind={payload.get('kind')} effect={payload.get('effect')} "
+              f"targets={payload.get('corrects')} classes={payload.get('target_classes')} "
+              f"authority={payload.get('authority_role') or a.actor} "
+              f"assurance={payload.get('authority_assurance') or 'not-required'}")
     return 0
 
 

@@ -2,6 +2,7 @@
 
 配管は自動化するが判断はしない、という線引きを固定する。"""
 import argparse
+import hashlib
 import json
 import os
 import pathlib
@@ -1670,8 +1671,42 @@ def _xh_org(tmp_path, lineage="cross-harness"):
     """cross-harness を宣言した空の org を作る。"""
     (tmp_path / ".orgforge" / "ledger").mkdir(parents=True)
     (tmp_path / "constitution.yaml").write_text(
-        f"enforcement:\n  judges:\n    lineage: {lineage}\n", encoding="utf-8")
+        f"enforcement:\n  judges:\n    lineage: {lineage}\n"
+        "    judgment_corrections:\n      authority_roles: [supervisor]\n",
+        encoding="utf-8")
+    (tmp_path / "organization.yaml").write_text(
+        "roles:\n"
+        "  - {id: supervisor, active: true, functions: [organize, operate]}\n"
+        "  - {id: gate, active: true, functions: [judge, review]}\n"
+        "  - {id: skeptic, active: true, functions: [judge, review]}\n",
+        encoding="utf-8")
     return tmp_path
+
+
+def _xh_authority_receipt(org, target, reason, issue="7", kind="superseded"):
+    key = org / "supervisor-correction.pem"
+    code, out = run("identity.py", "keygen", "--key-id", "supervisor-correction",
+                    "--signer-id", "supervisor-principal", "--private-out", str(key),
+                    "--authorized-roles", "supervisor", "--authorized-lineages", "authority",
+                    cwd=str(org))
+    assert code == 0, out
+    oid = hashlib.sha256(str(org.resolve()).encode()).hexdigest()[:16]
+    ledger = org / ".orgforge" / "ledger"
+    lid = hashlib.sha256(str(ledger.resolve()).encode()).hexdigest()[:16]
+    subject = f"correction:{kind}:{int(target)}"
+    code, out = run(
+        "identity.py", "receipt", "--org-id", oid, "--ledger-id", lid,
+        "--subject", subject, "--issue", str(issue), "--role", "supervisor",
+        "--phase", "govern", "--lineage", "authority", "--verdict", kind,
+        "--event-class", "correction", "--requirements-digest",
+        "judgment-correction-authority-v1", "--reasoning-sha256",
+        hashlib.sha256(reason.encode("utf-8")).hexdigest(), "--issued-at",
+        "2026-08-02T00:00:00Z", "--key-id", "supervisor-correction",
+        "--private-key", str(key), cwd=str(org))
+    assert code == 0, out
+    receipt = org / "supervisor-correction.json"
+    receipt.write_text(out.strip(), encoding="utf-8")
+    return receipt
 
 
 def _prov(tmp_path, lineage, verdict, issue=7, role="gate", why=None, extra=(),
@@ -1850,26 +1885,31 @@ def test_xh_exact_retry_is_noop_but_rejudge_is_refused(tmp_path):
     assert len(_events(org, "verdict_provisional")) == 1
 
 
-def test_xh_correction_command_shown_actually_works(tmp_path):
-    """条件5+6: 拒否メッセージが案内する correction を **実際に打って、効くこと**。
-
-    0.32.1 は `corrects_seq`/`reason` を案内していたが、実物は `corrects: [seq]`/`kind` を
-    要求する。append は成功するのに無効化されないので、判定を差し替える経路が無かった。
-    エラー文に "correction" が含まれることだけを見るテストでは捕まえられない。
-    """
+def test_xh_rejudge_hands_back_to_declared_authority_and_that_path_works(tmp_path):
+    """Judgeには自己訂正コマンドを与えず、宣言済み第三者の脱出経路を実CLIで通す。"""
     org = _xh_org(tmp_path)
     assert _prov(org, "same-harness", "reject")[0] == 0
     c, o = _prov(org, "same-harness", "admit")     # 差し替えを試みる → 拒否
     assert c == 4
-
-    # 案内された行をそのまま取り出して打つ
-    m = re.search(r"--payload '(\{.*?\})'", o, re.S)
-    assert m, f"correction の payload が案内に含まれていない:\n{o}"
-    payload = m.group(1)
+    assert "authority roles: supervisor" in o
+    assert "--actor <あなたの役割>" not in o
+    prior = _events(org, "verdict_provisional")[0]
+    reason = "base更新後に第三者authorityが再検証を要求した"
+    receipt = _xh_authority_receipt(org, prior["seq"], reason)
+    payload = json.dumps({"corrects": [prior["seq"]], "kind": "superseded",
+                          "reason": reason,
+                          "corrected_by": "supervisor"}, ensure_ascii=False)
     code, lout = run("ledger.py", "append", "--class", "correction",
-                     "--actor", "supervisor", "--payload", payload,
+                     "--actor", "supervisor", "--payload", payload, "--receipt", str(receipt),
                      cwd=str(org))
-    assert code == 0, f"案内されたコマンドが通らない: {lout}"
+    assert code == 0, f"authority の correction が通らない: {lout}"
+    assert ("effect=voids" in lout and "authority=supervisor" in lout
+            and "assurance=authenticated" in lout)
+    code, shown = run("org_cycle.py", "show", "--issue", "7", cwd=str(org))
+    assert code == 0, shown
+    assert ("correction kind=superseded effect=voids" in shown
+            and "principal=supervisor-principal" in shown
+            and "assurance=authenticated" in shown)
 
     # **効いていること** — 無効化されたので、新しい判定が入る
     c, o = _prov(org, "same-harness", "admit")

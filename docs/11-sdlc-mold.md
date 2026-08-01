@@ -962,6 +962,34 @@ maker の報告や rework 指示まで拾い、8因子のうち4つが全 Issue 
 委ねている。案内する側がその区別を知らないと、正しい形で打っても効かない。**無効化の意味は
 kind ごとに違う** — 消すのか、置き換えるのか、後から補ったのか。
 
+### 判定の訂正は第三者authorityへhandbackする
+
+`correction` は追記であって履歴の削除ではないが、`probe` / `mistake` / `superseded` が
+judgmentを対象にすれば、派生viewやjoint admissionからその判定を除外できる。したがって、
+判定を出したgate/skeptic自身にこの操作を案内すると、別judgeのrejectを空けて自分のadmitへ
+差し替える経路になる。
+
+judgment correctionのauthorityはconstitutionに明示する:
+
+```yaml
+enforcement:
+  judges:
+    judgment_corrections:
+      authority_roles: [supervisor]
+```
+
+authorityはgate/skeptic以外のactive roleでなければならず、`org_lint`が存在・active状態・
+非judgingを検査する。さらにvoiding correctionは、org・ledger・対象seq・kind・authority role・
+理由digestへ束縛した署名receiptを必須とする。`--actor supervisor`と名乗るだけでは通らない。
+ledger writerは対象seqを実在イベントへ解決し、対象class・Issue・effect・authority principal・
+assuranceをcorrectionへ補う。`backfill`は対象を無効化しないため、このauthorityを消費しない。
+通常イベントのprobe/mistakeも従来どおり自己訂正できる。
+
+共有鍵のCompatibility Modeは`attested`までであり、同一UIDのhostに対するsecurity boundaryでは
+ない。非対称鍵でもwriter隔離などが欠ける環境では保証の限界を併記する。それでも署名receiptを
+要求することで、「actor名だけを変えて独立性を装う」通常経路を閉じる。role名だけを
+`authenticated`とは呼ばず、実際に検証したassuranceを台帳へ残す。
+
 ### 「同じものを見たか」を判定の同一性に入れる
 
 複数の judge の一致を要求するなら、**何を判定したのかを一致の条件に入れる。** verdict と役だけで
