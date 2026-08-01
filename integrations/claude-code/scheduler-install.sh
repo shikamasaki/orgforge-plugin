@@ -92,8 +92,11 @@ if [ -z "$CLAUDE_BIN" ]; then die "'claude' not found on PATH"; fi
 # shell quotes, so escape it after producing the POSIX single-quoted shell word.
 cron_quote() {
   local quoted
-  quoted="'${1//\'/\'\\\'\'}'"
-  printf '%s' "${quoted//%/\\%}"
+  # Bash 3.2 (the system Bash on macOS) produces a malformed word for the compact parameter-
+  # expansion form of this replacement. Build the POSIX 'foo'\''bar' spelling with sed instead,
+  # then protect '%' from cron after the shell word is complete.
+  quoted="'$(printf '%s' "$1" | sed "s/'/'\\\\''/g")'"
+  printf '%s' "$quoted" | sed 's/%/\\%/g'
 }
 
 # env the headless runs need. cron has a bare environment, so we inline the ORG_* vars into each line.
