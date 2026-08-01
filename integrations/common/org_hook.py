@@ -607,6 +607,100 @@ def _window_since():
 _PROTECTED_BRANCHES = ("develop", "main", "master")
 _MERGE_VERBS = (("git", "merge"), ("git", "rebase"), ("git", "cherry-pick"))
 _MERGE_COMMANDS = {verb for _, verb in _MERGE_VERBS}
+_REBASE_RECOVERY_ACTIONS = {"--abort", "--continue", "--skip"}
+_GIT_GLOBAL_FLAGS = {"--paginate", "-P", "--no-pager", "--no-replace-objects",
+                     "--bare", "--literal-pathspecs", "--glob-pathspecs", "--noglob-pathspecs",
+                     "--icase-pathspecs", "--no-optional-locks", "--no-advice"}
+_GIT_GLOBAL_WITH_VALUE = {"-c", "--config-env"}
+
+
+def _git_command_at(tokens, index, target):
+    """Parse Git global options and return ``(verb, verb_index, target)``.
+
+    Only options that leave checkout identity unchanged are accepted. ``-C`` updates the static
+    target; ``--git-dir``/``--work-tree`` and unknown global options are intentionally unresolved
+    so the integration guard fails closed instead of inspecting a different repository from Git.
+    """
+    pos = index + 1
+    while pos < len(tokens):
+        token = tokens[pos]
+        if token == "-C":
+            if pos + 1 >= len(tokens):
+                return None, None, None
+            raw = tokens[pos + 1]
+            if (not raw or raw.startswith("-")
+                    or any(mark in raw for mark in ("$", "`", "~"))):
+                return None, None, None
+            target = raw if os.path.isabs(raw) else os.path.join(target, raw)
+            pos += 2
+            continue
+        if token in _GIT_GLOBAL_WITH_VALUE:
+            if pos + 1 >= len(tokens):
+                return None, None, None
+            pos += 2
+            continue
+        if token in _GIT_GLOBAL_FLAGS or token.startswith("--config-env="):
+            pos += 1
+            continue
+        if token.startswith("-"):
+            return None, None, None
+        return token, pos, os.path.realpath(target)
+    return None, None, None
+
+
+def _rebase_recovery_target(cmd):
+    """Return ``(is_recovery, cwd)`` for one statically targeted rebase recovery command.
+
+    ``rebase --abort/--continue/--skip`` does not choose a branch to integrate. Git applies it to
+    rebase state already stored in one checkout. Allow that recovery on a protected branch, but
+    only when the command contains exactly one Git invocation and its checkout can be resolved
+    before Bash runs. A compound or dynamic command remains held.
+    """
+    if not isinstance(cmd, str):
+        return False, None
+    plain = _tokenize(cmd)
+    if (not _has_token(plain, "git") or not _has_token(plain, "rebase")
+            or not _REBASE_RECOVERY_ACTIONS.intersection(plain)):
+        return False, None
+    if len(cmd) > _MAX_TOKENIZE_CHARS or re.search(r"`|\$\(|(?:^|\s)[<>]\(", cmd):
+        return True, None
+    try:
+        lexer = shlex.shlex(cmd, posix=True, punctuation_chars=";&|\n")
+        lexer.whitespace = " \t\r"
+        lexer.whitespace_split = True
+        lexer.commenters = "#"
+        tokens = list(lexer)
+    except (TypeError, ValueError):
+        return True, None
+
+    git_positions = [i for i, token in enumerate(tokens) if token == "git"]
+    if len(git_positions) != 1:
+        return True, None
+    index = git_positions[0]
+    direct_cd = (index == 3 and tokens[0] == "cd" and tokens[2] == "&&")
+    if index != 0 and not direct_cd:
+        return True, None
+    if any(token in {";", "&&", "||", "|", "|&", "&", "\n"}
+           for token in tokens[index + 1:]):
+        return True, None
+
+    target = os.getcwd()
+    if direct_cd:
+        raw_cd = tokens[1]
+        if (not raw_cd or raw_cd.startswith("-")
+                or any(mark in raw_cd for mark in ("$", "`", "~"))):
+            return True, None
+        target = raw_cd if os.path.isabs(raw_cd) else os.path.join(os.getcwd(), raw_cd)
+    verb, verb_index, target = _git_command_at(tokens, index, target)
+    if verb != "rebase" or verb_index is None:
+        return False, None
+    args = tokens[verb_index + 1:]
+    actions = [arg for arg in args if arg in _REBASE_RECOVERY_ACTIONS]
+    if len(actions) != 1 or len(args) != 1:
+        return True, None
+    if not target or not os.path.isdir(target):
+        return True, None
+    return True, target
 
 
 def _integration_target_cwd(cmd):
@@ -620,12 +714,8 @@ def _integration_target_cwd(cmd):
     if not isinstance(cmd, str):
         return False, None
     plain = _tokenize(cmd)
-    direct_integration = any(_has_seq(plain, verb) for verb in _MERGE_VERBS)
-    git_c_integration = any(
-        plain[index] == "git" and index + 1 < len(plain) and plain[index + 1] == "-C"
-        and bool(_MERGE_COMMANDS.intersection(plain[index + 2:index + 6]))
-        for index in range(len(plain)))
-    might_integrate = direct_integration or git_c_integration
+    might_integrate = (_has_token(plain, "git")
+                       and bool(_MERGE_COMMANDS.intersection(plain)))
     if not might_integrate:
         return False, None
     if len(cmd) > _MAX_TOKENIZE_CHARS or re.search(r"`|\$\(|(?:^|\s)[<>]\(", cmd):
@@ -658,22 +748,25 @@ def _integration_target_cwd(cmd):
                     or any(mark in raw_cd for mark in ("$", "`", "~"))):
                 return True, None
             target = raw_cd if os.path.isabs(raw_cd) else os.path.join(os.getcwd(), raw_cd)
-        verb_index = index + 1
-        if verb_index < len(tokens) and tokens[verb_index] == "-C":
-            if verb_index + 2 >= len(tokens):
+        verb, _verb_index, target = _git_command_at(tokens, index, target)
+        if verb in _MERGE_COMMANDS:
+            if target is None:
                 return True, None
-            raw_target = tokens[verb_index + 1]
-            verb_index += 2
-            if (not raw_target or raw_target.startswith("-")
-                    or any(mark in raw_target for mark in ("$", "`", "~"))):
+            targets.append(target)
+        elif verb is None:
+            # A Git global option we do not model may redirect the repository (for example
+            # --git-dir/--work-tree). If this shell segment still names an integration verb, the
+            # target is ambiguous — never turn parser incompleteness into an authorization bypass.
+            segment = []
+            for word in tokens[index + 1:]:
+                if word in {";", "&&", "||", "|", "|&", "&", "\n"}:
+                    break
+                segment.append(word)
+            if _MERGE_COMMANDS.intersection(segment):
                 return True, None
-            target = raw_target if os.path.isabs(raw_target) else os.path.join(target, raw_target)
-        if verb_index < len(tokens) and tokens[verb_index] in _MERGE_COMMANDS:
-            targets.append(os.path.realpath(target))
 
     if not targets:
-        # Preserve detection of wrapper forms already held by the old adjacent-token classifier.
-        return True, os.getcwd()
+        return False, None
     if len(targets) != 1 or not os.path.isdir(targets[0]):
         return True, None
     return True, targets[0]
@@ -705,6 +798,18 @@ def _integration_bypass(tool_name, ti):
     if tool_name != "Bash":
         return None
     cmd = _without_inert_heredoc_data(_command_text(ti))
+    is_recovery, recovery_cwd = _rebase_recovery_target(cmd)
+    if is_recovery:
+        if recovery_cwd is None:
+            _current_branch, current_root = _git_integration_context(os.getcwd())
+            if current_root and os.path.isdir(os.path.join(current_root, ".orgforge")):
+                return ("rebase復旧コマンドの対象 worktree を静的に解決できない。"
+                        "対象worktreeをcwdにし、`git rebase --abort|--continue|--skip`を"
+                        "単独で実行すること。")
+            return None
+        _branch, recovery_root = _git_integration_context(recovery_cwd)
+        if recovery_root and os.path.isdir(os.path.join(recovery_root, ".orgforge")):
+            return None
     has_integration, target_cwd = _integration_target_cwd(cmd)
     if not has_integration:
         return None
