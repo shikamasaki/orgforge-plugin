@@ -6,6 +6,17 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 2.0.21 — staged persistent scheduling
+
+### Fixed
+
+- Let the Claude Code cron installer select `tick`, `work`, and `discover` independently with
+  `--cycles`, so the documented read-only-first rollout works for unattended organizations instead
+  of silently enabling the acting PM loop.
+- Make reinstallation remove cycles that are no longer selected, preserve unrelated crontab entries,
+  validate exactly representable wall-clock intervals, and quote cron command inputs safely.
+- Document the `tick,discover` staging command and keep the three-cycle default backward compatible.
+
 ## 2.0.20 — ledger-backed graceful degradation and recovery
 
 ### Added

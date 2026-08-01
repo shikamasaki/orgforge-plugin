@@ -93,16 +93,36 @@ does not signal a reused PID or kill another session. Run `rearm-check` again be
 
 ### OS cron — only for genuinely unattended (no session open)
 
-`/loop` ends when Claude Code closes. To run 24/7 with no session, install the cadence on the OS cron:
+`/loop` ends when Claude Code closes. Start unattended operation with the cycles whose authority has
+actually been proven. The strict read-only-first form keeps health monitoring alive without letting
+the discovery or PM cycles write external/backlog state or delegate work:
 
 ```
-integrations/claude-code/scheduler-install.sh --role <role> --tick-min 30 --work-min 60 --discover-hours 24
+integrations/claude-code/scheduler-install.sh --role <role> \
+  --cycles tick --tick-min 30
 # preview:  add --dry-run   |   remove:  scheduler-uninstall.sh --role <role>
 ```
 
-This writes crontab entries that run headless with the plugin attached; output streams to
-`$ORG_LEDGER_ROOT/cron.log`, each tagged `# orgforge:<role>`. Use this only when you truly need the org
-running while no session is open — for everything else, the three `/loop`s above are all you need.
+When backlog discovery has separate approval but asset-touching work is still unsafe, use
+`--cycles tick,discover`. This is the useful staged shape for a repository whose worktree resources
+are not isolated yet; it is not called read-only because discovery appends backlog evidence.
+
+After the acting preflight and local resource-isolation checks pass, enable all three cycles. Omitting
+`--cycles` remains the backward-compatible spelling for the same selection:
+
+```
+integrations/claude-code/scheduler-install.sh --role <role> \
+  --cycles tick,work,discover --tick-min 30 --work-min 60 --discover-hours 24
+```
+
+Re-running the installer for the same role replaces its prior set, so moving from all cycles back to
+`--cycles tick` removes the old work/discover entries. Unknown or empty cycle selections fail instead
+of degrading silently. Intervals must be exactly representable by wall-clock cron (for example 15m,
+30m, 1h, 2h, 6h, 12h, or 24h); an inexact request such as 90m is rejected.
+
+The installer writes crontab entries that run headless with the plugin attached; output streams to
+`$ORG_LEDGER_ROOT/cron.log`, each tagged `# orgforge:<role>`. Use it only when you truly need the org
+running while no session is open — for everything else, the `/loop`s above are all you need.
 
 ## The stop/night discipline still holds
 

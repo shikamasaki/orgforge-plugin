@@ -8,7 +8,8 @@
 # schedule.yaml cadence.
 #
 # Usage:
-#   integrations/claude-code/scheduler-install.sh --role <role> [--tick-min 30] [--work-min 60] \
+#   integrations/claude-code/scheduler-install.sh --role <role> \
+#       [--cycles tick,work,discover] [--tick-min 30] [--work-min 60] \
 #       [--discover-hours 24] [--workdir /path/to/org] [--dry-run]
 #
 # Requires: ORG_LEDGER_ROOT (and usually ORG_ROLE/ORG_DOCTRINE_ROOT) set in your environment or your
@@ -22,59 +23,141 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$HERE"
-ROLE=""; TICK_MIN=30; WORK_MIN=60; DISCOVER_HOURS=24; WORKDIR="$PWD"; DRY_RUN=0
+ROLE=""; CYCLES="tick,work,discover"; TICK_MIN=30; WORK_MIN=60
+DISCOVER_HOURS=24; WORKDIR="$PWD"; DRY_RUN=0
+
+die() {
+  echo "error: $*" >&2
+  exit 2
+}
+
+need_arg() {
+  [ "$1" -ge 2 ] || die "$2 requires a value"
+}
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --role) ROLE="$2"; shift 2;;
-    --tick-min) TICK_MIN="$2"; shift 2;;
-    --work-min) WORK_MIN="$2"; shift 2;;
-    --discover-hours) DISCOVER_HOURS="$2"; shift 2;;
-    --workdir) WORKDIR="$2"; shift 2;;
+    --role) need_arg "$#" "$1"; ROLE="$2"; shift 2;;
+    --cycles) need_arg "$#" "$1"; CYCLES="$2"; shift 2;;
+    --tick-min) need_arg "$#" "$1"; TICK_MIN="$2"; shift 2;;
+    --work-min) need_arg "$#" "$1"; WORK_MIN="$2"; shift 2;;
+    --discover-hours) need_arg "$#" "$1"; DISCOVER_HOURS="$2"; shift 2;;
+    --workdir) need_arg "$#" "$1"; WORKDIR="$2"; shift 2;;
     --dry-run) DRY_RUN=1; shift;;
-    *) echo "unknown arg: $1" >&2; exit 2;;
+    *) die "unknown arg: $1";;
   esac
 done
 
 ROLE="${ROLE:-${ORG_ROLE:-}}"
-if [ -z "$ROLE" ]; then echo "error: --role (or ORG_ROLE) is required" >&2; exit 2; fi
+if [ -z "$ROLE" ]; then die "--role (or ORG_ROLE) is required"; fi
+[[ "$ROLE" =~ ^[A-Za-z0-9._-]+$ ]] ||
+  die "role must contain only letters, digits, dot, underscore, or hyphen"
 if [ -z "${ORG_LEDGER_ROOT:-}" ]; then
-  echo "error: ORG_LEDGER_ROOT is not set — export it (or your .claude/settings.json env) first" >&2
-  exit 2
+  die "ORG_LEDGER_ROOT is not set — export it (or your .claude/settings.json env) first"
 fi
 
+# A cron entry is one physical line. Reject values that could split it before quoting anything.
+for path_value in "$WORKDIR" "$ORG_LEDGER_ROOT" "${ORG_DOCTRINE_ROOT:-}" \
+                  "${ORG_CONVENTIONS_ROOT:-}" "$PLUGIN_DIR"; do
+  case "$path_value" in
+    *$'\n'*|*$'\r'*) die "workdir and ORG_* paths must not contain newlines";;
+  esac
+done
+
+# Parse a portable comma-list without associative arrays (macOS still ships Bash 3.2).
+SELECTED=","
+case "$CYCLES" in
+  ""|,*|*,|*,,*) die "cycles must not contain an empty item";;
+esac
+IFS=',' read -r -a REQUESTED_CYCLES <<< "$CYCLES"
+[ "${#REQUESTED_CYCLES[@]}" -gt 0 ] || die "cycles must select at least one of: tick,work,discover"
+for cycle in "${REQUESTED_CYCLES[@]}"; do
+  case "$cycle" in
+    tick|work|discover) ;;
+    "") die "cycles must not contain an empty item";;
+    *) die "unknown cycles item '$cycle' (expected tick,work,discover)";;
+  esac
+  [[ "$SELECTED" != *",${cycle},"* ]] || die "cycles contains duplicate '$cycle'"
+  SELECTED="${SELECTED}${cycle},"
+done
+
+has_cycle() {
+  [[ "$SELECTED" == *",$1,"* ]]
+}
+
 CLAUDE_BIN="$(command -v claude || true)"
-if [ -z "$CLAUDE_BIN" ]; then echo "error: 'claude' not found on PATH" >&2; exit 2; fi
+if [ -z "$CLAUDE_BIN" ]; then die "'claude' not found on PATH"; fi
+
+# Quote one value for the shell command embedded in crontab. Cron treats '%' specially even inside
+# shell quotes, so escape it after producing the POSIX single-quoted shell word.
+cron_quote() {
+  local quoted
+  quoted="'${1//\'/\'\\\'\'}'"
+  printf '%s' "${quoted//%/\\%}"
+}
 
 # env the headless runs need. cron has a bare environment, so we inline the ORG_* vars into each line.
-ENV_PREFIX="ORG_LEDGER_ROOT='${ORG_LEDGER_ROOT}' ORG_ROLE='${ROLE}'"
-[ -n "${ORG_DOCTRINE_ROOT:-}" ]    && ENV_PREFIX="$ENV_PREFIX ORG_DOCTRINE_ROOT='${ORG_DOCTRINE_ROOT}'"
-[ -n "${ORG_CONVENTIONS_ROOT:-}" ] && ENV_PREFIX="$ENV_PREFIX ORG_CONVENTIONS_ROOT='${ORG_CONVENTIONS_ROOT}'"
+ENV_PREFIX="ORG_LEDGER_ROOT=$(cron_quote "$ORG_LEDGER_ROOT") ORG_ROLE=$(cron_quote "$ROLE")"
+[ -n "${ORG_DOCTRINE_ROOT:-}" ]    && ENV_PREFIX="$ENV_PREFIX ORG_DOCTRINE_ROOT=$(cron_quote "$ORG_DOCTRINE_ROOT")"
+[ -n "${ORG_CONVENTIONS_ROOT:-}" ] && ENV_PREFIX="$ENV_PREFIX ORG_CONVENTIONS_ROOT=$(cron_quote "$ORG_CONVENTIONS_ROOT")"
 
 # one headless invocation of a slash-command, plugin attached so hooks + injection fire.
 run_cmd() {  # $1 = slash command text
-  echo "cd '${WORKDIR}' && ${ENV_PREFIX} '${CLAUDE_BIN}' -p '$1' --plugin-dir '${PLUGIN_DIR}' --output-format json >> '${ORG_LEDGER_ROOT}/cron.log' 2>&1"
+  echo "cd $(cron_quote "$WORKDIR") && ${ENV_PREFIX} $(cron_quote "$CLAUDE_BIN") -p $(cron_quote "$1") --plugin-dir $(cron_quote "$PLUGIN_DIR") --output-format json >> $(cron_quote "${ORG_LEDGER_ROOT}/cron.log") 2>&1"
 }
 
-# build a valid minute-field schedule: cron minutes are 0-59, so an interval of 60+ must become an
-# hourly (or N-hourly) expression, not the invalid `*/60`.
-minute_cron() {  # $1 = interval in minutes  -> a 5-field cron expression
-  local m="$1"
-  if [ "$m" -lt 60 ]; then echo "*/${m} * * * *"
-  elif [ $((m % 60)) -eq 0 ]; then echo "0 */$((m / 60)) * * *"
-  else echo "*/${m} * * * *"; fi   # sub-hour non-divisor: leave as-is (cron accepts */m for m<60 only; caller warned)
+# Emit only exact wall-clock cadences. Expressions such as */90 in the minute field are invalid;
+# */45 is syntactically valid but creates alternating 45/15-minute gaps, not "every 45 minutes".
+minute_cron() {  # $1 = interval in minutes, $2 = cycle name
+  local m="$1" name="$2" h
+  [[ "$m" =~ ^[1-9][0-9]*$ ]] || { echo "error: ${name} interval must be a positive base-10 integer in minutes" >&2; return 2; }
+  if [ "$m" -ge 1 ] && [ "$m" -lt 60 ] && [ $((60 % m)) -eq 0 ]; then
+    echo "*/${m} * * * *"
+  elif [ "$m" -eq 1440 ]; then
+    echo "0 0 * * *"
+  elif [ "$m" -ge 60 ] && [ "$m" -lt 1440 ] && [ $((m % 60)) -eq 0 ]; then
+    h=$((m / 60))
+    [ $((24 % h)) -eq 0 ] || {
+      echo "error: ${name} interval ${m}m is not exactly representable by wall-clock cron" >&2
+      return 2
+    }
+    echo "0 */${h} * * *"
+  else
+    echo "error: ${name} interval ${m}m is not exactly representable by wall-clock cron" >&2
+    return 2
+  fi
+}
+
+hour_cron() {  # $1 = interval in hours, $2 = cycle name
+  local h="$1" name="$2"
+  [[ "$h" =~ ^[1-9][0-9]*$ ]] || { echo "error: ${name} interval must be a positive base-10 integer in hours" >&2; return 2; }
+  if [ "$h" -ge 1 ] && [ "$h" -lt 24 ] && [ $((24 % h)) -eq 0 ]; then
+    echo "0 */${h} * * *"
+  elif [ "$h" -eq 24 ]; then
+    echo "0 0 * * *"
+  else
+    echo "error: ${name} interval ${h}h is not exactly representable by wall-clock cron" >&2
+    return 2
+  fi
 }
 
 TAG="# orgforge:${ROLE}"
-LINES=$(cat <<EOF
-$(minute_cron "$TICK_MIN")  $(run_cmd "/org-tick")  ${TAG}
-$(minute_cron "$WORK_MIN")  $(run_cmd "/org-work ${ROLE}")  ${TAG}
-0 */${DISCOVER_HOURS} * * *  $(run_cmd "/org-discover ${ROLE}")  ${TAG}
-EOF
-)
+LINES=()
+if has_cycle tick; then
+  TICK_CRON="$(minute_cron "$TICK_MIN" tick)"
+  LINES+=("${TICK_CRON}  $(run_cmd "/org-tick")  ${TAG}")
+fi
+if has_cycle work; then
+  WORK_CRON="$(minute_cron "$WORK_MIN" work)"
+  LINES+=("${WORK_CRON}  $(run_cmd "/org-work ${ROLE}")  ${TAG}")
+fi
+if has_cycle discover; then
+  DISCOVER_CRON="$(hour_cron "$DISCOVER_HOURS" discover)"
+  LINES+=("${DISCOVER_CRON}  $(run_cmd "/org-discover ${ROLE}")  ${TAG}")
+fi
 
-echo "== orgforge scheduler entries for role '${ROLE}' =="
-echo "$LINES"
+echo "== orgforge scheduler entries for role '${ROLE}' (cycles: ${CYCLES}) =="
+printf '%s\n' "${LINES[@]}"
 echo
 
 if [ "$DRY_RUN" = "1" ]; then
@@ -83,8 +166,12 @@ if [ "$DRY_RUN" = "1" ]; then
 fi
 
 # merge: drop any prior lines for this role's tag, then append the new ones.
-EXISTING="$(crontab -l 2>/dev/null | grep -v "${TAG}" || true)"
-printf '%s\n%s\n' "$EXISTING" "$LINES" | grep -v '^$' | crontab -
+EXISTING="$(crontab -l 2>/dev/null | awk -v tag="${TAG}" \
+  'length($0) < length(tag) || substr($0, length($0) - length(tag) + 1) != tag' || true)"
+{
+  [ -z "$EXISTING" ] || printf '%s\n' "$EXISTING"
+  printf '%s\n' "${LINES[@]}"
+} | crontab -
 echo "✔ installed. Verify with: crontab -l | grep '${TAG}'"
 echo "  Logs stream to: ${ORG_LEDGER_ROOT}/cron.log"
 echo "  Remove with:    integrations/claude-code/scheduler-uninstall.sh --role ${ROLE}"
