@@ -6,6 +6,17 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 2.0.15 — bounded judge environment preflights
+
+### Added
+
+- Let an organization declare argv-based environment probes with explicit timeouts and
+  issue/phase/role selectors under `enforcement.judges.preflights`.
+- Stop verification before judge dispatch on a failed or timed-out matching probe, and preserve
+  the measured command, exit code, elapsed time, stdout, and stderr as review evidence.
+- Validate the preflight contract during organization linting and bundle the identical runner and
+  constitution contract in Claude Code and Codex.
+
 ## 2.0.14 — host-independent monitor liveness
 
 ### Added

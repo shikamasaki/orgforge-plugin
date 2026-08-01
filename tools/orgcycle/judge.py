@@ -26,6 +26,7 @@ from ._core import (
     _run,
     _sub,
 )
+from .preflight import PreflightConfigError, run_declared_preflights
 
 
 def _role_charter(role):
@@ -159,6 +160,20 @@ def cmd_verify(a):
     if title is None:
         print(f"Issue #{a.issue} を読めなかった（gh の認証 / repo 解決を確認）。", file=sys.stderr)
         return 3
+    # judge を起動する前に、**この Issue / phase / role にだけ適用される**環境probeを走らせる。
+    # プロセス名から Docker 等を推測せず、org が宣言した argv の実測結果だけを証拠にする。
+    phase = getattr(a, "phase", None) or "implement"
+    try:
+        preflight_ok, preflight_evidence = run_declared_preflights(
+            a.issue, role, phase, cwd=os.getcwd())
+    except PreflightConfigError as exc:
+        print(f"judge preflight の宣言が不正: {exc}\n"
+              "  **設定を読めない・boundedでないなら judge を起動しない。**", file=sys.stderr)
+        return 2
+    if not preflight_ok:
+        print("judge preflight が失敗したため、judge は起動していない。\n"
+              "  上の measured result を直し、同じ verify を再実行すること。", file=sys.stderr)
+        return 8
     seam = _seam(role, a.issue, title)
     prior = _prior_gate(a.issue) if role == "skeptic" else None
     history = _judgment_history(a.issue)
@@ -169,6 +184,10 @@ def cmd_verify(a):
     out = []
     out.append(f"===== {role} subagent への投入プロンプト（#{a.issue}: {title}）=====\n")
     out.append(seam or "(seam contract の生成に失敗 — handoff.py を確認)")
+    if preflight_evidence:
+        out.append("\n## judge dispatch 前の environment preflight（監督が実測）\n")
+        out.extend(preflight_evidence)
+        out.append("\n> これは宣言されたコマンドの測定結果であり、daemon名や実装を推測した結果ではない。")
     out.append("\n## あなたの憲章（agents/%s.md — 検証基準はここが唯一の出所）\n" % role)
     out.append(charter)
     rounds = [h for h in history if h["class"] == "admission_decided"]
