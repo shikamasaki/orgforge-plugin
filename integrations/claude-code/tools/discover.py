@@ -26,12 +26,15 @@ Nothing here writes; discovery is a pure read of what is already true.
   discover.py env    [--start DIR]   print all of them as shell exports (for a human who wants them)
 """
 import argparse
+import hashlib
 import os
 import subprocess
 import sys
 
 # the marker that says "an org lives here" — the chart is the one file founding always writes
 ORG_MARKERS = ("organization.yaml", ".orgforge")
+GOVERNANCE_FILES = ("organization.yaml", "constitution.yaml", "ledger-schema.yaml",
+                    "moves.yaml", "role-settings.yaml", "schedule.yaml", "sensors.yaml")
 
 
 def org_root(start=None):
@@ -41,8 +44,12 @@ def org_root(start=None):
     (post-init, pre-founding) — so discovery works between /org-init and /org-found too."""
     d = os.path.abspath(start or os.getcwd())
     while True:
-        if any(os.path.exists(os.path.join(d, m)) for m in ORG_MARKERS) and not _is_worktree(d):
-            return d
+        if any(os.path.exists(os.path.join(d, m)) for m in ORG_MARKERS):
+            if not _is_worktree(d):
+                return d
+            primary = _primary_worktree(d)
+            if primary and any(os.path.exists(os.path.join(primary, m)) for m in ORG_MARKERS):
+                return primary
         parent = os.path.dirname(d)
         if parent == d:
             return None
@@ -71,6 +78,75 @@ def _is_worktree(d):
     except OSError:
         return False
     return head.startswith("gitdir:") and "/worktrees/" in head
+
+
+def _primary_worktree(d):
+    """Return the main worktree sharing ``d``'s git common directory.
+
+    A linked worktree can live anywhere on disk, so parent walking is insufficient. Git's
+    porcelain worktree list is the authority and its first entry is the primary worktree. Keep
+    failure quiet: callers can still continue the ordinary parent walk for non-git directories.
+    """
+    try:
+        p = subprocess.run(["git", "-C", d, "worktree", "list", "--porcelain"],
+                           capture_output=True, text=True, timeout=10)
+        if p.returncode != 0:
+            return None
+        for line in (p.stdout or "").splitlines():
+            if line.startswith("worktree "):
+                return os.path.abspath(line[len("worktree "):])
+    except Exception:
+        pass
+    return None
+
+
+def subject_root(start=None):
+    """The checkout whose commit/files a command is measuring.
+
+    This deliberately differs from :func:`org_root` inside a linked worktree: governance comes
+    from the primary worktree, while review/integration evidence must describe the caller's real
+    checkout rather than silently switching the subject under review.
+    """
+    d = os.path.abspath(start or os.getcwd())
+    try:
+        p = subprocess.run(["git", "-C", d, "rev-parse", "--show-toplevel"],
+                           capture_output=True, text=True, timeout=10)
+        if p.returncode == 0 and (p.stdout or "").strip():
+            return os.path.abspath(p.stdout.strip())
+    except Exception:
+        pass
+    return None
+
+
+def _file_digest(path):
+    try:
+        with open(path, "rb") as f:
+            return hashlib.sha256(f.read()).hexdigest()
+    except FileNotFoundError:
+        return None
+    except OSError:
+        return "unreadable"
+
+
+def governance_divergences(start=None):
+    """Describe governance files that differ in the caller's linked worktree.
+
+    Resolution always uses the authoritative primary checkout, but divergence is not hidden: the
+    stale checkout remains useful subject evidence and operators need to know its embedded rules
+    no longer match the rules actually enforcing the organization.
+    """
+    authority = org_root(start)
+    subject = subject_root(start)
+    if not authority or not subject or os.path.realpath(authority) == os.path.realpath(subject):
+        return []
+    out = []
+    for rel in GOVERNANCE_FILES:
+        authoritative = _file_digest(os.path.join(authority, rel))
+        observed = _file_digest(os.path.join(subject, rel))
+        if authoritative != observed:
+            out.append({"path": rel, "authoritative": authoritative, "subject": observed,
+                        "authority_root": authority, "subject_root": subject})
+    return out
 
 
 def ledger_root(start=None):

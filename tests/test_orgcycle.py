@@ -820,6 +820,67 @@ def test_worktree_is_not_mistaken_for_the_org_root(tmp_path):
             os.environ["ORG_LEDGER_ROOT"] = saved
 
 
+def test_external_worktree_uses_primary_governance_but_keeps_its_subject(tmp_path, monkeypatch):
+    """Host-created worktrees need one governance root even when they live outside the repo.
+
+    The older regression only covered ``<repo>/.orgforge/wt``. Claude Code/Codex may create a
+    linked worktree as a sibling or under a host temp directory, where walking parents can never
+    reach the primary checkout. Governance must come from the primary worktree while the commit
+    under review remains the external worktree's commit.
+    """
+    import importlib, sys as _s
+    if str(TOOLS) not in _s.path:
+        _s.path.insert(0, str(TOOLS))
+    disc = importlib.import_module("discover")
+    ledger = importlib.import_module("ledger")
+
+    repo = tmp_path / "primary"; repo.mkdir()
+    def g(*a, cwd=repo):
+        return subprocess.run(["git", *a], cwd=cwd, capture_output=True, text=True, check=True)
+    g("init", "-q", "-b", "main"); g("config", "user.email", "t@t"); g("config", "user.name", "t")
+    (repo / ".orgforge").mkdir()
+    (repo / "organization.yaml").write_text("name: test\n", encoding="utf-8")
+    (repo / "ledger-schema.yaml").write_text("schema_version: old\n", encoding="utf-8")
+    (repo / "constitution.yaml").write_text("version: old\n", encoding="utf-8")
+    g("add", "-A"); g("commit", "-qm", "seed")
+
+    wt = tmp_path / "host-worktrees" / "issue-34"
+    wt.parent.mkdir()
+    g("worktree", "add", "-q", "-b", "feat/issue-34", str(wt), "HEAD")
+    (repo / "ledger-schema.yaml").write_text("schema_version: authoritative\n", encoding="utf-8")
+    (repo / "constitution.yaml").write_text("version: authoritative\n", encoding="utf-8")
+    g("add", "-A"); g("commit", "-qm", "governance update")
+    subdir = wt / "src"; subdir.mkdir()
+
+    monkeypatch.delenv("ORG_LEDGER_ROOT", raising=False)
+    monkeypatch.delenv("ORG_LEDGER_SCHEMA", raising=False)
+    assert disc.org_root(str(subdir)) == str(repo.resolve())
+    assert disc.subject_root(str(subdir)) == str(wt.resolve())
+
+    core = importlib.import_module("orgcycle._core")
+    _, subject = core.review_subject(34, "gate", cwd=str(wt))
+    wt_tree = g("rev-parse", "HEAD^{tree}", cwd=wt).stdout.strip()
+    primary_tree = g("rev-parse", "HEAD^{tree}").stdout.strip()
+    assert subject["head_tree_sha"] == wt_tree
+    assert subject["head_tree_sha"] != primary_tree, \
+        "governance resolution must not switch the commit/tree being reviewed"
+
+    old_cwd = os.getcwd()
+    try:
+        os.chdir(subdir)
+        assert ledger._schema_path() == str(repo / "ledger-schema.yaml")
+        divergences = disc.governance_divergences()
+    finally:
+        os.chdir(old_cwd)
+    assert {d["path"] for d in divergences} >= {"ledger-schema.yaml", "constitution.yaml"}
+
+    status = subprocess.run(
+        [sys.executable, str(TOOLS / "status.py"), "status", str(repo / ".orgforge" / "ledger")],
+        cwd=str(subdir), capture_output=True, text=True, timeout=60)
+    assert status.returncode == 0
+    assert "AMBER" in status.stdout and "governance" in status.stdout.lower(), status.stdout
+
+
 def test_integrate_passes_its_own_test_output_to_the_log():
     """integrate 自身が log の必須検査に引っかかっていた。
 
