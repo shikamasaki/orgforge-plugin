@@ -6,6 +6,17 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 2.0.13 — recover interrupted rebases safely
+
+### Fixed
+
+- Allow `git rebase --abort`, `--continue`, and `--skip` to recover an interrupted checkout
+  without misclassifying the recovery as a new protected-branch integration.
+- Bind recovery to one statically resolved checkout across direct cwd, `cd PATH && git`, `git -C`,
+  linked worktrees, and safe Git global options.
+- Keep ordinary rebases guarded and fail closed for dynamic, compound, or repository-redirecting
+  commands whose target cannot be resolved before execution.
+
 ## 2.0.12 — authoritative worktree governance
 
 ### Fixed
