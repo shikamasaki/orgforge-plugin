@@ -35,8 +35,26 @@ you. The adapter emits the first RED and each changed RED, suppresses an unchang
 GREEN so a later recurrence notifies again:
 
 ```
-Monitor (persistent): python3 "${CLAUDE_PLUGIN_ROOT}/scripts/redline_monitor.py"
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/redline_monitor.py" rearm-check \
+  --role ${1:-supervisor} --instance redline-${1:-supervisor}
+
+# Run Monitor only when rearm-check prints READY TO ARM:
+Monitor (persistent): python3 "${CLAUDE_PLUGIN_ROOT}/scripts/redline_monitor.py" \
+  --role ${1:-supervisor} --instance redline-${1:-supervisor}
 ```
+
+Do **not** rearm when the check prints `DO NOT REARM`: a process is still alive even if Claude's
+`TaskList` forgot it. Inspect every registered PID/version/identity with:
+
+```
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/redline_monitor.py" status \
+  --role ${1:-supervisor} --instance redline-${1:-supervisor}
+```
+
+For a duplicate or old-version process, request a cooperative stop of the exact record shown by
+`status`: `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/redline_monitor.py" stop <record-id>`. This writes a
+token-bound stop request checked by that monitor; it does not signal a reused PID or kill another
+session. Run `rearm-check` again before creating the replacement.
 
 Each RED line becomes a push — a wedged cycle, a repeated death, a broken chain — so you learn it without
 opening `/org`. This closes "unattended ≠ unobservable" (the transport is delegated to the harness, R0).

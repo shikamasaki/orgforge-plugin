@@ -6,6 +6,17 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 2.0.14 — host-independent monitor liveness
+
+### Added
+
+- Record an atomic heartbeat after every redline probe with PID, plugin version, role, logical
+  instance, cadence, poll count, and last signal state.
+- Add `status`, `rearm-check`, and token-bound cooperative `stop` commands that distinguish live,
+  stale, dead, duplicate, orphaned, and old-version monitor processes without host task metadata.
+- Bundle the same monitor contract in Claude Code and Codex, and require a successful rearm check
+  before the Claude Monitor guidance creates a replacement.
+
 ## 2.0.13 — recover interrupted rebases safely
 
 ### Fixed
