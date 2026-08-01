@@ -6,6 +6,19 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 2.0.25 — scheduler check receipts
+
+### Fixed
+
+- Record a strict, idempotent `scheduled_check_completed` receipt after each unattended machine
+  check instead of treating absent domain events as proof that the check never ran.
+- Run covered checks before missed-tick planning, require exact receipt readback, and count unique
+  cadence windows so retries cannot hide a skipped execution.
+- Align cadence windows with the scheduler's first observed tick rather than Unix wall-clock
+  boundaries, matching relative cron/launchd execution.
+- Report unattended versus attended-only schedule coverage and keep unsupported, context-dependent
+  checks outside the headless scheduler's claims instead of silently pretending to execute them.
+
 ## 2.0.24 — installed exercise session binding
 
 ### Fixed

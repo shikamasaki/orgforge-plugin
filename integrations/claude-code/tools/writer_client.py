@@ -16,7 +16,8 @@ def main(argv):
     if len(argv) < 2 or argv[1] in ("-h", "--help"):
         print(__doc__.strip() + "\n\n"
               "  writer_client.py <op> [--org NAME] -- <ledger.py に渡す引数…>\n\n"
-              "  op: append | trip-halt | release-halt | reserve-exposure | halt-status | derive-admission\n"
+              "  op: append | record-scheduled-check | trip-halt | release-halt | "
+              "reserve-exposure | halt-status | derive-admission\n"
               "  **台帳のパスは渡せない** — writerd が org 名から決める。")
         return 0
     op = argv[1]

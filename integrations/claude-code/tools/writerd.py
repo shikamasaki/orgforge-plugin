@@ -479,12 +479,12 @@ class Writer:
                 return {"ok": False, "reason": "read_failed", "detail": str(e)}, False
             return {"ok": True, "reason": "read", "exit_code": r.returncode,
                     "stdout": r.stdout, "stderr": r.stderr}, True
-        if op not in ("append", "trip-halt", "release-halt", "reserve-exposure",
-                      "derive-admission"):
+        if op not in ("append", "record-scheduled-check", "trip-halt", "release-halt",
+                      "reserve-exposure", "derive-admission"):
             return {"ok": False, "reason": "unsupported_op",
                     "detail": f"op={op!r} は writerd 経由では実行できない"
-                              f"（append / trip-halt / release-halt / reserve-exposure / "
-                              f"derive-admission / halt-status）。"}, False
+                              f"（append / record-scheduled-check / trip-halt / release-halt / "
+                              f"reserve-exposure / derive-admission / halt-status）。"}, False
         # **caller が root を指定する経路を閉じる。** argv からパスらしきものを弾く。
         for a in argv:
             if a == root or a.startswith("/") and os.path.sep in a and (

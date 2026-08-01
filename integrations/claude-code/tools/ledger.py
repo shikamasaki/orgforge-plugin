@@ -1655,7 +1655,7 @@ def _verify_receipt_for(a, payload, cls, receipt_expect=None):
 def cmd_append(a):
     """Append one event under the hash chain. actor is from --actor (runtime identity),
     never the payload. seq is gapless. requires_prior is enforced against real history."""
-    _wp = require_writer_path("append")
+    _wp = require_writer_path(getattr(a, "writer_op", None) or "append")
     if _wp:
         print(json.dumps({"ok": False, "reason": "direct_write_refused", "detail": _wp},
                          ensure_ascii=False) if "append" != "append" else f"append: {_wp}",
@@ -1768,7 +1768,8 @@ def cmd_append(a):
                             "workload_isolation": "none"})
 
         # 新規 append だけを検証する。既存イベントに遡って適用すると移行できない。
-        bad, warns = validate_event(a.cls, payload, snap)   # writer_op なし = writer 専用は拒否
+        bad, warns = validate_event(a.cls, payload, snap,
+                                    writer_op=getattr(a, "writer_op", None))
         if bad:
             print(f"append: {bad}", file=sys.stderr)
             return 2
@@ -1959,6 +1960,38 @@ def cmd_append(a):
               f"authority={payload.get('authority_role') or a.actor} "
               f"assurance={payload.get('authority_assurance') or 'not-required'}")
     return 0
+
+
+def cmd_record_scheduled_check(a):
+    """Persist scheduler proof through a dedicated writer operation.
+
+    A generic caller must not be able to forge the receipt that satisfies missed-tick accounting.
+    This is still only the configured writer boundary (and therefore not stronger than its UID),
+    but it prevents ordinary append from manufacturing a healthy unattended run.
+    """
+    payload = {
+        "check_id": a.check_id,
+        "scheduled_for_min": a.scheduled_for_min,
+        "execution_id": a.execution_id,
+        "result": a.result,
+        "exit_code": a.exit_code,
+        "command_sha256": a.command_sha256,
+        "plugin_version": a.plugin_version,
+    }
+    forwarded = argparse.Namespace(
+        root=a.root,
+        actor="system:scheduler_tick",
+        cls="scheduled_check_completed",
+        payload=json.dumps(payload, ensure_ascii=False),
+        natural_key=f"scheduler-check-{a.check_id}-{a.scheduled_for_min}",
+        ts=None,
+        ts_legacy=None,
+        receipt=None,
+        schema_version=None,
+        schema_sha256=None,
+        writer_op="scheduled_check_completed",
+    )
+    return cmd_append(forwarded)
 
 
 
@@ -3402,6 +3435,18 @@ def main(argv):
                    help="idempotency key: if a prior event of this class carries the same key, "
                         "this append is a no-op (docs/11 §0 — replay/retry must count once)")
 
+    sc = sub.add_parser("record-scheduled-check",
+                        help="scheduler checkの実行receiptを書く（writer専用）")
+    sc.add_argument("root", nargs="?", default=None)
+    sc.add_argument("--check-id", required=True)
+    sc.add_argument("--scheduled-for-min", type=int, required=True)
+    sc.add_argument("--execution-id", required=True)
+    sc.add_argument("--result", choices=("ok", "escalate"), required=True)
+    sc.add_argument("--exit-code", type=int, choices=(0, 10), required=True)
+    sc.add_argument("--command-sha256", required=True)
+    sc.add_argument("--plugin-version", required=True)
+    sc.set_defaults(fn=cmd_record_scheduled_check)
+
     q = sub.add_parser("verify"); q.set_defaults(fn=cmd_verify)
     q.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)")
 
@@ -3429,7 +3474,7 @@ def main(argv):
     # A long-running judge can forget the installed plugin path and find an unrelated development
     # checkout. Read-only inspection remains useful from anywhere, but every mutation must come
     # from the organ registered by SessionStart (or carry an explicit developer bypass).
-    mutating = a.cmd in {"append", "reserve-exposure", "derive-admission",
+    mutating = a.cmd in {"append", "record-scheduled-check", "reserve-exposure", "derive-admission",
                          "trip-halt", "release-halt"}
     mutating = mutating or (a.cmd == "schema" and getattr(a, "fix", False))
     if mutating:

@@ -1,6 +1,6 @@
 {
   "name": "orgforge",
-  "version": "2.0.24+codex.20260802072721",
+  "version": "2.0.25+codex.20260802081802",
   "description": "Resilience engineering for coding-agent teams: a portable governance plane for safe degradation, recovery, evidence-backed adaptation, and human control without replacing Codex.",
   "author": {
     "name": "shikamasaki",

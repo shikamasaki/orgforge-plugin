@@ -138,6 +138,18 @@ def test_ledger_actor_not_from_payload(tmp_path):
     assert code == 2 and "must not carry its own 'actor'" in out
 
 
+def test_scheduler_receipt_cannot_be_forged_by_generic_append(tmp_path):
+    payload = json.dumps({
+        "check_id": "machine_sensors", "scheduled_for_min": 100,
+        "execution_id": "forged", "result": "ok", "exit_code": 0,
+        "command_sha256": "a" * 64, "plugin_version": "2.0.25",
+    })
+    code, out = run("ledger.py", "append", str(tmp_path),
+                    "--actor", "system:scheduler_tick",
+                    "--class", "scheduled_check_completed", "--payload", payload)
+    assert code == 2 and "writer 専用" in out
+
+
 def test_ledger_tamper_detected(tmp_path):
     seed(tmp_path, "a", "candidate_submitted",
          {"maker": "a", "candidate_id": "c1", "contract_ref": "r", "evidence": []})

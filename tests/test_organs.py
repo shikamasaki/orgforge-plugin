@@ -441,6 +441,32 @@ def test_tick_detects_miss(tmp_path):
     assert code == 10 and ("MISS" in out or "ESCALATE" in out)
 
 
+def test_tick_detects_missing_scheduler_receipt_without_domain_event_forgery(tmp_path):
+    seed(tmp_path, "system:tick_host", "tick_planned",
+         {"now_min": 100, "night": False, "due": [], "suspended": [], "missed": []})
+    code, out = run(
+        "tick.py", "plan", str(tmp_path), _sched(), "--now-min", "280",
+        "--only-check", "machine_sensors", "--receipt-check", "machine_sensors")
+    assert code == 10
+    assert "scheduled-check receipt" in out and "machine_sensors" in out
+
+
+def test_tick_relative_phase_follows_host_start_not_unix_boundary(tmp_path):
+    seed(tmp_path, "system:tick_host", "tick_planned",
+         {"now_min": 101, "night": False, "due": [], "suspended": [], "missed": []})
+    receipt_code, receipt_out = run(
+        "ledger.py", "record-scheduled-check", str(tmp_path),
+        "--check-id", "machine_sensors", "--scheduled-for-min", "131",
+        "--execution-id", "relative-131", "--result", "ok", "--exit-code", "0",
+        "--command-sha256", "a" * 64, "--plugin-version", "test")
+    assert receipt_code == 0, receipt_out
+    code, out = run(
+        "tick.py", "plan", str(tmp_path), _sched(), "--now-min", "131",
+        "--only-check", "machine_sensors", "--receipt-check", "machine_sensors")
+    assert code == 0
+    assert "machine_sensors" in out and "DUE (1)" in out
+
+
 def test_tick_night_suspends_unsafe(tmp_path):
     code, out = run("tick.py", "plan", str(tmp_path), _sched(), "--now-min", "5", "--night")
     assert "SUSPENDED" in out and ("mandate_conflict" in out or "contract_change" in out)

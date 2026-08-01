@@ -151,8 +151,18 @@ def cmd_plan(a):
     esc_after = int(mt.get("escalate_after_consecutive", 3))
     monitoring_origin, monitoring_origin_seq, clock_error = _monitoring_origin(events, now)
 
-    # tick_seq: how many base intervals have elapsed. A clock check with interval M is DUE when
-    # now is a multiple of M (within one base interval).
+    selected = set(a.only_check or [])
+    receipt_checks = set(a.receipt_check or [])
+    declared_ids = {str(c.get("id")) for c in sched.get("checks", []) if c.get("id")}
+    unknown = sorted((selected | receipt_checks) - declared_ids)
+    if unknown:
+        print("tick: scheduler coverage names undeclared check(s): " + ", ".join(unknown),
+              file=sys.stderr)
+        return 12
+
+    # A clock check with interval M is DUE relative to the first tick in this clock domain.
+    # Host schedulers such as launchd use StartInterval (relative), not wall-clock boundaries;
+    # absolute ``now % interval`` therefore made a healthy job permanently miss its due phase.
     due, suspended, missed, escalate = [], [], [], False
     if clock_error:
         missed.append(("tick_clock", f"{clock_error}: MISS (cannot prove scheduled checks ran)"))
@@ -160,6 +170,8 @@ def cmd_plan(a):
 
     for c in sched.get("checks", []):
         cid = c.get("id")
+        if selected and cid not in selected:
+            continue
         cadence = c.get("cadence", "")
         night_safe = c.get("night_safe", False)
         interval = _interval_min(cadence)
@@ -176,13 +188,14 @@ def cmd_plan(a):
                 due.append((cid, f"edge ({cadence}) — host fires on event, not this tick"))
             continue
 
-        # is it due now? due when now falls on an interval boundary (mod), within base slack
+        # is it due now? due when elapsed monitoring time falls on an interval boundary,
+        # within base slack. This follows both relative OS timers and monotonic test clocks.
         if interval < base:
             escalate = True
             missed.append((cid, f"cadence {cadence} ({interval}m) is FINER than base_interval "
                                 f"{base}m — the host cron can never fire it; schedule is unsatisfiable"))
             continue
-        phase = now % interval
+        phase = (now - monitoring_origin) % interval
         is_due = phase < base
         if not is_due:
             continue
@@ -193,7 +206,38 @@ def cmd_plan(a):
         # the check should have produced its verify_event since (now - interval). If the ledger
         # holds no such event within (grace) base intervals of when it was due, it's a MISS.
         verify_class = c.get("verify_event")
-        if verify_class:
+        if cid in receipt_checks:
+            # The unattended adapter records proof that the CHECK ran.  It must not forge the
+            # check's domain output (for example sensor_reading or heartbeat). Count unique
+            # cadence opportunities, not raw events, so retrying one scheduler minute cannot
+            # make up for a skipped later window.
+            served = set()
+            for event in events:
+                if event.get("class") != "scheduled_check_completed":
+                    continue
+                if int(event.get("seq", 0)) <= monitoring_origin_seq:
+                    continue
+                payload = event.get("payload") or {}
+                if payload.get("check_id") != cid:
+                    continue
+                scheduled_for = payload.get("scheduled_for_min")
+                if (not isinstance(scheduled_for, int) or isinstance(scheduled_for, bool)
+                        or scheduled_for < monitoring_origin or scheduled_for > now):
+                    continue
+                elapsed = scheduled_for - monitoring_origin
+                if elapsed % interval < base:
+                    served.add(elapsed // interval)
+            expected_ticks = max(0, (now - monitoring_origin) // interval)
+            produced = len(served)
+            shortfall = expected_ticks - produced
+            if shortfall > grace:
+                missed.append((cid, f"due {expected_ticks}x but only {produced} "
+                                    "scheduled-check receipt window(s) in ledger — shortfall "
+                                    f"{shortfall} > grace {grace}: MISS (the check did not run "
+                                    "when scheduled)"))
+                if shortfall >= esc_after:
+                    escalate = True
+        elif verify_class:
             # Count only the cadence opportunities since this host first planned a tick.  The
             # host counter may be Unix-epoch minutes, so epoch zero is not a valid org origin.
             produced = sum(1 for e in events
@@ -246,6 +290,10 @@ def main(argv):
     q.add_argument("--now-min", dest="now_min", type=int, required=True)
     q.add_argument("--night", action="store_true")
     q.add_argument("--verbose", action="store_true")
+    q.add_argument("--only-check", action="append", default=[],
+                   help="plan/monitor only this declared check (repeatable; host adapter use)")
+    q.add_argument("--receipt-check", action="append", default=[],
+                   help="use scheduled_check_completed receipts for this check (repeatable)")
     a = p.parse_args(argv[1:])
     return a.fn(a)
 

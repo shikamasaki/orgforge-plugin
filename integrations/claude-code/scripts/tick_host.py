@@ -53,6 +53,8 @@ def main(argv=None):
     parser.add_argument("--now-min", type=int, required=True)
     parser.add_argument("--night", action="store_true")
     parser.add_argument("--verbose", action="store_true")
+    parser.add_argument("--only-check", action="append", default=[])
+    parser.add_argument("--receipt-check", action="append", default=[])
     args = parser.parse_args(argv)
 
     root = _ledger_root(args.root)
@@ -66,6 +68,10 @@ def main(argv=None):
         command.append("--night")
     if args.verbose:
         command.append("--verbose")
+    for check_id in args.only_check:
+        command.extend(["--only-check", check_id])
+    for check_id in args.receipt_check:
+        command.extend(["--receipt-check", check_id])
     planned = subprocess.run(command, capture_output=True, text=True, encoding="utf-8",
                              errors="replace")
     if planned.stdout:
