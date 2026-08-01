@@ -172,7 +172,12 @@ def run_reviewer_outage(scenario_path=DEFAULT_SCENARIO):
             raise ExerciseError(f"production adaptation activation failed: {activated}")
         activation = activated["activation"]
 
-        session_id = "exercise-reviewer-outage-session"
+        # The stable installed-organ launcher binds every state mutation to the current host
+        # session.  Keep that protection active inside the exercise instead of inventing a second
+        # owner that operational_state must (correctly) reject.  Standalone/CI execution has no
+        # binding and retains the deterministic fixture identity.
+        session_id = (os.environ.get("ORG_ORGAN_SESSION_ID") or
+                      "exercise-reviewer-outage-session")
         code, degraded = _operate(
             root, "degrade", "--envelope", "required-reviewer-outage",
             "--circuit", "reviewer:gate", "--dependency", "required-reviewer",
