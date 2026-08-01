@@ -47,6 +47,17 @@ def _role_charter(role):
     return body.strip(), path
 
 
+def _verdict_schema(role):
+    """Return the bundled structured-output schema for a judge role.
+
+    ``HERE`` is the tools directory in both the neutral checkout and each self-contained
+    harness bundle.  Keeping this resolution in one named helper makes the packaging contract
+    executable: build scripts must place schemas under the adjacent ``template/schemas`` tree.
+    """
+    return os.path.normpath(
+        os.path.join(HERE, "..", "template", "schemas", f"{role}-verdict.json"))
+
+
 def _seam(role, issue, title):
     """handoff.py を内部で呼んで seam contract を作る。引数6個の手打ちをここで吸収する。"""
     slice_ = {
@@ -251,6 +262,21 @@ def cmd_verify(a):
                        "> admit しなければ、この学びは次の Issue に渡らない。"
                        "実地では同じ失敗を3回繰り返した。")
 
+    out.append("\n## 変異検査の証拠規律（**空振りした変異の GREEN は証拠ではない**）\n")
+    out.append(
+        "変異検査を使う場合は、必ず **baseline → mutate → postcondition → test → restore → "
+        "restore postcondition** の順で実行する。変異コマンドが exit 0 でも、対象状態を読み返して"
+        "変化を確認するまでは `applied` ではない。コマンドが無い・接続できない・対象が違う・"
+        "変化しなかった場合、その後の GREEN を『変異を生き延びた』証拠に数えてはいけない。\n\n"
+        "- mutate と postcondition 確認と test は、前段の失敗を隠さない形（例: `&&`）で繋ぐ。\n"
+        "- postcondition には、変更後の状態を読んだ**実コマンドと実出力**を残す。\n"
+        "- 復元後も状態を読み返す。復元を確認できない変異を残したまま判定を終えない。\n"
+        "- 適用できなかった試行は `detected=false` と推測せず、未測定として evidence / risk に"
+        "失敗出力を残す。構造化出力の `mutations` には、適用と postcondition を確認できたものだけ"
+        "を入れる。\n"
+        "- 環境固有の入口（Docker上のDB等）は、repoの設定・実行中サービス・既存テストから"
+        "導出して接続を実測する。ホストに同名CLIがあると仮定しない。")
+
     # subagent に渡すのは「返すもの」の指定。**記録するコマンドは載せない** —
     # subagent には ORG_GITHUB_REPO も台帳のパスも渡っておらず、載せると指示と権限が
     # 食い違う。実地で7回、判定を出した後に「記録は監督に委ねます」と止まり、一度は
@@ -262,7 +288,10 @@ def cmd_verify(a):
         fields += [("standard", "適用した基準（SPEC の MUST / seam contract / 機械バー）"),
                    ("alternatives", "採らなかった選択肢と、その理由")]
     else:
-        fields += [("mutations", "撃ったミューテーションの一覧（検出された／生存した）— "
+        fields += [("mutations", "**適用後状態を実測できた**ミューテーションの一覧。各項目に "
+                                 "`applied: true` と postcondition の実コマンド/実出力を含める。"
+                                 "復元後の読取結果も `restore_postcondition` に含める。"
+                                 "適用失敗はここへ入れず evidence / risk に未測定として残す — "
                                  "次の周回が同じ場所を撃ち直さないために要る"),
                    ("out_of_scope", "**MUST の範囲外**で見つけた欠陥（実在するが、この Issue が"
                                     "守ると述べていないもの）。`verdict` には数えず、"
@@ -271,6 +300,11 @@ def cmd_verify(a):
                                     "    判断が難しいものは**あなたが決めず**、両方の読み方を"
                                     "書いて監督に返すこと（スコープの carve out は監督の判断）")]
     fields += [("risk", "承知の上で残す穴 / 排除しきれなかった失敗モード。無いなら「無い」と明示")]
+
+    if role == "skeptic":
+        out.append("\n**skeptic の返り値は常に構造化 JSON にすること。** 静的判定で変異を"
+                   "使わなかった場合も `\"mutations\": []` を含める。散文だけの報告は、"
+                   "変異の適用・復元を機械検査できないため成果物として受理されない。")
 
     out.append("\n## 返すもの（**判定はあなたが決める。記録は監督が行う**）\n")
     for k, desc in fields:
@@ -334,7 +368,7 @@ def cmd_verify(a):
     # constitution の `enforcement.judges.lineage` を読む。**既定は same-harness** —
     # 別ハーネスの契約・CLI・認証を前提にすると、持っていない環境で org が回らなくなる。
     # 層を増やすのは選択であって前提ではない。
-    _schema = os.path.join(os.path.dirname(HERE), "template", "schemas", f"{role}-verdict.json")
+    _schema = _verdict_schema(role)
     if _lineage == "cross-harness":
         if not os.path.isfile(_schema):
             print(f"judges.lineage = cross-harness だが {role} の出力スキーマが無い "
@@ -615,9 +649,33 @@ def cmd_intake(a):
             v = str(as_json.get(k) or "").strip()
             if k in dict((c[0], 1) for c in checks) and len(v) < 20 and (k, ) not in [(m[0],) for m in missing]:
                 missing.append((k, "構造化された返り値の該当欄が短すぎる（20文字未満）"))
+        if role == "skeptic":
+            mutations = as_json.get("mutations")
+            if not isinstance(mutations, list):
+                missing.append(("mutations", "mutations が array ではない / 欠落している"))
+                mutations = []
+            for index, mutation in enumerate(mutations):
+                if not isinstance(mutation, dict):
+                    missing.append(("mutations", f"mutation[{index}] が object ではない"))
+                    continue
+                if mutation.get("applied") is not True:
+                    missing.append(("mutations", f"mutation[{index}] の適用成立が確認されていない"))
+                post = mutation.get("postcondition")
+                if not isinstance(post, str) or len(post.strip()) < 10:
+                    missing.append(("mutations", f"mutation[{index}] に適用後状態の実測が無い"))
+                restored = mutation.get("restore_postcondition")
+                if not isinstance(restored, str) or len(restored.strip()) < 10:
+                    missing.append(("mutations", f"mutation[{index}] に復元後状態の実測が無い"))
     else:
         missing = [(k, why) for k, pat, why in checks
                    if not re.search(pat, text, re.I | re.M)]
+        if role == "skeptic":
+            # Claude's print mode cannot enforce --output-schema.  Free prose cannot prove an
+            # empty list: a decoy `mutations: []` line may coexist with mutation claims elsewhere.
+            # Require the structured contract for every skeptic report.  Static proofs represent
+            # the empty list in JSON, which keeps both harness paths on the same intake boundary.
+            missing.append(("mutations", "skeptic 報告は常に構造化 JSON が必要。"
+                            "静的判定も `\"mutations\": []` を含む JSON で返す"))
     truncated = [p for p in _TRUNCATED if re.search(p, text.strip(), re.I | re.M)]
 
     print(f"— intake #{a.issue} ({role}) — {len(text)} 文字")

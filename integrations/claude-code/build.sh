@@ -57,6 +57,11 @@ for f in schedule.yaml sensors.yaml constitution.yaml moves.yaml ledger-schema.y
          organization.SKELETON.yaml SPEC.md role-settings.yaml REQUIREMENTS.md; do
   sync_one "$REPO/template/$f" "$HERE/template/$f" || rc=1
 done
+# Structured-output contracts used by cross-harness judges.  Omitting this nested directory made
+# source-checkout verification work while installed plugins stopped at "schema missing".
+for f in "$REPO"/template/schemas/*.json; do
+  sync_one "$f" "$HERE/template/schemas/$(basename "$f")" || rc=1
+done
 
 if [ "$CHECK" = "--check" ]; then
   [ $rc -eq 0 ] && echo "plugin bundle is in sync with the neutral source" || \

@@ -6,6 +6,17 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 2.0.10 — measured mutation evidence
+
+### Fixed
+
+- Require mutation-based judge evidence to prove the mutation's applied postcondition, preserve the
+  real command/output, and restore the original state before interpreting a test result.
+- Reject structured skeptic reports that claim unapplied or unmeasured mutations while preserving
+  valid static reviews with an empty mutation list.
+- Bundle the gate and skeptic structured-output schemas in both Claude Code and Codex projections,
+  and verify byte parity plus runtime path resolution in CI.
+
 ## 2.0.9 — reliable org schema migration
 
 ### Fixed

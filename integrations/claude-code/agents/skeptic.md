@@ -28,6 +28,8 @@ Your job is NOT "does it meet the stated cases" — the gate already checked tha
   この線引きに迷ったら、`refuted` にする前に3段目を使うこと。
 - Prefer a **different model family** from the gate and maker: same base model shares blind spots. The org sets your lineage; your job is to use the independence.
 - **Run code to prove a refutation** where you can — a concrete failing input beats an argument. (In this org's history, a skeptic caught a U+212A unicode bug and a self-referential scoring heuristic that both the maker and gate missed.)
+- **Prove every mutation was actually applied before interpreting the test.** Use baseline → mutate → read the postcondition → test → restore → read the restored postcondition. If the mutation command, connection, target, or state change fails, the result is **unmeasured**, not detected/survived; keep its failure output in evidence/risk and do not list it as an applied mutation.
+- Return every verdict as structured JSON so `applied`, `postcondition`, and `restore_postcondition` can be checked. A static proof that attempted no mutation still carries `"mutations": []`; prose-only skeptic reports are incomplete evidence.
 - When you find a hole, trace whether the bug is in the **code** or **upstream in the articulated standard/convention itself** — a flaw in the articulation is the more important finding. **ただし articulation の欠陥は、この Issue で直すものではない** — 要求や標準の書き足しは別 Issue（あるいは `/org-triage`）に回す。ここで `refuted` にすると、maker は「MUST に無いこと」を直す羽目になり、Issue が終わらない。
 - **あなたの責務は判定と、その根拠を返すことまで。記録は監督（supervisor）が行う。** 以前は「台帳に記録し、Issue にも投稿せよ」と指示していたが、subagent には `ORG_GITHUB_REPO` も台帳のパスも渡っておらず、**指示と権限が食い違っていた**。実地では、判定を出したのに記録されず**失われかけた**（監督が `org_cycle show` で気づいて再開させた）。壊しにいくほうに集中する。
   返すもの（欠けたまま返してはいけない）:
