@@ -31,10 +31,11 @@ Role: **${1:-supervisor}** · tick every **${2:-15}** min · work every **${3:-6
 ## Get notified the moment the org needs you (Monitor)
 
 So a RED never waits for the next tick, arm a persistent **Monitor** that pushes only when the org needs
-you (silent while healthy — `status.py redline` prints a line only on RED):
+you. The adapter emits the first RED and each changed RED, suppresses an unchanged RED, and resets after
+GREEN so a later recurrence notifies again:
 
 ```
-Monitor (persistent): while true; do python3 "${CLAUDE_PLUGIN_ROOT}/tools/status.py" redline; sleep 60; done
+Monitor (persistent): python3 "${CLAUDE_PLUGIN_ROOT}/scripts/redline_monitor.py"
 ```
 
 Each RED line becomes a push — a wedged cycle, a repeated death, a broken chain — so you learn it without
