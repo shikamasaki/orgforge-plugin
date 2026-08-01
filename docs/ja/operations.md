@@ -37,14 +37,38 @@ releaseでは、別登録approver、対象に束縛された非対称receipt、r
 
 解除記録に失敗した場合はHALTを維持します。
 
-## 4. Effect cap
+## 4. 縮退運転と復旧
+
+dependency障害は、単一のledger-backed state machineで表現します。
+
+| State | 許可される動作 |
+|---|---|
+| `NORMAL` | 宣言済みworkflowと通常guardrailを適用します。 |
+| `DEGRADED` | 観測と安全なresponseを維持します。変更操作にはone-shot宣言が必要で、active adaptive envelope内だけを許可します。merge、deploy、publishは禁止します。 |
+| `RECOVERING` | 観測とrecovery protocolだけを許可します。probe成功だけでは解除せず、全tainted artifactが宣言済みrevalidation scopeを通る必要があります。 |
+| `HALTED` | 通常作業を停止します。既存のreceipt-backed HALT releaseを正とし、envelopeの失効・消失からeffective HALTを導出する場合もあります。 |
+
+`orgforge operational-state status` はcircuit、所有session、taint、recovery状態を表示します。
+recovery authorityとcooldownは`constitution.yaml`で宣言し、stale sessionからの解除は拒否します。
+`project --target otel|github-checks`は、別のhealth scoreを作らず同じstate名と件数を外部へ投影します。
+
+acting schedulerを有効にする前に、次を実行します。
+
+```bash
+orgforge resilience-exercise reviewer-outage --expect GREEN
+```
+
+決定的fixtureは、networkや実repositoryへのwriteを使わず、検知、縮退、独立failover、half-open
+probe、taint再検証、circuit close、`NORMAL`復帰を証明しなければなりません。
+
+## 5. Effect cap
 
 destructive operation、external write、infrastructure change、file mutationを上限で制御します。
 すべてのshell commandを課金する仕組みではなく、runawayを止めるための仕組みです。
 
 永続設定はconstitutionをsource of truthにします。環境変数はdevelopment overrideです。
 
-## 5. Productionと実資産
+## 6. Productionと実資産
 
 実際の権限はhost境界へ置きます。
 
@@ -57,7 +81,7 @@ destructive operation、external write、infrastructure change、file mutation�
 
 orgforgeは統制が出した判断と証拠を記録します。platformのroot credentialを保持・再実装しません。
 
-## 6. Failure handling
+## 7. Failure handling
 
 - 継続が不可逆effectを生む場合、control stateを読めなければfail-closed
 - check失敗は理由を報告し、違う理由の拒否を合格にしない
@@ -65,7 +89,7 @@ orgforgeは統制が出した判断と証拠を記録します。platformのroot
 - exact retryでdurable decisionを重複させない
 - 実orgを破壊的test fixtureにしない
 
-## 7. 非サポートのseparate-UID writer実験
+## 8. 非サポートのseparate-UID writer実験
 
 通常運用でprivileged writer-install commandを実行しません。別UID writer codeがcandidateや
 historyに存在しても実験扱いで、supported productの外です。release、Quickstart、

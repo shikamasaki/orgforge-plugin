@@ -6,6 +6,24 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 2.0.20 — ledger-backed graceful degradation and recovery
+
+### Added
+
+- Add one operational state machine for `NORMAL | DEGRADED | HALTED | RECOVERING`, with
+  dependency circuits, retry budgets, cooldown/half-open probes, explicit actor/reason/evidence/
+  confidence, repeated-failure escalation, and compatibility with the existing HALT latch.
+- Enforce adaptive-envelope actions and a no-ship rule at the PreToolUse boundary while degraded;
+  recovering and derived HALT permit observation and the ledger-validated recovery path only.
+- Propagate taint from the initial outage and every artifact generated or referenced by a degraded
+  deviation, then require the declared revalidation scope before closing the circuit and returning
+  to NORMAL. Stale sessions and unauthorized recovery actors fail closed.
+- Project identical state semantics through doctor, the status board, the ledger view, OpenTelemetry
+  attributes, and a GitHub Checks payload without producing a synthetic resilience score.
+- Turn the deterministic reviewer-outage exercise GREEN through the production sequence
+  `NORMAL → DEGRADED → RECOVERING → NORMAL`, including independent recovery preflight, failover,
+  taint revalidation, envelope reversion, and circuit closure.
+
 ## 2.0.19 — deterministic resilience exercise
 
 ### Added

@@ -102,9 +102,19 @@ def _adapt(root, *arguments):
     return completed.returncode, body
 
 
-def _operational_state(events):
-    transitions = [event for event in events if event.get("class") == "operational_state_transitioned"]
-    return (transitions[-1].get("payload") or {}).get("to_state") if transitions else None
+def _operate(root, *arguments):
+    ledger = root / ".orgforge" / "ledger"
+    env = dict(os.environ, ORG_CONSTITUTION=str(root / "constitution.yaml"),
+               ORG_LEDGER_SCHEMA=str(root / "ledger-schema.yaml"), ORG_ROLE="supervisor")
+    completed = subprocess.run(
+        [sys.executable, str(HERE / "operational_state.py"), *arguments,
+         "--root", str(ledger), "--json"], cwd=root, env=env,
+        capture_output=True, text=True, timeout=30)
+    try:
+        body = json.loads(completed.stdout) if completed.stdout else {"error": completed.stderr.strip()}
+    except json.JSONDecodeError as exc:
+        raise ExerciseError(f"operational state returned non-JSON output: {completed.stdout!r}") from exc
+    return completed.returncode, body
 
 
 def run_reviewer_outage(scenario_path=DEFAULT_SCENARIO):
@@ -160,10 +170,23 @@ def run_reviewer_outage(scenario_path=DEFAULT_SCENARIO):
             "--confidence", "1.0")
         if code:
             raise ExerciseError(f"production adaptation activation failed: {activated}")
+        activation = activated["activation"]
+
+        session_id = "exercise-reviewer-outage-session"
+        code, degraded = _operate(
+            root, "degrade", "--envelope", "required-reviewer-outage",
+            "--circuit", "reviewer:gate", "--dependency", "required-reviewer",
+            "--artifact", str(maker),
+            "--reason", "fault receipt proves the required reviewer is unavailable",
+            "--evidence", f"file:{receipt_path}", "--confidence", "1.0",
+            "--session-id", session_id, "--by", "supervisor")
+        if code:
+            raise ExerciseError(f"production DEGRADED transition failed: {degraded}")
+        degraded_state = degraded["state"]
 
         decisions = {}
         for action in expected["allowed_actions"] + expected["forbidden_actions"]:
-            action_code, decision = _adapt(
+            action_code, decision = _operate(
                 root, "authorize", "--envelope", "required-reviewer-outage",
                 "--action", action, "--phase", "test", "--artifact", str(maker))
             decisions[action] = {"allowed": action_code == 0 and bool(decision.get("allowed")),
@@ -185,14 +208,76 @@ def run_reviewer_outage(scenario_path=DEFAULT_SCENARIO):
             "--judged-by", "exercise:declared-scenario")
         if code:
             raise ExerciseError(f"production safe outcome record failed: {outcome}")
+
+        # The dependency fixture recovers. The production preflight boundary measures it again;
+        # recovery does not trust a scenario flag or the first successful process exit alone.
+        recovery_injection_id = f"{fault['injection_id']}-recovery"
+        recovery_probe = Probe(
+            "exercise-required-reviewer-recovery",
+            (sys.executable, str(Path(__file__).resolve()), "_fake-dependency",
+             "--mode", "noop", "--exit-code", "0",
+             "--injection-id", recovery_injection_id),
+            2.0,
+        )
+        recovered_measurement = run_probe(
+            recovery_probe, issue="exercise-1", role=fault["expected_role"],
+            phase=fault["expected_phase"], cwd=root)
+        try:
+            recovered_receipt = json.loads(recovered_measurement.stdout)
+        except json.JSONDecodeError as exc:
+            raise ExerciseError("recovery probe did not return its protocol receipt") from exc
+        recovery_reached = (
+            recovered_measurement.ok and
+            recovered_receipt.get("injection_id") == recovery_injection_id and
+            recovered_receipt.get("observed_context", {}).get("role") == fault["expected_role"] and
+            recovered_receipt.get("observed_context", {}).get("phase") == fault["expected_phase"]
+        )
+        if not recovery_reached:
+            raise ExerciseError("recovery probe did not reach judge preflight")
+        recovery_receipt_path = root / "recovery-receipt.json"
+        recovery_receipt_path.write_text(json.dumps({
+            "protocol": "orgforge.exercise.recovery-receipt/v1",
+            "boundary": "orgcycle.preflight.run_probe",
+            "injection_id": recovery_injection_id,
+            "reached": recovery_reached,
+            "measurement": json.loads(result_evidence(recovered_measurement)),
+            "dependency_receipt": recovered_receipt,
+        }, sort_keys=True), encoding="utf-8")
+
+        code, recovering = _operate(
+            root, "begin-recovery", "--actor", "gate", "--circuit", "reviewer:gate",
+            "--reason", "required reviewer is available through the independent failover route",
+            "--evidence", f"file:{recovery_receipt_path}", "--confidence", "1.0",
+            "--session-id", session_id, "--by", "gate", "--result", "pass")
+        if code:
+            raise ExerciseError(f"production RECOVERING transition failed: {recovering}")
+        code, revalidated = _operate(
+            root, "revalidate", "--actor", "gate", "--artifact", str(maker),
+            "--check", "review_decision", "--check", "tainted_artifacts",
+            "--check", "integration_gate", "--result", "pass",
+            "--evidence", f"file:{recovery_receipt_path}",
+            "--session-id", session_id, "--by", "gate")
+        if code:
+            raise ExerciseError(f"production artifact revalidation failed: {revalidated}")
+        code, recovered = _operate(
+            root, "recover", "--actor", "gate", "--circuit", "reviewer:gate",
+            "--reason", "probe and declared taint revalidation completed",
+            "--evidence", f"file:{recovery_receipt_path}", "--confidence", "1.0",
+            "--session-id", session_id, "--by", "gate")
+        if code:
+            raise ExerciseError(f"production NORMAL recovery failed: {recovered}")
+
         code, status = _adapt(root, "status")
         if code:
             raise ExerciseError(f"production adaptation status failed: {status}")
-        ledger_path = root / ".orgforge" / "ledger" / "ledger.jsonl"
-        events = [json.loads(line) for line in ledger_path.read_text(encoding="utf-8").splitlines()]
-        observed_state = _operational_state(events)
+        code, operational = _operate(root, "status")
+        if code:
+            raise ExerciseError(f"production operational status failed: {operational}")
+        operational_state = operational["state"]
+        observed_state = operational_state["effective_state"]
         active = next(row for row in status["state"]["activations"]
                       if row["envelope_id"] == "required-reviewer-outage")
+        sequence = [row["to_state"] for row in operational_state["transitions"]]
 
         assertions = {
             "maker_evidence_exists": maker.is_file() and bool(_sha(maker)),
@@ -209,6 +294,12 @@ def run_reviewer_outage(scenario_path=DEFAULT_SCENARIO):
             "safe_stop_is_acceptable": outcome["outcome"]["outcome"] in
                                        scenario["acceptable_outcomes"],
             "operational_state_matches": observed_state == expected["operational_state"],
+            "degraded_was_explicit": degraded_state["effective_state"] == "DEGRADED",
+            "recovery_probe_reached_production_preflight": recovery_reached,
+            "recovery_sequence_matches": sequence == expected["transition_sequence"],
+            "taint_revalidated_before_normal": not operational_state["unresolved_taints"],
+            "circuit_closed": operational_state["circuits"]["reviewer:gate"]["to_state"] == "CLOSED",
+            "temporary_envelope_reverted": active["status"] == "reverted",
         }
         gaps = [name for name, passed in assertions.items() if not passed]
         return {
@@ -220,11 +311,18 @@ def run_reviewer_outage(scenario_path=DEFAULT_SCENARIO):
             "fault_injection": {"receipt_sha256": _sha(receipt_path), "reached": reached,
                                 "boundary": receipt["boundary"], "measurement": evidence},
             "decision_path": {"actions": decisions, "envelope_status": active["status"],
+                              "activation_id": activation["activation_id"],
                               "critical_functions": active["affected_critical_functions"],
                               "missing_evidence": active["missing_evidence"],
                               "tainted_artifact_count": len(active["tainted_artifacts"])},
             "operational_state": {"expected": expected["operational_state"],
-                                  "observed": observed_state},
+                                  "observed": observed_state,
+                                  "transition_sequence": sequence,
+                                  "circuit": operational_state["circuits"]["reviewer:gate"],
+                                  "unresolved_taints": operational_state["unresolved_taints"]},
+            "recovery": {"receipt_sha256": _sha(recovery_receipt_path),
+                         "probe_reached": recovery_reached,
+                         "revalidation": revalidated["revalidation"]},
             "outcome": {"observed": outcome["outcome"]["outcome"], "acceptable": True},
             "potentials": scenario["potentials"],
             "human_judgment": scenario["human_judgment"],
