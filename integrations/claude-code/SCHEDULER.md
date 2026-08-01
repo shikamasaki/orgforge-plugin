@@ -71,14 +71,25 @@ orgforge no longer builds one.
 to reach you. Arm a Monitor that streams only the RED signal:
 
 ```
+# Never infer death from TaskList. This must print READY TO ARM before creating a Monitor:
+python3 <plugin>/scripts/redline_monitor.py rearm-check "$ORG_LEDGER_ROOT" \
+  --role <role> --instance redline-<role>
+
 # redline_monitor retains the previous signal: first/changed RED only, quiet while unchanged or healthy
-Monitor: python3 <plugin>/scripts/redline_monitor.py "$ORG_LEDGER_ROOT"   (persistent)
+Monitor: python3 <plugin>/scripts/redline_monitor.py "$ORG_LEDGER_ROOT" \
+  --role <role> --instance redline-<role>   (persistent)
 ```
 
 The first RED and each changed RED become notifications — a wedged cycle, a repeated death, a broken
 chain — while an unchanged RED stays quiet. GREEN resets the remembered signal, so a later recurrence
 notifies again. `/org-tick` also sends a `PushNotification` on a genuine escalation when it runs.
 Healthy ticks stay silent (fail-quiet); a notification you didn't need erodes trust.
+
+The monitor updates an atomic heartbeat with PID, plugin version, role and instance after every
+probe. `redline_monitor.py status "$ORG_LEDGER_ROOT"` distinguishes live, stale, dead, duplicate,
+orphaned and old-version records without Claude's task metadata. Stop one exact record with
+`redline_monitor.py stop <record-id> --root "$ORG_LEDGER_ROOT"`; the token-bound cooperative request
+does not signal a reused PID or kill another session. Run `rearm-check` again before replacing it.
 
 ### OS cron — only for genuinely unattended (no session open)
 

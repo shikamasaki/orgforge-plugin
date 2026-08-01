@@ -195,6 +195,20 @@ identical actions. In unattended CI, either register the hook as **managed** or 
 
 ## Running unattended (both harnesses)
 
+Both plugin bundles ship the same host-independent redline monitor registry. Before starting or
+restarting a long-lived monitor, use its installed script to check the logical instance:
+
+```bash
+python3 <plugin>/scripts/redline_monitor.py rearm-check "$ORG_LEDGER_ROOT" \
+  --role supervisor --instance redline-supervisor
+python3 <plugin>/scripts/redline_monitor.py status "$ORG_LEDGER_ROOT"
+```
+
+Only `READY TO ARM` authorizes a replacement. A live/stale record returns `DO NOT REARM`; use
+`stop <record-id> --root "$ORG_LEDGER_ROOT"` to request cooperative shutdown of that exact process. This
+surface does not depend on Claude TaskList or a Codex session and exposes PID, version, role,
+instance, duplicates and old-version orphans while keeping healthy RED polling silent.
+
 ```bash
 # one department turn, headless — inspect the projected command first:
 python3 integrations/runner/run_department.py --harness claude --role gate \
