@@ -169,12 +169,12 @@ def test_daily_intervals_generate_valid_daily_cron(tmp_path):
 def test_rejects_unsafe_role_and_quotes_paths_for_shell_and_cron(tmp_path):
     result, _ = _run(tmp_path, "--cycles", "tick")
     assert result.returncode == 0, result.stderr
-    assert "work with '\\'' quote \\% pct" in result.stdout
-    assert "ledger with '\\'' quote \\% pct" in result.stdout
 
     # Cron removes the escape that protects '%' before invoking /bin/sh. Simulate that handoff and
-    # prove the generated command reaches the quoted workdir/log path rather than splitting it.
+    # prove the generated command reaches the quoted workdir/log path rather than splitting it. Do
+    # not couple this behavior check to Bash's exact printable spelling for a single-quoted apostrophe.
     line = _scheduled_commands(result.stdout)[0]
+    assert "\\%" in line
     command = line.split(maxsplit=5)[5].removesuffix("  # orgforge:supervisor").replace("\\%", "%")
     executed = subprocess.run(["/bin/sh", "-c", command], text=True, capture_output=True)
     assert executed.returncode == 0, executed.stderr
