@@ -164,6 +164,7 @@ validation:
       verdict: [refuted, survives]
     correction:
       kind:    [probe, mistake, backfill, superseded]
+      effect:  [voids, records_backfill]
     phase_admitted:
       verdict: [pass, fail]
     goal_host_synced:
@@ -171,7 +172,7 @@ validation:
       assurance: [reported, observed]
   # 型。同上、存在する場合に検証する。
   types:
-    correction:          { corrects: list }
+    correction:          { corrects: list, target_classes: list, target_issues: list }
     admission_decided:   { from_seqs: list, agreed_by: list }
     verdict_provisional: { issue: int_or_str }
     goal_blocker_observed: { evidence: list }
@@ -242,7 +243,13 @@ event_classes:
   #         superseded   — 後続の判定で置き換わった
   # 訂正そのものも追記なので、訂正の訂正も可能。誰が無効化したかは actor に残る。
   correction:           { corrects: [seq], kind: probe|mistake|backfill|superseded, reason,
-                          corrected_by }   # LEDGER-CORRECTION
+                          corrected_by, authority_role, authority_principal, authority_assurance,
+                          authority_receipt_subject,
+                          target_classes: [event_class], target_issues: [issue], issue,
+                          effect: voids|records_backfill,
+                          decision_by, recorded_by, identity_assurance, recorder_assurance,
+                          workload_isolation, writer_isolation, signer_id, key_id }
+                          # LEDGER-CORRECTION
 
   # ── 判定クラス（`github_sync decide` が受け付けるもの）───────────────────────
   # **これらは実運用で書かれていたが、schema に宣言が無かった。** Writer Phase 0 の

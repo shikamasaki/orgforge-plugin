@@ -370,6 +370,25 @@ def _org_lineage():
     return effective_lineage(declared)
 
 
+def _judgment_correction_authorities():
+    """Return the declared third-party roles to which a re-judgment must be handed back."""
+    try:
+        sys.path.insert(0, HERE)
+        from discover import constitution
+        path = constitution()
+        import yaml
+        with open(path, encoding="utf-8") as handle:
+            doc = yaml.safe_load(handle) or {}
+        judges = ((doc.get("enforcement") or {}).get("judges") or {})
+        policy = judges.get("judgment_corrections") or {}
+        roles = policy.get("authority_roles") or []
+        if isinstance(roles, list) and roles and all(isinstance(role, str) for role in roles):
+            return [role.strip() for role in roles if role.strip()]
+    except Exception:
+        pass
+    return []
+
+
 def _has_lineage_verdict(issue, event, lineage):
     """その Issue の同じ event に、指定した血統の **通した** 判定が台帳にあるか。
 
@@ -527,16 +546,19 @@ def cmd_provisional(a):
             what.append(f"subject {str(prior.get('subject'))[:12]}… → {a.subject[:12]}…")
         if prior.get("digest") != digest:
             what.append("why/evidence が違う")
+        authorities = _judgment_correction_authorities()
+        handback = ", ".join(authorities) if authorities else "(未宣言 — constitution を修復)"
         print(f"provisional: #{a.issue} の {a.lineage} には既に判定がある"
               f"（seq={prior['seq']}）。変わっているのは: {', '.join(what)}\n"
               f"  **同じ血統が判定を積み替えて一致を作れてはいけない。**\n"
-              f"  先の判定を無効化してから入れ直すこと（append-only なので消せない）:\n"
-              f'    python3 "{os.path.join(HERE, "ledger.py")}" append --class correction '
-              f"--actor <あなたの役割> \\\n"
-              f'      --payload \'{{"corrects": [{prior["seq"]}], "kind": "superseded", '
-              f'"corrected_by": "<あなたの役割>", "reason": "<なぜ差し替えるのか>"}}\'\n'
-              f"  kind は probe | mistake | backfill | superseded のいずれか"
-              f"（対象が実判定なら superseded、試験で書いたものなら probe）。",
+              f"  judge 自身では先の判定を無効化できない。次を第三者authorityへ handback:\n"
+              f"    target seq: {prior['seq']}\n"
+              f"    requested kind: superseded\n"
+              f"    receipt subject: correction:superseded:{prior['seq']}\n"
+              f"    authority roles: {handback}\n"
+              f"  authority は理由と対象を確認し、上のsubject・Issue・role・kind・理由digestへ"
+              f"束縛した署名receiptとともにappend-only correctionを記録する。 "
+              f"probe/mistakeもjudgmentを無効化する場合は同じ権限とreceiptを要求する。",
               file=sys.stderr)
         return 4
 

@@ -6,6 +6,20 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 2.0.23 — receipt-bound judgment correction authority
+
+### Fixed
+
+- Prevent a gate or skeptic from voiding its own or another judge's verdict to manufacture room for
+  a replacement admission; provisional conflicts now hand the decision back to a declared
+  third-party correction authority.
+- Require a verified authority receipt bound to the org, ledger, target sequence numbers, correction
+  kind, role, and reason digest, so changing only `--actor` cannot impersonate the authority.
+- Preserve append-only factual corrections and judgment backfills while recording the correction's
+  effect, target classes and Issues, authority principal, and assurance in the ledger and cycle view.
+- Lint and enforce that correction authorities are declared, active, and outside judging/review
+  duties, with synchronized Claude Code, Codex, and neutral projections.
+
 ## 2.0.22 — receipt-backed native host scheduling
 
 ### Fixed

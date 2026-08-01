@@ -959,6 +959,11 @@ git -C <plugin> rev-parse --short HEAD             # 検証対象の版を記録
 - 成功: `verify --print-subject` が判定を回さずに subject を返す
 - 拒否: 別 subject の provisional が一致しない（exit 6）／同一血統の verdict 差し替え（exit 4）
 - **脱出**: 案内された `correction` を**実際に打って**、その後に新しい判定が入ること
+- **権限**: judgmentを出したjudge自身と別judgeのcorrectionは拒否し、constitutionで宣言した
+  第三者authorityの対象束縛済み署名receiptだけが通ること。`--actor`の名乗り替えだけでは拒否し、
+  通常イベントのprobe/mistakeとjudgmentのbackfillは残ること
+- **再構成**: correctionの対象class・Issue・effect・authority・assuranceが台帳と
+  `org-cycle show`から読めること
 - 未追跡ファイルの内容を変えると subject が変わること（`git diff HEAD` では見えない）
 - 生成物（`.gitignore` 済み）では subject が変わらないこと
 - 実 index を壊さないこと（`git status` が前後で同一）

@@ -67,6 +67,46 @@ def test_clean_template_passes(tmp_path):
     assert code == 0, out
 
 
+def test_judgment_correction_authority_must_be_third_party(tmp_path):
+    def mutate(constitution):
+        constitution["enforcement"]["judges"]["judgment_corrections"] = {
+            "authority_roles": ["gate"]}
+        return constitution
+
+    code, out = _lint(tmp_path, constitution=mutate)
+    assert code == 1
+    assert "correction authority must be third-party" in out
+
+
+def test_judgment_correction_authority_must_be_declared(tmp_path):
+    def mutate(constitution):
+        constitution["enforcement"]["judges"].pop("judgment_corrections", None)
+        return constitution
+
+    code, out = _lint(tmp_path, constitution=mutate)
+    assert code == 1
+    assert "judgment invalidation has no declared third-party authority" in out
+
+
+def test_judgment_correction_authority_must_be_a_real_active_role(tmp_path):
+    def unknown(constitution):
+        constitution["enforcement"]["judges"]["judgment_corrections"] = {
+            "authority_roles": ["ghost-registrar"]}
+        return constitution
+
+    code, out = _lint(tmp_path, constitution=unknown)
+    assert code == 1 and "is not a declared role" in out
+
+    def dormant(organization):
+        for role in organization["roles"]:
+            if role["id"] == "supervisor":
+                role["active"] = False
+        return organization
+
+    code, out = _lint(tmp_path, organization=dormant)
+    assert code == 1 and "correction authority 'supervisor' is dormant" in out
+
+
 def test_clean_role_settings_pass_without_runtime_tier(tmp_path):
     code, out = _lint_with_role_settings(tmp_path)
     assert code == 0, out

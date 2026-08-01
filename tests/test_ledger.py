@@ -2,6 +2,7 @@
 
 ここが緩むと、判断の記録が「あるように見えて効いていない」状態になる。"""
 import argparse
+import hashlib
 import json
 import os
 import pathlib
@@ -443,6 +444,179 @@ def test_correction_backfill_is_not_voided(tmp_path):
     assert m.corrected_seqs(evs) == {2}, "backfill まで無効化した"
 
 
+def _correction_org(tmp_path, policy=True):
+    import shutil
+    org = tmp_path / "org"
+    ledger = org / ".orgforge" / "ledger"
+    ledger.mkdir(parents=True)
+    shutil.copy(TEMPLATE / "ledger-schema.yaml", org / "ledger-schema.yaml")
+    policy_yaml = ("    judgment_corrections:\n"
+                   "      authority_roles: [supervisor]\n") if policy else ""
+    (org / "constitution.yaml").write_text(
+        "enforcement:\n  judges:\n    lineage: same-harness\n" + policy_yaml,
+        encoding="utf-8")
+    (org / "organization.yaml").write_text(
+        "roles:\n"
+        "  - {id: supervisor, active: true, functions: [organize, operate]}\n"
+        "  - {id: gate, active: true, functions: [judge, review]}\n"
+        "  - {id: skeptic, active: true, functions: [judge, review]}\n",
+        encoding="utf-8")
+    return org, ledger
+
+
+_CORRECTION_REASON = "独立したauthorityが対象と理由を確認した訂正"
+
+
+def _correction_receipt(org, ledger, role, target, kind="superseded", issue="64",
+                        reason=_CORRECTION_REASON):
+    key_id = f"{role}-correction-key"
+    private_key = org / f"{key_id}.pem"
+    keygen = subprocess.run(
+        [sys.executable, str(TOOLS / "identity.py"), "keygen",
+         "--key-id", key_id, "--signer-id", f"{role}-principal",
+         "--private-out", str(private_key), "--authorized-roles", role,
+         "--authorized-lineages", "authority"],
+        cwd=org, capture_output=True, text=True)
+    assert keygen.returncode == 0, keygen.stdout + keygen.stderr
+    oid, lid = _real_ids(org)
+    subject = f"correction:{kind}:{int(target)}"
+    receipt = subprocess.run(
+        [sys.executable, str(TOOLS / "identity.py"), "receipt",
+         "--org-id", oid, "--ledger-id", lid, "--subject", subject,
+         "--issue", str(issue), "--role", role, "--phase", "govern",
+         "--lineage", "authority", "--verdict", kind,
+         "--event-class", "correction", "--requirements-digest",
+         "judgment-correction-authority-v1", "--reasoning-sha256",
+         hashlib.sha256(reason.encode("utf-8")).hexdigest(),
+         "--issued-at", "2026-08-02T00:00:00Z", "--key-id", key_id,
+         "--private-key", str(private_key)],
+        cwd=org, capture_output=True, text=True)
+    assert receipt.returncode == 0, receipt.stdout + receipt.stderr
+    path = org / f"{key_id}-{target}.json"
+    path.write_text(receipt.stdout.strip(), encoding="utf-8")
+    return path
+
+
+def _correction_append(org, ledger, actor, target, kind="superseded", receipt=None,
+                       reason=_CORRECTION_REASON):
+    command = [sys.executable, str(TOOLS / "ledger.py"), "append", str(ledger),
+               "--actor", actor, "--class", "correction", "--payload", json.dumps({
+                   "corrects": [target], "kind": kind, "corrected_by": actor,
+                   "reason": reason}, ensure_ascii=False)]
+    if receipt:
+        command.extend(["--receipt", str(receipt)])
+    return subprocess.run(command, cwd=org, capture_output=True, text=True)
+
+
+def _provisional_target(org, ledger, actor="gate"):
+    payload = {"issue": 64, "deliverable": "64", "role": "gate",
+               "lineage": "same-harness", "verdict": "reject",
+               "for_event": "admission_decided", "review_subject_id": "subject-A",
+               "reasoning_sha256": "digest-A"}
+    result = subprocess.run(
+        [sys.executable, str(TOOLS / "ledger.py"), "append", str(ledger),
+         "--actor", actor, "--class", "verdict_provisional",
+         "--payload", json.dumps(payload)], cwd=org, capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    return json.loads((ledger / "ledger.jsonl").read_text(encoding="utf-8").splitlines()[-1])
+
+
+def test_judge_cannot_void_its_own_judgment(tmp_path):
+    org, ledger = _correction_org(tmp_path)
+    target = _provisional_target(org, ledger, actor="gate")
+    result = _correction_append(org, ledger, "gate", target["seq"])
+    assert result.returncode == 3
+    assert "権限が無い" in result.stderr or "自分の判定" in result.stderr
+    assert len((ledger / "ledger.jsonl").read_text().splitlines()) == 1
+
+
+def test_other_judge_cannot_void_a_judgment(tmp_path):
+    org, ledger = _correction_org(tmp_path)
+    target = _provisional_target(org, ledger, actor="gate")
+    result = _correction_append(org, ledger, "skeptic", target["seq"])
+    assert result.returncode == 3
+    assert "第三者 authority: supervisor" in result.stderr
+
+
+def test_declared_third_party_authority_can_void_judgment_with_audit_fields(tmp_path):
+    org, ledger = _correction_org(tmp_path)
+    target = _provisional_target(org, ledger, actor="gate")
+    receipt = _correction_receipt(org, ledger, "supervisor", target["seq"])
+    result = _correction_append(org, ledger, "supervisor", target["seq"], receipt=receipt)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "effect=voids" in result.stdout
+    event = json.loads((ledger / "ledger.jsonl").read_text().splitlines()[-1])
+    payload = event["payload"]
+    assert payload["corrected_by"] == "supervisor"
+    assert payload["authority_role"] == "supervisor"
+    assert payload["authority_principal"] == "supervisor-principal"
+    assert payload["authority_assurance"] == "authenticated"
+    assert payload["identity_assurance"] == "authenticated"
+    assert payload["authority_receipt_subject"] == "correction:superseded:1"
+    assert payload["target_classes"] == ["verdict_provisional"]
+    assert payload["target_issues"] == ["64"] and payload["issue"] == "64"
+    assert payload["effect"] == "voids"
+
+
+def test_declared_authority_actor_name_without_receipt_cannot_void_judgment(tmp_path):
+    """Changing only ``--actor`` must not impersonate the third-party authority."""
+    org, ledger = _correction_org(tmp_path)
+    target = _provisional_target(org, ledger, actor="gate")
+    result = _correction_append(org, ledger, "supervisor", target["seq"])
+    assert result.returncode == 3
+    assert "署名receiptが無い" in result.stderr
+    assert "--actor の役割名だけ" in result.stderr
+
+
+def test_custom_judging_role_cannot_be_correction_authority_at_runtime(tmp_path):
+    org, ledger = _correction_org(tmp_path)
+    constitution = (org / "constitution.yaml").read_text(encoding="utf-8").replace(
+        "authority_roles: [supervisor]", "authority_roles: [review-lead]")
+    (org / "constitution.yaml").write_text(constitution, encoding="utf-8")
+    (org / "organization.yaml").write_text(
+        "roles:\n"
+        "  - {id: review-lead, active: true, functions: [judge, review]}\n"
+        "  - {id: gate, active: true, functions: [judge, review]}\n",
+        encoding="utf-8")
+    target = _provisional_target(org, ledger, actor="gate")
+    receipt = _correction_receipt(org, ledger, "review-lead", target["seq"])
+    result = _correction_append(org, ledger, "review-lead", target["seq"], receipt=receipt)
+    assert result.returncode == 3
+    assert "judge/review職務を持つ" in result.stderr
+
+
+def test_missing_authority_policy_fails_closed_only_for_judgments(tmp_path):
+    org, ledger = _correction_org(tmp_path, policy=False)
+    target = _provisional_target(org, ledger, actor="gate")
+    denied = _correction_append(org, ledger, "supervisor", target["seq"])
+    assert denied.returncode == 3
+    assert "judgment_corrections が宣言されていない" in denied.stderr
+
+    # The judge role may still correct its own *non-judgment* probe/mistake. The restriction is on
+    # authority-bearing judgments, not on append-only factual hygiene.
+    factual = subprocess.run(
+        [sys.executable, str(TOOLS / "ledger.py"), "append", str(ledger),
+         "--actor", "gate", "--class", "progress_recorded", "--payload",
+         json.dumps({"role": "gate", "candidate_id": "c1", "phase": "implement"})],
+        cwd=org, capture_output=True, text=True)
+    assert factual.returncode == 0, factual.stdout + factual.stderr
+    factual_seq = json.loads((ledger / "ledger.jsonl").read_text().splitlines()[-1])["seq"]
+    allowed = _correction_append(org, ledger, "gate", factual_seq, kind="probe")
+    assert allowed.returncode == 0, allowed.stdout + allowed.stderr
+    assert "effect=voids" in allowed.stdout and "assurance=not-required" in allowed.stdout
+
+
+def test_judgment_backfill_does_not_void_or_require_authority(tmp_path):
+    org, ledger = _correction_org(tmp_path, policy=False)
+    target = _provisional_target(org, ledger, actor="gate")
+    result = _correction_append(org, ledger, "gate", target["seq"], kind="backfill")
+    assert result.returncode == 0, result.stdout + result.stderr
+    event = json.loads((ledger / "ledger.jsonl").read_text().splitlines()[-1])
+    assert event["payload"]["effect"] == "records_backfill"
+    assert target["seq"] not in __import__("ledger").corrected_seqs(
+        [target, event], kinds=("superseded", "probe", "mistake"))
+
+
 def test_show_lists_every_judgment_with_correction_marks():
     """1つの Issue の判定履歴を一望できる（何周目のどの判定かが分かる）。"""
     src = _cycle_src()
@@ -836,8 +1010,10 @@ def test_unknown_validator_type_fails_closed(tmp_path, monkeypatch):
     """schema の型名の typo が「検査の無効化」になってはいけない。"""
     alt = tmp_path / "typo-schema.yaml"
     alt.write_text((TEMPLATE / "ledger-schema.yaml").read_text(encoding="utf-8")
-                   .replace("correction:          { corrects: list }",
-                            "correction:          { corrects: lst }"), encoding="utf-8")
+                   .replace("correction:          { corrects: list, target_classes: list, "
+                            "target_issues: list }",
+                            "correction:          { corrects: lst, target_classes: list, "
+                            "target_issues: list }"), encoding="utf-8")
     monkeypatch.setenv("ORG_LEDGER_SCHEMA", str(alt))
     code, out = _app(tmp_path, "correction", {"corrects": [1], "kind": "probe"}, actor="sup")
     assert code == 2
@@ -918,7 +1094,8 @@ def test_conflicting_scalar_is_reported_not_overwritten(tmp_path):
     org が意図して変えたのか、テンプレートが変わったのかは道具では判別できない。
     """
     org = _org_with_schema(tmp_path, lambda t: t.replace(
-        "correction:          { corrects: list }", "correction:          { corrects: map }", 1))
+        "correction:          { corrects: list, target_classes: list, target_issues: list }",
+        "correction:          { corrects: map, target_classes: list, target_issues: list }", 1))
     code, out = run("ledger.py", "schema", cwd=str(org))
     assert "衝突" in out
     assert "corrects" in out
@@ -3289,7 +3466,18 @@ def _AA_org(tmp_path, name="org"):
     (org / "ledger-schema.yaml").write_text(
         (TEMPLATE / "ledger-schema.yaml").read_text(encoding="utf-8"), encoding="utf-8")
     (org / "constitution.yaml").write_text(
-        "enforcement:\n  caps:\n    destructive_ops: 50\n", encoding="utf-8")
+        "enforcement:\n"
+        "  caps:\n"
+        "    destructive_ops: 50\n"
+        "  judges:\n"
+        "    judgment_corrections:\n"
+        "      authority_roles: [ceo]\n",
+        encoding="utf-8")
+    (org / "organization.yaml").write_text(
+        "roles:\n"
+        "  - {id: ceo, active: true, functions: [organize, operate]}\n"
+        "  - {id: gate, active: true, functions: [judge, review]}\n",
+        encoding="utf-8")
     return org, str(org / ".orgforge" / "ledger")
 
 
@@ -3346,11 +3534,14 @@ def test_corrected_admission_does_not_block_forever(tmp_path):
         assert _AA_prov(org, led, "7", lin, "S1").returncode == 0
     assert _AA_derive(org, led, "7").returncode == 0
     seq = _AA_adm(led)[0]["seq"]
+    receipt = _correction_receipt(org, pathlib.Path(led), "ceo", seq, issue="7",
+                                  reason="対象が差し替わったので取り消す")
     r = subprocess.run(
         [sys.executable, str(TOOLS / "ledger.py"), "append", led, "--actor", "ceo",
          "--class", "correction",
          "--payload", json.dumps({"corrects": [seq], "kind": "superseded",
-                                  "why": "対象が差し替わったので取り消す"})],
+                                  "reason": "対象が差し替わったので取り消す"}),
+         "--receipt", str(receipt)],
         capture_output=True, text=True, cwd=str(org), env=_AA_ENV, timeout=60)
     assert r.returncode == 0, r.stdout + r.stderr
     for lin in ("same-harness", "cross-harness"):
