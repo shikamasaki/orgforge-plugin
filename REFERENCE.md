@@ -132,12 +132,19 @@ distinguishes `proposed | active | expired | reverted | adopted`; `activate`, `a
 `outcome` records safe stop, scope reduction, goal abandonment, human handback, and observe-only as
 valid outcomes; `experiment` plus receipt-backed `adopt` keeps permanent practice changes human-held.
 
-`orgforge resilience-exercise reviewer-outage --expect RED` runs the bounded Phase-A fault fixture
-through production judge preflight, adaptive authorization, and the ephemeral real ledger. The
-injected marker must appear in a fault receipt or the exercise is `INVALID`; a no-op fault can never
-make it GREEN. Before #45, the sole expected RED gap is the missing `DEGRADED` transition. Output
-separates observed facts, acceptable outcome, multi-potential evidence, and remaining human judgment
-without producing a resilience score.
+`orgforge operational-state ...` operates the ledger-backed `NORMAL | DEGRADED | HALTED |
+RECOVERING` state machine. `degrade` opens a dependency circuit and taints affected artifacts;
+`authorize` checks one action against the active envelope; `failure` consumes the retry budget;
+`begin-recovery` performs the half-open transition; `revalidate` clears one artifact only after all
+declared checks pass; and `recover` closes the circuit and reverts the temporary envelope. `status`,
+`doctor`, and `project --target canonical|otel|github-checks` expose the same effective state.
+
+`orgforge resilience-exercise reviewer-outage --expect GREEN` runs the bounded fault fixture through
+production judge preflight, adaptive authorization, operational state, and the ephemeral real ledger.
+The injected marker must appear in a fault receipt or the exercise is `INVALID`; a no-op fault can
+never make it GREEN. The fixture must deterministically traverse `NORMAL → DEGRADED → RECOVERING →
+NORMAL`, revalidate every tainted artifact, and close the circuit. Output separates observed facts,
+acceptable outcome, multi-potential evidence, and remaining human judgment without a resilience score.
 
 ---
 

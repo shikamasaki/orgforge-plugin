@@ -1569,7 +1569,11 @@ _RECOVERY_REPAIR = re.compile(
     # を通さないと **解除手段がゼロ**になり、一度止めた org は二度と動かせない。
     # 解除そのものは receipt 署名で守られているので、ここを通しても統制は緩まない。
     # **止める側（trip-halt）は復旧ではないので通さない。**
-    r"|" + _PY + r"\s+['\"]?\S*writer_client\.py['\"]?\s+release-halt\b",
+    r"|" + _PY + r"\s+['\"]?\S*writer_client\.py['\"]?\s+release-halt\b"
+    # The operational state machine owns its recovery transition. These commands remain ledger-
+    # validated and session/authority checked; blocking the only recovery path would deadlock it.
+    r"|" + _PY + r"\s+['\"]?\S*operational_state\.py['\"]?\s+"
+    r"(?:status|doctor|authorize|project|begin-recovery|revalidate|recover)\b",
     re.I)
 
 
@@ -1695,6 +1699,180 @@ def _check_halt(tool_name, tool_input):
           f"  通るのは観測・検証・安全な修復だけである（git status / ledger verify / "
           f"ledger halt-status / schema --fix など）。\n"
           f"  **解除は自動では行われない。** 何が起きたかを確かめ、復旧を検証してから解除する。")
+
+
+_OPERATIONAL_READ_TOOLS = {"Read", "Grep", "Glob", "WebFetch", "WebSearch"}
+_OPERATIONAL_RECOVERY = re.compile(
+    _PY + r"\s+['\"]?\S*operational_state\.py['\"]?\s+"
+    r"(?:status|doctor|authorize|project|begin-recovery|revalidate|recover)\b", re.I)
+
+
+def _command_scoped_adaptation(cmd):
+    """Read a one-command adaptive declaration before Bash executes it.
+
+    The hook cannot see prefix assignments through ``os.environ``. Keep this deliberately smaller
+    than a shell: one simple command, no chaining/substitution/redirection, and four explicit values.
+    The declaration can authorize one bounded act; it cannot smuggle a second command beside it.
+    """
+    if not isinstance(cmd, str) or len(cmd) > 64 * 1024 or \
+            re.search(r"[;&|`\n<>]|\$\(", cmd):
+        return None
+    try:
+        parts = shlex.split(cmd)
+    except ValueError:
+        return None
+    if not parts:
+        return None
+    index = 0
+    if parts[0] == "env":
+        index = 1
+        if index < len(parts) and parts[index] == "--":
+            index += 1
+    values = {}
+    while index < len(parts):
+        match = _SHELL_ASSIGNMENT.match(parts[index])
+        if not match:
+            break
+        if match.group(1) in {"ORG_ADAPTIVE_ACTION", "ORG_ADAPTIVE_ENVELOPE",
+                             "ORG_ADAPTIVE_PHASE", "ORG_ADAPTIVE_ARTIFACT"}:
+            values[match.group(1)] = match.group(2)
+        index += 1
+    required = {"ORG_ADAPTIVE_ACTION", "ORG_ADAPTIVE_ENVELOPE", "ORG_ADAPTIVE_PHASE",
+                "ORG_ADAPTIVE_ARTIFACT"}
+    if index >= len(parts) or not required <= set(values):
+        return None
+    if any(not str(values[key]).strip() for key in required):
+        return None
+    values["_command_argv"] = parts[index:]
+    return values
+
+
+def _adaptive_action_matches_command(declaration):
+    """Keep a declared action tied to an observable command shape, not a self-applied label."""
+    action = declaration.get("ORG_ADAPTIVE_ACTION")
+    argv = declaration.get("_command_argv") or []
+    if not argv:
+        return False
+    executable = os.path.basename(argv[0]).lower()
+    if action == "cross_harness_failover":
+        if executable in {"claude", "codex", "gemini", "opencode", "forge", "gt"}:
+            return True
+        return executable.startswith("python") and any(
+            os.path.basename(token) == "run_department.py" for token in argv[1:3])
+    if action in {"safe_stop", "observe_only", "scope_reduction", "human_handback",
+                  "goal_abandonment"}:
+        joined = " ".join(argv)
+        return bool(re.search(
+            r"(?:^|\s)(?:\S*/)?adaptation\.py\s+outcome\b|"
+            r"(?:^|\s)(?:\S*/)?org_goal\.py\s+(?:pause|block|complete)\b|"
+            r"^orgforge\s+(?:adaptation\s+outcome|org-goal\s+(?:pause|block|complete))\b",
+            joined))
+    return False
+
+
+def _operational_ship_action(tool_name, tool_input):
+    if not _is_shell_tool(tool_name):
+        return None
+    command = _without_inert_heredoc_data(_command_text(tool_input))
+    patterns = (
+        (r"(?:^|[;&|\n]\s*)git\s+(?:[^;&|\n]+\s+)?merge\b", "merge"),
+        (r"(?:^|[;&|\n]\s*)git\s+(?:[^;&|\n]+\s+)?push\b", "ship"),
+        (r"\bgh\s+pr\s+merge\b", "merge"),
+        (r"\b(?:npm|pnpm|yarn)\s+publish\b|\btwine\s+upload\b|\bgh\s+release\s+create\b", "publish"),
+        (r"\bdocker\s+push\b|\bkubectl\s+(?:apply|rollout)\b|\bterraform\s+apply\b|\bvercel\s+deploy\b", "deploy"),
+    )
+    for pattern, action in patterns:
+        if re.search(pattern, command, re.I):
+            return action
+    return None
+
+
+def _operational_recovery_allowed(tool_name, tool_input):
+    if tool_name in _OPERATIONAL_READ_TOOLS:
+        return True
+    if not _is_shell_tool(tool_name):
+        return False
+    command = _command_text(tool_input).strip()
+    if _halt_recovery_allowed(tool_name, tool_input):
+        return True
+    return bool(_OPERATIONAL_RECOVERY.match(command))
+
+
+def _operational_status():
+    code, output = _run_organ(["operational_state.py", "status", "--root", LEDGER_ROOT, "--json"])
+    if code:
+        return None, f"operational-state status failed (exit {code}): {output.strip()[:300]}"
+    try:
+        body = json.loads(output)
+        state = body.get("state") if isinstance(body, dict) else None
+    except json.JSONDecodeError:
+        state = None
+    if not isinstance(state, dict) or state.get("effective_state") not in {
+            "NORMAL", "DEGRADED", "HALTED", "RECOVERING"}:
+        return None, "operational-state status returned no recognized state"
+    return state, None
+
+
+def _ledger_mentions_operational_state():
+    try:
+        with open(os.path.join(LEDGER_ROOT, "ledger.jsonl"), encoding="utf-8") as stream:
+            for line in stream:
+                if any(name in line for name in (
+                        '"operational_state_transitioned"', '"circuit_state_changed"',
+                        '"artifact_tainted"', '"recovery_probe_recorded"')):
+                    return True
+    except OSError:
+        return False
+    return False
+
+
+def _check_operational_state(tool_name, tool_input):
+    """Enforce the effective state at the same PreToolUse boundary as HALT and blast radius."""
+    if not LEDGER_ROOT:
+        return
+    state, error = _operational_status()
+    if error:
+        # Old organizations have no operational-state contract or events. Preserve compatibility,
+        # but once the ledger contains this protocol, inability to evaluate it is fail-closed.
+        if _ledger_mentions_operational_state():
+            _deny("org guardrail: operational state cannot be evaluated. "
+                  "The ledger contains operational events, so unknown state is not NORMAL.\n  " + error)
+        return
+    effective = state["effective_state"]
+    if effective == "NORMAL":
+        return
+    ship_action = _operational_ship_action(tool_name, tool_input)
+    if ship_action:
+        _deny(f"org guardrail {effective}: {ship_action} is forbidden until the org returns to NORMAL. "
+              "Complete the declared recovery probe and every taint revalidation first.")
+    if _operational_recovery_allowed(tool_name, tool_input):
+        return
+    if effective in {"HALTED", "RECOVERING"}:
+        _deny(f"org guardrail {effective}: only observation and the ledger-validated recovery path "
+              "are allowed; ordinary mutation and delegation remain stopped.")
+    declaration = _command_scoped_adaptation(_command_text(tool_input)) \
+        if _is_shell_tool(tool_name) else None
+    if not declaration:
+        _deny("org guardrail DEGRADED: this action has no one-shot adaptive declaration. "
+              "Use one simple Bash command prefixed with ORG_ADAPTIVE_ACTION, "
+              "ORG_ADAPTIVE_ENVELOPE, ORG_ADAPTIVE_PHASE, and ORG_ADAPTIVE_ARTIFACT; "
+              "ship actions remain forbidden.")
+    if not _adaptive_action_matches_command(declaration):
+        _deny("org guardrail DEGRADED: the declared adaptive action does not match the command "
+              "shape. A label cannot authorize an unrelated shell mutation.")
+    command = [sys.executable, os.path.join(TOOLS_DIR, "operational_state.py"), "authorize",
+               "--root", LEDGER_ROOT, "--action", declaration["ORG_ADAPTIVE_ACTION"],
+               "--envelope", declaration["ORG_ADAPTIVE_ENVELOPE"],
+               "--phase", declaration["ORG_ADAPTIVE_PHASE"],
+               "--artifact", declaration["ORG_ADAPTIVE_ARTIFACT"], "--json"]
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=30)
+    except Exception as exc:
+        _deny(f"org guardrail DEGRADED: adaptive authorization could not run ({exc}).")
+        return
+    if result.returncode:
+        detail = (result.stdout or result.stderr).strip()[:500]
+        _deny(f"org guardrail DEGRADED: action is outside the active adaptive envelope.\n  {detail}")
 
 
 
@@ -1889,6 +2067,11 @@ def main():
         print("org_hook: ORG_LEDGER_ROOT unset — no org state to gate against; allowing "
               "(set it to enable guardrails)", file=sys.stderr)
         _allow()
+
+    # Operational mode is a ledger-backed authorization boundary. HALT above remains the
+    # writer-owned latch; this adds derived HALT (for example an expired envelope), DEGRADED
+    # one-shot authorization, RECOVERING isolation, and the unconditional no-ship rule.
+    _check_operational_state(tool_name, tool_input)
 
     for rule in RULES:
         argv = rule(tool_name, tool_input)

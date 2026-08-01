@@ -653,6 +653,29 @@ def lint_resilience(con, present_invariants, charter_items, held, lint):
         lint.fail("RE", "resilience.safe_diagnostic_actions must preserve a diagnosis/stop path")
     if safe & forbidden_global:
         lint.fail("RE", f"safe diagnostic actions are globally forbidden: {sorted(safe & forbidden_global)}")
+    operational = contract.get("operational_state") or {}
+    states = set(operational.get("states") or [])
+    if operational.get("initial") != "NORMAL" or states != {
+            "NORMAL", "DEGRADED", "HALTED", "RECOVERING"}:
+        lint.fail("RE", "resilience.operational_state must declare NORMAL, DEGRADED, HALTED, RECOVERING")
+    transitions = operational.get("transitions") or {}
+    expected_transitions = {
+        "NORMAL": {"DEGRADED", "HALTED"},
+        "DEGRADED": {"RECOVERING", "HALTED"},
+        "RECOVERING": {"NORMAL", "DEGRADED", "HALTED"},
+        "HALTED": {"RECOVERING", "NORMAL"},
+    }
+    if set(transitions) != states or any(set(transitions.get(source) or []) != targets
+                                         for source, targets in expected_transitions.items()):
+        lint.fail("RE", "resilience.operational_state transition graph is incomplete or widened")
+    if set(operational.get("circuit_states") or []) != {"CLOSED", "OPEN", "HALF_OPEN"}:
+        lint.fail("RE", "resilience.operational_state circuit_states are incomplete")
+    if not set(operational.get("safe_actions") or []) <= safe:
+        lint.fail("RE", "operational safe_actions exceed resilience.safe_diagnostic_actions")
+    if set(operational.get("ship_forbidden_states") or []) != {"DEGRADED", "HALTED", "RECOVERING"}:
+        lint.fail("RE", "ship must be forbidden in DEGRADED, HALTED, and RECOVERING")
+    if operational.get("repeated_failure_route") != "human":
+        lint.fail("RE", "repeated circuit failure must route to human")
     envelopes = _unique_ids(contract.get("adaptive_envelopes"),
                             "resilience.adaptive_envelopes", lint)
     for eid, envelope in envelopes.items():
@@ -695,6 +718,12 @@ def lint_resilience(con, present_invariants, charter_items, held, lint):
             lint.fail("RE", f"adaptive envelope '{eid}' has invalid retry_budget")
         if envelope.get("missing_evidence_policy") not in {"safe_only", "record_and_revalidate"}:
             lint.fail("RE", f"adaptive envelope '{eid}' has invalid missing_evidence_policy")
+        recovery = envelope.get("recovery") or {}
+        if not str(recovery.get("authority_role") or "").strip() or \
+                "human_decision" not in recovery or \
+                not isinstance(recovery.get("cooldown_seconds"), int) or \
+                recovery["cooldown_seconds"] < 0:
+            lint.fail("RE", f"adaptive envelope '{eid}' has incomplete recovery authority/cooldown")
         if not isinstance(envelope.get("expires_after_minutes"), int) or \
                 envelope["expires_after_minutes"] < 1:
             lint.fail("RE", f"adaptive envelope '{eid}' must expire after a positive duration")

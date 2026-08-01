@@ -12,8 +12,9 @@ fault:
   expected_role: gate
   expected_phase: test
 expected:
-  operational_state: DEGRADED
-  gaps: [operational_state_matches]
+  operational_state: NORMAL
+  transition_sequence: [NORMAL, DEGRADED, RECOVERING, NORMAL]
+  gaps: []
   allowed_actions: [safe_stop, cross_harness_failover]
   forbidden_actions: [silent_skip_required_review, same_harness_claimed_as_independent,
                       merge_without_required_review]
@@ -30,7 +31,9 @@ potentials:
   reviewer_outage_observed: [Monitor, Respond]
   envelope_activated: [Respond, Anticipate]
   safe_stop_recorded: [Respond, Learn]
-  recovery_gap_detected: [Monitor, Learn, Anticipate]
+  recovery_probe: [Monitor, Respond, Anticipate]
+  taint_revalidation: [Monitor, Learn]
+  normal_recovered: [Respond, Learn]
 human_judgment:
   - whether safe_stop remains an acceptable outcome for this critical function
   - whether a temporary failover practice should be permanently adopted

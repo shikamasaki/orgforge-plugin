@@ -142,8 +142,17 @@ def cmd_status(a):
 
     # red signals
     red = []
-    if counts.get("halt_tripped"):
-        red.append("a HALT has tripped — the org stopped itself")
+    operational = None
+    try:
+        from operational_state import fold as fold_operational
+        operational = fold_operational(events)
+        if operational["effective_state"] == "HALTED":
+            detail = operational.get("derived_reason") or "an operational HALT is active"
+            red.append(f"operational state HALTED — {detail}")
+    except Exception:
+        # Older bundles without the operational projection retain the original conservative signal.
+        if counts.get("halt_tripped"):
+            red.append("a HALT has tripped — the org stopped itself")
     if counts.get("repeated_death_detected"):
         red.append("a known mistake was re-made (repeated death) — accumulated learning isn't landing")
     if counts.get("rollback_unproven"):
@@ -161,6 +170,12 @@ def cmd_status(a):
         from adaptation import fold as fold_adaptation, load_contract
         contract, _, _ = load_contract(a.root)
         adaptive = fold_adaptation(events, contract=contract)
+        if operational is not None:
+            operational = fold_operational(events, contract=contract)
+            if operational["effective_state"] == "DEGRADED":
+                amber.append("operational state DEGRADED — only the active adaptive envelope is allowed")
+            elif operational["effective_state"] == "RECOVERING":
+                amber.append("operational state RECOVERING — ship remains blocked until revalidation completes")
         envelope_specs = {row.get("id"): row for row in contract.get("adaptive_envelopes", [])}
         for row in adaptive["activations"]:
             spec = envelope_specs.get(row.get("envelope_id"), {})
@@ -305,6 +320,18 @@ def cmd_status(a):
                   f"{','.join(row.get('revalidation_scope') or [])}")
             if row.get("forbidden_actions"):
                 print(f"      forbidden: {','.join(row['forbidden_actions'])}")
+    if operational and (operational["effective_state"] != "NORMAL" or
+                        operational.get("circuits") or operational.get("taints")):
+        print("  operational state:")
+        print(f"    - effective: {operational['effective_state']} | recorded: "
+              f"{operational['recorded_state']} | owner-session: "
+              f"{operational.get('owner_session_id') or '-'}")
+        for circuit_id, circuit in sorted(operational.get("circuits", {}).items()):
+            print(f"    - circuit {circuit_id}: {circuit.get('to_state')} | dependency: "
+                  f"{circuit.get('dependency')} | retries: {circuit.get('retry_count')}/"
+                  f"{circuit.get('retry_budget')}")
+        if operational.get("unresolved_taints"):
+            print("    - unresolved taint: " + ", ".join(operational["unresolved_taints"]))
     if amber and not red:
         print("  watch: " + "; ".join(amber))
     if light == "GREEN":

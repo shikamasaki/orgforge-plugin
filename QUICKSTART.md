@@ -152,13 +152,14 @@ adaptive-envelope, and ledger paths; it needs no network, model subscription, cr
 repository mutation:
 
 ```bash
-orgforge resilience-exercise reviewer-outage --expect RED
+orgforge resilience-exercise reviewer-outage --expect GREEN
 ```
 
-From a source checkout, use `python3 tools/resilience_exercise.py reviewer-outage --expect RED`.
-Phase A intentionally reports `RED` only for the missing `DEGRADED` operational-state transition;
-safe stop is recorded as an acceptable outcome, not counted as the failure. Issue #45 turns this
-same fixture GREEN rather than replacing it with a second test path.
+From a source checkout, use `python3 tools/resilience_exercise.py reviewer-outage --expect GREEN`.
+The fixture proves the production path detects the outage, enters `DEGRADED`, authorizes only the
+declared cross-harness failover, enters `RECOVERING` after a successful half-open probe, revalidates
+every tainted artifact, and returns to `NORMAL`. Safe stop remains an acceptable outcome rather than
+being counted as a failure; an injected fault that does not reach judge preflight is `INVALID`.
 
 A "department" is a Claude Code (or Codex) turn pointed at one role's profile. Use the runner —
 it projects the role onto the harness and attaches the plugin so the guardrails apply:

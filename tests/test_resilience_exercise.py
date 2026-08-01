@@ -17,12 +17,12 @@ def _run(*args):
                           capture_output=True, text=True, timeout=30)
 
 
-def test_phase_a_reviewer_outage_is_deterministic_red_until_operational_state_exists():
-    run = _run("reviewer-outage", "--expect", "RED", "--json")
+def test_reviewer_outage_deterministically_degrades_revalidates_and_recovers():
+    run = _run("reviewer-outage", "--expect", "GREEN", "--json")
     assert run.returncode == 0, run.stdout + run.stderr
     report = json.loads(run.stdout)
-    assert report["exercise_status"] == "RED"
-    assert report["gaps"] == ["operational_state_matches"]
+    assert report["exercise_status"] == "GREEN"
+    assert report["gaps"] == []
     assert report["gaps"] == report["expected_gaps"]
     assert report["fault_injection"]["reached"] is True
     assert report["fault_injection"]["boundary"] == "orgcycle.preflight.run_probe"
@@ -32,6 +32,12 @@ def test_phase_a_reviewer_outage_is_deterministic_red_until_operational_state_ex
     assert report["human_judgment"]
     assert report["decision_path"]["missing_evidence"] == ["required_reviewer_response"]
     assert report["decision_path"]["tainted_artifact_count"] == 1
+    assert report["operational_state"]["observed"] == "NORMAL"
+    assert report["operational_state"]["transition_sequence"] == [
+        "NORMAL", "DEGRADED", "RECOVERING", "NORMAL"]
+    assert report["operational_state"]["circuit"]["to_state"] == "CLOSED"
+    assert report["operational_state"]["unresolved_taints"] == []
+    assert report["recovery"]["probe_reached"] is True
 
 
 def test_fault_noop_is_invalid_not_green(tmp_path):
@@ -78,4 +84,4 @@ def test_exercise_uses_production_preflight_and_adaptation_modules():
     source = TOOL.read_text(encoding="utf-8")
     assert "from orgcycle.preflight import Probe, result_evidence, run_probe" in source
     assert 'str(HERE / "adaptation.py")' in source
-    assert "operational_state_transitioned" in source
+    assert 'str(HERE / "operational_state.py")' in source

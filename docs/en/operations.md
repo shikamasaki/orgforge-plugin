@@ -37,7 +37,32 @@ This is workflow separation and attestation, not hostile key custody.
 
 If recording the release fails, HALT remains active.
 
-## 4. Effect caps
+## 4. Graceful degradation and recovery
+
+Dependency failure is represented by one ledger-backed state machine:
+
+| State | Permitted behavior |
+|---|---|
+| `NORMAL` | Declared workflow and ordinary guardrails apply. |
+| `DEGRADED` | Observation and safe responses remain available. A mutating action needs a one-shot declaration and must be inside the active adaptive envelope. Merge, deploy, and publish are forbidden. |
+| `RECOVERING` | Only observation and the recovery protocol remain. A successful probe is not enough: every tainted artifact must pass its declared revalidation scope. |
+| `HALTED` | Normal work is stopped. Existing receipt-backed HALT release remains authoritative; an expired or missing envelope can also derive an effective HALT. |
+
+`orgforge operational-state status` shows circuits, the owning session, taint, and recovery state.
+Recovery authority and cooldown come from `constitution.yaml`; a stale session cannot release the
+state. `project --target otel|github-checks` preserves the same state names and counts for external
+systems instead of inventing a separate health score.
+
+Before enabling an acting scheduler, run:
+
+```bash
+orgforge resilience-exercise reviewer-outage --expect GREEN
+```
+
+The deterministic fixture must prove detection, degradation, independent failover, half-open probe,
+taint revalidation, circuit closure, and return to `NORMAL` without network or real-repository writes.
+
+## 5. Effect caps
 
 Caps bound destructive operations, external writes, infrastructure changes, and file mutations.
 They are designed to stop runaway behavior, not to meter every shell command.
@@ -45,7 +70,7 @@ They are designed to stop runaway behavior, not to meter every shell command.
 Use the constitution as the persistent source of truth. Environment variables are development
 overrides, not the normal configuration mechanism.
 
-## 5. Production and real assets
+## 6. Production and real assets
 
 Keep actual authority at the host boundary:
 
@@ -59,7 +84,7 @@ Keep actual authority at the host boundary:
 orgforge should record the decision and evidence that those controls produced. It should not hold
 or recreate the platform's root credentials.
 
-## 6. Failure handling
+## 7. Failure handling
 
 - An unreadable control state fails closed when continuing could create an irreversible effect.
 - A failed check must report why it failed; a rejection for the wrong reason is not evidence.
@@ -67,7 +92,7 @@ or recreate the platform's root credentials.
 - Exact retries must not duplicate durable decisions.
 - The real organization is never used as a destructive test fixture.
 
-## 7. Unsupported separate-UID writer experiment
+## 8. Unsupported separate-UID writer experiment
 
 Do not run privileged writer-install commands as part of normal operation. Separate-UID writer code,
 if present in a candidate or historical change, is experimental and outside the supported product.

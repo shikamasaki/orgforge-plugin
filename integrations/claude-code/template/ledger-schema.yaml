@@ -109,6 +109,18 @@ validation:
                                 identity_assurance, recorder_assurance, workload_isolation]
     acceptable_outcome_recorded: [critical_function, outcome, evidence, judged_by]
     microexperiment_concluded: [experiment_id, envelope_id, hypothesis, result, evidence, judged_by]
+    circuit_state_changed: [circuit_id, dependency, from_state, to_state, reason, evidence,
+                            confidence, retry_count, retry_budget, cooldown_until, session_id,
+                            envelope_id, activation_id]
+    operational_state_transitioned: [transition_id, from_state, to_state, circuit_id, reason,
+                                     evidence, confidence, session_id, transitioned_by,
+                                     envelope_id, activation_id]
+    operational_escalated: [circuit_id, failures, retry_budget, reason, evidence, route_to]
+    artifact_tainted: [artifact, cause_seq, circuit_id, envelope_id, activation_id, reason,
+                       revalidation_scope]
+    recovery_probe_recorded: [circuit_id, activation_id, result, evidence, confidence, session_id]
+    artifact_revalidated: [artifact, activation_id, checks, result, evidence, verified_by,
+                           session_id]
   # **相関キーはどれか1つあればよい。** deliverable / candidate_id / claim_id / issue はどれも
   # 正当な相関キーで（`_same_work` が union-find で束ねる）、どれを使うかは経路によって違う。
   # 1つに固定すると正当な書き込みを弾く（実際に統制のテストを弾いた）。
@@ -128,7 +140,10 @@ validation:
                                 goal_completed, goal_host_synced, adaptive_envelope_activated,
                                 adaptive_deviation_recorded, adaptive_envelope_expired,
                                 adaptive_envelope_reverted, adaptive_envelope_adopted,
-                                acceptable_outcome_recorded, microexperiment_concluded]
+                                acceptable_outcome_recorded, microexperiment_concluded,
+                                circuit_state_changed, operational_state_transitioned,
+                                operational_escalated, artifact_tainted,
+                                recovery_probe_recorded, artifact_revalidated]
   # **writer 専用のクラス。** generic append では書けない。
   #
   # 上限の予約を通常の append で書ける状態は、上限そのものを無効化する — 実測で
@@ -169,6 +184,13 @@ validation:
     adaptive_envelope_reverted: { evidence: list }
     acceptable_outcome_recorded: { evidence: list }
     microexperiment_concluded: { evidence: list }
+    circuit_state_changed: { evidence: list, confidence: number, retry_count: int,
+                             retry_budget: int }
+    operational_state_transitioned: { evidence: list, confidence: number }
+    operational_escalated: { evidence: list, failures: int, retry_budget: int }
+    artifact_tainted: { revalidation_scope: list }
+    recovery_probe_recorded: { evidence: list, confidence: number }
+    artifact_revalidated: { checks: list, evidence: list }
 
 
 
@@ -295,6 +317,26 @@ event_classes:
                                  judgment_required }
   microexperiment_concluded:   { experiment_id, envelope_id, hypothesis, result, evidence: [ref],
                                  judged_by }
+  # Operational resilience is a ledger-backed state machine, not a second runtime. Circuit
+  # observations feed state transitions; taint and revalidation prevent a successful probe from
+  # silently blessing artifacts produced while controls were degraded.
+  circuit_state_changed:       { circuit_id, dependency, from_state: CLOSED|OPEN|HALF_OPEN,
+                                 to_state: CLOSED|OPEN|HALF_OPEN, reason, evidence: [ref], confidence,
+                                 retry_count, retry_budget, cooldown_until, session_id,
+                                 envelope_id, activation_id }
+  operational_state_transitioned: { transition_id,
+                                     from_state: NORMAL|DEGRADED|HALTED|RECOVERING,
+                                     to_state: NORMAL|DEGRADED|HALTED|RECOVERING,
+                                     circuit_id, reason, evidence: [ref], confidence, session_id,
+                                     transitioned_by, envelope_id, activation_id }
+  operational_escalated:       { circuit_id, failures, retry_budget, reason, evidence: [ref],
+                                 route_to: human }
+  artifact_tainted:            { artifact, cause_seq, circuit_id, envelope_id, activation_id,
+                                 reason, revalidation_scope: [check] }
+  recovery_probe_recorded:     { circuit_id, activation_id, result: pass|fail,
+                                 evidence: [ref], confidence, session_id }
+  artifact_revalidated:        { artifact, activation_id, checks: [check], result: pass|fail,
+                                 evidence: [ref], verified_by, session_id }
   # accountable_supervisor (docs/09 §A1): which supervising role owns this output up the chain,
   # set from the runtime supervision edge (never the payload — a manager cannot forge who owns a
   # result, mirroring actor_identity_source). Empty for the top (human-owned) tier.
@@ -606,6 +648,13 @@ views:
                               shape: current proposed/active/expired/reverted/adopted envelopes,
                                      exposed critical functions, taint, revalidation, missingness,
                                      and acceptable outcomes without a synthetic resilience score }
+  operational_state: { from: [halt_tripped, halt_released, adaptive_envelope_activated,
+                              adaptive_envelope_expired, adaptive_envelope_reverted,
+                              circuit_state_changed, operational_state_transitioned,
+                              operational_escalated, artifact_tainted, recovery_probe_recorded,
+                              artifact_revalidated],
+                       shape: effective NORMAL/DEGRADED/HALTED/RECOVERING state, dependency circuits,
+                              owning session, taint, required revalidation, escalation, and evidence }
   reusable_modules:     { from: [cycle_completed], shape: shared implementation assets }
   gate_input_spec:      { from: [intent_revised, proposal_adjudicated], shape: the current candidate submission format }
   doctrine_gaps:        { from: [doctrine_diff_admitted, cycle_completed], shape: roles whose doctrine is thin or expiring }

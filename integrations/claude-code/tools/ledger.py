@@ -1665,6 +1665,19 @@ def cmd_append(a):
         if adaptation_error:
             print(f"append: {a.cls} rejected — {adaptation_error}", file=sys.stderr)
             return 3
+        try:
+            from operational_state import ledger_event_violation as operational_violation
+            operational_error = operational_violation(ev, hist, a.root)
+        except Exception as exc:
+            operational_error = (f"operational state contract could not be evaluated: {exc}"
+                                 if a.cls in {"circuit_state_changed",
+                                              "operational_state_transitioned",
+                                              "operational_escalated", "artifact_tainted",
+                                              "recovery_probe_recorded", "artifact_revalidated"}
+                                 else None)
+        if operational_error:
+            print(f"append: {a.cls} rejected — {operational_error}", file=sys.stderr)
+            return 3
         if a.cls in REQUIRES_PRIOR and not REQUIRES_PRIOR[a.cls](ev, hist):
             why = REQUIRES_PRIOR_WHY.get(a.cls, "a required prior event does not exist")
             print(f"append: {a.cls} rejected — requires a prior event that does not exist: {why} "
@@ -2958,6 +2971,13 @@ def cmd_view(a):
         from adaptation import fold, load_contract
         contract, _, _ = load_contract(a.root, required=False)
         print(json.dumps({"view": "adaptive_envelope_status", **fold(events, contract=contract)},
+                         indent=2, ensure_ascii=False))
+        return 0
+    if a.view_id == "operational_state":
+        from operational_state import fold
+        from adaptation import load_contract
+        contract, _, _ = load_contract(a.root, required=False)
+        print(json.dumps({"view": "operational_state", **fold(events, contract=contract)},
                          indent=2, ensure_ascii=False))
         return 0
     # generic projection: the events feeding the view, newest last, payloads intact.

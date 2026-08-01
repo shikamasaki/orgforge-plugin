@@ -202,6 +202,18 @@ resilience:
   safe_diagnostic_actions: [safe_stop, observe_only, human_handback]
   globally_forbidden_actions: [silent_skip_required_review, self_approval,
                                production_credential_use, rewrite_evidence]
+  operational_state:
+    initial: NORMAL
+    states: [NORMAL, DEGRADED, HALTED, RECOVERING]
+    transitions:
+      NORMAL: [DEGRADED, HALTED]
+      DEGRADED: [RECOVERING, HALTED]
+      RECOVERING: [NORMAL, DEGRADED, HALTED]
+      HALTED: [RECOVERING, NORMAL]
+    circuit_states: [CLOSED, OPEN, HALF_OPEN]
+    safe_actions: [safe_stop, observe_only, human_handback]
+    ship_forbidden_states: [DEGRADED, HALTED, RECOVERING]
+    repeated_failure_route: human
   adaptive_envelopes:
     - id: required-reviewer-outage
       version: 1
@@ -225,6 +237,10 @@ resilience:
       blast_radius: { max_deviations: 3, max_tainted_artifacts: 10 }
       retry_budget: 2
       missing_evidence_policy: record_and_revalidate
+      recovery:
+        authority_role: gate
+        human_decision: null
+        cooldown_seconds: 0
       expires_after_minutes: 60
       required_evidence: [outage_receipt, affected_artifact_inventory]
       revert_condition: required_reviewer_available
@@ -252,6 +268,10 @@ resilience:
       blast_radius: { max_deviations: 3, max_tainted_artifacts: 10 }
       retry_budget: 0
       missing_evidence_policy: record_and_revalidate
+      recovery:
+        authority_role: supervisor
+        human_decision: null
+        cooldown_seconds: 0
       expires_after_minutes: 60
       required_evidence: [outage_receipt, affected_artifact_inventory]
       revert_condition: required_provider_available
