@@ -563,6 +563,67 @@ def test_worktree_rebase_uses_the_command_target_not_the_hook_cwd(tmp_path, monk
         assert h._integration_bypass("Bash", {"command": command}) is None, command
 
 
+@pytest.mark.parametrize("action", ["--abort", "--continue", "--skip"])
+def test_rebase_recovery_is_not_treated_as_a_new_protected_branch_integration(
+        tmp_path, monkeypatch, action):
+    """Recovery advances or unwinds an existing rebase; it does not select a new branch target."""
+    h = _hook()
+    repo = _org_repo(tmp_path, "main")
+    monkeypatch.chdir(repo)
+    assert h._integration_bypass("Bash", {"command": f"git rebase {action}"}) is None
+
+
+def test_rebase_recovery_supports_static_worktree_targets_and_git_global_options(
+        tmp_path, monkeypatch):
+    h = _hook()
+    repo = _org_repo(tmp_path, "main")
+    worktree = tmp_path / "feature recovery"
+    subprocess.run(["git", "worktree", "add", "-q", "-b", "feat/issue-38", str(worktree), "main"],
+                   cwd=repo, capture_output=True, text=True, check=True)
+    monkeypatch.chdir(repo)
+
+    commands = (
+        f"git -C {shlex.quote(str(worktree))} rebase --abort",
+        f"cd {shlex.quote(str(worktree))} && git rebase --continue",
+        "git --no-pager -c core.editor=true rebase --skip",
+    )
+    for command in commands:
+        assert h._integration_bypass("Bash", {"command": command}) is None, command
+
+    # The hook is running from a linked feature worktree, while the recovery state belongs to the
+    # protected primary checkout. Static ``git -C`` must bind recovery to that checkout without
+    # reclassifying it as a fresh integration into main.
+    monkeypatch.chdir(worktree)
+    assert h._integration_bypass(
+        "Bash", {"command": f"git -C {shlex.quote(str(repo))} rebase --abort"}) is None
+
+
+def test_rebase_recovery_fails_closed_for_ambiguous_or_compound_targets(tmp_path, monkeypatch):
+    h = _hook()
+    repo = _org_repo(tmp_path, "main")
+    monkeypatch.chdir(repo)
+
+    for command in (
+        'cd "$TARGET_WORKTREE" && git rebase --abort',
+        "git rebase --abort && git merge feat/issue-38",
+        "git rebase --continue; git rebase feat/issue-38",
+    ):
+        result = h._integration_bypass("Bash", {"command": command})
+        assert result is not None and "静的に解決できない" in result, command
+
+
+def test_git_global_options_do_not_bypass_ordinary_rebase_guard(tmp_path, monkeypatch):
+    h = _hook()
+    repo = _org_repo(tmp_path, "main")
+    monkeypatch.chdir(repo)
+    result = h._integration_bypass(
+        "Bash", {"command": "git --no-pager -c advice.skippedCherryPicks=false rebase feat/x"})
+    assert result is not None and "org_cycle" in result
+    unresolved = h._integration_bypass(
+        "Bash", {"command": "git --work-tree=/tmp rebase feat/x"})
+    assert unresolved is not None and "静的に解決できない" in unresolved
+
+
 def test_command_targeting_a_protected_checkout_is_held(tmp_path, monkeypatch):
     """Resolving command cwd must not let a feature-side hook mutate main."""
     h = _hook()
