@@ -62,6 +62,9 @@ done
 for f in "$REPO"/template/schemas/*.json; do
   sync_one "$f" "$HERE/template/schemas/$(basename "$f")" || rc=1
 done
+for f in "$REPO"/template/exercises/*.yaml; do
+  sync_one "$f" "$HERE/template/exercises/$(basename "$f")" || rc=1
+done
 
 if [ "$CHECK" = "--check" ]; then
   [ $rc -eq 0 ] && echo "plugin bundle is in sync with the neutral source" || \
