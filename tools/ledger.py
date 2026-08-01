@@ -1437,7 +1437,11 @@ def _verify_receipt_for(a, payload, cls):
     for k, pk in (("verdict", "verdict"), ("role", "role"), ("lineage", "lineage"),
                   ("review_subject_id", "review_subject_id"),
                   ("reasoning_sha256", "reasoning_sha256"),
-                  ("issue", "issue"), ("phase", "phase")):
+                  ("issue", "issue"), ("phase", "phase"),
+                  ("envelope_id", "envelope_id"),
+                  ("human_decision_ref", "human_decision_ref"),
+                  ("microexperiment_ref", "microexperiment_ref"),
+                  ("practice_change_ref", "practice_change_ref")):
         if payload.get(pk) is not None:
             expect[k] = payload[pk]
     # org / ledger は台帳の側が持つ。**payload からではなく、書き込み先から取る** —
@@ -1560,7 +1564,7 @@ def cmd_append(a):
         if _ident:
             payload.update(_ident)
         elif a.cls in ("verdict_provisional", "admission_decided", "refutation_attempted",
-                       "judges_disagreed"):
+                       "judges_disagreed", "adaptive_envelope_adopted"):
             # **receipt が無いときも identity を記録する — ただし `claimed` として。**
             # 欄が無いと「確かめた結果 claimed だった」のか「そもそも見ていない」のかを
             # 区別できない。書き手が生成するので、caller は値を選べない。
@@ -1649,6 +1653,17 @@ def cmd_append(a):
         goal_error = _goal_lifecycle_violation(ev, hist, a.root)
         if goal_error:
             print(f"append: {goal_error}", file=sys.stderr)
+            return 3
+        try:
+            from adaptation import ledger_event_violation
+            adaptation_error = ledger_event_violation(ev, hist, a.root)
+        except Exception as exc:
+            adaptation_error = (f"adaptive contract could not be evaluated: {exc}"
+                                if a.cls.startswith("adaptive_") or
+                                a.cls in {"acceptable_outcome_recorded", "microexperiment_concluded"}
+                                else None)
+        if adaptation_error:
+            print(f"append: {a.cls} rejected — {adaptation_error}", file=sys.stderr)
             return 3
         if a.cls in REQUIRES_PRIOR and not REQUIRES_PRIOR[a.cls](ev, hist):
             why = REQUIRES_PRIOR_WHY.get(a.cls, "a required prior event does not exist")
@@ -2937,6 +2952,12 @@ def cmd_view(a):
         goals = goal_states_from_events(events)
         print(json.dumps({"view": "goal_state", "goals": goals,
                           "current": goals[-1] if goals else None},
+                         indent=2, ensure_ascii=False))
+        return 0
+    if a.view_id == "adaptive_envelope_status":
+        from adaptation import fold, load_contract
+        contract, _, _ = load_contract(a.root, required=False)
+        print(json.dumps({"view": "adaptive_envelope_status", **fold(events, contract=contract)},
                          indent=2, ensure_ascii=False))
         return 0
     # generic projection: the events feeding the view, newest last, payloads intact.

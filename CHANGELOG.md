@@ -6,6 +6,20 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 2.0.18 — bounded adaptation contract
+
+### Added
+
+- Define versioned critical functions, acceptable outcomes, constitutional invariants, adaptive
+  practices, and expiring adaptive envelopes without treating the four resilience potentials as
+  separate product modules or reducing resilience to a score.
+- Add ledger-enforced activation, authorization, deviation, expiry, revert, outcome,
+  microexperiment, and human-attested permanent-adoption flows with declared observation sources,
+  confidence, scope, blast radius, retries, taint, and recovery revalidation.
+- Ship deterministic reviewer/provider outage and safe-stop contracts in both harnesses, expose
+  proposed/active/expired/reverted/adopted state in doctor/status, and distinguish Work-as-Imagined,
+  Work-as-Recorded, Work-as-Reported, and inferred Work-as-Done.
+
 ## 2.0.17 — portable persistent goals
 
 ### Added

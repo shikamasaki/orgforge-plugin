@@ -96,6 +96,19 @@ validation:
     goal_resumed:            [goal_id, from_session_id, session_id, reason, harness]
     goal_completed:          [goal_id, session_id, summary, evidence]
     goal_host_synced:        [goal_id, session_id, harness, native_state, assurance]
+    adaptive_envelope_activated: [envelope_id, envelope_version, trigger, source, activation_id,
+                                  baseline_ref, evidence, confidence, expires_at,
+                                  affected_critical_functions]
+    adaptive_deviation_recorded: [envelope_id, activation_id, action, phase, artifacts,
+                                  wai_baseline, reason, result, missing_evidence,
+                                  tainted_artifacts, revalidation_scope]
+    adaptive_envelope_expired: [envelope_id, activation_id, reason]
+    adaptive_envelope_reverted: [envelope_id, activation_id, reason, evidence]
+    adaptive_envelope_adopted: [envelope_id, activation_id, human_decision_ref,
+                                microexperiment_ref, practice_change_ref, decision_by, recorded_by,
+                                identity_assurance, recorder_assurance, workload_isolation]
+    acceptable_outcome_recorded: [critical_function, outcome, evidence, judged_by]
+    microexperiment_concluded: [experiment_id, envelope_id, hypothesis, result, evidence, judged_by]
   # **相関キーはどれか1つあればよい。** deliverable / candidate_id / claim_id / issue はどれも
   # 正当な相関キーで（`_same_work` が union-find で束ねる）、どれを使うかは経路によって違う。
   # 1つに固定すると正当な書き込みを弾く（実際に統制のテストを弾いた）。
@@ -112,7 +125,10 @@ validation:
   additional_properties_false: [verdict_provisional, judges_disagreed, exposure_budget_checked,
                                 halt_tripped, halt_released, goal_started, goal_progressed,
                                 goal_paused, goal_blocker_observed, goal_blocked, goal_resumed,
-                                goal_completed, goal_host_synced]
+                                goal_completed, goal_host_synced, adaptive_envelope_activated,
+                                adaptive_deviation_recorded, adaptive_envelope_expired,
+                                adaptive_envelope_reverted, adaptive_envelope_adopted,
+                                acceptable_outcome_recorded, microexperiment_concluded]
   # **writer 専用のクラス。** generic append では書けない。
   #
   # 上限の予約を通常の append で書ける状態は、上限そのものを無効化する — 実測で
@@ -146,6 +162,13 @@ validation:
     goal_blocker_observed: { evidence: list }
     goal_blocked:          { evidence: list, occurrences: int }
     goal_completed:        { evidence: list }
+    adaptive_envelope_activated: { evidence: map, confidence: number,
+                                   affected_critical_functions: list }
+    adaptive_deviation_recorded: { artifacts: list, missing_evidence: list,
+                                   tainted_artifacts: list, revalidation_scope: list }
+    adaptive_envelope_reverted: { evidence: list }
+    acceptable_outcome_recorded: { evidence: list }
+    microexperiment_concluded: { evidence: list }
 
 
 
@@ -248,6 +271,30 @@ event_classes:
   goal_host_synced:      { goal_id, session_id, harness,
                            native_state: active|complete|blocked|unavailable|failed,
                            native_ref, detail, assurance: reported|observed }
+
+  # Bounded field adaptation.  These events never change the constitution; they record an expiring
+  # envelope activation, each actual deviation from WAI, and its disposition.  The adaptation tool
+  # and ledger writer both evaluate the same constitution contract, so direct generic append cannot
+  # turn an undeclared or expired deviation into a valid one.
+  adaptive_envelope_activated: { envelope_id, envelope_version, trigger, source, activation_id,
+                                 baseline_ref, evidence: {kind: ref}, confidence, expires_at,
+                                 affected_critical_functions: [id] }
+  adaptive_deviation_recorded: { envelope_id, activation_id, action, phase, artifacts: [ref],
+                                 wai_baseline, reason, result, missing_evidence: [kind],
+                                 tainted_artifacts: [ref], revalidation_scope: [check] }
+  adaptive_envelope_expired:   { envelope_id, activation_id, reason }
+  adaptive_envelope_reverted:  { envelope_id, activation_id, reason, evidence: [ref] }
+  adaptive_envelope_adopted:   { envelope_id, activation_id, human_decision_ref,
+                                 microexperiment_ref, practice_change_ref, decision_by, recorded_by,
+                                 identity_assurance, recorder_assurance, workload_isolation,
+                                 writer_isolation, signer_id, key_id }
+  acceptable_outcome_recorded: { critical_function,
+                                 outcome: verified_delivery|safe_stop|scope_reduction|
+                                          goal_abandonment|human_handback|observe_only,
+                                 envelope_id, activation_id, evidence: [ref], judged_by,
+                                 judgment_required }
+  microexperiment_concluded:   { experiment_id, envelope_id, hypothesis, result, evidence: [ref],
+                                 judged_by }
   # accountable_supervisor (docs/09 §A1): which supervising role owns this output up the chain,
   # set from the runtime supervision edge (never the payload — a manager cannot forge who owns a
   # result, mirroring actor_identity_source). Empty for the top (human-owned) tier.
@@ -552,6 +599,13 @@ views:
                                  goal_completed, goal_host_synced],
                           shape: the one portable persistent goal, its owning session, latest progress,
                                  blocker observations, evidence, and host-adapter synchronization }
+  adaptive_envelope_status: { from: [adaptive_envelope_activated,
+                                     adaptive_deviation_recorded, adaptive_envelope_expired,
+                                     adaptive_envelope_reverted, adaptive_envelope_adopted,
+                                     acceptable_outcome_recorded, microexperiment_concluded],
+                              shape: current proposed/active/expired/reverted/adopted envelopes,
+                                     exposed critical functions, taint, revalidation, missingness,
+                                     and acceptable outcomes without a synthetic resilience score }
   reusable_modules:     { from: [cycle_completed], shape: shared implementation assets }
   gate_input_spec:      { from: [intent_revised, proposal_adjudicated], shape: the current candidate submission format }
   doctrine_gaps:        { from: [doctrine_diff_admitted, cycle_completed], shape: roles whose doctrine is thin or expiring }

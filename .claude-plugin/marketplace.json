@@ -4,13 +4,13 @@
     "name": "shikamasaki"
   },
   "metadata": {
-    "description": "Govern existing coding-agent teams without replacing their runtime: explicit ownership, maker/checker separation, workflow gates, evidence, human-held irreversible decisions, and bounded organization evolution. Adopt an existing repository in one command and project the same neutral organization onto Claude Code and Codex."
+    "description": "Resilience engineering for agentic software delivery: a portable governance plane that helps coding-agent teams sustain acceptable outcomes, degrade and recover safely, and adapt from evidence without losing human control."
   },
   "plugins": [
     {
       "name": "orgforge-plugin",
       "source": "./integrations/claude-code",
-      "description": "既存のClaude Code運用へ、明示的なownership、maker/checker分離、非スキップのSDLC gate、evidence ledger、人間が保持する不可逆判断を追加するgovernance layer。/org-adoptで途中のrepositoryへ1コマンド導入でき、既存ledgerは追記履歴を保持したまま移行する。通常の開発はtrusted developer modeで進める一方、production credential・deploy・資金・外部公開の保護はhost platformのapprovalとcustodyが担う。"
+      "description": "AIコーディング組織のためのレジリエンスエンジニアリング。変動下でも必要な成果と人間の統制を維持し、安全に縮退・停止・復旧し、証拠から適応するportable governance plane。Claude Codeのruntimeを置き換えず、/org-adoptで既存repositoryへ導入する。"
     }
   ]
 }

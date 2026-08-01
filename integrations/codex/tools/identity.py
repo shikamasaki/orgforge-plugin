@@ -32,7 +32,8 @@ import sys
 # 「署名されているから独立している」は誤りである。**同じ signer が両方の血統に署名できるなら、
 # それは独立レビューではない** — だから `reviewer_independence` を別軸として持つ。
 
-PROTOCOL_VERSION = 3                 # receipt の形式。ledger の schema_version とは別に動く
+PROTOCOL_VERSION = 4                 # receipt の形式。ledger の schema_version とは別に動く
+# v4: adaptive-envelope の恒久化判断を envelope / human decision / microexperiment に束縛。
 # v3: `event_class` を束縛に加えた。どのクラスの判定かを署名が覆わないと、
 #     admission_decided 用の receipt を refutation_attempted に流用できる。
 # v2: `judge_workload` を署名対象に加えた。v1 では署名の外にあり、**署名後に
@@ -46,6 +47,8 @@ _RECEIPT_BOUND = ("receipt_id", "org_id", "ledger_id", "review_subject_id", "iss
                   # **どのクラスの判定か。** 覆わないと、admission 用の receipt を
                   # refutation に流用できる。
                   "event_class")
+_OPTIONAL_RECEIPT_BOUND = ("envelope_id", "human_decision_ref", "microexperiment_ref",
+                           "practice_change_ref")
 
 
 # ══ Authenticated Mode: 非対称署名（judge は秘密鍵、writer は公開鍵だけ）══════
@@ -260,7 +263,7 @@ def authorize(key, role, lineage, want_release=False):
 
 def receipt_signing_bytes(receipt):
     """署名が覆うバイト列。**束縛する値を1つでも外すと、そこは差し替え可能になる。**"""
-    core = {k: receipt.get(k) for k in _RECEIPT_BOUND}
+    core = {k: receipt.get(k) for k in _RECEIPT_BOUND + _OPTIONAL_RECEIPT_BOUND}
     return json.dumps(core, sort_keys=True, separators=(",", ":"),
                       ensure_ascii=False).encode("utf-8")
 
@@ -516,9 +519,16 @@ def _cmd_receipt(a):
     if key.get("revoked"):
         print(f"receipt: key_id {a.key_id!r} は失効している", file=sys.stderr)
         return 2
+    if a.event_class == "adaptive_envelope_adopted" and not all(
+            (a.envelope_id, a.human_decision_ref, a.microexperiment_ref, a.practice_change_ref)):
+        print("receipt: adaptive adoption requires --envelope-id, --human-decision-ref, and "
+              "--microexperiment-ref, and --practice-change-ref", file=sys.stderr)
+        return 2
     r = {"receipt_id": hashlib.sha256(
              f"{a.org_id}|{a.subject}|{a.issue}|{a.role}|{a.lineage}|{a.verdict}"
-             f"|{a.reasoning_sha256}|{a.key_id}|{a.issued_at}".encode()).hexdigest()[:32],
+             f"|{a.reasoning_sha256}|{a.key_id}|{a.issued_at}|{a.envelope_id}"
+             f"|{a.human_decision_ref}|{a.microexperiment_ref}|{a.practice_change_ref}"
+             .encode()).hexdigest()[:32],
          "org_id": a.org_id, "ledger_id": a.ledger_id,
          "review_subject_id": a.subject, "issue": a.issue, "role": a.role, "phase": a.phase,
          "lineage": a.lineage, "verdict": a.verdict,
@@ -529,6 +539,10 @@ def _cmd_receipt(a):
          # **judge 自身が申告する。** 署名が覆うので、後から足せない。
          "judge_workload": a.judge_workload,
          "event_class": a.event_class,
+         "envelope_id": a.envelope_id,
+         "human_decision_ref": a.human_decision_ref,
+         "microexperiment_ref": a.microexperiment_ref,
+         "practice_change_ref": a.practice_change_ref,
          "protocol_version": PROTOCOL_VERSION}
     if a.private_key:
         priv = (open(a.private_key, encoding="utf-8").read()
@@ -580,8 +594,12 @@ def main(argv):
     q.add_argument("--schema-version", dest="schema_version", type=int, default=1)
     q.add_argument("--event-class", dest="event_class", required=True,
                    choices=("admission_decided", "refutation_attempted", "verdict_provisional",
-                            "halt_released"),
+                            "halt_released", "adaptive_envelope_adopted"),
                    help="この receipt が使える台帳クラス。**署名が覆う**ので流用できない")
+    q.add_argument("--envelope-id", dest="envelope_id")
+    q.add_argument("--human-decision-ref", dest="human_decision_ref")
+    q.add_argument("--microexperiment-ref", dest="microexperiment_ref")
+    q.add_argument("--practice-change-ref", dest="practice_change_ref")
     q.add_argument("--judge-workload", dest="judge_workload", default="none",
                    choices=("none", "separate_process", "separate_uid", "separate_host"),
                    help="この judge がどこで動いたか。**署名が覆う**ので後から足せない")

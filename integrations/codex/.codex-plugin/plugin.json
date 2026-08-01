@@ -1,7 +1,7 @@
 {
   "name": "orgforge",
-  "version": "2.0.17+codex.20260802013536",
-  "description": "A governance layer for existing coding-agent teams: explicit roles, maker/checker boundaries, a non-skippable SDLC, human-held irreversible decisions, evidence records, and bounded organization evolution without replacing the Codex runtime.",
+  "version": "2.0.18+codex.20260801170509",
+  "description": "Resilience engineering for coding-agent teams: a portable governance plane for safe degradation, recovery, evidence-backed adaptation, and human control without replacing Codex.",
   "author": {
     "name": "shikamasaki",
     "url": "https://github.com/shikamasaki"
@@ -13,12 +13,13 @@
     "guardrails",
     "sdlc",
     "audit-ledger",
-    "agent-governance"
+    "agent-governance",
+    "resilience-engineering"
   ],
   "interface": {
     "displayName": "OrgForge",
-    "shortDescription": "Governance for coding-agent teams",
-    "longDescription": "Projects orgforge's neutral organizational governance onto Codex: explicit roles, SDLC phase gates, maker/checker separation, human-held irreversible decisions, evidence records, and bounded changes that let the organization evolve with the product. It uses the existing Codex runtime instead of introducing another agent framework.",
+    "shortDescription": "Resilience for coding-agent teams",
+    "longDescription": "Projects OrgForge's portable governance plane onto Codex so coding-agent teams can sustain acceptable outcomes under variability, degrade or stop safely, recover with explicit revalidation, and adapt from evidence without losing human-held decisions. It uses the existing Codex runtime instead of introducing another agent framework.",
     "defaultPrompt": "Use OrgForge governance for this repository: preserve ownership boundaries, follow the declared workflow, require independent checks, and record evidence.",
     "developerName": "shikamasaki",
     "category": "Productivity",

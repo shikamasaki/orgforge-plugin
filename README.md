@@ -5,14 +5,20 @@
 > This root document is the long-form design overview. The language-specific sets above define the
 > current supported product, assurance vocabulary, and operating model.
 
-## Turn agent instructions into an accountable software team
+## Resilience engineering for agentic software delivery
 
-orgforge is a governance layer for coding agents you already use. It does not replace Claude Code,
-Codex, CI, or your deployment platform. It turns an existing repository and its instructions into
-an explicit operating model: ownership, workflow gates, independent checks, evidence, and the
-decisions that remain human-held. As the product changes, the same evidence lets the organization
-propose bounded changes to its roles, contracts, information flow, and checks—so the product and
-the organization improve together.
+orgforge is a portable governance plane for coding agents you already use. It helps the development
+organization sustain acceptable outcomes under variability, degrade or stop safely, recover with
+the right revalidation, and adapt from evidence without losing human control. It does not replace
+Claude Code, Codex, CI, or your deployment platform. It turns an existing repository and its
+instructions into an explicit operating model: ownership, workflow gates, independent checks,
+evidence, and the decisions that remain human-held.
+
+Respond, Monitor, Learn, and Anticipate are an interconnected capability model and evaluation lens,
+not four product modules. The implementation is organized around operational state, observations,
+evidence, and bounded adaptation. It never reduces resilience to one score: it makes the evidence,
+missing observations, confidence, decision owner, and effects of change inspectable while leaving
+the judgment of acceptable outcomes and permanent organizational change with humans.
 
 The product has six parts:
 
@@ -24,6 +30,11 @@ The product has six parts:
    agent runtime.
 6. **Organization evolution** — turn observed bottlenecks and failures into reviewable changes to
    roles, contracts, context, and controls without letting agents rewrite the human-held purpose.
+
+The constitution and workflow describe Work-as-Imagined. The ledger, Git, CI, and traces are
+Work-as-Recorded; agent and human explanations are Work-as-Reported. OrgForge triangulates those
+partial observations to support an explicitly uncertain inference about Work-as-Done—it does not
+claim that one ledger fully captures real work.
 
 An explicit objective can also survive a Claude Code/Codex restart through `org-goal`: its state,
 next action, blocker observations, completion evidence, and owning host session live in the shared
