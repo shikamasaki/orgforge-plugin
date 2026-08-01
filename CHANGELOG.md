@@ -6,6 +6,17 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 2.0.12 — authoritative worktree governance
+
+### Fixed
+
+- Resolve organization governance from Git's primary worktree even when Claude Code or Codex
+  creates a linked worktree outside the repository directory.
+- Keep the reviewed commit and file tree pinned to the caller's actual worktree while surfacing
+  stale embedded governance files as an AMBER status condition.
+- Emit the schema-declared `blocked_by` field in `progress_recorded` receipts and keep the neutral,
+  Claude Code, and Codex projections byte-identical.
+
 ## 2.0.11 — coherent rework transitions
 
 ### Fixed
