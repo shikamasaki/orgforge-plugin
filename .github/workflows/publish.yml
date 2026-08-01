@@ -81,7 +81,7 @@ jobs:
             --output="dist/$CODEX_ARCHIVE" HEAD:integrations/codex
           tar -tzf "dist/$CLAUDE_ARCHIVE" >/dev/null
           tar -tzf "dist/$CODEX_ARCHIVE" >/dev/null
-          shasum -a 256 dist/*.tar.gz > dist/SHA256SUMS
+          (cd dist && shasum -a 256 *.tar.gz > SHA256SUMS)
 
       - name: Attest plugin archives
         if: steps.existing.outputs.skip != 'true'
