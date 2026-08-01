@@ -566,6 +566,45 @@ def test_manual_issue_writes_are_held(tmp_path, monkeypatch):
         assert "github_sync" in r or "org_cycle" in r, "打つべきコマンドが示されていない"
 
 
+def test_quoted_cat_heredoc_body_is_data_not_an_executed_command(tmp_path, monkeypatch):
+    """A reproducible observation may quote commands without executing them.
+
+    The hook used to tokenize the heredoc body together with the shell program, so recording the
+    exact command that had been held was itself held as another Issue write/merge/destructive op.
+    """
+    h = _hook()
+    repo = _org_repo(tmp_path, "develop")
+    monkeypatch.chdir(repo)
+    command = ("cat >> .orgforge/observations.md <<'OBS'\n"
+               "held: gh issue create --title x --body y\n"
+               "held: git merge feat/issue-9\n"
+               "evidence only: rm -rf /\n"
+               "OBS")
+    assert h._gh_bypass("Bash", {"command": command}) is None
+    assert h._integration_bypass("Bash", {"command": command}) is None
+    assert h._catastrophic_reason("Bash", {"command": command}) is None
+
+
+@pytest.mark.parametrize("command", [
+    "bash <<'EOF'\ngh issue close 42\nEOF",
+    "cat <<'EOF' | bash\ngh issue edit 42 --title x\nEOF",
+    "cat <<'EOF' > >(bash)\ngh issue close 42\nEOF",
+    "cat <<EOF\n$(gh issue reopen 42)\nEOF",
+])
+def test_executable_heredoc_issue_writes_remain_held(tmp_path, monkeypatch, command):
+    """Interpreter input, pipelines to a shell, and expanding heredocs are not inert data."""
+    h = _hook()
+    repo = _org_repo(tmp_path, "develop")
+    monkeypatch.chdir(repo)
+    assert h._gh_bypass("Bash", {"command": command}) is not None, command
+
+
+def test_executable_heredoc_catastrophic_command_remains_held():
+    h = _hook()
+    command = "bash <<'EOF'\nrm -rf /\nEOF"
+    assert h._catastrophic_reason("Bash", {"command": command}) is not None
+
+
 def test_no_hold_outside_an_orgforge_repo(tmp_path, monkeypatch):
     """org でないリポジトリには、この規律を適用しない。"""
     h = _hook()

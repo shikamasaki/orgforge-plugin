@@ -249,6 +249,65 @@ def _has_seq(tokens, *pairs):
     return False
 
 
+_QUOTED_HEREDOC = re.compile(
+    r"<<(?P<strip_tabs>-)?[ \t]*(?P<quote>['\"])(?P<delimiter>[^'\"\r\n]+)(?P=quote)")
+
+
+def _without_inert_heredoc_data(cmd):
+    """Remove data from one provably inert, quoted ``cat`` heredoc before policy inspection.
+
+    PreToolUse receives Bash source as one string. Treating every byte as executable makes an
+    observation such as ``cat >> notes <<'EOF'`` look like it executes the commands quoted in its
+    body. We remove the body only for a deliberately narrow shape:
+
+    * exactly one quoted heredoc (quoted delimiters disable shell expansion),
+    * a standalone ``cat`` command with no pipeline/separator/substitution, and
+    * no command after the terminating delimiter.
+
+    Interpreter consumers, pipelines to a shell, unquoted/expanding heredocs, multiple heredocs,
+    and ambiguous syntax are returned unchanged so every guardrail continues to fail closed.
+    """
+    if not isinstance(cmd, str) or "<<" not in cmd:
+        return cmd
+    lines = cmd.splitlines(keepends=True)
+    starts = []
+    for index, line in enumerate(lines):
+        for match in _QUOTED_HEREDOC.finditer(line):
+            starts.append((index, match))
+    if len(starts) != 1:
+        return cmd
+    start, match = starts[0]
+    if any(line.strip() for line in lines[:start]):
+        return cmd
+    header = lines[start].rstrip("\r\n")
+    # A shell operator can send the data to an interpreter or attach a later command. Quoted
+    # filenames containing these bytes are conservatively left unsanitized as well.
+    if any(operator in header for operator in ("|", ";", "&", "`", "$(", "<(", ">(")):
+        return cmd
+    try:
+        header_tokens = shlex.split(header, posix=True)
+    except ValueError:
+        return cmd
+    if not header_tokens or os.path.basename(header_tokens[0]) != "cat":
+        return cmd
+
+    delimiter = match.group("delimiter")
+    strip_tabs = bool(match.group("strip_tabs"))
+    end = None
+    for index in range(start + 1, len(lines)):
+        candidate = lines[index].rstrip("\r\n")
+        if strip_tabs:
+            candidate = candidate.lstrip("\t")
+        if candidate == delimiter:
+            end = index
+            break
+    if end is None or any(line.strip() for line in lines[end + 1:]):
+        return cmd
+    # Inspection does not execute this returned text; retaining the header preserves redirects and
+    # asset classification while removing only the bytes the shell supplies to cat as stdin.
+    return "".join(lines[:start]) + header
+
+
 # stdout/stderr redirect onto an ABSOLUTE path — but NOT the harmless cases that dominate real work.
 # The earlier check `(\||>>?)\s*/` fired on `2>/dev/null`, `> /dev/null 2>&1`, and any pipe-to-absolute,
 # so read-only searches with stderr suppressed were mis-charged as destructive and drained the budget.
@@ -310,7 +369,7 @@ def _asset_dimension(tool_name, ti):
     the reviewers recommended — the single check that unblocks a legit build while keeping
     overwrite metered. Fail-safe: unknown shell is charged, ambiguous destroys are max-cost."""
     if isinstance(ti, dict):
-        cmd = _command_text(ti)
+        cmd = _without_inert_heredoc_data(_command_text(ti))
         path = ti.get("file_path") or ti.get("path") or ""
     elif isinstance(ti, str):
         cmd, path = ti, ""
@@ -559,7 +618,7 @@ def _integration_bypass(tool_name, ti):
     """
     if tool_name != "Bash":
         return None
-    cmd = _command_text(ti)
+    cmd = _without_inert_heredoc_data(_command_text(ti))
     toks = _tokenize(cmd)
     if not any(_has_seq(toks, v) for v in _MERGE_VERBS):
         return None
@@ -739,8 +798,13 @@ def _gh_bypass(tool_name, ti):
     """organ を通さない Issue の書き換えか。理由（と打つべきコマンド）を返す。"""
     if tool_name != "Bash":
         return None
-    cmd = _command_text(ti)
+    cmd = _without_inert_heredoc_data(_command_text(ti))
     toks = _tokenize(cmd)
+    # Command substitution executes even when the surrounding command only writes/prints data.
+    # shlex keeps ``$(gh`` as one token, so expose the inner words explicitly. Single-quoted
+    # occurrences can be conservatively held; the safe observation form is the quoted heredoc above.
+    for inner in re.findall(r"\$\(([^)]*)\)|`([^`]*)`", cmd):
+        toks += _tokenize(" ".join(part for part in inner if part))
     if not _has_token(toks, "gh"):
         return None
     if not os.path.isdir(os.path.join(os.getcwd(), ".orgforge")):
@@ -855,7 +919,7 @@ _EXECUTES_STRING = re.compile(
 def _catastrophic_reason(tool_name, ti):
     if not _is_shell_tool(tool_name):
         return None
-    cmd = _command_text(ti)
+    cmd = _without_inert_heredoc_data(_command_text(ti))
     if not cmd.strip():
         return None
     # **入れ子の中身も見る。ただし「実行される中身」だけ。**
