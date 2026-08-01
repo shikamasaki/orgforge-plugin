@@ -90,12 +90,55 @@ def _interval_min(cadence):
     return None   # on_<event> — not clock-driven; the host fires it on the event, not the tick
 
 
-def _last_verify_seq(events, verify_class):
-    last = None
-    for e in events:
-        if e["class"] == verify_class:
-            last = e["seq"]
-    return last
+def _monitoring_origin(events, now):
+    """Return the first host-planned tick in this clock domain.
+
+    ``--now-min`` is an absolute or monotonic counter chosen by the host.  It is not an org-age
+    counter, so dividing it directly by a cadence counts imaginary runs before monitoring was
+    enabled (Unix-epoch minutes made a new org appear roughly 56 years overdue).
+
+    ``tick_planned`` already records that same counter.  Its first occurrence is therefore the
+    only ledger fact that proves when schedule monitoring began.  Before one exists, this run is
+    the baseline: it may report what is due, but cannot truthfully claim an earlier run was missed.
+    The sequence boundary also keeps verification events from before monitoring started from
+    masking later misses.
+    """
+    planned = [event for event in events if event.get("class") == "tick_planned"]
+    compatible = []
+    barriers = []
+    for event in planned:
+        seq = int(event.get("seq", 0))
+        value = (event.get("payload") or {}).get("now_min")
+        if isinstance(value, int) and not isinstance(value, bool) and value <= now:
+            compatible.append((value, seq))
+        else:
+            barriers.append((seq, value))
+
+    # A later well-formed receipt repairs a malformed origin or explicitly starts the host's new
+    # clock domain. Until that receipt exists, fail visibly instead of silently re-baselining.
+    barrier_seq = max((seq for seq, _ in barriers), default=0)
+    repaired = [(value, seq) for value, seq in compatible if seq > barrier_seq]
+    if repaired:
+        value, seq = repaired[0]
+        return value, seq, None
+    if barriers:
+        detail = [f"seq {seq}: now_min={value!r}" for seq, value in barriers]
+        error = (f"recorded tick origin is incompatible with now_min {now} "
+                 f"({'; '.join(detail)}) — the host clock domain moved backwards or the origin "
+                 "is malformed")
+        # A malformed later receipt must not erase an earlier trustworthy origin: retain that
+        # accounting while also escalating the corrupted barrier. If every recorded clock value
+        # is ahead of ``now``, elapsed intervals are unknowable; the global clock MISS is the only
+        # truthful result until the host persists a receipt in its new domain.
+        prior = [(value, seq) for value, seq in compatible if seq < barrier_seq]
+        if prior:
+            value, seq = prior[0]
+            return value, seq, error
+        return now, max((int(event.get("seq", 0)) for event in events), default=0), error
+    if compatible:
+        value, seq = compatible[0]
+        return value, seq, None
+    return now, max((int(event.get("seq", 0)) for event in events), default=0), None
 
 
 def cmd_plan(a):
@@ -106,10 +149,14 @@ def cmd_plan(a):
     mt = sched.get("missed_tick", {})
     grace = int(mt.get("grace_intervals", 2))
     esc_after = int(mt.get("escalate_after_consecutive", 3))
+    monitoring_origin, monitoring_origin_seq, clock_error = _monitoring_origin(events, now)
 
     # tick_seq: how many base intervals have elapsed. A clock check with interval M is DUE when
     # now is a multiple of M (within one base interval).
     due, suspended, missed, escalate = [], [], [], False
+    if clock_error:
+        missed.append(("tick_clock", f"{clock_error}: MISS (cannot prove scheduled checks ran)"))
+        escalate = True
 
     for c in sched.get("checks", []):
         cid = c.get("id")
@@ -147,11 +194,12 @@ def cmd_plan(a):
         # holds no such event within (grace) base intervals of when it was due, it's a MISS.
         verify_class = c.get("verify_event")
         if verify_class:
-            # crude but honest ledger-time proxy: we don't have wall-clock in the ledger events
-            # here, so we count how many of THIS check's verify_events exist vs how many ticks
-            # were due. A shortfall past grace = missed. (A host with ledger ts refines this.)
-            produced = sum(1 for e in events if e["class"] == verify_class)
-            expected_ticks = max(1, now // interval)
+            # Count only the cadence opportunities since this host first planned a tick.  The
+            # host counter may be Unix-epoch minutes, so epoch zero is not a valid org origin.
+            produced = sum(1 for e in events
+                           if e["class"] == verify_class
+                           and int(e.get("seq", 0)) > monitoring_origin_seq)
+            expected_ticks = max(0, (now - monitoring_origin) // interval)
             shortfall = expected_ticks - produced
             if shortfall > grace:
                 missed.append((cid, f"due {expected_ticks}x but only {produced} {verify_class} "

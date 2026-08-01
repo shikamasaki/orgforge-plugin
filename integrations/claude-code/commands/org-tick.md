@@ -10,7 +10,7 @@ Ledger root は**発見される**（`tools/discover.py`）— 環境変数の�
 
 ## Plan the tick (which checks are due / suspended / MISSED)
 
-!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/tick.py" plan "${CLAUDE_PLUGIN_ROOT}/template/schedule.yaml" --now-min ${1:-$(( $(date -u +%s) / 60 ))} ${2}`
+!`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/tick_host.py" "${CLAUDE_PLUGIN_ROOT}/template/schedule.yaml" --now-min ${1:-$(( $(date -u +%s) / 60 ))} ${2}`
 
 ## Evaluate the machine sensors over the ledger
 

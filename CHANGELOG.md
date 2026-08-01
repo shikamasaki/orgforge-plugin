@@ -6,6 +6,17 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 2.0.2 — reliable missed-tick monitoring
+
+### Fixed
+
+- Anchor scheduled-check accounting to the first persisted `tick_planned` receipt instead of Unix
+  epoch zero, eliminating decades of false missed-check alerts in newly monitored organizations.
+- Persist planner receipts through a host adapter on every Claude Code tick path, including writerd
+  deployments, while keeping retries idempotent and append failures visible.
+- Preserve real missed-check accounting across malformed receipts, fail visibly on incompatible
+  clock domains, and recover after the host records a valid receipt in the active clock domain.
+
 ## 2.0.0 — adaptive reviewer routing
 
 ### Breaking changes
