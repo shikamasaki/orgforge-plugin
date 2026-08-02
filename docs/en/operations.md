@@ -77,6 +77,14 @@ orgforge resilience-exercise provider-outage --expect GREEN
 It must retain `DEGRADED`, deny an unverified provider substitution and merge, and return the
 retry decision to a human when the declared retry budget is exhausted.
 
+To exercise liveness correlation, run:
+
+```bash
+orgforge resilience-exercise heartbeat-correlation --expect GREEN
+```
+
+Duplicate or stale heartbeats remain `ATTENTION` even when a single ledger probe is healthy.
+
 For unattended read-only-first operation, install the deterministic machine tick:
 
 ```bash

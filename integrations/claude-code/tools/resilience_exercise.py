@@ -10,7 +10,9 @@ that the injected marker reached that boundary.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -27,6 +29,7 @@ TEMPLATE = BUNDLE / "template"
 DEFAULT_SCENARIO = TEMPLATE / "exercises" / "reviewer-outage.yaml"
 DEFAULT_FALSE_GREEN_SCENARIO = TEMPLATE / "exercises" / "false-green-mutation.yaml"
 DEFAULT_PROVIDER_OUTAGE_SCENARIO = TEMPLATE / "exercises" / "provider-outage.yaml"
+DEFAULT_HEARTBEAT_SCENARIO = TEMPLATE / "exercises" / "heartbeat-correlation.yaml"
 
 
 class ExerciseError(RuntimeError):
@@ -558,6 +561,103 @@ def run_provider_outage(scenario_path=DEFAULT_PROVIDER_OUTAGE_SCENARIO):
         }
 
 
+def _redline_monitor_module():
+    """Load the installed projection's monitor implementation in source or bundled layouts."""
+    import importlib.util
+    candidates = [BUNDLE / "integrations" / "common" / "redline_monitor.py",
+                  HERE.parent / "scripts" / "redline_monitor.py"]
+    monitor = next((path for path in candidates if path.is_file()), None)
+    if monitor is None:
+        raise ExerciseError("redline monitor implementation is not installed")
+    spec = importlib.util.spec_from_file_location("resilience_exercise_redline_monitor", monitor)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_heartbeat_scenario(path):
+    document = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
+    required = {"schema_version", "id", "critical_functions", "acceptable_outcomes",
+                "signals", "expected", "blast_radius", "potentials", "human_judgment"}
+    missing = sorted(required - set(document))
+    if missing:
+        raise ExerciseError(f"scenario is missing fields: {', '.join(missing)}")
+    if document.get("schema_version") != 1:
+        raise ExerciseError("scenario schema_version must be 1")
+    radius = document.get("blast_radius") or {}
+    bounded = {"faults": 0, "workspace": "temporary_directory", "network": "forbidden",
+               "real_repository_mutation": "forbidden", "production_credentials": "forbidden"}
+    if radius != bounded:
+        raise ExerciseError("heartbeat scenario blast radius must prohibit network, credentials, and repo mutation")
+    expected = document.get("expected") or {}
+    if expected.get("outcome") not in set(document.get("acceptable_outcomes") or []):
+        raise ExerciseError("expected outcome is not declared acceptable")
+    return document
+
+
+def run_heartbeat_correlation(scenario_path=DEFAULT_HEARTBEAT_SCENARIO):
+    """Prove that contradictory heartbeat/probe signals remain attention, never false GREEN."""
+    scenario = _load_heartbeat_scenario(scenario_path)
+    expected = scenario["expected"]
+    monitor = _redline_monitor_module()
+    with tempfile.TemporaryDirectory(prefix="orgforge-exercise-") as temporary:
+        root = Path(temporary)
+        registry = root / "monitors"
+        current_version = str(scenario["signals"]["current_version"])
+        monitor.register_heartbeat(registry, role="supervisor", instance="redline-supervisor",
+                                   version=current_version, pid=101, now=1000, token="current")
+        monitor.register_heartbeat(registry, role="supervisor", instance="redline-supervisor",
+                                   version=current_version, pid=102, now=1001, token="duplicate")
+        monitor.register_heartbeat(registry, role="gate", instance="gate-watch",
+                                   version=current_version, pid=103, now=700, token="stale")
+
+        red_status = root / "red-status.py"
+        red_status.write_text("print('RED ledger probe: no fresh chain receipt')\n", encoding="utf-8")
+        green_status = root / "green-status.py"
+        green_status.write_text("# healthy silence\n", encoding="utf-8")
+        alive = lambda pid: int(pid) in {101, 102, 103}
+
+        rows = monitor.monitor_status(registry, current_version=current_version, now=1000,
+                                      stale_after=60, pid_alive=alive)
+        report_output = io.StringIO()
+        with contextlib.redirect_stdout(report_output):
+            red_code = monitor.report_status(registry, current_version=current_version, now=1000,
+                                             stale_after=60, pid_alive=alive)
+        red_probe = monitor.probe(red_status)
+        with contextlib.redirect_stdout(report_output):
+            green_code = monitor.report_status(registry, current_version=current_version, now=1000,
+                                               stale_after=60, pid_alive=alive)
+        green_probe = monitor.probe(green_status)
+        by_token = {row["token"]: row for row in rows}
+        duplicate_live = by_token["current"]["status"] == "live" and by_token["current"]["duplicate"]
+        stale_seen = by_token["stale"]["status"] == "stale"
+        assertions = {
+            "duplicate_heartbeat_observed": duplicate_live,
+            "stale_heartbeat_observed": stale_seen,
+            "red_probe_observed": red_probe.startswith("RED"),
+            "red_correlation_requires_attention": red_code == expected["attention_exit"],
+            "green_probe_observed_as_silence": green_probe == "",
+            "green_probe_does_not_hide_heartbeat_attention": green_code == expected["attention_exit"],
+            "no_single_signal_claims_healthy": red_code != 0 and green_code != 0,
+        }
+        gaps = [name for name, passed in assertions.items() if not passed]
+        return {
+            "scenario": scenario["id"], "exercise_status": "GREEN" if not gaps else "RED",
+            "assertions": assertions, "gaps": gaps, "expected_gaps": expected.get("gaps") or [],
+            "signals": {
+                "heartbeat": [{"token": row["token"], "status": row["status"],
+                               "duplicate": row["duplicate"], "orphaned": row["orphaned"]}
+                              for row in rows],
+                "ledger_probe_red": red_probe, "ledger_probe_green": green_probe,
+            },
+            "correlation": {"red_case_exit": red_code, "green_case_exit": green_code,
+                            "observed": "ATTENTION", "healthy_claim": False},
+            "outcome": {"observed": expected["outcome"], "acceptable": True},
+            "potentials": scenario["potentials"], "human_judgment": scenario["human_judgment"],
+            "resilience_score": None, "blast_radius": scenario["blast_radius"],
+        }
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="resilience-exercise")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -577,13 +677,18 @@ def main(argv=None):
     provider.add_argument("--scenario", default=str(DEFAULT_PROVIDER_OUTAGE_SCENARIO))
     provider.add_argument("--expect", choices=("RED", "GREEN"))
     provider.add_argument("--json", action="store_true")
+    heartbeat = sub.add_parser("heartbeat-correlation")
+    heartbeat.add_argument("--scenario", default=str(DEFAULT_HEARTBEAT_SCENARIO))
+    heartbeat.add_argument("--expect", choices=("RED", "GREEN"))
+    heartbeat.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
     if args.command == "_fake-dependency":
         return _fake_dependency(args)
     try:
         report = (run_reviewer_outage(args.scenario) if args.command == "reviewer-outage"
                   else run_false_green_mutation(args.scenario) if args.command == "false-green-mutation"
-                  else run_provider_outage(args.scenario))
+                  else run_provider_outage(args.scenario) if args.command == "provider-outage"
+                  else run_heartbeat_correlation(args.scenario))
     except ExerciseError as exc:
         report = {"scenario": args.command, "exercise_status": "INVALID",
                   "error": str(exc), "resilience_score": None}

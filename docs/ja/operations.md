@@ -76,6 +76,14 @@ orgforge resilience-exercise provider-outage --expect GREEN
 `DEGRADED`を維持し、未検証のprovider代替とmergeを拒否し、retry budgetが尽きたときは
 人間へ判断を返さなければなりません。
 
+livenessの相関を検証するには、次を実行します。
+
+```bash
+orgforge resilience-exercise heartbeat-correlation --expect GREEN
+```
+
+ledger probeが正常でも、duplicateまたはstaleなheartbeatは`ATTENTION`のままです。
+
 無人運転をread-only-firstで始める場合は、決定的なmachine tickだけを登録します。
 
 ```bash

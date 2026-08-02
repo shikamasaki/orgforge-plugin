@@ -13,6 +13,7 @@ TOOL = REPO / "tools" / "resilience_exercise.py"
 SCENARIO = REPO / "template" / "exercises" / "reviewer-outage.yaml"
 FALSE_GREEN_SCENARIO = REPO / "template" / "exercises" / "false-green-mutation.yaml"
 PROVIDER_OUTAGE_SCENARIO = REPO / "template" / "exercises" / "provider-outage.yaml"
+HEARTBEAT_SCENARIO = REPO / "template" / "exercises" / "heartbeat-correlation.yaml"
 
 
 def _run(*args):
@@ -168,3 +169,28 @@ def test_provider_outage_noop_fault_is_invalid_not_green(tmp_path):
     report = json.loads(run.stdout)
     assert report["exercise_status"] == "INVALID"
     assert "no-op" in report["error"]
+
+
+def test_heartbeat_correlation_keeps_duplicate_and_stale_signals_as_attention():
+    run = _run("heartbeat-correlation", "--expect", "GREEN", "--json")
+    assert run.returncode == 0, run.stdout + run.stderr
+    report = json.loads(run.stdout)
+    assert report["exercise_status"] == "GREEN"
+    assert report["gaps"] == []
+    assert report["correlation"] == {
+        "red_case_exit": 4, "green_case_exit": 4, "observed": "ATTENTION", "healthy_claim": False}
+    assert report["outcome"] == {"observed": "observe_only", "acceptable": True}
+    assert report["resilience_score"] is None
+
+
+def test_heartbeat_correlation_scenario_has_bounded_inputs():
+    scenario = yaml.safe_load(HEARTBEAT_SCENARIO.read_text(encoding="utf-8"))
+    assert scenario["time_budget_seconds"] <= 180
+    assert scenario["blast_radius"] == {
+        "faults": 0,
+        "workspace": "temporary_directory",
+        "network": "forbidden",
+        "real_repository_mutation": "forbidden",
+        "production_credentials": "forbidden",
+    }
+    assert set(scenario["signals"]["required"]) == {"heartbeat", "pid_liveness", "ledger_probe"}
