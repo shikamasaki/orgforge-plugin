@@ -107,7 +107,7 @@ def _fixture(tmp_path: Path) -> tuple[dict[str, str], Path, Path, Path]:
     binding.parent.mkdir(parents=True, exist_ok=True)
     binding.write_text(json.dumps({
         "schema": "orgforge-installed-organ/v1",
-        "version": "2.0.27",
+        "version": "2.0.28",
         "plugin_root": str(PLUGIN),
         "org_root": str(workdir),
         "harness": "claude-code",

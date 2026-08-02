@@ -347,6 +347,10 @@ enforcement:
     # before creating a joint event. This performs no fetch or rebase: movement, divergence, deletion,
     # or an unresolvable ref requires a fresh review subject.
     require_current_integration_head: true
+    # The integration target is a governance fact, not something tools can infer from whichever
+    # branches happen to exist. Strict mode uses this ref unless `verify --base <ref>` explicitly
+    # selects a different target for that review.
+    integration_ref: origin/main
     # Voiding a judgment is itself an authority-bearing act. A gate/skeptic may not erase its own
     # or the other judge's verdict to manufacture room for a replacement. The role is declared here
     # instead of being hard-coded in the organ; installations may assign append-only record custody

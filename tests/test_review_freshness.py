@@ -31,7 +31,8 @@ def _org(tmp_path, *, feature_commit=False):
     (org / ".gitignore").write_text(".orgforge/\n", encoding="utf-8")
     (org / "constitution.yaml").write_text(
         "enforcement:\n  judges:\n    lineage: cross-harness\n"
-        "    require_current_integration_head: true\n", encoding="utf-8")
+        "    require_current_integration_head: true\n"
+        "    integration_ref: main\n", encoding="utf-8")
     (org / "REQUIREMENTS.md").write_text("MUST keep the target current\n", encoding="utf-8")
     (org / "artifact.txt").write_text("baseline\n", encoding="utf-8")
     shutil.copy2(REPO / "template" / "ledger-schema.yaml", org / "ledger-schema.yaml")
@@ -116,6 +117,32 @@ def test_verify_reports_stale_diverged_and_unresolvable_targets(tmp_path):
                   "--phase", "implement", "--base", "main", "--print-subject")
     assert result.returncode == 11
     assert "unresolvable" in result.stderr or "解決できない" in result.stderr
+
+
+def test_strict_verify_uses_declared_ref_when_main_and_develop_both_exist(tmp_path):
+    org = _org(tmp_path)
+    _git(org, "branch", "develop", "main")
+    result = _run(org, "org_cycle.py", "verify", "--issue", "7", "--role", "gate",
+                  "--phase", "implement", "--print-subject")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "integration_ref" in result.stderr and "= main" in result.stderr
+
+
+def test_strict_verify_requires_declared_ref_but_cli_can_override(tmp_path):
+    org = _org(tmp_path)
+    constitution = org / "constitution.yaml"
+    constitution.write_text(
+        constitution.read_text(encoding="utf-8").replace("    integration_ref: main\n", ""),
+        encoding="utf-8")
+    missing = _run(org, "org_cycle.py", "verify", "--issue", "7", "--role", "gate",
+                   "--phase", "implement", "--print-subject")
+    assert missing.returncode == 11
+    assert "統合先を推測しない" in missing.stderr
+
+    explicit = _run(org, "org_cycle.py", "verify", "--issue", "7", "--role", "gate",
+                    "--phase", "implement", "--base", "main", "--print-subject")
+    assert explicit.returncode == 0, explicit.stdout + explicit.stderr
+    assert "integration_ref" in explicit.stderr and "= main" in explicit.stderr
 
 
 def test_target_movement_after_both_votes_blocks_derive(tmp_path):

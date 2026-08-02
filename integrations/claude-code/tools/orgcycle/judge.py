@@ -166,7 +166,8 @@ def _issue_decision_comments(issue, event):
 def cmd_verify(a):
     """gate / skeptic を起動するための材料を組み立てて印字する。判定はしない。"""
     role = a.role
-    from review_freshness import descriptor_status, freshness_policy, persist_descriptor
+    from review_freshness import (descriptor_status, freshness_policy, integration_ref_policy,
+                                  persist_descriptor)
     try:
         from discover import constitution
         _constitution_path = constitution()
@@ -176,8 +177,19 @@ def cmd_verify(a):
     if _policy_error:
         print(f"review freshness policy が不正: {_policy_error}", file=sys.stderr)
         return 2
+    _ref_declared, _configured_ref, _ref_error = integration_ref_policy(_constitution_path)
+    if _ref_error and not getattr(a, "base", None):
+        print(f"integration ref policy が不正: {_ref_error}", file=sys.stderr)
+        return 2
+    if _strict_freshness and not getattr(a, "base", None) and not _configured_ref:
+        print("strict review freshness では統合先を推測しない。\n"
+              "  constitution.yaml に "
+              "`enforcement.judges.integration_ref: origin/main` のように宣言するか、"
+              "今回だけ `verify --base <ref>` を明示すること。", file=sys.stderr)
+        return 11
+    _integration_ref = getattr(a, "base", None) or _configured_ref
     _sid, _sparts = review_subject(
-        a.issue, role, getattr(a, "phase", None), integration_ref=getattr(a, "base", None))
+        a.issue, role, getattr(a, "phase", None), integration_ref=_integration_ref)
     _subject_path = persist_descriptor(_sid, _sparts)
     _freshness = descriptor_status({**_sparts, "review_subject_id": _sid}, os.getcwd())
     if _strict_freshness and not _freshness["ok"]:
