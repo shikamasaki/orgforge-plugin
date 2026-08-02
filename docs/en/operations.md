@@ -68,6 +68,15 @@ postcondition was never established:
 orgforge resilience-exercise false-green-mutation --expect GREEN
 ```
 
+To verify provider containment rather than reviewer failover, run:
+
+```bash
+orgforge resilience-exercise provider-outage --expect GREEN
+```
+
+It must retain `DEGRADED`, deny an unverified provider substitution and merge, and return the
+retry decision to a human when the declared retry budget is exhausted.
+
 For unattended read-only-first operation, install the deterministic machine tick:
 
 ```bash
