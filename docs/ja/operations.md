@@ -82,6 +82,14 @@ livenessの相関を検証するには、次を実行します。
 orgforge resilience-exercise heartbeat-correlation --expect GREEN
 ```
 
+`repeated-failure-learning` は、別々の候補で同じ失敗が繰り返されたときに production の
+learning organ がエスカレーションし、doctrine への引き渡しコマンドを出すことを確認します。
+役割や doctrine の恒久変更は自動では行わず、人間の判断と bounded microexperiment を残します。
+
+```bash
+orgforge resilience-exercise repeated-failure-learning --expect GREEN
+```
+
 ledger probeが正常でも、duplicateまたはstaleなheartbeatは`ATTENTION`のままです。
 
 無人運転をread-only-firstで始める場合は、決定的なmachine tickだけを登録します。

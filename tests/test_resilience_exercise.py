@@ -14,6 +14,7 @@ SCENARIO = REPO / "template" / "exercises" / "reviewer-outage.yaml"
 FALSE_GREEN_SCENARIO = REPO / "template" / "exercises" / "false-green-mutation.yaml"
 PROVIDER_OUTAGE_SCENARIO = REPO / "template" / "exercises" / "provider-outage.yaml"
 HEARTBEAT_SCENARIO = REPO / "template" / "exercises" / "heartbeat-correlation.yaml"
+REPEATED_LEARNING_SCENARIO = REPO / "template" / "exercises" / "repeated-failure-learning.yaml"
 
 
 def _run(*args):
@@ -194,3 +195,29 @@ def test_heartbeat_correlation_scenario_has_bounded_inputs():
         "production_credentials": "forbidden",
     }
     assert set(scenario["signals"]["required"]) == {"heartbeat", "pid_liveness", "ledger_probe"}
+
+
+def test_repeated_failure_learning_escalates_without_auto_mutation():
+    run = _run("repeated-failure-learning", "--expect", "GREEN", "--json")
+    assert run.returncode == 0, run.stdout + run.stderr
+    report = json.loads(run.stdout)
+    assert report["exercise_status"] == "GREEN"
+    assert report["gaps"] == []
+    assert report["learning"]["returncode"] == 10
+    assert report["assertions"]["repeated_event_was_emitted"] is True
+    assert report["assertions"]["no_doctrine_was_auto_mutated"] is True
+    assert report["outcome"] == {"observed": "observe_only", "acceptable": True}
+    assert report["resilience_score"] is None
+
+
+def test_repeated_failure_learning_scenario_has_bounded_inputs():
+    scenario = yaml.safe_load(REPEATED_LEARNING_SCENARIO.read_text(encoding="utf-8"))
+    assert scenario["time_budget_seconds"] <= 180
+    assert scenario["blast_radius"] == {
+        "faults": 0,
+        "workspace": "temporary_directory",
+        "network": "forbidden",
+        "real_repository_mutation": "forbidden",
+        "production_credentials": "forbidden",
+    }
+    assert any(len(potentials) > 1 for potentials in scenario["potentials"].values())

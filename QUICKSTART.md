@@ -186,6 +186,14 @@ can manufacture a healthy claim:
 orgforge resilience-exercise heartbeat-correlation --expect GREEN
 ```
 
+The repeated-failure-learning exercise verifies that recurring death causes escalate through the
+production learning organ and produce an actionable doctrine handoff without silently changing
+roles or doctrine. Human judgment and a bounded microexperiment remain required.
+
+```bash
+orgforge resilience-exercise repeated-failure-learning --expect GREEN
+```
+
 A "department" is a Claude Code (or Codex) turn pointed at one role's profile. Use the runner —
 it projects the role onto the harness and attaches the plugin so the guardrails apply:
 
