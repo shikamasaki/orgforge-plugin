@@ -71,6 +71,8 @@ def main(argv):
     # phase は review_subject の一部（どのフェーズの判定か）。
     q.add_argument("--phase", default=None,
                    help="判定するフェーズ（review_subject_id に入る）")
+    q.add_argument("--base", dest="base", default=None,
+                   help="統合先 ref（省略時は origin/develop/develop/origin/main/main の順で解決）")
     # 記録のためだけに judge を起動させない。cross-harness の org では verify が実際に
     # headless judge を回すので、subject を知るのに数分待つのは筋が悪い（実測）。
     q.add_argument("--print-subject", action="store_true",

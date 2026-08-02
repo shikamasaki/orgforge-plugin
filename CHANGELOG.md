@@ -6,6 +6,21 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 2.0.27 — integration-base freshness
+
+### Fixed
+
+- Bind each review subject to an explicit integration ref, its observed head, merge-base relation,
+  reviewed tree, and requirements digest rather than treating agreement on an old base as current.
+- Re-resolve that target both when a provisional judgment is recorded and immediately before a
+  joint admission is derived; moved, stale, diverged, deleted, and unresolvable targets fail closed
+  without fetching or rebasing as a side effect.
+- Preserve the observable subject descriptor in the ledger so a stale/tainted decision can be
+  reconstructed, and require re-review after a rebase produces a new subject.
+- Add an explicit `require_current_integration_head` migration choice to doctor; new organizations
+  select strict current-head matching while existing organizations must choose strict or documented
+  compatibility mode instead of silently inheriting behavior.
+
 ## 2.0.26 — effective correction projection
 
 ### Fixed

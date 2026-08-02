@@ -142,7 +142,7 @@ def test_scheduler_receipt_cannot_be_forged_by_generic_append(tmp_path):
     payload = json.dumps({
         "check_id": "machine_sensors", "scheduled_for_min": 100,
         "execution_id": "forged", "result": "ok", "exit_code": 0,
-        "command_sha256": "a" * 64, "plugin_version": "2.0.26",
+        "command_sha256": "a" * 64, "plugin_version": "2.0.27",
     })
     code, out = run("ledger.py", "append", str(tmp_path),
                     "--actor", "system:scheduler_tick",

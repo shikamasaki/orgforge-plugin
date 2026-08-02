@@ -87,6 +87,19 @@ def test_doctor_requires_design_and_baseline_after_prepare(tmp_path):
     assert ADOPT.doctor(tmp_path)["ready"] is True
 
 
+def test_doctor_requires_explicit_review_freshness_migration(tmp_path):
+    ADOPT.prepare(tmp_path, "ja")
+    constitution = tmp_path / "constitution.yaml"
+    text = constitution.read_text(encoding="utf-8")
+    text = text.replace("    require_current_integration_head: true\n", "")
+    constitution.write_text(text, encoding="utf-8")
+
+    result = ADOPT.doctor(tmp_path)
+    check = next(item for item in result["checks"] if item["name"] == "review_freshness")
+    assert check["ok"] is False
+    assert "require_current_integration_head" in check["detail"]
+
+
 def test_doctor_rejects_invalid_baseline_and_organization(tmp_path):
     ADOPT.prepare(tmp_path, "ja")
     (tmp_path / "organization.yaml").write_text("roles: []\n", encoding="utf-8")

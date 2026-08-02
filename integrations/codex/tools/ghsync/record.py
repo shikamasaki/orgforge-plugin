@@ -460,6 +460,34 @@ def cmd_provisional(a):
               f"  2血統で回すなら constitution の enforcement.judges.lineage を "
               f"cross-harness にすること。", file=sys.stderr)
         return 2
+    # Subject equality alone cannot detect that both judges reviewed the same *old* base.  `verify`
+    # persists the observable descriptor; embed it in the append-only event and re-resolve the ref
+    # before accepting a positive vote.
+    from review_freshness import descriptor_status, freshness_policy, load_descriptor
+    try:
+        from discover import constitution
+        constitution_path = constitution()
+    except Exception:
+        constitution_path = None
+    _declared, strict_freshness, policy_error = freshness_policy(constitution_path)
+    if policy_error:
+        print(f"provisional: review freshness policy が不正 — {policy_error}", file=sys.stderr)
+        return 2
+    subject_descriptor, descriptor_path = load_descriptor(a.subject, os.getcwd())
+    if strict_freshness and subject_descriptor is None:
+        print("provisional: strict review freshness に必要な subject descriptor が無い。\n"
+              f"  expected: {descriptor_path}\n"
+              f"  org_cycle.py verify --issue {a.issue} --role {a.role} --print-subject\n"
+              "  古い review_subject_id だけでは統合先の移動を検査できないため、判定を記録しない。",
+              file=sys.stderr)
+        return 7
+    if subject_descriptor is not None:
+        freshness = descriptor_status(subject_descriptor, os.getcwd())
+        if strict_freshness and not freshness["ok"]:
+            print(f"provisional: stale review subject を記録しない — "
+                  f"{freshness['reason']}: {freshness['detail']}\n"
+                  "  統合先を取り込み、verify と判定をやり直すこと。", file=sys.stderr)
+            return 7
     ok = {"gate": ("admit", "reject", "park"), "skeptic": ("survives", "refuted")}
     if a.role not in ok:
         print(f"provisional: --role は gate | skeptic（got {a.role!r}）", file=sys.stderr)
@@ -522,6 +550,8 @@ def cmd_provisional(a):
                # 条件7+8: digest の照合対象を永続化する。台帳に散文は置かないが、
                # **どこを見れば原文があるか**は残す（Issue コメントの marker）。
                "reasoning_ref": f"issue:{a.issue}#provisional-{a.lineage}-{digest[:12]}"}
+    if subject_descriptor is not None:
+        payload["review_subject"] = subject_descriptor
     if getattr(a, "phase", None):
         payload["phase"] = a.phase
     if getattr(a, "risk", None):
@@ -596,6 +626,12 @@ def cmd_provisional(a):
             f"\n**review_subject_id:** `{a.subject}`",
             f"\n**Why (the reasoning):**\n{why}",
         ]
+        if subject_descriptor:
+            parts.insert(4, "**Integration target:** "
+                         f"`{subject_descriptor.get('integration_ref')}` @ "
+                         f"`{str(subject_descriptor.get('integration_head_sha') or '')[:12]}`; "
+                         f"base `{str(subject_descriptor.get('base_sha') or '')[:12]}` "
+                         f"({subject_descriptor.get('integration_relation')})")
         if (a.evidence or "").strip():
             parts.append(f"\n**Evidence consulted:**\n{a.evidence}")
         if (a.alternatives or "").strip():

@@ -418,7 +418,7 @@ event_classes:
                           reviewer_independence, agreed_identity_assurance, signer_id, key_id,
                           lineage: "same-harness|cross-harness|joint — `joint` means generated from two
                                     agreeing verdict_provisional records, not placed by one judge",
-                          agreed_by, from_seqs, review_subject_id,
+                          agreed_by, from_seqs, review_subject_id, review_subject,
                           reasoning_by_lineage: "per-lineage {seq, reasoning_sha256, reasoning_ref} —
                                                  the joint digest is derived from BOTH, so neither
                                                  side's account can go missing",
@@ -460,11 +460,18 @@ event_classes:
                           writer_isolation,
                           signer_id, key_id, risk_accepted,
 
-                          review_subject_id: "digest of (issue, role, phase, base_sha,
-                                              reviewed_tree_sha, dirty, requirements_digest) — generated
+                          review_subject,
+
+                          review_subject_id: "digest of (issue, role, phase, integration_ref,
+                                              integration_head_sha, base_sha, reviewed_tree_sha,
+                                              dirty, requirements_digest) — generated
                                               ONCE by `verify`, never by the judge. Two verdicts with
                                               different subjects looked at different artefacts and
                                               therefore do NOT agree",
+                          review_subject: "observable descriptor bound by review_subject_id; includes
+                                           integration ref/head, base relation, reviewed tree, and
+                                           requirements digest so freshness can be rechecked when the
+                                           verdict is recorded and when joint admission is derived",
                           authority: "NONE on its own — a single lineage's verdict is material, not a decision",
                           one_per: "(issue, for_event, lineage) — a lineage may not rewrite its verdict to
                                     manufacture agreement; correct via `correction`" }

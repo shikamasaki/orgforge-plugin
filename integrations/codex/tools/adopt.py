@@ -278,6 +278,37 @@ def doctor(root):
         "ledger, doctrine, and conventions directories exist")
     add("core_specs", all((root / name).is_file() for name in SPEC_FILES),
         "constitution, sensors, schedule, moves, ledger schema, and role settings exist")
+    freshness_declared = False
+    freshness_value = None
+    freshness_error = None
+    constitution_path = root / "constitution.yaml"
+    if constitution_path.is_file():
+        try:
+            import yaml
+            document = yaml.safe_load(constitution_path.read_text(encoding="utf-8")) or {}
+            judges = ((document.get("enforcement") or {}).get("judges") or {})
+            if not isinstance(judges, dict):
+                freshness_error = "enforcement.judges is not a map"
+            elif "require_current_integration_head" in judges:
+                freshness_declared = True
+                freshness_value = judges["require_current_integration_head"]
+                if not isinstance(freshness_value, bool):
+                    freshness_error = "require_current_integration_head is not boolean"
+        except Exception as exc:
+            freshness_error = f"constitution could not be parsed: {exc}"
+    freshness_ok = freshness_declared and freshness_error is None
+    if freshness_error:
+        freshness_detail = freshness_error
+    elif not freshness_declared:
+        freshness_detail = ("declare enforcement.judges.require_current_integration_head: true "
+                            "(strict) or false (explicit compatibility); old review subjects cannot "
+                            "prove integration-base freshness")
+    elif freshness_value:
+        freshness_detail = "strict review subjects must match the current integration head"
+    else:
+        freshness_detail = ("compatibility mode explicitly selected; stale integration bases are "
+                            "not blocked")
+    add("review_freshness", freshness_ok, freshness_detail)
     legacy_tier = _legacy_runtime_tier(root / "role-settings.yaml")
     add("runtime_mode", legacy_tier is None,
         "role settings use the current capability model"

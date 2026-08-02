@@ -342,6 +342,11 @@ enforcement:
     # judge が署名を出せるようになってから true にすること。
     # 段階的に移行できるようにするための既定であって、false が安全という意味ではない。
     require_attested_identity: false
+    # Positive judgments are valid only while the observed integration target still equals their
+    # merge-base. `verify` records ref/head/base and `derive-admission` resolves it again immediately
+    # before creating a joint event. This performs no fetch or rebase: movement, divergence, deletion,
+    # or an unresolvable ref requires a fresh review subject.
+    require_current_integration_head: true
     # Voiding a judgment is itself an authority-bearing act. A gate/skeptic may not erase its own
     # or the other judge's verdict to manufacture room for a replacement. The role is declared here
     # instead of being hard-coded in the organ; installations may assign append-only record custody

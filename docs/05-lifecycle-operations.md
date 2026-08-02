@@ -954,9 +954,15 @@ git -C <plugin> rev-parse --short HEAD             # 検証対象の版を記録
 | 故障注入 | 記録に失敗したとき **fail-closed** になること |
 | control | 仕組みを外すと **同じ操作が通る**こと（= その仕組みが止めていた証拠） |
 
-### A. subject / correction（0.32.2, 0.32.3）
+### A. subject / correction / integration freshness（0.32.2, 0.32.3, 2.0.27）
 
 - 成功: `verify --print-subject` が判定を回さずに subject を返す
+- **鮮度**: strict orgではsubjectが統合先ref・観測時head・merge-baseを保持し、判定記録時と
+  joint生成直前の双方で再解決する。統合先の移動・stale・diverged・deleted・unresolvableは
+  exit 7/11でfail-closedとし、自動fetch/rebaseは行わない
+- **移行**: `adopt doctor` が
+  `enforcement.judges.require_current_integration_head: true|false` の明示を要求する。旧subjectは
+  descriptorを持たないため、strict admissionへ再利用せずverifyからやり直す
 - 拒否: 別 subject の provisional が一致しない（exit 6）／同一血統の verdict 差し替え（exit 4）
 - **脱出**: 案内された `correction` を**実際に打って**、その後に新しい判定が入ること
 - **権限**: judgmentを出したjudge自身と別judgeのcorrectionは拒否し、constitutionで宣言した
