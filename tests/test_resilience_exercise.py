@@ -11,6 +11,7 @@ import yaml
 REPO = pathlib.Path(__file__).resolve().parents[1]
 TOOL = REPO / "tools" / "resilience_exercise.py"
 SCENARIO = REPO / "template" / "exercises" / "reviewer-outage.yaml"
+FALSE_GREEN_SCENARIO = REPO / "template" / "exercises" / "false-green-mutation.yaml"
 
 
 def _run(*args):
@@ -97,3 +98,30 @@ def test_exercise_uses_production_preflight_and_adaptation_modules():
     assert "from orgcycle.preflight import Probe, result_evidence, run_probe" in source
     assert 'str(HERE / "adaptation.py")' in source
     assert 'str(HERE / "operational_state.py")' in source
+
+
+def test_false_green_mutation_is_rejected_by_the_production_skeptic_intake():
+    run = _run("false-green-mutation", "--expect", "GREEN", "--json")
+    assert run.returncode == 0, run.stdout + run.stderr
+    report = json.loads(run.stdout)
+    assert report["exercise_status"] == "GREEN"
+    assert report["gaps"] == []
+    assert report["test"]["green"] is True
+    assert report["mutation"]["applied"] is False
+    assert report["intake"]["returncode"] == 10
+    assert "mutation[0] の適用成立が確認されていない" in report["intake"]["rejection"]
+    assert report["outcome"] == {"observed": "safe_stop", "acceptable": True}
+    assert report["resilience_score"] is None
+
+
+def test_false_green_scenario_has_the_same_bounded_blast_radius():
+    scenario = yaml.safe_load(FALSE_GREEN_SCENARIO.read_text(encoding="utf-8"))
+    assert scenario["time_budget_seconds"] <= 180
+    assert scenario["blast_radius"] == {
+        "faults": 1,
+        "workspace": "temporary_directory",
+        "network": "forbidden",
+        "real_repository_mutation": "forbidden",
+        "production_credentials": "forbidden",
+    }
+    assert any(len(potentials) > 1 for potentials in scenario["potentials"].values())

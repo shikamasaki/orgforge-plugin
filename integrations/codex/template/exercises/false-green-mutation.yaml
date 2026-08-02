@@ -1,0 +1,27 @@
+schema_version: 1
+id: false-green-mutation-minimal
+description: a GREEN test result cannot establish a mutation that never took effect
+time_budget_seconds: 60
+critical_functions: [evidence_integrity, governed_delivery]
+acceptable_outcomes: [safe_stop, observe_only, human_handback]
+false_green:
+  test_injection_id: false-green-test-fixture-v1
+expected:
+  intake_returncode: 10
+  rejection_marker: mutation[0] の適用成立が確認されていない
+  outcome: safe_stop
+  gaps: []
+blast_radius:
+  faults: 1
+  workspace: temporary_directory
+  network: forbidden
+  real_repository_mutation: forbidden
+  production_credentials: forbidden
+potentials:
+  green_test_observed: [Monitor]
+  mutation_postcondition_missing: [Monitor, Anticipate]
+  false_green_rejected: [Respond, Learn]
+  safe_stop_preserved: [Respond, Learn]
+human_judgment:
+  - whether dynamic mutation testing is required for this claim rather than a static proof
+  - whether the rejected evidence warrants rework, a different oracle, or safe stop

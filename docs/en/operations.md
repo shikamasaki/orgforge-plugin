@@ -61,6 +61,13 @@ orgforge resilience-exercise reviewer-outage --expect GREEN
 
 The deterministic fixture must prove detection, degradation, independent failover, half-open probe,
 taint revalidation, circuit closure, and return to `NORMAL` without network or real-repository writes.
+Run the separate false-GREEN fixture to prove that a passing test cannot admit a mutation whose
+postcondition was never established:
+
+```bash
+orgforge resilience-exercise false-green-mutation --expect GREEN
+```
+
 For unattended read-only-first operation, install the deterministic machine tick:
 
 ```bash

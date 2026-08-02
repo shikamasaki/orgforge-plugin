@@ -60,6 +60,13 @@ orgforge resilience-exercise reviewer-outage --expect GREEN
 
 決定的fixtureは、networkや実repositoryへのwriteを使わず、検知、縮退、独立failover、half-open
 probe、taint再検証、circuit close、`NORMAL`復帰を証明しなければなりません。
+別のfalse-GREEN fixtureでは、テストがGREENでも変異のpostconditionが成立していなければ
+skeptic intakeが拒否することを検証できます。
+
+```bash
+orgforge resilience-exercise false-green-mutation --expect GREEN
+```
+
 無人運転をread-only-firstで始める場合は、決定的なmachine tickだけを登録します。
 
 ```bash
