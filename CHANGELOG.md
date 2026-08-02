@@ -6,6 +6,17 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 2.0.31 — governed Issue-body repair
+
+### Fixed
+
+- Reject empty and placeholder-only task or objective bodies before any GitHub write, and verify an
+  existing matching Issue's body before treating `create` as an idempotent replay.
+- Refuse to silently discard a different non-empty body: report only old/new SHA-256 digests and
+  direct the operator to an explicit `repair-body` command.
+- Add a governed body-repair path that records the Issue, authenticated actor, reason, and old/new
+  body digests in an audit comment, rolling the edit back if that evidence cannot be written.
+
 ## 2.0.30 — idempotent skeptic joints
 
 ### Fixed
