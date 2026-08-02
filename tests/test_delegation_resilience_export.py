@@ -174,9 +174,7 @@ def _clone_dr(tmp_path: Path) -> Path:
 
 def _clone_graph_dr(tmp_path: Path) -> Path:
     clone = tmp_path / "dr-graph-checkout"
-    subprocess.run(["git", "clone", "--no-local", str(DR_ROOT), str(clone)],
-                   check=True, capture_output=True, text=True)
-    subprocess.run(["git", "-C", str(clone), "checkout", "--detach",
+    subprocess.run(["git", "-C", str(DR_ROOT), "worktree", "add", "--detach", str(clone),
                     "e098ed6f04a4af12e564f102276f15cbc4b9ed2f"],
                    check=True, capture_output=True, text=True)
     return clone
@@ -270,9 +268,13 @@ def test_graph_export_ignores_checkout_shadowing(tmp_path, shadow):
          "--lock", str(LOCK), "--dr-root", str(clone), "--output", str(clean)],
         cwd=REPO, text=True, capture_output=True, timeout=30,
     )
-    assert run.returncode == 0, run.stderr
-    assert (clean / "assurance-graph.json").is_file()
-    assert (clean / "assurance-graph.json").read_bytes() == (baseline / "assurance-graph.json").read_bytes()
+    try:
+        assert run.returncode == 0, run.stderr
+        assert (clean / "assurance-graph.json").is_file()
+        assert (clean / "assurance-graph.json").read_bytes() == (baseline / "assurance-graph.json").read_bytes()
+    finally:
+        subprocess.run(["git", "-C", str(DR_ROOT), "worktree", "remove", "--force", str(clone)],
+                       check=False, capture_output=True, text=True)
 
 
 def test_export_rejects_code_digest_mismatch(tmp_path):
