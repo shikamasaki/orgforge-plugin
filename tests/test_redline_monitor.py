@@ -2,6 +2,7 @@
 
 import importlib.util
 import io
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -206,6 +207,13 @@ def test_live_process_status_rearm_and_cooperative_stop_end_to_end(tmp_path):
     status_script.write_text("# healthy silence\n", encoding="utf-8")
     registry = tmp_path / "registry"
     base = [sys.executable, str(BUNDLE)]
+    # Hermetic ps: status/rearm-check now cross-check the process table, and a real
+    # monitor running on the host machine must not leak into this registry lifecycle test.
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    (fake_bin / "ps").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    (fake_bin / "ps").chmod(0o755)
+    env = dict(os.environ, PATH=f"{fake_bin}:{os.environ.get('PATH', '')}")
     process = subprocess.Popen(
         base + ["--status-script", str(status_script), "--registry", str(registry),
                 "--role", "supervisor", "--instance", "redline-supervisor",
@@ -226,19 +234,19 @@ def test_live_process_status_rearm_and_cooperative_stop_end_to_end(tmp_path):
         status = subprocess.run(
             base + ["status", "--registry", str(registry), "--role", "supervisor",
                     "--instance", "redline-supervisor"],
-            capture_output=True, text=True, timeout=10)
+            capture_output=True, text=True, timeout=10, env=env)
         assert status.returncode == 0 and "MONITOR READY" in status.stdout
         assert record_id in status.stdout
 
         rearm = subprocess.run(
             base + ["rearm-check", "--registry", str(registry), "--role", "supervisor",
                     "--instance", "redline-supervisor"],
-            capture_output=True, text=True, timeout=10)
+            capture_output=True, text=True, timeout=10, env=env)
         assert rearm.returncode == 4 and "DO NOT REARM" in rearm.stdout
 
         stop = subprocess.run(
             base + ["stop", record_id, "--registry", str(registry)],
-            capture_output=True, text=True, timeout=10)
+            capture_output=True, text=True, timeout=10, env=env)
         assert stop.returncode == 0 and "no PID signal was sent" in stop.stdout
         assert process.wait(timeout=5) == 0
         assert process.stdout.read() == ""       # healthy silence remains silent
@@ -246,7 +254,7 @@ def test_live_process_status_rearm_and_cooperative_stop_end_to_end(tmp_path):
         after = subprocess.run(
             base + ["rearm-check", "--registry", str(registry), "--role", "supervisor",
                     "--instance", "redline-supervisor"],
-            capture_output=True, text=True, timeout=10)
+            capture_output=True, text=True, timeout=10, env=env)
         assert after.returncode == 0 and "READY TO ARM" in after.stdout
     finally:
         if process.poll() is None:
@@ -275,6 +283,156 @@ def test_main_rejects_non_positive_limits(args):
     with pytest.raises(SystemExit) as exc:
         MONITOR.main(args)
     assert exc.value.code == 2
+
+
+def test_registration_failure_refuses_to_monitor(tmp_path, monkeypatch, capsys):
+    """OBS-065 (a): if the registry record cannot be written, the monitor must not start."""
+    blocked = tmp_path / "registry"
+    blocked.write_text("a file where the registry directory should be", encoding="utf-8")
+    probes = []
+    monkeypatch.setattr(MONITOR, "probe", lambda *args, **kwargs: probes.append(args) or "")
+
+    rc = MONITOR.main(["--registry", str(blocked), "--max-polls", "1"])
+
+    assert rc == 3
+    assert probes == []                      # never entered the watch loop
+    assert "REFUSING TO START" in capsys.readouterr().err
+
+
+def test_shipped_entry_point_fails_closed_without_registry_write(tmp_path):
+    blocked = tmp_path / "registry"
+    blocked.write_text("not a directory", encoding="utf-8")
+    result = subprocess.run(
+        [sys.executable, str(BUNDLE), "--registry", str(blocked), "--max-polls", "1"],
+        capture_output=True, text=True, timeout=10)
+    assert result.returncode == 3
+    assert result.stdout == ""
+    assert "REFUSING TO START" in result.stderr
+
+
+def test_status_reports_unregistered_same_instance_process(tmp_path, capsys):
+    """OBS-065 (b): status must cross-check ps and flag same-instance processes with no record."""
+    registry = tmp_path / "monitors"
+    MONITOR.register_heartbeat(registry, role="supervisor", instance="redline-supervisor",
+                               version="2.0.30", pid=222, now=1000, token="seen")
+    ps_rows = [
+        (222, "python3 /plug/scripts/redline_monitor.py /ledger --role supervisor"),
+        (97836, "python3 /plug/scripts/redline_monitor.py /ledger --role supervisor "
+                "--instance redline-supervisor --interval 60"),
+        (500, "python3 /plug/scripts/redline_monitor.py status --registry /somewhere"),
+        (501, "grep redline_monitor"),
+        (502, "python3 /plug/scripts/redline_monitor.py /ledger --role gate"),
+    ]
+
+    rc = MONITOR.report_status(
+        registry, current_version="2.0.30", now=1010, stale_after=60,
+        pid_alive=lambda pid: pid == 222, role="supervisor",
+        instance="redline-supervisor", ps_rows=ps_rows)
+    out = capsys.readouterr().out
+
+    assert rc == 4
+    assert "MONITOR ATTENTION" in out
+    assert "pid=97836" in out and "unregistered" in out
+    assert "pid=500" not in out              # subcommand invocation is not a watch loop
+    assert "pid=501" not in out              # grep is not a monitor
+    assert "pid=502" not in out              # different logical instance
+
+
+def test_status_flags_unregistered_process_even_with_empty_registry(tmp_path, capsys):
+    registry = tmp_path / "monitors"
+    ps_rows = [(97836, "python3 /plug/scripts/redline_monitor.py /ledger "
+                       "--role supervisor --instance redline-supervisor")]
+
+    rc = MONITOR.report_status(
+        registry, current_version="2.0.30", now=1010, stale_after=60,
+        pid_alive=lambda _pid: False, role="supervisor",
+        instance="redline-supervisor", ps_rows=ps_rows)
+    out = capsys.readouterr().out
+
+    assert rc == 4
+    assert "MONITOR ABSENT" not in out       # a live-but-invisible monitor is not absence
+    assert "pid=97836" in out and "unregistered" in out
+
+
+def test_status_notes_unavailable_process_table_without_crashing(tmp_path, capsys):
+    registry = tmp_path / "monitors"
+    MONITOR.register_heartbeat(registry, role="supervisor", instance="redline-supervisor",
+                               version="2.0.30", pid=222, now=1000, token="seen")
+
+    rc = MONITOR.report_status(
+        registry, current_version="2.0.30", now=1010, stale_after=60,
+        pid_alive=lambda pid: pid == 222, role="supervisor",
+        instance="redline-supervisor", ps_rows=None)
+    out = capsys.readouterr().out
+
+    assert rc == 0                           # registry itself is healthy
+    assert "process table unavailable" in out
+
+
+def test_rearm_check_refuses_when_unregistered_live_process_owns_instance(tmp_path, capsys):
+    """OBS-065 (c): an unregistered live process for the instance means DO NOT REARM."""
+    registry = tmp_path / "monitors"         # registry looks empty — the Tatekae trap
+    ps_rows = [(97836, "python3 /plug/scripts/redline_monitor.py /ledger "
+                       "--role supervisor --instance redline-supervisor")]
+
+    rc = MONITOR.rearm_check(
+        registry, current_version="2.0.30", now=1010, stale_after=60,
+        pid_alive=lambda _pid: False, role="supervisor",
+        instance="redline-supervisor", ps_rows=ps_rows)
+    out = capsys.readouterr().out
+
+    assert rc == 4
+    assert "DO NOT REARM" in out and "unregistered" in out
+    assert "READY TO ARM" not in out
+
+
+def test_rearm_check_notes_unavailable_process_table(tmp_path, capsys):
+    registry = tmp_path / "monitors"
+
+    rc = MONITOR.rearm_check(
+        registry, current_version="2.0.30", now=1010, stale_after=60,
+        pid_alive=lambda _pid: False, role="supervisor",
+        instance="redline-supervisor", ps_rows=None)
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    assert "READY TO ARM" in out and "process table unavailable" in out
+
+
+def test_process_table_reads_pid_and_command_defensively():
+    class Result:
+        returncode = 0
+        stdout = "  12 python3 monitor.py\ngarbage line\n 13 ps -axo pid=,command=\n"
+
+    rows = MONITOR.process_table(runner=lambda *a, **k: Result())
+    assert rows == [(12, "python3 monitor.py"), (13, "ps -axo pid=,command=")]
+
+    def broken(*_args, **_kwargs):
+        raise OSError("no ps on this host")
+    assert MONITOR.process_table(runner=broken) is None
+
+
+def test_cli_status_consults_the_process_table_via_ps(tmp_path):
+    """End-to-end: the shipped status subcommand actually reads ps, not only the registry."""
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_ps = fake_bin / "ps"
+    fake_ps.write_text(
+        "#!/bin/sh\n"
+        "echo ' 97836 python3 /plug/scripts/redline_monitor.py /ledger"
+        " --role supervisor --instance redline-supervisor'\n", encoding="utf-8")
+    fake_ps.chmod(0o755)
+    registry = tmp_path / "registry"
+    registry.mkdir()
+    env = dict(os.environ, PATH=f"{fake_bin}:{os.environ.get('PATH', '')}")
+
+    result = subprocess.run(
+        [sys.executable, str(BUNDLE), "status", "--registry", str(registry),
+         "--role", "supervisor", "--instance", "redline-supervisor"],
+        capture_output=True, text=True, timeout=10, env=env)
+
+    assert result.returncode == 4
+    assert "pid=97836" in result.stdout and "unregistered" in result.stdout
 
 
 def test_org_start_checks_liveness_before_rearming_monitor():

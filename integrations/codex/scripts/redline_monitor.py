@@ -241,18 +241,116 @@ def _selected(rows, role=None, instance=None):
             and (not instance or row.get("instance") == instance)]
 
 
+def process_table(runner=None):
+    """Read (pid, command) rows from the process table; None means it could not be read."""
+    run = runner or subprocess.run
+    try:
+        result = run(["ps", "-axo", "pid=,command="],
+                     capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if getattr(result, "returncode", 1) != 0:
+        return None
+    rows = []
+    for line in (result.stdout or "").splitlines():
+        parts = line.strip().split(None, 1)
+        if len(parts) == 2 and parts[0].isdigit():
+            rows.append((int(parts[0]), parts[1]))
+    return rows
+
+
+def _monitor_identity(command):
+    """Return (role, instance) when a ps command line is a monitor WATCH loop, else None."""
+    tokens = str(command or "").split()
+    index = next((position for position, token in enumerate(tokens)
+                  if Path(token).name.startswith("redline_monitor")), None)
+    if index is None:
+        return None
+    if index > 0 and not Path(tokens[0]).name.lower().startswith("python"):
+        return None                                   # grep/pkill/editor lines, not a monitor
+    rest = tokens[index + 1:]
+    if rest and rest[0] in {"status", "rearm-check", "stop"}:
+        return None                                   # registry queries never own the instance
+    role, instance = "", None
+    position = 0
+    while position < len(rest):
+        token = rest[position]
+        if token == "--role" and position + 1 < len(rest):
+            role, position = rest[position + 1], position + 2
+        elif token.startswith("--role="):
+            role, position = token.split("=", 1)[1], position + 1
+        elif token == "--instance" and position + 1 < len(rest):
+            instance, position = rest[position + 1], position + 2
+        elif token.startswith("--instance="):
+            instance, position = token.split("=", 1)[1], position + 1
+        else:
+            position += 1
+    role = role or "supervisor"
+    return role, instance or f"redline-{_safe(role)}"
+
+
+def unregistered_monitors(registry, role=None, instance=None, ps_rows=None, own_pid=None):
+    """Live monitor processes matching this signature that have NO registry record (OBS-065)."""
+    rows = process_table() if ps_rows is None else ps_rows
+    if rows is None:
+        return []
+    recorded = set()
+    for record in _load_records(registry):
+        try:
+            recorded.add(int(record.get("pid")))
+        except (TypeError, ValueError):
+            continue
+    own = os.getpid() if own_pid is None else int(own_pid)
+    found = []
+    for pid, command in rows:
+        try:
+            pid = int(pid)
+        except (TypeError, ValueError):
+            continue
+        if pid == own or pid in recorded:
+            continue
+        identity = _monitor_identity(command)
+        if identity is None:
+            continue
+        process_role, process_instance = identity
+        if (role and process_role != role) or (instance and process_instance != instance):
+            continue
+        found.append({"pid": pid, "role": process_role, "instance": process_instance,
+                      "status": "unregistered", "command": str(command)})
+    return sorted(found, key=lambda process: process["pid"])
+
+
+_PS_UNCHECKED = object()  # library default: pure registry view (resilience_exercise, older callers)
+_PS_NOTE = "process table unavailable — unregistered-monitor cross-check skipped"
+
+
+def _cross_check(registry, role, instance, ps_rows):
+    """Resolve the injected ps source into (unregistered rows, optional caveat note)."""
+    if ps_rows is _PS_UNCHECKED:
+        return [], None
+    if ps_rows is None:
+        return [], _PS_NOTE
+    return unregistered_monitors(registry, role=role, instance=instance, ps_rows=ps_rows), None
+
+
 def report_status(registry, current_version, now=None, stale_after=180, pid_alive=None,
-                  role=None, instance=None):
+                  role=None, instance=None, ps_rows=_PS_UNCHECKED):
     rows = _selected(monitor_status(registry, current_version, now, stale_after, pid_alive),
                      role, instance)
+    unregistered, note = _cross_check(registry, role, instance, ps_rows)
     active = [row for row in rows if row["status"] in {"live", "stale"}]
     attention = [row for row in active
                  if row["status"] == "stale" or row["duplicate"] or row["old_version"]]
-    if not active:
+    if not active and unregistered:
+        print("MONITOR ATTENTION — unregistered live monitor process; "
+              "no registry record, so cooperative stop cannot reach it")
+        code = 4
+    elif not active:
         print("MONITOR ABSENT — no live heartbeat; rearm-check may authorize a new instance")
         code = 3
-    elif attention:
-        print("MONITOR ATTENTION — stale, duplicate, orphaned, or old-version instance detected")
+    elif attention or unregistered:
+        print("MONITOR ATTENTION — stale, duplicate, orphaned, old-version, "
+              "or unregistered instance detected")
         code = 4
     else:
         print("MONITOR READY — one current live instance")
@@ -263,21 +361,34 @@ def report_status(registry, current_version, now=None, stale_after=180, pid_aliv
         print(f"  {row['record_id']} status={row['status']} pid={row.get('pid')} "
               f"version={row.get('plugin_version')} role={row.get('role')} "
               f"instance={row.get('instance')}{suffix}")
+    for process in unregistered:
+        print(f"  pid={process['pid']} status=unregistered role={process['role']} "
+              f"instance={process['instance']} — no registry record; token-bound stop "
+              f"unavailable; command: {process['command']}")
+    if note:
+        print(f"  note: {note}")
     return code
 
 
 def rearm_check(registry, current_version, now=None, stale_after=180, pid_alive=None,
-                role=None, instance=None):
+                role=None, instance=None, ps_rows=_PS_UNCHECKED):
     rows = _selected(monitor_status(registry, current_version, now, stale_after, pid_alive),
                      role, instance)
+    unregistered, note = _cross_check(registry, role, instance, ps_rows)
     active = [row for row in rows if row["status"] in {"live", "stale"}]
-    if active:
-        print("DO NOT REARM — a live/stale process still owns this logical monitor instance")
+    if active or unregistered:
+        print("DO NOT REARM — a live process still owns this logical monitor instance")
         for row in active:
             print(f"  {row['record_id']} status={row['status']} version={row.get('plugin_version')}"
                   f"; stop exactly this record with: redline_monitor.py stop {row['record_id']}")
+        for process in unregistered:
+            print(f"  pid={process['pid']} status=unregistered — live monitor with no registry "
+                  f"record owns {process['instance']}; cooperative stop unavailable; "
+                  f"command: {process['command']}")
         return 4
     print("READY TO ARM — no live process owns this logical monitor instance")
+    if note:
+        print(f"  note: {note}")
     return 0
 
 
@@ -360,9 +471,11 @@ def main(argv=None):
             parser.error("--stale-after must be greater than zero")
         if command == "status":
             return report_status(registry, version, stale_after=args.stale_after,
-                                 role=args.role, instance=args.instance)
+                                 role=args.role, instance=args.instance,
+                                 ps_rows=process_table())
         return rearm_check(registry, version, stale_after=args.stale_after,
-                           role=args.role, instance=args.instance)
+                           role=args.role, instance=args.instance,
+                           ps_rows=process_table())
 
     parser = argparse.ArgumentParser(
         description="Watch status.py redline and emit only RED transitions/changes.")
@@ -386,9 +499,17 @@ def main(argv=None):
         parser.error("could not discover the monitor registry; pass a ledger root or --registry")
     role = args.role or "supervisor"
     instance = args.instance or f"redline-{_safe(role)}"
-    record = register_heartbeat(
-        registry, role=role, instance=instance, version=plugin_version(),
-        ledger_root=args.root, interval=args.interval)
+    try:
+        # Fail closed (OBS-065): a monitor that cannot register would be invisible to
+        # status/stop and would later trick rearm-check into authorizing a duplicate.
+        record = register_heartbeat(
+            registry, role=role, instance=instance, version=plugin_version(),
+            ledger_root=args.root, interval=args.interval)
+    except OSError as exc:
+        print(f"REFUSING TO START — could not write the monitor registry record under "
+              f"{registry} ({type(exc).__name__}: {exc}); an unregistered monitor cannot be "
+              f"seen by status or stopped cooperatively", file=sys.stderr)
+        return 3
     try:
         watch(lambda: probe(args.status_script, args.root, args.role),
               interval=args.interval, max_polls=args.max_polls,
