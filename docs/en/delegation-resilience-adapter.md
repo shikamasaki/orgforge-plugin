@@ -32,35 +32,32 @@ OrgForge imports nor exercise execution code.
 
 ## Assurance Graph export
 
-The consumer lock now pins the separate DR Assurance Graph v0alpha1 profile while retaining the
-transactional-action v0alpha2 packet profile. `graph` resolves only the pinned
-`assurance-graph-v0alpha1` tag object and commit, imports from its path-safe archive, checks the
-consumer-held schema and verifier digests, and runs the standalone DR verifier before emitting any
-output. A schema/verifier or digest mismatch emits no partial artifact.
+`tools/assurance_graph_export.py export` is a second one-way adapter, separate from the v0alpha2
+packet exporter, which stays byte-for-byte unchanged. It reads the same three OrgForge inputs plus
+an explicit `--observed-at` UTC timestamp (the report protocol records no time of its own), and
+emits a graph packet: `graph.json`, the locked DR verifier's `verification-result.json`, the
+source artifacts, and a standalone copy of the pinned Graph verifier.
 
-The current mapping is deliberately minimal and source-bound:
+The lock is `integrations/delegation-resilience/assurance-graph-v0alpha1.lock.json`. It binds the
+`assurance-graph-v0alpha1.1` tag object, commit, schema digest, and standalone Graph verifier code
+digest — the same values DR's own release lock publishes at that commit. Export resolves the tag
+references against the DR checkout, then runs the Graph verifier only from a path-safe
+`git archive` of the locked commit in a fresh subprocess; schema and verifier code digests are
+recomputed from that archive and must match the lock, or no output is written.
 
-| OrgForge evidence | Candidate graph element | Required treatment |
-| --- | --- | --- |
-| actor identity and role record | `actor` | stable mapping plus source artifact digest |
-| declared critical function / intent | `intent` or `capability` | declaration only; never inferred support |
-| exercise attempt and fault receipt | `attempt` / `exercise` | observed conditions and bounded outcome |
-| ledger or exercise observation | `evidence` | epistemic status and sourceRef |
-| attestation or signed packet | `attestation` / `artifact` | digest-bound opaque source |
-| declared dependency or seam | `dependency` | only when explicitly present in source |
+Mapping rules, in addition to the v0alpha2 boundary above:
 
-The adapter currently emits only the explicit reviewer-outage `exercise`, its observed report
-`evidence`/`artifact`, and the schema-defined `produces_artifact` relationship. It emits no actor,
-claim, capability, dependency, external effect, or inferred edge when the OrgForge source does not
-declare one. Missing evidence, unsupported edge types, duplicate IDs, dangling references, graph
-digest changes, and mapping omissions fail closed in the pinned DR verifier. Graph verification
-leaves recovery capability `not_demonstrated`; graph existence is never a recovery claim.
+- Nodes and edges read directly from a source artifact (the exercise, its report evidence, the
+  constitution artifact, the reviewer and harness dependencies, the declared shared-fate and
+  depends_on relations) are `observed`.
+- Everything the adapter itself introduces — the recovery claim node and every `supports` /
+  `depends_on` edge into it — is `derived`, never `observed`. The claim requests only
+  `NOT_DEMONSTRATED`.
+- The locked verifier therefore keeps the claim at `NOT_DEMONSTRATED` for two independent
+  reasons (derived support, shared-fate dependencies). The exporter additionally fails closed if
+  any claim result requests or verifies anything else.
 
-This is intentionally a design boundary, not a new OrgForge assurance claim. The purpose is to
-make evidence, dependencies, external effects, and recoverability explainable with tamper
-resistance and reproducibility—not to treat the existence of a graph as a guarantee.
-
-The adapter tests duplicate/invalid JSON and digest failures at the trust boundary, deterministic
-byte-identical regeneration, source immutability, standalone verification, and the DR verifier's
-duplicate/dangling/mutation checks. `GRAPH_VERIFIED` only means the derived graph is internally
-valid and reproducible; it does not demonstrate recovery capability or human takeover.
+`GRAPH_VERIFIED` only proves graph structure, source-artifact digests, references, and
+reproducibility. It is not recovery capability, human takeover, deployment approval, or
+authorization; those remain `NOT_DEMONSTRATED` until a facilitated human drill and a real-world
+recovery exercise exist.

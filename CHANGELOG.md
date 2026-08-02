@@ -6,6 +6,17 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 2.1.1 — restore the reviewed Graph adapter
+
+### Fixed
+
+- 2.1.0 shipped the pre-review in-place graph adapter: the old `assurance-graph-v0alpha1`
+  tag pin, an `assuranceGraph` block folded into `v0alpha2.lock.json`, and no
+  `--no-replace-objects` hardening. This release restores the independently reviewed
+  separate adapter (`tools/assurance_graph_export.py`) pinned to `assurance-graph-v0alpha1.1`
+  with its own lock file, the git-replace (`--no-replace-objects`) hardening on both the
+  graph and delegation-resilience adapters, and the bound `verifierManifestPath`.
+
 ## 2.0.32 — atomic hold guidance
 
 ### Fixed

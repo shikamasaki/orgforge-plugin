@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Export OrgForge evidence through archived, consumer-pinned DR profiles."""
+"""Export OrgForge evidence through an archived, pinned DR v0alpha2 checkout."""
 
 from __future__ import annotations
 
@@ -55,34 +55,17 @@ def _locked_archive(root: Path, expected: dict[str, Any]) -> bytes:
     tag_object = expected.get("tagObject")
     if not commit or not tag_object or not expected.get("verifierCodeDigest"):
         raise ExportError("DR lock is incomplete")
+    # --no-replace-objects: a repo-local replace ref could otherwise swap the archived
+    # content while rev-parse still reports the locked SHAs.
     for ref, digest in (("v0alpha2^{}", commit), ("v0alpha2", tag_object)):
-        result = subprocess.run(["git", "-C", str(root), "rev-parse", ref], text=True,
-                                capture_output=True)
+        result = subprocess.run(["git", "--no-replace-objects", "-C", str(root),
+                                 "rev-parse", ref], text=True, capture_output=True)
         if result.returncode != 0 or result.stdout.strip() != digest:
             raise ExportError(f"DR lock mismatch for {ref}")
-    archive = subprocess.run(["git", "-C", str(root), "archive", "--format=tar", commit],
-                             capture_output=True)
+    archive = subprocess.run(["git", "--no-replace-objects", "-C", str(root), "archive",
+                              "--format=tar", commit], capture_output=True)
     if archive.returncode != 0:
         raise ExportError("unable to archive locked DR commit")
-    return archive.stdout
-
-
-def _locked_profile_archive(root: Path, expected: dict[str, Any], *, ref: str) -> bytes:
-    if not root.is_dir():
-        raise ExportError("DR profile root is unavailable")
-    commit = expected.get("commit")
-    tag_object = expected.get("tagObject")
-    if not commit or not tag_object:
-        raise ExportError("DR profile lock is incomplete")
-    for profile_ref, digest in ((f"{ref}^{{}}", commit), (ref, tag_object)):
-        result = subprocess.run(["git", "-C", str(root), "rev-parse", profile_ref],
-                                text=True, capture_output=True)
-        if result.returncode != 0 or result.stdout.strip() != digest:
-            raise ExportError(f"DR profile lock mismatch for {profile_ref}")
-    archive = subprocess.run(["git", "-C", str(root), "archive", "--format=tar", commit],
-                             capture_output=True)
-    if archive.returncode != 0:
-        raise ExportError("unable to archive locked DR profile")
     return archive.stdout
 
 
@@ -227,166 +210,6 @@ def export(*, report_path: Path, constitution_path: Path, scenario_path: Path,
         shutil.copytree(child_output, output)
 
 
-def _graph_timestamp(report: dict[str, Any]) -> str:
-    timestamp = report.get("observed_at")
-    if not isinstance(timestamp, str) or not timestamp.endswith("Z"):
-        raise ExportError("graph mapping requires an observed_at UTC timestamp")
-    return timestamp
-
-
-def _build_graph(*, report_raw: bytes, constitution_raw: bytes, scenario_raw: bytes,
-                 report: dict[str, Any], graph_lock: dict[str, Any]) -> dict[str, Any]:
-    """Map only explicit OrgForge exercise artifacts; never invent claims or capabilities."""
-    observed_at = _graph_timestamp(report)
-    sources = [
-        ("src:orgforge-exercise-report", "orgforge-inputs/exercise-report.json", report_raw),
-        ("src:orgforge-constitution", "orgforge-inputs/constitution.yaml", constitution_raw),
-        ("src:orgforge-reviewer-outage", "orgforge-inputs/reviewer-outage.yaml", scenario_raw),
-    ]
-    source_artifacts = [
-        {"id": source_id, "uri": uri, "digest": _digest(raw), "observedAt": observed_at}
-        for source_id, uri, raw in sources
-    ]
-    report_ref, scenario_ref = source_artifacts[0]["id"], source_artifacts[2]["id"]
-    report_digest = source_artifacts[0]["digest"]
-    provenance = lambda ref, mode="observed", method=None: {
-        "mode": mode, "sourceRefs": [ref], **({"method": method} if method else {})
-    }
-    nodes = [
-        {"id": "exercise:reviewer-outage-minimal", "type": "exercise",
-         "sourceRefs": [scenario_ref], "assurance": "observed",
-         "observedAt": observed_at, "provenance": provenance(scenario_ref)},
-        {"id": "evidence:orgforge-exercise-report", "type": "evidence",
-         "sourceRefs": [report_ref], "artifactDigest": report_digest,
-         "assurance": "observed", "observedAt": observed_at,
-         "provenance": provenance(report_ref)},
-        {"id": "artifact:orgforge-exercise-report", "type": "artifact",
-         "sourceRefs": [report_ref], "artifactDigest": report_digest,
-         "assurance": "observed", "observedAt": observed_at,
-         "provenance": provenance(report_ref)},
-    ]
-    edges = [
-        {"id": "edge:reviewer-outage-produces-report", "type": "produces_artifact",
-         "from": "exercise:reviewer-outage-minimal", "to": "artifact:orgforge-exercise-report",
-         "sourceRefs": [report_ref], "assurance": "derived", "observedAt": observed_at,
-         "provenance": provenance(report_ref, "derived", "OrgForge exercise-report protocol")},
-    ]
-    digest_seed = json.dumps([item["digest"] for item in source_artifacts], separators=(",", ":"))
-    graph_id = "graph:orgforge-" + hashlib.sha256(digest_seed.encode()).hexdigest()[:24]
-    return {
-        "apiVersion": graph_lock["profile"], "kind": "AssuranceGraph",
-        "metadata": {"graphId": graph_id, "createdAt": observed_at,
-                      "canonicalization": "RFC8785-JCS"},
-        "sourceArtifacts": source_artifacts, "nodes": nodes, "edges": edges,
-    }
-
-
-def _run_graph_child(*, archive_root: Path, graph_path: Path, artifact_root: Path,
-                     output: Path, expected: dict[str, Any]) -> None:
-    sys.path.insert(0, str(archive_root))
-    graph_module = importlib.import_module("tools.assurance_graph")
-    manifest = importlib.import_module("tools.assurance_graph_manifest")
-    for module in (graph_module, manifest):
-        module_file = getattr(module, "__file__", None)
-        if not module_file or not Path(module_file).resolve().is_relative_to(archive_root.resolve()):
-            raise ExportError("DR graph verifier module is outside the archive root")
-    actual_schema = _digest((archive_root / expected["schemaPath"]).read_bytes())
-    actual_code = manifest.assurance_graph_code_digest()
-    if actual_schema != expected["schemaDigest"]:
-        raise ExportError("DR graph schema digest does not match lock")
-    if actual_code != expected["verifierCodeDigest"]:
-        raise ExportError("DR graph verifier code digest does not match lock")
-    result = graph_module.verify_file(graph_path, artifact_root=artifact_root)
-    if result.get("graphVerificationOutcome") != "GRAPH_VERIFIED":
-        raise ExportError("DR graph verifier rejected generated graph")
-    output.mkdir(parents=True, exist_ok=False)
-    graph_value = json.loads(graph_path.read_text(encoding="utf-8"))
-    (output / "assurance-graph.json").write_bytes(graph_module.canonical_graph_bytes(graph_value))
-    (output / "orgforge-inputs").mkdir(parents=True, exist_ok=True)
-    shutil.copy2(artifact_root / "orgforge-inputs" / "exercise-report.json",
-                 output / "orgforge-inputs" / "exercise-report.json")
-    shutil.copy2(artifact_root / "orgforge-inputs" / "constitution.yaml",
-                 output / "orgforge-inputs" / "constitution.yaml")
-    shutil.copy2(artifact_root / "orgforge-inputs" / "reviewer-outage.yaml",
-                 output / "orgforge-inputs" / "reviewer-outage.yaml")
-    verifier_root = output / "standalone-verifier"
-    for relative in ("tools", "profiles/assurance-graph/schema", "requirements-verifier.txt"):
-        source = archive_root / relative
-        destination = verifier_root / relative
-        if source.is_dir():
-            shutil.copytree(source, destination)
-        else:
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source, destination)
-    (output / "graph-verifier-code-digest.txt").write_text(actual_code + "\n")
-    (output / "graph-schema-digest.txt").write_text(actual_schema + "\n")
-    (output / "verification-result.json").write_bytes(graph_module.canonical_graph_bytes(result))
-
-
-def export_assurance_graph(*, report_path: Path, constitution_path: Path, scenario_path: Path,
-                           lock_path: Path, dr_root: Path, output: Path) -> None:
-    if output.exists():
-        raise ExportError("graph output must not already exist")
-    report_raw, constitution_raw, scenario_raw = (report_path.read_bytes(),
-                                                  constitution_path.read_bytes(),
-                                                  scenario_path.read_bytes())
-    report = _json(report_raw, "exercise report")
-    lock = _json(lock_path.read_bytes(), "adapter lock")
-    if lock.get("apiVersion") != "orgforge.delegation-resilience-adapter/v1":
-        raise ExportError("unknown adapter lock version")
-    graph = lock.get("assuranceGraph")
-    if not isinstance(graph, dict):
-        raise ExportError(
-            "consumer lock declares no Assurance Graph schema/verifier contract; "
-            "graph export is unavailable and no artifact was emitted"
-        )
-    required_graph_fields = (
-        "repository", "tag", "tagObject", "commit", "profile", "schemaPath",
-        "schemaDigest", "verifierCodeDigest", "verifierManifestPath",
-    )
-    missing_graph_fields = [
-        field for field in required_graph_fields
-        if not isinstance(graph.get(field), str) or not graph[field]
-    ]
-    if missing_graph_fields:
-        raise ExportError(
-            "Assurance Graph consumer lock is incomplete; missing required fields: "
-            + ", ".join(missing_graph_fields)
-        )
-    if graph.get("profile") != "delegation-resilience.org/assurance-graph/v0alpha1":
-        raise ExportError("unsupported Assurance Graph profile")
-    _validate_inputs(report, scenario_raw, constitution_raw)
-    graph_value = _build_graph(report_raw=report_raw, constitution_raw=constitution_raw,
-                               scenario_raw=scenario_raw, report=report, graph_lock=graph)
-    archive_raw = _locked_profile_archive(dr_root, graph, ref=graph["tag"])
-    with tempfile.TemporaryDirectory(prefix="orgforge-graph-") as temp:
-        temp_root = Path(temp)
-        archive_root = temp_root / "dr"
-        _extract_archive(archive_raw, archive_root)
-        artifact_root = temp_root / "artifacts"
-        (artifact_root / "orgforge-inputs").mkdir(parents=True)
-        (artifact_root / "orgforge-inputs" / "exercise-report.json").write_bytes(report_raw)
-        (artifact_root / "orgforge-inputs" / "constitution.yaml").write_bytes(constitution_raw)
-        (artifact_root / "orgforge-inputs" / "reviewer-outage.yaml").write_bytes(scenario_raw)
-        graph_path = temp_root / "assurance-graph.json"
-        graph_path.write_bytes(importlib.import_module("json").dumps(
-            graph_value, sort_keys=True, separators=(",", ":")
-        ).encode())
-        child_output = temp_root / "output"
-        env = os.environ.copy()
-        env["PYTHONPATH"] = str(archive_root)
-        result = subprocess.run(
-            [sys.executable, str(Path(__file__).resolve()), "run-graph",
-             "--archive-root", str(archive_root), "--graph", str(graph_path),
-             "--artifact-root", str(artifact_root), "--output", str(child_output),
-             "--lock", str(lock_path)],
-            cwd=archive_root, env=env, text=True, capture_output=True,
-        )
-        if result.returncode != 0:
-            raise ExportError(result.stderr.strip() or "DR graph verifier failed")
-        shutil.copytree(child_output, output)
-
-
 def main() -> int:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
@@ -396,31 +219,12 @@ def main() -> int:
     child = sub.add_parser("run-dr")
     for name in ("archive-root", "exercise-report", "constitution", "scenario", "mapping", "output"):
         child.add_argument(f"--{name}", required=True, type=Path)
-    graph_child = sub.add_parser("run-graph")
-    for name in ("archive-root", "graph", "artifact-root", "output", "lock"):
-        graph_child.add_argument(f"--{name}", required=True, type=Path)
-    graph = sub.add_parser("graph")
-    for name in ("exercise-report", "constitution", "scenario", "lock", "dr-root", "output"):
-        graph.add_argument(f"--{name}", required=True, type=Path)
     args = parser.parse_args()
     try:
         if args.command == "run-dr":
             _run_dr_child(archive_root=args.archive_root, report_path=args.exercise_report,
                           constitution_path=args.constitution, scenario_path=args.scenario,
                           mapping_path=args.mapping, output=args.output)
-        elif args.command == "run-graph":
-            lock = _json(args.lock.read_bytes(), "adapter lock")
-            expected = lock.get("assuranceGraph")
-            if not isinstance(expected, dict):
-                raise ExportError("adapter lock has no Assurance Graph profile")
-            _run_graph_child(archive_root=args.archive_root, graph_path=args.graph,
-                             artifact_root=args.artifact_root, output=args.output,
-                             expected=expected)
-        elif args.command == "graph":
-            export_assurance_graph(report_path=args.exercise_report,
-                                   constitution_path=args.constitution,
-                                   scenario_path=args.scenario, lock_path=args.lock,
-                                   dr_root=args.dr_root, output=args.output)
         else:
             export(report_path=args.exercise_report, constitution_path=args.constitution,
                    scenario_path=args.scenario, lock_path=args.lock, dr_root=args.dr_root, output=args.output)
