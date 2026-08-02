@@ -166,6 +166,10 @@ def main(argv):
     pv.add_argument("--receipt", default=None,
                     help="判断の receipt（ファイルか JSON）。検証できたときだけ decision_by が "
                          "attested になる。無ければ claimed のまま — 独立性の強制には使えない")
+    pv.add_argument("--shared-fate", default=None, metavar="JSON",
+                    help="shared-fate evidence JSON object; stored as evidence, not inferred")
+    pv.add_argument("--shared-fate-policy", default=None, metavar="JSON",
+                    help="task policy JSON with must_differ/may_share/must_match")
     pv.set_defaults(fn=cmd_provisional)
 
     q = sub.add_parser("decide")

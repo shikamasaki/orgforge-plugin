@@ -556,6 +556,20 @@ def cmd_provisional(a):
         payload["phase"] = a.phase
     if getattr(a, "risk", None):
         payload["risk_accepted"] = True
+    for attr, field in (("shared_fate", "shared_fate"), ("shared_fate_policy", "shared_fate_policy")):
+        raw = getattr(a, attr, None)
+        if raw:
+            try:
+                value = json.loads(raw) if isinstance(raw, str) else raw
+            except (TypeError, ValueError) as exc:
+                print(f"provisional: --{attr.replace('_', '-')} is not valid JSON: {exc}",
+                      file=sys.stderr)
+                return 2
+            if not isinstance(value, dict):
+                print(f"provisional: --{attr.replace('_', '-')} must be a JSON object",
+                      file=sys.stderr)
+                return 2
+            payload[field] = value
 
     # **同じ血統の二度目の扱い。** 0.32.1 は verdict が違うときだけ拒否したので、同じ verdict で
     # 理由を変えた別の provisional を積めた（監査指摘）。どれと一致したのかが運用次第になる。

@@ -3084,6 +3084,36 @@ def cmd_derive_admission(a):
                                       "integration_ref": descriptor.get("integration_ref"),
                                       "observed": freshness}, ensure_ascii=False))
                     return 7
+        # A declared shared-fate policy is a task-level gate, not a reviewer self-claim. Both
+        # provisional records must carry the same policy and complete evidence; unknown/shared
+        # required axes prevent joint admission. Legacy receipts without a policy remain readable
+        # but are never retroactively upgraded by this check.
+        shared_fate_result = None
+        policies = [v.get("shared_fate_policy") for v in found.values()]
+        if any(policy is not None for policy in policies):
+            if len(policies) != 2 or any(not isinstance(policy, dict) for policy in policies):
+                print(json.dumps({"ok": False, "reason": "shared_fate_policy_missing",
+                                  "detail": "両方の provisional に同じ shared-fate policy が必要"},
+                                 ensure_ascii=False))
+                return 8
+            if policies[0] != policies[1] or any(not isinstance(v.get("shared_fate"), dict)
+                                                  for v in found.values()):
+                print(json.dumps({"ok": False, "reason": "shared_fate_policy_mismatch",
+                                  "detail": "policy または evidence が血統間で一致しない"},
+                                 ensure_ascii=False))
+                return 8
+            try:
+                from shared_fate import compare as compare_shared_fate
+                _left, _right = list(found.values())
+                shared_fate_result = compare_shared_fate(_left, _right, policies[0])
+            except Exception as exc:
+                print(json.dumps({"ok": False, "reason": "shared_fate_invalid",
+                                  "detail": str(exc)}, ensure_ascii=False))
+                return 8
+            if not shared_fate_result["independent"]:
+                print(json.dumps({"ok": False, "reason": "shared_fate_not_independent",
+                                  "detail": shared_fate_result}, ensure_ascii=False))
+                return 8
         verdicts = {v.get("verdict") for v in found.values()}
         if len(verdicts) != 1:
             print(json.dumps({"ok": False, "reason": "verdicts_disagree",
@@ -3131,6 +3161,8 @@ def cmd_derive_admission(a):
                    "verdict": list(verdicts)[0], "lineage": "joint",
                    "agreed_by": lineages, "review_subject_id": list(subs)[0],
                    "reviewer_independence": independence,
+                   **({"shared_fate": shared_fate_result["vector"],
+                       "shared_fate_policy": policies[0]} if shared_fate_result else {}),
                    "from_seqs": sorted(v["seq"] for v in found.values()),
                    "reasoning_by_lineage": pair, "reasoning_sha256": joint_digest,
                    "agreed_identity_assurance": min(

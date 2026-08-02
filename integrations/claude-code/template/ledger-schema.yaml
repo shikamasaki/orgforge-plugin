@@ -419,6 +419,7 @@ event_classes:
                           lineage: "same-harness|cross-harness|joint — `joint` means generated from two
                                     agreeing verdict_provisional records, not placed by one judge",
                           agreed_by, from_seqs, review_subject_id, review_subject,
+                          shared_fate, shared_fate_policy,
                           reasoning_by_lineage: "per-lineage {seq, reasoning_sha256, reasoning_ref} —
                                                  the joint digest is derived from BOTH, so neither
                                                  side's account can go missing",
@@ -459,6 +460,7 @@ event_classes:
                           # **writer の隔離は judge の隔離ではない。** 欄を分ける（0.39.2）。
                           writer_isolation,
                           signer_id, key_id, risk_accepted,
+                          shared_fate, shared_fate_policy,
 
                           review_subject,
 

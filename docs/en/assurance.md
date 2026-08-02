@@ -49,9 +49,10 @@ Review diversity remains valuable as a quality control, not an identity security
 
 `tools/shared_fate.py` makes this limitation explicit as an axis vector rather than a single
 independence score. A task policy declares `must_differ`, `may_share`, and `must_match` axes;
-missing values remain `unknown` and are never counted as different. This first step is a pure
-evidence projection. The joint-admission writer must consume the same policy before a vector can
-authorize a joint result.
+missing values remain `unknown` and are never counted as different. The joint-admission writer
+consumes the same policy when both provisional records carry it; a required axis that is shared or
+unknown blocks the joint result. Legacy receipts without a policy remain readable but are not
+retroactively upgraded.
 
 `adaptive` routing derives the primary from the running agent (`Claude Code` or `Codex`), not from a
 static preference in `organization.yaml`. If the opposite product is locally available it selects
