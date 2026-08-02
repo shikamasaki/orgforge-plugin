@@ -3303,9 +3303,12 @@ def cmd_view(a):
         # /org-resume read it to answer "what was this role mid-way through, and what's the next step?"
         # "Finished" is any of (#102 / OBS-050 — cycle_completed alone leaks WIP slots forever):
         #   - cycle_completed for the candidate;
-        #   - integration_admitted{verdict: pass} for the SAME WORK — the integrate step records
-        #     `issue`, not candidate_id, so correlate through the ledger's own alias bridge
-        #     (cycle_started.pack_manifest_id "issue-N" ↔ integration_admitted.issue);
+        #   - a LATER integration_admitted{verdict: pass} for the SAME WORK — the integrate step
+        #     records `issue`, not candidate_id, so correlate through the ledger's own alias bridge
+        #     (cycle_started.pack_manifest_id "issue-N" ↔ integration_admitted.issue). TEMPORAL on
+        #     purpose: only an integration recorded AFTER the start finishes it. A cycle_started
+        #     AFTER the pass is rework-after-integration — a LIVE candidate that must stay visible,
+        #     or /org-resume recovers to silence while the rework is mid-flight;
         #   - the cycle_started itself voided by a correction — voided_seqs, the single
         #     effective-event projection derive-admission uses (OBS-042: no third semantics).
         started, completed, latest, integrated = {}, set(), {}, []
@@ -3313,7 +3316,7 @@ def cmd_view(a):
             pl = e["payload"]
             if e["class"] == "integration_admitted":
                 if str(pl.get("verdict", "")).strip().lower() in ("pass", "admit"):
-                    integrated.append(pl)
+                    integrated.append((e["seq"], pl))
                 continue
             cid = pl.get("candidate_id")
             if not cid:
@@ -3328,13 +3331,16 @@ def cmd_view(a):
                                ("fraction", "phase", "done_so_far", "next_step", "blocked_by", "artifacts")}
         voided = voided_seqs(events)
         find = _work_aliases(events)
-        integrated_roots = {find(x) for p in integrated for x in _correlation_ids(p)}
+        integrated_roots = [(iseq, {find(x) for x in _correlation_ids(p)})
+                            for iseq, p in integrated]
         wip = []
         for cid, row in started.items():
             if cid in completed or row["started_seq"] in voided:
                 continue
-            if {find(x) for x in (_correlation_ids(row["payload"]) | _alias_ids(row["payload"]))} \
-                    & integrated_roots:
+            row_roots = {find(x) for x in
+                         (_correlation_ids(row["payload"]) | _alias_ids(row["payload"]))}
+            if any(iseq > row["started_seq"] and (roots & row_roots)
+                   for iseq, roots in integrated_roots):
                 continue
             wip.append({"candidate_id": cid, "role": row["role"],
                         "started_seq": row["started_seq"], "progress": latest.get(cid)})

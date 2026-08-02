@@ -4081,3 +4081,47 @@ def test_wip_completed_still_disappears(tmp_path):
          {"role": "eng", "candidate_id": "cand-a", "outputs": []},
          ts="2026-07-16T02:00:00Z")
     assert _wip(tmp_path) == []
+
+
+def test_wip_rework_candidate_started_after_integration_stays_visible(tmp_path):
+    # skeptic 反証（rework-after-integration）: 統合済み Issue が標準の rework 経路で再開され、
+    # NEW cycle_started が integration_admitted: pass より「後」に来る。統合は自分より前の
+    # 開始しか完了させない（temporal）— さもなくば /org-resume が生きている rework を
+    # 沈黙で回収する。
+    seed(tmp_path, "eng", "cycle_started",
+         {"role": "eng", "candidate_id": "cand-old", "pack_manifest_id": "issue-9"},
+         ts="2026-07-16T01:00:00Z")   # seq=1 — 統合前の開始（これは消えるべき）
+    seed(tmp_path, "eng", "cycle_completed",
+         {"role": "eng", "candidate_id": "cand-old", "outputs": []},
+         ts="2026-07-16T02:00:00Z")   # seq=2
+    seed(tmp_path, "supervisor", "integration_admitted",
+         {"integration_branch": "develop", "deliverables": ["9"], "issue": 9,
+          "integration_subject_sha": "a" * 40, "combined_ci_ref": "pytest -q",
+          "verdict": "pass", "admitter": "supervisor"},
+         ts="2026-07-16T03:00:00Z")   # seq=3
+    seed(tmp_path, "eng", "cycle_started",
+         {"role": "eng", "candidate_id": "cand-rework", "pack_manifest_id": "issue-9"},
+         ts="2026-07-16T04:00:00Z")   # seq=4 — 統合「後」の rework 開始（生きている）
+    seed(tmp_path, "eng", "progress_recorded",
+         {"role": "eng", "candidate_id": "cand-rework", "fraction": 0.4, "phase": "impl",
+          "done_so_far": "regression repro'd", "next_step": "temporal integration arm",
+          "blocked_by": None, "artifacts": []},
+         ts="2026-07-16T05:00:00Z")
+    wip = _wip(tmp_path)
+    ids = [w["candidate_id"] for w in wip]
+    assert ids == ["cand-rework"], (
+        f"統合後に始まった rework 候補が回収の沈黙に落ちた（または旧候補が復活した）: {ids}")
+    assert wip[0]["progress"]["fraction"] == pytest.approx(0.4)
+    assert wip[0]["progress"]["next_step"] == "temporal integration arm"
+
+
+def test_wip_pre_integration_start_still_drops_after_temporal_arm(tmp_path):
+    # control: OBS-050 本体（pass が開始より後）は temporal 化しても直ったまま
+    seed(tmp_path, "eng", "cycle_started",
+         {"role": "eng", "candidate_id": "cand-5ca3e595a9c4", "pack_manifest_id": "issue-9"},
+         ts="2026-07-16T01:00:00Z")   # seq=1
+    seed(tmp_path, "supervisor", "integration_admitted",
+         {"integration_branch": "develop", "issue": 9, "verdict": "pass",
+          "admitter": "supervisor"},
+         ts="2026-07-16T02:00:00Z")   # seq=2 > 1 → 完了扱い
+    assert _wip(tmp_path) == []
