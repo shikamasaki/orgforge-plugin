@@ -525,8 +525,15 @@ event_classes:
   # integrate phase (docs/11 §4c): the fanned-out siblings merged to `develop` and pass the COMBINED
   # suite together. Green CI on develop is its machine form; result_deployed should require it (the
   # develop→main promotion). Owned by the supervising manager (A3 extended to cross-deliverable).
+  # `candidate_id`/`issue` are optional but LOAD-BEARING when present. `candidate_id` (written by
+  # orgcycle/ship.py since #102 rework #2) names WHICH candidate this integration finished — the
+  # work_in_progress view then frees exactly that slot, so a parallel sibling on the same issue or
+  # a later rework start is never silenced by correlation guesswork. `issue` is the legacy bridge:
+  # ledgers whose integrations lack candidate_id (all pre-#102, incl. Tatekae) are correlated
+  # candidate_id ↔ issue via aliases, temporally. Undeclared, either field would be one emitter
+  # cleanup away from silently breaking the OBS-050 fix.
   integration_admitted: { integration_branch, integration_subject_sha, deliverables: [ref],
-                          combined_ci_ref, verdict: pass|fail, admitter }
+                          combined_ci_ref, verdict: pass|fail, admitter, candidate_id, issue }
   # A result may only deploy AFTER the skeptic refuted-and-failed (verdict: survives) for it.
   # requires_prior makes the skeptic load-bearing: without a `survives` for this candidate_id,
   # a result_deployed event is INVALID (the deploy path cannot skip adversarial review).
@@ -683,7 +690,9 @@ views:
   parts_inventory:      { from: [admission_decided, result_retired], shape: admitted orthogonal components }
   combination_history:  { from: [candidate_submitted, admission_decided], shape: tried combinations and outcomes }
   open_experiments:     { from: [candidate_submitted, cycle_completed], shape: backlog awaiting execution }
-  work_in_progress:     { from: [cycle_started, progress_recorded, cycle_completed], shape: candidates STARTED but not yet completed, each with its latest progress checkpoint (how far / next step / blocker) — the recovery source after a context wipe (/org-resume) }
+  work_in_progress:     { from: [cycle_started, progress_recorded, cycle_completed,
+                                 candidate_submitted, integration_admitted, correction],
+                          shape: candidates STARTED but not yet finished — finished means cycle_completed, OR the same work integrated (integration_admitted verdict pass, correlated via candidate_id↔issue aliases), OR the start voided by a correction — each with its latest progress checkpoint (how far / next step / blocker); the recovery source after a context wipe (/org-resume). Without the integration/void arms an integrated candidate holds a WIP slot forever (OBS-050) }
   goal_state:           { from: [goal_started, goal_progressed, goal_paused,
                                  goal_blocker_observed, goal_blocked, goal_resumed,
                                  goal_completed, goal_host_synced],

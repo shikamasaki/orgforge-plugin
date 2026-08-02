@@ -11,6 +11,7 @@ import sys
 from ._core import (
     _admission_for,
     _branch_for,
+    _candidate_id,
     _execute,
     _gh_sync,
     _issue_body,
@@ -407,6 +408,9 @@ def cmd_integrate(a):
         return rc
 
     # ここまで来たら「combined suite が green」— それが integrate gate の機械的な形（docs/11 §4c）
+    # candidate_id: どの候補を統合したかを cycle と同じ導出（Issue body の trailer、無ければ
+    # issue-N）で記録する。issue だけだと WIP 側は別名相関に頼るしかなく、同一 Issue の
+    # 並行 sibling や backfill された統合が生きている候補を巻き添えにする（#102 rework #2）。
     rec = [
         (f"integration_admitted を記録",
          lambda: _ledger("append", "--actor", a.role, "--class", "integration_admitted",
@@ -414,6 +418,7 @@ def cmd_integrate(a):
                          "--payload", json.dumps({"integration_branch": base,
                                                   "deliverables": [str(a.issue)],
                                                   "issue": a.issue,
+                                                  "candidate_id": _candidate_id(a.issue),
                                                   "integration_subject_sha": subject_sha,
                                                   "combined_ci_ref": a.test,
                                                   "verdict": "pass"}, ensure_ascii=False))),

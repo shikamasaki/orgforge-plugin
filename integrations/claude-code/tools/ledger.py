@@ -3298,24 +3298,74 @@ def cmd_view(a):
                          indent=2, ensure_ascii=False))
         return 0
     if a.view_id == "work_in_progress":
-        # RESOLVE (not raw rows): candidates started but not completed, each with its LATEST progress
+        # RESOLVE (not raw rows): candidates started but not FINISHED, each with its LATEST progress
         # checkpoint. This is the recovery source after a context wipe — the SessionStart hook and
         # /org-resume read it to answer "what was this role mid-way through, and what's the next step?"
+        # "Finished" is any of (#102 / OBS-050 — cycle_completed alone leaks WIP slots forever):
+        #   - cycle_completed for the candidate;
+        #   - integration_admitted{verdict: pass} that names THIS candidate_id — the integrate
+        #     step (ship.py) records which candidate it merged, so exactly that slot frees and
+        #     nothing else: a parallel sibling on the same issue and a later rework start both
+        #     stay visible (skeptic C3/C2 — the finish decision is cycle-level, not issue-level);
+        #   - LEGACY fallback for integrations WITHOUT candidate_id (all pre-#102 ledgers, incl.
+        #     Tatekae/OBS-050): correlate candidate_id ↔ issue via the ledger's alias bridge, and
+        #     only a TEMPORALLY LATER integration finishes the start — compared on ts when both
+        #     events carry the writer-enforced UTC form (a backfilled receipt with an earlier ts
+        #     must not kill a later rework start), on seq only when ts is unusable or tied.
+        #     Documented limitation: this legacy path has no candidate information, so it cannot
+        #     protect a live SIBLING started before the integration on the same issue; only the
+        #     candidate_id-carrying form (new ledgers) gives full protection;
+        #   - the cycle_started itself voided by a correction — voided_seqs, the single
+        #     effective-event projection derive-admission uses (OBS-042: no third semantics).
         started, completed, latest = {}, set(), {}
+        integrated_exact, integrated_legacy = set(), []
         for e in events:
-            cid = e["payload"].get("candidate_id")
+            pl = e["payload"]
+            if e["class"] == "integration_admitted":
+                if str(pl.get("verdict", "")).strip().lower() in ("pass", "admit"):
+                    icid = str(pl.get("candidate_id") or "").strip()
+                    if icid:
+                        integrated_exact.add(icid)
+                    else:
+                        integrated_legacy.append((e["seq"], str(e.get("ts") or ""), pl))
+                continue
+            cid = pl.get("candidate_id")
             if not cid:
                 continue
             if e["class"] == "cycle_started":
-                started[cid] = {"candidate_id": cid, "role": e["payload"].get("role"),
-                                "started_seq": e["seq"]}
+                started[cid] = {"candidate_id": cid, "role": pl.get("role"),
+                                "started_seq": e["seq"], "started_ts": str(e.get("ts") or ""),
+                                "payload": pl}
             elif e["class"] == "cycle_completed":
                 completed.add(cid)
             elif e["class"] == "progress_recorded":
-                latest[cid] = {k: e["payload"].get(k) for k in
+                latest[cid] = {k: pl.get(k) for k in
                                ("fraction", "phase", "done_so_far", "next_step", "blocked_by", "artifacts")}
-        wip = [{**started[cid], "progress": latest.get(cid)}
-               for cid in started if cid not in completed]
+        voided = voided_seqs(events)
+        find = _work_aliases(events)
+        legacy_roots = [(iseq, its, {find(x) for x in _correlation_ids(p)})
+                        for iseq, its, p in integrated_legacy]
+        _TS = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+
+        def _integration_after(iseq, its, sseq, sts):
+            # Writer-enforced UTC form makes lexicographic ts comparison a real temporal order;
+            # seq decides only when ts is unusable on either side, or exactly tied.
+            if _TS.match(its) and _TS.match(sts) and its != sts:
+                return its > sts
+            return iseq > sseq
+
+        wip = []
+        for cid, row in started.items():
+            if cid in completed or row["started_seq"] in voided or cid in integrated_exact:
+                continue
+            row_roots = {find(x) for x in
+                         (_correlation_ids(row["payload"]) | _alias_ids(row["payload"]))}
+            if any(_integration_after(iseq, its, row["started_seq"], row["started_ts"])
+                   and (roots & row_roots)
+                   for iseq, its, roots in legacy_roots):
+                continue
+            wip.append({"candidate_id": cid, "role": row["role"],
+                        "started_seq": row["started_seq"], "progress": latest.get(cid)})
         wip.sort(key=lambda w: w["started_seq"])
         print(json.dumps({"view": "work_in_progress", "in_progress": wip}, indent=2, ensure_ascii=False))
         return 0
