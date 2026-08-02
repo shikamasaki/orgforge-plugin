@@ -19,6 +19,7 @@ from ._core import (
     _refutation_for,
     _repo,
     resolve_integration_base,
+    resolve_issue_branch,
 )
 
 
@@ -201,7 +202,6 @@ def cmd_gc(a):
     # 「統合済みか」の基準。develop を推測すると、origin/main に統合済みの worktree を
     # 「未統合」として永久に残す（OBS-057 / #106）。--all は統合済み判定を**しない**ので
     # 基準を要求しない — fail-closed は base を実際に消費する判断にだけかける（rework #106）。
-    # 注: branch 名の導出と実 branch の不一致は #107 — ここでは扱わない。
     merged_base = None
     if not a.all:
         merged_base, base_err = resolve_integration_base(getattr(a, "base", None))
@@ -224,10 +224,20 @@ def cmd_gc(a):
             continue
         if not a.all:
             # 既定は「統合済みだけ」を消す。まだ取り込まれていない仕事は消さない。
-            br = _branch_for(issue)
+            # 「どの branch を統合済みか問うか」は導出名ではなく**実在の branch**（#107）。
+            # 導出名で問うと、タイトル変更後は `--merged --list <導出名>` が常に空になり、
+            # 統合済み worktree が「未統合」として永久に残る（Tatekae OBS-012/057原因2）。
+            br, warn, err = resolve_issue_branch(issue, derived=_branch_for(issue))
+            if err:
+                # 実在 branch を特定できないなら消す判断はできない — 残して理由を言う。
+                print(err, file=sys.stderr)
+                kept.append((name, "branch を解決できない（上の stderr を見ること）"))
+                continue
+            if warn:
+                print(f"  ⚠ {warn}", file=sys.stderr)
             code, merged = _raw(["git", "branch", "--merged", merged_base, "--list", br])
             if code != 0 or not (merged or "").strip():
-                kept.append((name, f"{merged_base} に未統合"))
+                kept.append((name, f"{merged_base} に未統合（branch {br}）"))
                 continue
         code, out = _raw(["git", "worktree", "remove", wt])
         (removed if code == 0 else kept).append(

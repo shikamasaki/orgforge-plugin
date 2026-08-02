@@ -423,6 +423,48 @@ def issue_worktree(issue, cwd=None):
     return None
 
 
+def resolve_issue_branch(issue, derived=None, cwd=None):
+    """Issue の**実在する** branch を2段で解決する（#107）。``(branch, warn, err)`` を返す。
+
+    タイトル slug から導出した名前は**作成時の規約**であって恒久 identity ではない —
+    タイトル変更や手動命名で実在名とずれる。Tatekae 実測（OBS-012 / OBS-048欠陥6 /
+    OBS-057原因2）では導出名 `feat/issue-15-google` が実在せず（実在は
+    `feat/issue-15-login-redirect`）、`git branch --merged --list <導出名>` が常に空になり、
+    gc が統合済み worktree を「未統合」として永久に残した。
+
+    (a) Issue worktree（`.orgforge/wt/issue-N`、issue_worktree が解決）が実在するなら、
+        その HEAD branch が**常に真** — 実際に作業されたのはそこである。
+        導出名とずれていれば warn で言う（黙ってどちらかを選ばない）。
+    (b) 無ければ、導出名が**実在する場合に限り**使う（`git rev-parse --verify`）。
+    (c) どちらも無ければ err — **実在しない導出名を黙って信じない**（fail-closed）。
+    """
+    try:
+        wt = issue_worktree(issue, cwd)
+    except Exception:
+        wt = None
+    if wt and worktree_rooted_at(wt):
+        code, head = _raw(["git", "-C", wt, "symbolic-ref", "--short", "-q", "HEAD"])
+        head = (head or "").strip()
+        if code == 0 and head:
+            warn = None
+            if derived and derived != head:
+                warn = (f"導出名 `{derived}` と worktree の実 branch `{head}` が一致しない"
+                        f"（タイトル変更か手動命名）。worktree "
+                        f".orgforge/wt/issue-{issue} の HEAD を採用する（#107）。")
+            return head, warn, None
+    if derived:
+        code, _out = _raw(["git"] + (["-C", cwd] if cwd else [])
+                          + ["rev-parse", "--verify", "--quiet", f"refs/heads/{derived}"])
+        if code == 0:
+            return derived, None, None
+    return None, None, (
+        f"Issue #{issue} の branch を解決できない: 導出名 `{derived or '(導出できず)'}` は"
+        f"実在の branch ではなく、worktree .orgforge/wt/issue-{issue} も無い。\n"
+        f"  実在の候補は `git branch --list 'feat/issue-{issue}*'` で探せる。\n"
+        f"  これから作るなら `github_sync branch --issue {issue} --worktree` で"
+        f"branch ごと worktree を作ること。")
+
+
 def worktree_rooted_at(path):
     """`path` が「**まさにそこを toplevel とする**実 worktree」かを実体で確かめる。
 

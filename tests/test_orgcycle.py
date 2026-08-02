@@ -2466,6 +2466,88 @@ def test_gc_explicit_base_overrides_constitution(tmp_path, monkeypatch):
     assert not wt.is_dir(), "明示 --base が constitution に負けた"
 
 
+# ── #107: 導出 branch 名を実在の branch と突合する ────────────────────────────
+# Tatekae 実測（OBS-012 / OBS-048欠陥6 / OBS-057原因2）: 導出名 feat/issue-15-google が
+# 実在せず（実在は feat/issue-15-login-redirect）、gc の `--merged --list <導出名>` が
+# 常に空 → 統合済み worktree が「未統合」として永久に残った。worktree の HEAD が常に真。
+
+
+def test_gc_collects_merged_worktree_whose_real_branch_differs_from_derived(
+        tmp_path, monkeypatch, capsys):
+    """(a) Tatekae shape: worktree は feat/issue-15-login-redirect（origin/main に統合済み）、
+    タイトル導出名は feat/issue-15-google → gc は実 HEAD で merged 判定して片付ける。"""
+    org, g = _declared_org(tmp_path, integration_ref="origin/main", develop=False, name="org107")
+    wt = org / ".orgforge" / "wt" / "issue-15"
+    g("worktree", "add", "-q", "-b", "feat/issue-15-login-redirect", str(wt), "origin/main")
+    (wt / "fix.txt").write_text("done", encoding="utf-8")
+    g("add", "-A", cwd=wt)
+    g("commit", "-qm", "fix login redirect", cwd=wt)
+    # 統合済みにする: origin/main を branch の先端まで進める（merge 済みの形）
+    g("update-ref", "refs/remotes/origin/main", "feat/issue-15-login-redirect")
+    monkeypatch.chdir(org)
+    m = _cycle_mod("inspect")
+    # 導出名はタイトル由来（タイトル変更後の形）— 実在しない
+    monkeypatch.setattr(m, "_branch_for", lambda i: f"feat/issue-{i}-google")
+    rc = m.cmd_gc(argparse.Namespace(base=None, all=False))
+    assert rc == 0
+    assert not wt.is_dir(), \
+        "統合済み worktree が残った — 導出名 feat/issue-15-google で merged を問うている（#107）"
+    # (b) 不一致は黙らない — どちらを採用したかを警告で言う
+    err = capsys.readouterr().err
+    assert "feat/issue-15-google" in err and "feat/issue-15-login-redirect" in err, \
+        f"導出名と実在名の不一致が警告されていない: {err!r}"
+
+
+def test_gc_keeps_worktree_when_branch_cannot_be_resolved(tmp_path, monkeypatch, capsys):
+    """(d) fail-closed: worktree が detached HEAD で導出名も実在しない → 消さずに残して言う。"""
+    org, g = _declared_org(tmp_path, integration_ref="origin/main", develop=False, name="org107d")
+    wt = org / ".orgforge" / "wt" / "issue-9"
+    g("worktree", "add", "-q", "--detach", str(wt), "origin/main")
+    monkeypatch.chdir(org)
+    m = _cycle_mod("inspect")
+    monkeypatch.setattr(m, "_branch_for", lambda i: f"feat/issue-{i}-ghost")
+    rc = m.cmd_gc(argparse.Namespace(base=None, all=False))
+    assert rc == 0
+    assert wt.is_dir(), "実在 branch を特定できないのに worktree を消した"
+    err = capsys.readouterr().err
+    assert "feat/issue-9-ghost" in err, f"何を解決できなかったのか名指ししていない: {err!r}"
+
+
+def test_resolve_issue_branch_worktree_head_is_authoritative(tmp_path):
+    """(a)(b) worktree が実在するなら HEAD が真。導出名とずれたら warn（黙らない）。"""
+    core = _cycle_mod("_core")
+    org, g = _declared_org(tmp_path, integration_ref="origin/main", develop=False, name="org107r")
+    wt = org / ".orgforge" / "wt" / "issue-15"
+    g("worktree", "add", "-q", "-b", "feat/issue-15-login-redirect", str(wt), "origin/main")
+    br, warn, err = core.resolve_issue_branch(15, derived="feat/issue-15-google", cwd=str(org))
+    assert (br, err) == ("feat/issue-15-login-redirect", None)
+    assert warn and "feat/issue-15-google" in warn and "feat/issue-15-login-redirect" in warn
+    # (e) 導出名 == 実在名なら従来どおり — warn も出ない
+    br2, warn2, err2 = core.resolve_issue_branch(
+        15, derived="feat/issue-15-login-redirect", cwd=str(org))
+    assert (br2, warn2, err2) == ("feat/issue-15-login-redirect", None, None)
+
+
+def test_resolve_issue_branch_uses_existing_derived_without_worktree(tmp_path):
+    """(c) worktree 無し + 導出名が実在 → 実在確認の上でそのまま使う。"""
+    core = _cycle_mod("_core")
+    org, g = _declared_org(tmp_path, integration_ref="origin/main", develop=False, name="org107c")
+    g("branch", "feat/issue-7-add-login")
+    br, warn, err = core.resolve_issue_branch(7, derived="feat/issue-7-add-login", cwd=str(org))
+    assert (br, warn, err) == ("feat/issue-7-add-login", None, None)
+
+
+def test_resolve_issue_branch_fails_closed_when_nothing_exists(tmp_path):
+    """(d) worktree 無し + 導出名も実在しない → 黙って導出名を信じず、直し方を名指しする。"""
+    core = _cycle_mod("_core")
+    org, g = _declared_org(tmp_path, integration_ref="origin/main", develop=False, name="org107f")
+    br, warn, err = core.resolve_issue_branch(7, derived="feat/issue-7-add-login", cwd=str(org))
+    assert br is None
+    assert err and "feat/issue-7-add-login" in err, "実在しない導出名を名指ししていない"
+    assert "--worktree" in err or "git branch --list" in err, \
+        f"直し方が書かれていない: {err!r}"
+
+
 def test_gc_fails_closed_when_nothing_declares_the_base(tmp_path):
     """(c)(d) integration_ref 無し・--base 無し → develop があっても非ゼロで両方を名指し。"""
     org, g = _declared_org(tmp_path, integration_ref=None, develop=True)
