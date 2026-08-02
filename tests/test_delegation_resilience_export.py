@@ -8,12 +8,15 @@ that packet check is deliberately not a recovery-capability demonstration.
 from __future__ import annotations
 
 import hashlib
+import io
+import importlib.util
 import json
 import os
 from pathlib import Path
 import shutil
 import subprocess
 import sys
+import tarfile
 
 import pytest
 
@@ -22,6 +25,10 @@ REPO = Path(__file__).resolve().parents[1]
 EXPORTER = REPO / "tools" / "delegation_resilience_export.py"
 LOCK = REPO / "integrations" / "delegation-resilience" / "v0alpha2.lock.json"
 DR_ROOT = Path(os.environ.get("DR_V0ALPHA2_ROOT", "/missing/dr-v0alpha2"))
+_EXPORT_MODULE_SPEC = importlib.util.spec_from_file_location("orgforge_exporter", EXPORTER)
+assert _EXPORT_MODULE_SPEC and _EXPORT_MODULE_SPEC.loader
+_EXPORT_MODULE = importlib.util.module_from_spec(_EXPORT_MODULE_SPEC)
+_EXPORT_MODULE_SPEC.loader.exec_module(_EXPORT_MODULE)
 pytestmark = pytest.mark.skipif(
     not DR_ROOT.is_dir(),
     reason="DR_V0ALPHA2_ROOT is required for the cross-repository adapter contract",
@@ -164,7 +171,14 @@ def _clone_dr(tmp_path: Path) -> Path:
     return clone
 
 
-def test_export_rejects_wrong_head(tmp_path):
+def _assert_locked_archive_output(source: Path, output: Path, tmp_path: Path) -> None:
+    clean = tmp_path / "clean"
+    run = _export(source, clean)
+    assert run.returncode == 0, run.stderr
+    assert (output / "bundle.dsse.json").read_bytes() == (clean / "bundle.dsse.json").read_bytes()
+
+
+def test_export_ignores_wrong_head(tmp_path):
     source, _ = _source(tmp_path)
     clone = _clone_dr(tmp_path)
     parent = subprocess.run(["git", "-C", str(clone), "rev-parse", "HEAD^"],
@@ -172,33 +186,37 @@ def test_export_rejects_wrong_head(tmp_path):
     subprocess.run(["git", "-C", str(clone), "checkout", "--detach", parent],
                    check=True, capture_output=True, text=True)
     run = _export(source, tmp_path / "output", dr_root=clone)
-    assert run.returncode != 0
+    assert run.returncode == 0, run.stderr
+    _assert_locked_archive_output(source, tmp_path / "output", tmp_path)
 
 
-def test_export_rejects_dirty_tracked_checkout(tmp_path):
+def test_export_ignores_dirty_tracked_checkout(tmp_path):
     source, _ = _source(tmp_path)
     clone = _clone_dr(tmp_path)
     tracked = clone / "tools" / "data_loading.py"
     tracked.write_bytes(tracked.read_bytes() + b"\n# dirty\n")
     run = _export(source, tmp_path / "output", dr_root=clone)
-    assert run.returncode != 0
+    assert run.returncode == 0, run.stderr
+    _assert_locked_archive_output(source, tmp_path / "output", tmp_path)
 
 
-def test_export_rejects_untracked_module_shadow(tmp_path):
+def test_export_ignores_untracked_module_shadow(tmp_path):
     source, _ = _source(tmp_path)
     clone = _clone_dr(tmp_path)
     (clone / "tools" / "untracked_shadow.py").write_text("# shadow\n", encoding="utf-8")
     run = _export(source, tmp_path / "output", dr_root=clone)
-    assert run.returncode != 0
+    assert run.returncode == 0, run.stderr
+    _assert_locked_archive_output(source, tmp_path / "output", tmp_path)
 
 
-def test_export_rejects_ignored_module_shadow(tmp_path):
+def test_export_ignores_ignored_module_shadow(tmp_path):
     source, _ = _source(tmp_path)
     clone = _clone_dr(tmp_path)
     (clone / ".git" / "info" / "exclude").write_text("tools/ignored_shadow.py\n", encoding="utf-8")
     (clone / "tools" / "ignored_shadow.py").write_text("# shadow\n", encoding="utf-8")
     run = _export(source, tmp_path / "output", dr_root=clone)
-    assert run.returncode != 0
+    assert run.returncode == 0, run.stderr
+    _assert_locked_archive_output(source, tmp_path / "output", tmp_path)
 
 
 def test_export_rejects_code_digest_mismatch(tmp_path):
@@ -217,3 +235,13 @@ def test_export_rejects_non_strict_json(tmp_path, raw):
     (source / "exercise-report.json").write_bytes(raw)
     run = _export(source, tmp_path / "output")
     assert run.returncode != 0
+
+
+def test_archive_extraction_rejects_path_traversal(tmp_path):
+    raw = io.BytesIO()
+    with tarfile.open(fileobj=raw, mode="w") as archive:
+        member = tarfile.TarInfo("../escape.txt")
+        member.size = 4
+        archive.addfile(member, io.BytesIO(b"boom"))
+    with pytest.raises(ValueError):
+        _EXPORT_MODULE._extract_archive(raw.getvalue(), tmp_path / "archive")
