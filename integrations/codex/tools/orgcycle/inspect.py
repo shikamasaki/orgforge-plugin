@@ -18,6 +18,7 @@ from ._core import (
     _raw,
     _refutation_for,
     _repo,
+    resolve_integration_base,
 )
 
 
@@ -57,6 +58,15 @@ def cmd_show(a):
     ときにどの周のどの判定を見ているのか分からなくなった。ある Issue の反証記録 欠落も の
     reject 欠落も、この視点があれば即座に見つかっていた。
     """
+    # 不可逆な変更の帰属基準。develop を推測すると、他 Issue の成果を「この Issue の
+    # 不可逆な変更」と誤帰属する（OBS-054 / #106）。ただし show は読み取り専用の
+    # orientation なので、基準が無いことを理由に台帳由来の状態まで隠さない（rework #106）—
+    # 帰属ブロックだけを省き、警告して続行する（cmd_plan と同じ warn-don't-stop の形）。
+    attribution_base, base_err = resolve_integration_base(getattr(a, "base", None))
+    if base_err:
+        print(f"  ⚠ 不可逆な変更の帰属は表示しない — 基準が決まらない（#{a.issue}）:\n{base_err}",
+              file=sys.stderr)
+        attribution_base = None
     title, _ = _issue_body(a.issue)
     av, aseq, _ = _admission_for(a.issue)
     rv, rseq, _ = _refutation_for(a.issue)
@@ -155,22 +165,23 @@ def cmd_show(a):
     # 3: この Issue が生んだ**不可逆な変更**の数。運用では migration を5本生み、
     # それらが相互に干渉した（0009 が直したものを 0010 が壊し、0011 が別の2件を RED にした）。
     # **3本目を書く時点で「これは1つの Issue ではない」と気づけたはず。** 止めない — 材料を出す。
-    irreversible = []
-    for ev in evs:
-        if ev["class"] != "asset_touched" or ev.get("seq") in voided:
-            continue
-        pl = ev.get("payload", {}) or {}
-        irreversible.append(pl.get("name") or pl.get("op") or "?")
-    br = _branch_for(a.issue)
-    code, mig = _raw(["git", "diff", "--name-only", f"{a.base if hasattr(a, 'base') else 'develop'}...{br}"])
-    migrations = [f for f in (mig or "").split("\n")
-                  if re.search(r"(^|/)(migrations?|db/migrate)/", f)]
-    total = sorted(set(irreversible) | set(os.path.basename(m) for m in migrations))
-    if len(total) >= 3:
-        print(f"  不可逆:   {len(total)} 件 — {', '.join(t[:34] for t in total[:5])}"
-              + (" …" if len(total) > 5 else ""))
-        print(f"            1つの deliverable が3件以上の不可逆な変更を生んでいる。"
-              f"Issue の切り方を見直す価値がある（相互に干渉するマイグレーションを生む）")
+    if attribution_base is not None:
+        irreversible = []
+        for ev in evs:
+            if ev["class"] != "asset_touched" or ev.get("seq") in voided:
+                continue
+            pl = ev.get("payload", {}) or {}
+            irreversible.append(pl.get("name") or pl.get("op") or "?")
+        br = _branch_for(a.issue)
+        code, mig = _raw(["git", "diff", "--name-only", f"{attribution_base}...{br}"])
+        migrations = [f for f in (mig or "").split("\n")
+                      if re.search(r"(^|/)(migrations?|db/migrate)/", f)]
+        total = sorted(set(irreversible) | set(os.path.basename(m) for m in migrations))
+        if len(total) >= 3:
+            print(f"  不可逆:   {len(total)} 件 — {', '.join(t[:34] for t in total[:5])}"
+                  + (" …" if len(total) > 5 else ""))
+            print(f"            1つの deliverable が3件以上の不可逆な変更を生んでいる。"
+                  f"Issue の切り方を見直す価値がある（相互に干渉するマイグレーションを生む）")
 
     nxt = ("gate 再判定 → skeptic → integrate" if av == "reject" else
            f"integrate --issue {a.issue}" if av == "admit" and rv == "survives" else
@@ -187,6 +198,16 @@ def cmd_gc(a):
     残ったものは誰の仕事でもなかった。統合済みなのに残っていると、次に同じ Issue を
     触ったとき古いツリーを掴む。
     """
+    # 「統合済みか」の基準。develop を推測すると、origin/main に統合済みの worktree を
+    # 「未統合」として永久に残す（OBS-057 / #106）。--all は統合済み判定を**しない**ので
+    # 基準を要求しない — fail-closed は base を実際に消費する判断にだけかける（rework #106）。
+    # 注: branch 名の導出と実 branch の不一致は #107 — ここでは扱わない。
+    merged_base = None
+    if not a.all:
+        merged_base, base_err = resolve_integration_base(getattr(a, "base", None))
+        if base_err:
+            print(f"gc の統合済み判定の基準が決まらない:\n{base_err}", file=sys.stderr)
+            return 2
     base = os.path.join(os.getcwd(), ".orgforge", "wt")
     if not os.path.isdir(base):
         print("worktree はありません。")
@@ -204,9 +225,9 @@ def cmd_gc(a):
         if not a.all:
             # 既定は「統合済みだけ」を消す。まだ取り込まれていない仕事は消さない。
             br = _branch_for(issue)
-            code, merged = _raw(["git", "branch", "--merged", a.base, "--list", br])
+            code, merged = _raw(["git", "branch", "--merged", merged_base, "--list", br])
             if code != 0 or not (merged or "").strip():
-                kept.append((name, f"{a.base} に未統合"))
+                kept.append((name, f"{merged_base} に未統合"))
                 continue
         code, out = _raw(["git", "worktree", "remove", wt])
         (removed if code == 0 else kept).append(

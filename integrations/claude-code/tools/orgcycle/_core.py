@@ -55,6 +55,48 @@ def _repo():
     return discover.backlog_repo()
 
 
+def resolve_integration_base(explicit=None, start=None):
+    """統合先 ref を決める。明示 --base > constitution の enforcement.judges.integration_ref。
+
+    どちらも無ければ ``(None, 理由)`` を返す — **develop を推測しない**（#106）。
+    Tatekae 実測では constitution が `integration_ref: origin/main` を宣言しているのに
+    begin/show/gc/integrate が develop を hard-code し、「統合先はどこか」への答えが
+    1製品内に複数あった（OBS-048/053/054/057）。verify が使う解決
+    （review_freshness.integration_ref_policy — #81）をそのまま共有し、第二のパーサは書かない。
+    """
+    if explicit:
+        return str(explicit), None
+    try:
+        from discover import constitution
+        path = constitution(start)
+    except Exception:
+        path = None
+    from review_freshness import integration_ref_policy
+    declared, ref, err = integration_ref_policy(path)
+    if err:
+        return None, f"integration ref policy が不正: {err}"
+    if declared and ref:
+        return ref, None
+    return None, ("統合先が決まらない。develop があるというだけで推測はしない（#106）。\n"
+                  "  constitution.yaml に `enforcement.judges.integration_ref: origin/main` "
+                  "のように宣言するか、\n"
+                  "  今回だけ `--base <ref>` を明示すること。")
+
+
+def local_branch_for(ref, cwd=None):
+    """checkout / PR base に使える branch 名。remote-tracking ref（origin/X）は X に写す。
+
+    integration_ref は「どこへ統合するか」の宣言なので origin/main のような remote-tracking
+    形で書かれる。`git checkout origin/main` は detached HEAD、`gh pr create --base origin/main`
+    はエラーになるので、実際に checkout / PR する文脈だけ branch 名に写す（判定・diff は
+    ref のまま使う）。"""
+    code, _ = _raw(["git"] + (["-C", cwd] if cwd else [])
+                   + ["rev-parse", "--verify", "--quiet", f"refs/remotes/{ref}"])
+    if code == 0 and "/" in ref:
+        return ref.split("/", 1)[1]
+    return ref
+
+
 def _execute(steps, label):
     """順に実行し、最初の失敗で止める。**部分適用のまま黙って進まない**こと —
     台帳の整合が崩れた状態を「成功」と報告するのが最悪なので、どこで止まったかを言う。"""

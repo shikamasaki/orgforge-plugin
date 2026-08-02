@@ -24,6 +24,7 @@ from ._core import (
     _run,
     _sub,
     _today,
+    resolve_integration_base,
     resolve_parent,
 )
 
@@ -307,6 +308,15 @@ def _cleanup_worktree(issue):
 
 
 def cmd_begin(a):
+    # worktree の base は constitution の integration_ref から解決する（OBS-053 / #106）。
+    # 台帳に書く前に決める — 決まらないまま claim だけ積むと、fail-closed が半端になる。
+    if not getattr(a, "no_worktree", False):
+        base, base_err = resolve_integration_base(getattr(a, "base", None))
+        if base_err:
+            print(f"begin の worktree base が決まらない（#{a.issue}）:\n{base_err}",
+                  file=sys.stderr)
+            return 2
+        a.base = base
     warns = [] if getattr(a, "no_check", False) else _readiness(a.issue)
     if warns:
         print(f"着手前の確認（#{a.issue}）:", file=sys.stderr)
@@ -330,7 +340,11 @@ def cmd_complete(a):
               "述べない限り台帳が拒否する。何も確立しなかったなら、その理由を書くこと"
               "（skeptic が反証できる主張になる）。", file=sys.stderr)
         return 2
-    surfaces = _new_public_surfaces(a.issue)
+    # 公開面/語彙の検出は**助言**の経路 — constitution が統合先を宣言していればそれを使い、
+    # 宣言の無い legacy org では従来どおり develop を試す（diff が取れなければ従来どおり沈黙）。
+    # complete 自体を fail-closed にはしない（#106 が要求するのは統合先を消費する4経路）。
+    _diff_base, _ = resolve_integration_base(None)
+    surfaces = _new_public_surfaces(a.issue, base=_diff_base or "develop")
     if surfaces and not (a.new_surface or a.new_surface_none):
         print(f"⚠ この変更で新しく公開された面がある（#{a.issue}）:", file=sys.stderr)
         for s in surfaces[:10]:
@@ -345,7 +359,7 @@ def cmd_complete(a):
 
     if a.domain_model_none:
         # 素通りをさせない: 「規則を定めていない」と書いたサイクルが、実は語彙を作っていないか。
-        ex = _new_exports(a.issue)
+        ex = _new_exports(a.issue, base=_diff_base or "develop")
         if ex:
             print(f"確認: none_asserted だが、このサイクルで {len(ex)} 個の公開シンボルが増えている:",
                   file=sys.stderr)
@@ -426,6 +440,12 @@ def cmd_plan(a):
     # plan こそ「打つ前に見る」場所なので、着手前の確認はここにも出す。
     for w in ([] if getattr(a, "no_check", False) else _readiness(a.issue)):
         print(f"  ⚠ {w}", file=sys.stderr)
+    # plan は実行しないので止めない。ただし begin が fail-closed になることは予告する（#106）。
+    base, base_err = resolve_integration_base(getattr(a, "base", None))
+    if base_err:
+        print(f"  ⚠ begin は worktree base を決められず失敗する:\n{base_err}", file=sys.stderr)
+    else:
+        a.base = base
     parent = a.parent or resolve_parent(a.issue)
     cid = a.candidate_id or _candidate_id(a.issue)
     print(f"# begin #{a.issue} ({a.role}) — parent=#{parent or '(解決できず)'} candidate_id={cid}")

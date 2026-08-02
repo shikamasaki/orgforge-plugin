@@ -19,6 +19,8 @@ from ._core import (
     _raw,
     _refutation_for,
     _repo,
+    local_branch_for,
+    resolve_integration_base,
 )
 
 
@@ -266,7 +268,13 @@ def cmd_handback(a):
         print(f"handback は push できる local branch が必要だが、{branch} は local branch "
               "ではない。branch を checkout してから再実行すること。", file=sys.stderr)
         return 3
-    base = a.base or "develop"
+    # PR の統合先は constitution の integration_ref から解決する（#106）。
+    # gh pr create の --base は branch 名なので、origin/main 形の宣言は main に写す。
+    resolved_base, base_err = resolve_integration_base(getattr(a, "base", None))
+    if base_err:
+        print(f"handback の統合先が決まらない（#{a.issue}）:\n{base_err}", file=sys.stderr)
+        return 2
+    base = local_branch_for(resolved_base)
 
     # 前提: gate の admit（PR は「見せる」ためのものなので skeptic 前でも作れてよい）
     av, aseq, _ = _admission_for(a.issue)
@@ -353,11 +361,15 @@ def cmd_integrate(a):
     最も抜けやすいのは統合の直前なので、そこを配管にする。
     """
     if getattr(a, "plan", False):
+        plan_base, base_err = resolve_integration_base(getattr(a, "base", None))
+        if base_err:
+            print(f"統合先が決まらない（#{a.issue}）:\n{base_err}", file=sys.stderr)
+            return 2
         branch, subject_sha, branch_error = _resolve_integration_branch(a.issue, a.branch)
         if branch_error:
             print(f"統合対象 branch を解決できない（#{a.issue}）: {branch_error}", file=sys.stderr)
             return 3
-        return _plan_integrate(a, branch, subject_sha, a.base or "develop")
+        return _plan_integrate(a, branch, subject_sha, plan_base)
     av, aseq, _ = _admission_for(a.issue)
     rv, rseq, _ = _refutation_for(a.issue)
     problems = []
@@ -381,7 +393,14 @@ def cmd_integrate(a):
     if branch_error:
         print(f"統合対象 branch を解決できない（#{a.issue}）: {branch_error}", file=sys.stderr)
         return 3
-    base = a.base or "develop"
+    # 統合先は constitution の integration_ref から解決する（OBS-048 / #106）。
+    # checkout は branch 名が要るので origin/main 形は main に写す。記録には宣言どおりの
+    # ref を残す（「どこへ統合したか」の答えは constitution の語彙で書く）。
+    base, base_err = resolve_integration_base(getattr(a, "base", None))
+    if base_err:
+        print(f"統合先が決まらない（#{a.issue}）:\n{base_err}", file=sys.stderr)
+        return 2
+    checkout_base = local_branch_for(base)
     # 統合テストの実出力を保持する。**integrate 自身が log の必須検査に引っかかっていた** —
     # マイルストーンの log は --command/--result を要求するのに、integrate はそれを渡さず、
     # 統合は完了するのに Issue へのログだけ落ちていた（実地で人が手で補った）。
@@ -394,11 +413,11 @@ def cmd_integrate(a):
         return code, out
 
     steps = [
-        (f"{base} に切り替え",
-         lambda: _raw(["git", "checkout", base])),
+        (f"{checkout_base} に切り替え",
+         lambda: _raw(["git", "checkout", checkout_base])),
         (f"{branch} @ {subject_sha[:12]} を --no-ff でマージ",
          lambda: _raw(["git", "merge", "--no-ff", subject_sha,
-                       "-m", f"Merge {branch} into {base} (#{a.issue})"])),
+                       "-m", f"Merge {branch} into {checkout_base} (#{a.issue})"])),
         (f"統合後の全体テスト: {a.test}", _run_test),
     ]
     rc = _execute(steps, f"integrate #{a.issue} → {base}")

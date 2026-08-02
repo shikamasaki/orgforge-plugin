@@ -1327,7 +1327,7 @@ def test_integrate_plan_flags_a_conditional_ci_job(tmp_path):
     """
     repo = _ci_repo(tmp_path, _CI_CONDITIONAL)
     p = subprocess.run([sys.executable, str(TOOLS / "org_cycle.py"), "integrate",
-                        "--issue", "42", "--plan"],
+                        "--issue", "42", "--plan", "--base", "develop"],   # #106: 明示（fixture に宣言が無い）
                        capture_output=True, text=True, cwd=str(repo), timeout=60)
     out = p.stdout + p.stderr
     assert "CI を触っている" in out, out
@@ -1339,7 +1339,7 @@ def test_integrate_plan_lists_only_real_jobs(tmp_path):
     """`on:` の子（pull_request / push）を job と誤認しないこと。条件が無ければ黙る。"""
     repo = _ci_repo(tmp_path, _CI_PLAIN)
     p = subprocess.run([sys.executable, str(TOOLS / "org_cycle.py"), "integrate",
-                        "--issue", "42", "--plan"],
+                        "--issue", "42", "--plan", "--base", "develop"],   # #106: 明示（fixture に宣言が無い）
                        capture_output=True, text=True, cwd=str(repo), timeout=60)
     out = p.stdout + p.stderr
     assert "job: test" in out, out
@@ -1674,6 +1674,7 @@ def _xh_org(tmp_path, lineage="cross-harness"):
     (tmp_path / ".orgforge" / "ledger").mkdir(parents=True)
     (tmp_path / "constitution.yaml").write_text(
         f"enforcement:\n  judges:\n    lineage: {lineage}\n"
+        "    integration_ref: origin/main\n"     # #106: show 等は統合先の宣言を要求する
         "    judgment_corrections:\n      authority_roles: [supervisor]\n",
         encoding="utf-8")
     (tmp_path / "organization.yaml").write_text(
@@ -2376,3 +2377,204 @@ def test_verify_fails_after_worktree_replaced_with_plain_dir(tmp_path):
     code2, sid2, _, err2 = _print_subject(repo, 7)
     assert code2 != 0, "worktree 消失後も verify が成功した — primary の tree に黙って差し替わる"
     assert sid2 is None
+
+
+# ── #106: 統合先は constitution の integration_ref から解決する（develop を推測しない）──
+# Tatekae 実測: constitution が integration_ref: origin/main を宣言しているのに、
+# begin(OBS-053)/show(OBS-054)/gc(OBS-057)/integrate(OBS-048) が develop を hard-code し、
+# 1つの製品の中で「統合先はどこか」への答えが複数あった。verify が既に使っている解決
+# （review_freshness.integration_ref_policy）を全 subcommand で共有する。
+
+
+def _declared_org(tmp_path, integration_ref="origin/main", develop=False, name="org106"):
+    """constitution が統合先を宣言する（あるいはしない）git 付き org。develop 無しが既定。"""
+    org = tmp_path / name
+    org.mkdir()
+
+    def g(*a, cwd=org):
+        return subprocess.run(["git", *a], cwd=cwd, capture_output=True, text=True)
+
+    g("init", "-q", "-b", "main")
+    g("config", "user.email", "t@t")
+    g("config", "user.name", "t")
+    (org / "seed.txt").write_text("s", encoding="utf-8")
+    (org / "organization.yaml").write_text("roles: []\n", encoding="utf-8")
+    judges = f"    integration_ref: {integration_ref}\n" if integration_ref else ""
+    (org / "constitution.yaml").write_text(
+        "enforcement:\n  judges:\n" + (judges or "    {}\n"), encoding="utf-8")
+    # 統治ファイルは main に**コミットしてから** branch を切る — 後続の `add -A` が
+    # constitution を feature branch に巻き込み、checkout で消える事故を防ぐ。
+    g("add", "-A")
+    g("commit", "-qm", "seed")
+    g("update-ref", "refs/remotes/origin/main", "main")
+    if develop:
+        g("branch", "develop")
+    (org / ".orgforge" / "ledger").mkdir(parents=True)
+    return org, g
+
+
+def test_resolve_integration_base_explicit_wins_and_constitution_is_default(tmp_path, monkeypatch):
+    """明示 --base > constitution の integration_ref > fail-closed（develop は推測しない）。"""
+    core = _cycle_mod("_core")
+    org, _ = _declared_org(tmp_path, integration_ref="origin/main", develop=True)
+    monkeypatch.chdir(org)
+    assert core.resolve_integration_base("develop") == ("develop", None)   # operator override
+    ref, err = core.resolve_integration_base(None)
+    assert (ref, err) == ("origin/main", None), f"constitution の宣言を読んでいない: {err}"
+
+
+def test_resolve_integration_base_fails_closed_naming_both_options(tmp_path, monkeypatch):
+    """(d) develop があり integration_ref が無い legacy org → 黙って develop に落ちない。"""
+    core = _cycle_mod("_core")
+    org, _ = _declared_org(tmp_path, integration_ref=None, develop=True)
+    monkeypatch.chdir(org)
+    ref, err = core.resolve_integration_base(None)
+    assert ref is None, f"integration_ref 無しで {ref} を推測した"
+    assert "--base" in err and "integration_ref" in err, f"両方の選択肢を名指ししていない: {err}"
+
+
+def test_gc_collects_worktree_merged_to_constitution_ref(tmp_path, monkeypatch):
+    """(a) OBS-057: origin/main に統合済みの worktree を、develop 無しの org で gc が消せる。"""
+    org, g = _declared_org(tmp_path, integration_ref="origin/main", develop=False)
+    wt = org / ".orgforge" / "wt" / "issue-3"
+    g("worktree", "add", "-q", "-b", "feat/issue-3", str(wt), "origin/main")
+    monkeypatch.chdir(org)
+    m = _cycle_mod("inspect")
+    rc = m.cmd_gc(argparse.Namespace(base=None, all=False))
+    assert rc == 0
+    assert not wt.is_dir(), "origin/main に統合済みの worktree が「未統合」として残った"
+
+
+def test_gc_explicit_base_overrides_constitution(tmp_path, monkeypatch):
+    """(b) 明示 --base は constitution より強い（operator override）。"""
+    org, g = _declared_org(tmp_path, integration_ref="origin/main", develop=True)
+    g("checkout", "-q", "develop")
+    (org / "d.txt").write_text("d", encoding="utf-8")
+    g("add", "-A")
+    g("commit", "-qm", "develop ahead")
+    g("checkout", "-q", "main")
+    wt = org / ".orgforge" / "wt" / "issue-4"
+    wt.parent.mkdir(parents=True, exist_ok=True)
+    g("worktree", "add", "-q", "-b", "feat/issue-4", str(wt), "develop")
+    monkeypatch.chdir(org)
+    m = _cycle_mod("inspect")
+    # constitution（origin/main）基準では未統合 → 残る
+    assert m.cmd_gc(argparse.Namespace(base=None, all=False)) == 0
+    assert wt.is_dir()
+    # 明示 --base develop なら統合済み → 消える
+    assert m.cmd_gc(argparse.Namespace(base="develop", all=False)) == 0
+    assert not wt.is_dir(), "明示 --base が constitution に負けた"
+
+
+def test_gc_fails_closed_when_nothing_declares_the_base(tmp_path):
+    """(c)(d) integration_ref 無し・--base 無し → develop があっても非ゼロで両方を名指し。"""
+    org, g = _declared_org(tmp_path, integration_ref=None, develop=True)
+    (org / ".orgforge" / "wt").mkdir(parents=True, exist_ok=True)
+    code, out = run("org_cycle.py", "gc", cwd=str(org))
+    assert code != 0, "統合先が宣言されていないのに gc が黙って進んだ"
+    assert "--base" in out and "integration_ref" in out, out
+
+
+def test_begin_fails_closed_and_writes_nothing_without_declared_base(tmp_path):
+    """(c) begin: 統合先が決まらないなら、台帳に何も書く前に非ゼロで止まる。"""
+    org, g = _declared_org(tmp_path, integration_ref=None, develop=True)
+    code, out = run("org_cycle.py", "begin", "--role", "r", "--issue", "5",
+                    "--parent", "9", "--candidate-id", "cid", "--no-check", cwd=str(org))
+    assert code != 0, "worktree の base が決まらないのに begin が進んだ"
+    assert "--base" in out and "integration_ref" in out, out
+    ledger = org / ".orgforge" / "ledger" / "ledger.jsonl"
+    assert not ledger.exists() or not ledger.read_text().strip(), \
+        "fail-closed の前に台帳へ書いてしまった"
+
+
+def test_begin_worktree_base_comes_from_constitution(tmp_path, monkeypatch):
+    """(a) OBS-053: begin の worktree は constitution の integration_ref から切られる。"""
+    org, _ = _declared_org(tmp_path, integration_ref="origin/main", develop=False)
+    monkeypatch.chdir(org)
+    m = _cycle_mod("cycle")
+    calls = []
+    monkeypatch.setattr(m, "_gh_sync", lambda *a: (calls.append(a), (0, ""))[1])
+    monkeypatch.setattr(m, "_ledger", lambda *a: (0, ""))
+    rc = m.cmd_begin(argparse.Namespace(
+        role="r", issue=5, agent=None, phase="implement", parent="9",
+        candidate_id="cid-5", base=None, why=None, no_check=True, no_worktree=False))
+    assert rc == 0
+    branch_calls = [c for c in calls if c and c[0] == "branch"]
+    assert branch_calls, "worktree を用意する branch 呼び出しが無い"
+    assert "--base" in branch_calls[0] and "origin/main" in branch_calls[0], \
+        f"begin が constitution の統合先を worktree base に渡していない: {branch_calls[0]}"
+
+
+def test_show_attributes_nothing_when_clean_against_constitution_ref(tmp_path):
+    """(a) OBS-054: origin/main 基準で差分ゼロなら、不可逆変更を誤帰属しない。"""
+    org, g = _declared_org(tmp_path, integration_ref="origin/main", develop=False)
+    g("branch", "feat/issue-7")          # origin/main と同一 commit（差分ゼロ）
+    code, out = run("org_cycle.py", "show", "--issue", "7", cwd=str(org))
+    assert code == 0, out
+    assert "不可逆" not in out, f"差分ゼロなのに不可逆変更を帰属させた:\n{out}"
+
+
+def test_show_without_declared_base_prints_status_warns_and_skips_attribution(tmp_path):
+    """rework #106: show は読み取り専用の orientation — 基準が無くても台帳由来の状態は出す。
+
+    fail-closed は base を**消費する判断**（帰属ブロック）にだけかける: ブロックを省き、
+    warn-don't-stop（cmd_plan と同じ形）で警告する。develop の推測はしない。
+    """
+    org, _ = _declared_org(tmp_path, integration_ref=None, develop=True)
+    code, out = run("org_cycle.py", "show", "--issue", "7", cwd=str(org))
+    assert code == 0, f"基準が無いだけで orientation 全体を閉め出した:\n{out}"
+    assert "判定" in out and "次:" in out, f"台帳由来の状態が出ていない:\n{out}"
+    assert "--base" in out and "integration_ref" in out, f"警告が両方の選択肢を名指ししていない:\n{out}"
+    # 帰属ブロックの行ラベルは「不可逆:」。警告文（不可逆な変更の帰属は表示しない）とは区別する。
+    assert "不可逆:" not in out, f"基準が無いのに帰属ブロックを出した:\n{out}"
+    assert "帰属は表示しない" in out, f"帰属を省いたことを言っていない:\n{out}"
+
+
+def test_show_attribution_block_fires_when_base_is_declared(tmp_path):
+    """宣言があれば帰属ブロックは従来どおり働く（rework で警告側に倒しすぎていないか）。"""
+    org, g = _declared_org(tmp_path, integration_ref="origin/main", develop=False)
+    g("checkout", "-q", "-b", "feat/issue-9")
+    (org / "migrations").mkdir()
+    for n in ("0001_a.sql", "0002_b.sql", "0003_c.sql"):
+        (org / "migrations" / n).write_text("select 1;", encoding="utf-8")
+    g("add", "-A")
+    g("commit", "-qm", "migrations")
+    g("checkout", "-q", "main")
+    code, out = run("org_cycle.py", "show", "--issue", "9", cwd=str(org))
+    assert code == 0, out
+    assert "不可逆" in out and "3 件" in out, f"宣言済みの基準で帰属ブロックが働いていない:\n{out}"
+
+
+def test_gc_all_works_without_declared_base(tmp_path):
+    """rework #106: --all は統合済み判定をしない = base を消費しない → 宣言を要求しない。"""
+    org, g = _declared_org(tmp_path, integration_ref=None, develop=True)
+    wt = org / ".orgforge" / "wt" / "issue-6"
+    wt.parent.mkdir(parents=True, exist_ok=True)
+    g("worktree", "add", "-q", "-b", "feat/issue-6", str(wt), "main")
+    code, out = run("org_cycle.py", "gc", "--all", cwd=str(org))
+    assert code == 0, f"base を消費しない --all が宣言を要求した:\n{out}"
+    assert not wt.is_dir(), f"クリーンな worktree を --all が消していない:\n{out}"
+
+
+def test_integrate_plan_targets_constitution_ref(tmp_path):
+    """(a) OBS-048: integrate --plan の統合先が constitution の宣言になる。"""
+    org, g = _declared_org(tmp_path, integration_ref="origin/main", develop=False)
+    g("checkout", "-q", "-b", "feat/issue-42")
+    (org / "w.txt").write_text("w", encoding="utf-8")
+    g("add", "-A")
+    g("commit", "-qm", "work")
+    g("checkout", "-q", "main")
+    code, out = run("org_cycle.py", "integrate", "--issue", "42", "--plan", cwd=str(org))
+    assert code == 0, out
+    assert "→ origin/main" in out, f"統合先が宣言どおりでない:\n{out}"
+    assert "→ develop" not in out
+
+
+def test_integrate_plan_fails_closed_without_declared_base(tmp_path):
+    """(c)(d) integrate も推測しない — develop があっても宣言が無ければ非ゼロ。"""
+    org, g = _declared_org(tmp_path, integration_ref=None, develop=True)
+    g("checkout", "-q", "-b", "feat/issue-42")
+    g("checkout", "-q", "main")
+    code, out = run("org_cycle.py", "integrate", "--issue", "42", "--plan", cwd=str(org))
+    assert code != 0, "統合先が宣言されていないのに integrate --plan が進んだ"
+    assert "--base" in out and "integration_ref" in out, out
