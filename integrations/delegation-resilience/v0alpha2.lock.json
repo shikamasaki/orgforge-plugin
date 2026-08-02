@@ -7,16 +7,5 @@
     "tagObject": "22f7a4c8dad78114e6a6bf3732836dec39f294f9",
     "commit": "67960e093217d6d2512b1d55d5d9afba658198f8",
     "verifierCodeDigest": "sha256:1e5bb186cf1ace87463ea42a5f3b0575efb91c53c7deceb3f6e64ff169223797"
-  },
-  "assuranceGraph": {
-    "repository": "https://github.com/shikamasaki/delegation-resilience.git",
-    "tag": "assurance-graph-v0alpha1",
-    "tagObject": "0cc0b3884b05b2f8bb7953129515e90e11a50d35",
-    "commit": "e098ed6f04a4af12e564f102276f15cbc4b9ed2f",
-    "profile": "delegation-resilience.org/assurance-graph/v0alpha1",
-    "schemaPath": "profiles/assurance-graph/schema/assurance-graph.schema.json",
-    "schemaDigest": "sha256:623e4c82c8814977455c91c7e6c838d692cd61fa481197f33db490ec68a85d18",
-    "verifierCodeDigest": "sha256:a62ea481b1036266e631767f3270f7c2cac561271d84a22419882316d874e021",
-    "verifierManifestPath": "tools/assurance_graph_manifest.py"
   }
 }
