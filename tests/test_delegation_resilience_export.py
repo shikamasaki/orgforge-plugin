@@ -58,7 +58,8 @@ def _source(tmp_path: Path) -> tuple[Path, dict[str, str]]:
     return source, {path.name: _sha256(path) for path in sorted(source.iterdir())}
 
 
-def _export(source: Path, output: Path, *, lock: Path = LOCK) -> subprocess.CompletedProcess[str]:
+def _export(source: Path, output: Path, *, lock: Path = LOCK,
+            dr_root: Path = DR_ROOT) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [
             sys.executable,
@@ -68,7 +69,7 @@ def _export(source: Path, output: Path, *, lock: Path = LOCK) -> subprocess.Comp
             "--constitution", str(source / "constitution.yaml"),
             "--scenario", str(source / "reviewer-outage.yaml"),
             "--lock", str(lock),
-            "--dr-root", str(DR_ROOT),
+            "--dr-root", str(dr_root),
             "--output", str(output),
         ],
         cwd=REPO,
@@ -80,12 +81,14 @@ def _export(source: Path, output: Path, *, lock: Path = LOCK) -> subprocess.Comp
 
 def _verify(packet: Path) -> bytes:
     verifier = packet / "standalone-verifier" / "tools" / "verify_bundle.py"
+    lock_data = json.loads(LOCK.read_text())
+    locked_code_digest = lock_data["delegationResilience"]["verifierCodeDigest"]
     result = subprocess.run(
         [sys.executable, str(verifier), str(packet / "bundle.dsse.json"),
          "--trust-policy", str(packet / "trust-policy.json"),
          "--artifact-root", str(packet), "--as-of", "2026-08-03T00:00:00Z",
          "--min-policy-sequence", "1",
-         "--expected-verifier-code-digest", (packet / "verifier-code-digest.txt").read_text().strip(),
+         "--expected-verifier-code-digest", locked_code_digest,
          "--expected-verifier-environment-digest", (packet / "verifier-environment-digest.txt").read_text().strip()],
         text=False,
         capture_output=True,
@@ -150,3 +153,58 @@ def test_export_contract_fails_closed_for_unmappable_or_unpinned_input(tmp_path,
     run = _export(source, tmp_path / "output", lock=lock)
     assert run.returncode != 0
     assert not (tmp_path / "output" / "bundle.dsse.json").exists()
+
+
+def _clone_dr(tmp_path: Path) -> Path:
+    clone = tmp_path / "dr-checkout"
+    subprocess.run(["git", "clone", "--no-local", str(DR_ROOT), str(clone)],
+                   check=True, capture_output=True, text=True)
+    subprocess.run(["git", "-C", str(clone), "checkout", "--detach", "67960e093217d6d2512b1d55d5d9afba658198f8"],
+                   check=True, capture_output=True, text=True)
+    return clone
+
+
+def test_export_rejects_wrong_head(tmp_path):
+    source, _ = _source(tmp_path)
+    clone = _clone_dr(tmp_path)
+    parent = subprocess.run(["git", "-C", str(clone), "rev-parse", "HEAD^"],
+                            check=True, capture_output=True, text=True).stdout.strip()
+    subprocess.run(["git", "-C", str(clone), "checkout", "--detach", parent],
+                   check=True, capture_output=True, text=True)
+    run = _export(source, tmp_path / "output", dr_root=clone)
+    assert run.returncode != 0
+
+
+def test_export_rejects_dirty_tracked_checkout(tmp_path):
+    source, _ = _source(tmp_path)
+    clone = _clone_dr(tmp_path)
+    tracked = clone / "tools" / "data_loading.py"
+    tracked.write_bytes(tracked.read_bytes() + b"\n# dirty\n")
+    run = _export(source, tmp_path / "output", dr_root=clone)
+    assert run.returncode != 0
+
+
+def test_export_rejects_untracked_module_shadow(tmp_path):
+    source, _ = _source(tmp_path)
+    clone = _clone_dr(tmp_path)
+    (clone / "tools" / "untracked_shadow.py").write_text("# shadow\n", encoding="utf-8")
+    run = _export(source, tmp_path / "output", dr_root=clone)
+    assert run.returncode != 0
+
+
+def test_export_rejects_code_digest_mismatch(tmp_path):
+    source, _ = _source(tmp_path)
+    lock = tmp_path / "lock.json"
+    lock_data = json.loads(LOCK.read_text())
+    lock_data["delegationResilience"]["verifierCodeDigest"] = "sha256:" + "0" * 64
+    lock.write_text(json.dumps(lock_data, sort_keys=True), encoding="utf-8")
+    run = _export(source, tmp_path / "output", lock=lock)
+    assert run.returncode != 0
+
+
+@pytest.mark.parametrize("raw", [b'{"protocol":"a","protocol":"b"}', b'{"protocol":NaN}'])
+def test_export_rejects_non_strict_json(tmp_path, raw):
+    source, _ = _source(tmp_path)
+    (source / "exercise-report.json").write_bytes(raw)
+    run = _export(source, tmp_path / "output")
+    assert run.returncode != 0

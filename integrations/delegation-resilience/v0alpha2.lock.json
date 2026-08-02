@@ -5,6 +5,7 @@
     "repository": "https://github.com/shikamasaki/delegation-resilience.git",
     "tag": "v0alpha2",
     "tagObject": "22f7a4c8dad78114e6a6bf3732836dec39f294f9",
-    "commit": "67960e093217d6d2512b1d55d5d9afba658198f8"
+    "commit": "67960e093217d6d2512b1d55d5d9afba658198f8",
+    "verifierCodeDigest": "sha256:1e5bb186cf1ace87463ea42a5f3b0575efb91c53c7deceb3f6e64ff169223797"
   }
 }
