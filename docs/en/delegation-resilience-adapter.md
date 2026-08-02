@@ -30,15 +30,15 @@ of the OrgForge organization.
 The exported standalone verifier is copied from the pinned DR checkout and contains neither
 OrgForge imports nor exercise execution code.
 
-## Assurance Graph status: fail-closed stub
+## Assurance Graph export
 
-The locked DR v0alpha2 commit does not publish a machine-readable Assurance Graph schema, edge
-semantics, or graph verifier contract. OrgForge therefore does **not** invent a graph format. The
-`tools/delegation_resilience_export.py graph` command fails closed and emits no partial artifact
-until a future consumer-held lock declares both `assuranceGraph.schemaRef` and
-`assuranceGraph.verifierCodeDigest`.
+The consumer lock now pins the separate DR Assurance Graph v0alpha1 profile while retaining the
+transactional-action v0alpha2 packet profile. `graph` resolves only the pinned
+`assurance-graph-v0alpha1` tag object and commit, imports from its path-safe archive, checks the
+consumer-held schema and verifier digests, and runs the standalone DR verifier before emitting any
+output. A schema/verifier or digest mismatch emits no partial artifact.
 
-The intended mapping, once DR defines that contract, is one-way and source-bound:
+The current mapping is deliberately minimal and source-bound:
 
 | OrgForge evidence | Candidate graph element | Required treatment |
 | --- | --- | --- |
@@ -49,17 +49,18 @@ The intended mapping, once DR defines that contract, is one-way and source-bound
 | attestation or signed packet | `attestation` / `artifact` | digest-bound opaque source |
 | declared dependency or seam | `dependency` | only when explicitly present in source |
 
-Edges, stable IDs, and recovery-claim results must come from the DR schema and verifier. Missing
-evidence, unsupported edge types, duplicate IDs, dangling references, graph digest changes, and
-mapping omissions must all fail closed. A successful packet or future graph verification must
-leave recovery capability `not_demonstrated` unless DR independently verifies the required claim.
+The adapter currently emits only the explicit reviewer-outage `exercise`, its observed report
+`evidence`/`artifact`, and the schema-defined `produces_artifact` relationship. It emits no actor,
+claim, capability, dependency, external effect, or inferred edge when the OrgForge source does not
+declare one. Missing evidence, unsupported edge types, duplicate IDs, dangling references, graph
+digest changes, and mapping omissions fail closed in the pinned DR verifier. Graph verification
+leaves recovery capability `not_demonstrated`; graph existence is never a recovery claim.
 
 This is intentionally a design boundary, not a new OrgForge assurance claim. The purpose is to
 make evidence, dependencies, external effects, and recoverability explainable with tamper
 resistance and reproducibility—not to treat the existence of a graph as a guarantee.
 
-The graph-specific negative/contract matrix (duplicate node or edge ID, dangling `sourceRef`,
-unmapped evidence, graph mutation digest mismatch, byte-identical regeneration, and standalone
-verification) is intentionally gated on that DR-published schema. The adapter already exercises
-the trust boundary independently: fixed-object archive import, dirty/untracked/ignored/cache
-shadow isolation, strict JSON, consumer-held verifier digest mismatch, and no partial output.
+The adapter tests duplicate/invalid JSON and digest failures at the trust boundary, deterministic
+byte-identical regeneration, source immutability, standalone verification, and the DR verifier's
+duplicate/dangling/mutation checks. `GRAPH_VERIFIED` only means the derived graph is internally
+valid and reproducible; it does not demonstrate recovery capability or human takeover.
