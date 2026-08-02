@@ -6,6 +6,15 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 2.0.29 — evidence-based env examples
+
+### Fixed
+
+- Make the reproducibility gate read env-example contents and require at least one dotenv-style
+  `KEY=` declaration instead of accepting an empty, comment-only, or arbitrary one-byte file.
+- Limit the successful claim to the declaration count actually observed; do not imply that all
+  semantically required configuration was inferred, and never report variable values.
+
 ## 2.0.28 — explicit integration target
 
 ### Fixed

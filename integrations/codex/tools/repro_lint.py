@@ -189,9 +189,31 @@ def check_migrations_idempotent(repo):
 
 
 def check_env_example(repo):
-    # the SET of required secrets must be discoverable (names only); only required if secrets are used
-    if _exists(repo, ".env.example", ".env.sample", ".env.template", "env.example"):
-        return True, ".env.example enumerates required config"
+    # Observe content, not a filename.  The previous check returned "enumerates required config" for
+    # a one-byte file containing only ``x``: a stronger claim than anything it measured.  We do not
+    # infer which variables are semantically required here; we only prove that at least one dotenv
+    # assignment name was actually declared.  Values are never included in the result.
+    examples = []
+    for name in (".env.example", ".env.sample", ".env.template", "env.example"):
+        for path in _iter_matches(repo, name):
+            if path not in examples:
+                examples.append(path)
+    if examples:
+        declarations = 0
+        unreadable = 0
+        assignment = re.compile(r"^\s*(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*\s*=", re.MULTILINE)
+        for path in examples:
+            try:
+                with open(path, encoding="utf-8") as handle:
+                    declarations += len(assignment.findall(handle.read()))
+            except (OSError, UnicodeError):
+                unreadable += 1
+        if declarations:
+            return True, (f"env example content declares {declarations} config variable name(s) "
+                          f"across {len(examples)} file(s); values were not reported")
+        suffix = f"; {unreadable} file(s) unreadable" if unreadable else ""
+        return False, (f"env example file(s) exist but contain 0 KEY= declarations{suffix}. "
+                       "Presence alone does not enumerate configuration names.")
     # if there's no sign the app needs env config, this is n/a; heuristic: a .env in .gitignore implies use
     gi = _read(repo, ".gitignore")
     if ".env" in gi:

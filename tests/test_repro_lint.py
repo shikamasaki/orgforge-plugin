@@ -95,6 +95,30 @@ def test_env_ignored_but_no_example_holds(tmp_path):
     assert code == 10 and "env-example" in out, out
 
 
+def test_empty_or_contentless_env_examples_hold(tmp_path):
+    for index, content in enumerate(("", "x", "# configuration goes here\n")):
+        case = tmp_path / str(index)
+        case.mkdir()
+        _clean_repo(case)
+        (case / ".env.example").write_text(content, encoding="utf-8")
+        code, out = run(case, "--phase", "test")
+        assert code == 10, out
+        assert "env-example" in out and "0 KEY=" in out
+
+
+def test_env_example_with_assignment_passes_without_reporting_values(tmp_path):
+    _clean_repo(tmp_path)
+    secret_value = "do-not-echo-this-value"
+    (tmp_path / ".env.example").write_text(
+        f"# public setup names\nPUBLIC_KEY=\nexport API_URL=https://example.invalid\n"
+        f"TOKEN={secret_value}\n", encoding="utf-8")
+    code, out = run(tmp_path, "--phase", "test")
+    assert code == 0, out
+    assert "declares 3 config variable name(s)" in out
+    assert secret_value not in out
+    assert "required config" not in out
+
+
 def test_ci_at_repo_root_counts_for_a_subpackage(tmp_path):
     # REGRESSION (found live on tatekae): CI lives at the VCS root (.github/), but the checked app is a
     # sub-package (monorepo app/). The CI check must walk up to the .git root, or it false-HOLDs a repo
