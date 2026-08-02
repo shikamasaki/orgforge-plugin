@@ -28,4 +28,9 @@ sudo、daemon、別OS UID、鍵、branch、GitHub Issue、network accessは不�
 - [保証モデル](docs/ja/assurance.md)
 - [運用](docs/ja/operations.md)
 
+Delegation Resilience adapterの説明は[`docs/ja/delegation-resilience-adapter.md`](docs/ja/delegation-resilience-adapter.md)にあります。
+固定したDR Assurance Graph v0alpha1とTransactional Action v0alpha2へ、OrgForgeのexercise evidenceを
+source-boundな派生artifactとしてexportします。`GRAPH_VERIFIED`はグラフの内部整合性と再現性だけを示し、
+recovery capability、human takeover、deployment approvalの実証を意味しません。
+
 英語版は [`docs/en/README.md`](docs/en/README.md) です。両セットはそれぞれ単独で完結します。
