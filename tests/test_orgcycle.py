@@ -2333,3 +2333,46 @@ def test_verify_subject_root_override(tmp_path):
     assert sid and parts["reviewed_tree_sha"] == root_tree
     assert parts.get("subject_root") == os.path.abspath(str(repo)), \
         "どの checkout を意図して判定したかが印字に残っていない"
+
+
+# ── #101 rework: isdir では偽 worktree が通る（skeptic の反証）─────────────────
+# 空の残骸ディレクトリ・prune せず再作成されたディレクトリ・repo root への symlink は
+# どれも primary の内側に居るので、git -C が primary に解決し、subject が primary の
+# tree（ahead=0・relation=current）として警告なしに mint される — OBS-071 の偽造の再現。
+# 「まさにそこを toplevel とする実 worktree」まで確かめて初めて fail-closed になる。
+
+def test_verify_rejects_empty_stub_at_worktree_path(tmp_path):
+    """失敗した `git worktree add` が残す空ディレクトリでは subject を mint しない。"""
+    repo, g = _subject_org(tmp_path, issues=())
+    fake = repo / ".orgforge" / "wt" / "issue-42"
+    fake.mkdir(parents=True)
+    code, sid, _, err = _print_subject(repo, 42)
+    assert code != 0, "残骸ディレクトリで verify が成功した — primary の tree が偽造される"
+    assert sid is None, "残骸ディレクトリから subject が mint された（OBS-071 の偽造）"
+    assert os.path.join(".orgforge", "wt", "issue-42") in err
+
+
+def test_verify_rejects_symlink_at_worktree_path(tmp_path):
+    """canonical path が repo root への symlink でも subject を mint しない。"""
+    repo, g = _subject_org(tmp_path, issues=())
+    (repo / ".orgforge" / "wt").mkdir(parents=True, exist_ok=True)
+    (repo / ".orgforge" / "wt" / "issue-43").symlink_to(repo)
+    code, sid, _, err = _print_subject(repo, 43)
+    assert code != 0, "symlink 経由で verify が成功した — primary の tree が偽造される"
+    assert sid is None
+    assert os.path.join(".orgforge", "wt", "issue-43") in err
+
+
+def test_verify_fails_after_worktree_replaced_with_plain_dir(tmp_path):
+    """実 worktree が消え、同じパスに素のディレクトリが再作成された遷移でも黙らない。"""
+    import shutil
+    repo, g = _subject_org(tmp_path)
+    wt = repo / ".orgforge" / "wt" / "issue-7"
+    wt_tree = g("rev-parse", "HEAD^{tree}", cwd=wt).stdout.strip()
+    code, sid, parts, err = _print_subject(repo, 7)
+    assert code == 0 and parts["reviewed_tree_sha"] == wt_tree, err
+    shutil.rmtree(wt)
+    wt.mkdir()                     # rm -rf 後に prune せず再作成（実地で起きる形）
+    code2, sid2, _, err2 = _print_subject(repo, 7)
+    assert code2 != 0, "worktree 消失後も verify が成功した — primary の tree に黙って差し替わる"
+    assert sid2 is None

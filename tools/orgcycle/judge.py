@@ -18,6 +18,7 @@ from ._core import (
     HERE,
     issue_worktree,
     review_subject,
+    worktree_rooted_at,
     _agents_dir,
     _events_for,
     _execute,
@@ -200,10 +201,16 @@ def cmd_verify(a):
             return 2
     else:
         _subject_cwd = issue_worktree(a.issue)
-        if not _subject_cwd or not os.path.isdir(_subject_cwd):
+        # isdir では足りない: 空の残骸ディレクトリや repo root への symlink は primary の
+        # 内側に居るので、git が primary に解決して OBS-071 の偽造がそのまま通る。
+        # 「まさにそこを toplevel とする実 worktree」まで確かめる（worktree_rooted_at）。
+        if not _subject_cwd or not worktree_rooted_at(_subject_cwd):
             _expected = _subject_cwd or os.path.join(
                 ".orgforge", "wt", f"issue-{a.issue}")
-            print(f"Issue #{a.issue} の worktree が無い: {_expected}\n"
+            _hint = ("（パスは存在するが実 worktree ではない — 残骸なら "
+                     "`git worktree prune` で片付けてから begin し直すこと）\n"
+                     if _subject_cwd and os.path.lexists(_subject_cwd) else "")
+            print(f"Issue #{a.issue} の worktree が無い: {_expected}\n{_hint}"
                   "  cwd の tree では代用しない — 本体から打つと、どの Issue でも同じ "
                   "subject が mint され、判定の同一性が壊れる（#101）。\n"
                   "  `org_cycle begin --issue N` で worktree を作るか、worktree 以外の "
