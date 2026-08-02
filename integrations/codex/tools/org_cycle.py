@@ -73,6 +73,10 @@ def main(argv):
                    help="判定するフェーズ（review_subject_id に入る）")
     q.add_argument("--base", dest="base", default=None,
                    help="統合先 ref（省略時は origin/develop/develop/origin/main/main の順で解決）")
+    q.add_argument("--subject-root", dest="subject_root", default=None,
+                   help="判定対象の checkout を明示する（既定は Issue の worktree "
+                        ".orgforge/wt/issue-<N>）。worktree 運用でないレイアウトを意図して"
+                        "判定するときだけ使う — cwd への暗黙 fallback はしない（#101）")
     # 記録のためだけに judge を起動させない。cross-harness の org では verify が実際に
     # headless judge を回すので、subject を知るのに数分待つのは筋が悪い（実測）。
     q.add_argument("--print-subject", action="store_true",

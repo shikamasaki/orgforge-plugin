@@ -358,6 +358,57 @@ def _worktree_tree_sha(cwd=None):
                 pass
 
 
+def issue_worktree(issue, cwd=None):
+    """`begin` が作る Issue worktree の正準パス `.orgforge/wt/issue-<N>` を解決する。
+
+    レイアウトの出所は `ghsync.branch._make_worktree`（primary checkout の toplevel 直下）。
+    第2のレイアウトを発明しない — ここは**解決だけ**を再現する。linked worktree の中から
+    呼ばれても primary に解決する（`git worktree list --porcelain` の先頭は常に primary）。
+    解決できなければ None（呼び手が fail-closed にする — cwd で代用しない）。
+    """
+    d = os.path.abspath(cwd or os.getcwd())
+    try:
+        r = subprocess.run(["git", "-C", d, "worktree", "list", "--porcelain"],
+                           capture_output=True, text=True, timeout=30)
+    except Exception:
+        return None
+    if r.returncode != 0:
+        return None
+    for line in (r.stdout or "").splitlines():
+        if line.startswith("worktree "):
+            primary = os.path.abspath(line[len("worktree "):])
+            return os.path.join(primary, ".orgforge", "wt", f"issue-{int(issue)}")
+    return None
+
+
+def worktree_rooted_at(path):
+    """`path` が「**まさにそこを toplevel とする**実 worktree」かを実体で確かめる。
+
+    `os.path.isdir` だけでは偽 worktree が通る（skeptic が実証）: 失敗した
+    `git worktree add` が残す空ディレクトリ・prune せず再作成されたディレクトリ・
+    repo root への symlink は、どれも primary repo の**内側**に居るので `git -C` が
+    primary に解決し、subject が primary の tree（ahead=0・relation=current）として
+    警告なしに mint される — OBS-071 の偽造がそのまま再現する。
+
+    判定は2段: (1) canonical path 自体が symlink なら偽（実体が別の場所にある worktree
+    は worktree ではない）。(2) `git rev-parse --show-toplevel` の実体が path の実体と
+    一致して初めて「そこに worktree がある」— 空ディレクトリや残骸は toplevel が
+    primary root に解決するので、ここで落ちる。祖先の symlink（/var → /private/var 等）
+    は両辺 realpath なので誤検出しない。
+    """
+    if not path or os.path.islink(path) or not os.path.isdir(path):
+        return False
+    try:
+        r = subprocess.run(["git", "-C", path, "rev-parse", "--show-toplevel"],
+                           capture_output=True, text=True, timeout=30)
+    except Exception:
+        return False
+    top = (r.stdout or "").strip()
+    if r.returncode != 0 or not top:
+        return False
+    return os.path.realpath(top) == os.path.realpath(path)
+
+
 def review_subject(issue, role, phase=None, cwd=None, integration_ref=None):
     """**判定対象の同一性**を1つの digest に束ねる。`verify` が一度だけ生成する。
 
