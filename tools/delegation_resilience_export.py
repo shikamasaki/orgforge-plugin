@@ -335,10 +335,23 @@ def export_assurance_graph(*, report_path: Path, constitution_path: Path, scenar
     if lock.get("apiVersion") != "orgforge.delegation-resilience-adapter/v1":
         raise ExportError("unknown adapter lock version")
     graph = lock.get("assuranceGraph")
-    if not isinstance(graph, dict) or not graph.get("schemaPath") or not graph.get("verifierCodeDigest"):
+    if not isinstance(graph, dict):
         raise ExportError(
             "consumer lock declares no Assurance Graph schema/verifier contract; "
             "graph export is unavailable and no artifact was emitted"
+        )
+    required_graph_fields = (
+        "repository", "tag", "tagObject", "commit", "profile", "schemaPath",
+        "schemaDigest", "verifierCodeDigest", "verifierManifestPath",
+    )
+    missing_graph_fields = [
+        field for field in required_graph_fields
+        if not isinstance(graph.get(field), str) or not graph[field]
+    ]
+    if missing_graph_fields:
+        raise ExportError(
+            "Assurance Graph consumer lock is incomplete; missing required fields: "
+            + ", ".join(missing_graph_fields)
         )
     if graph.get("profile") != "delegation-resilience.org/assurance-graph/v0alpha1":
         raise ExportError("unsupported Assurance Graph profile")

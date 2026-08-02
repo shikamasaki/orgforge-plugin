@@ -332,6 +332,28 @@ def test_graph_lock_requires_consumer_held_schema_and_verifier_digest(tmp_path):
     assert not (tmp_path / "graph").exists()
 
 
+@pytest.mark.parametrize("missing", [
+    "repository", "tag", "tagObject", "commit", "profile", "schemaPath",
+    "schemaDigest", "verifierCodeDigest", "verifierManifestPath",
+])
+def test_graph_lock_missing_required_field_fails_closed(tmp_path, missing):
+    source, _ = _source(tmp_path)
+    lock = tmp_path / "lock.json"
+    lock_data = json.loads(LOCK.read_text())
+    lock_data["assuranceGraph"].pop(missing)
+    lock.write_text(json.dumps(lock_data, sort_keys=True), encoding="utf-8")
+    run = subprocess.run(
+        [sys.executable, str(EXPORTER), "graph", "--exercise-report", str(source / "exercise-report.json"),
+         "--constitution", str(source / "constitution.yaml"), "--scenario", str(source / "reviewer-outage.yaml"),
+         "--lock", str(lock), "--dr-root", str(DR_ROOT), "--output", str(tmp_path / "graph")],
+        cwd=REPO, text=True, capture_output=True, timeout=30,
+    )
+    assert run.returncode != 0
+    assert f"missing required fields: {missing}" in run.stderr
+    assert "Traceback" not in run.stderr
+    assert not (tmp_path / "graph").exists()
+
+
 def test_graph_export_is_deterministic_and_stays_not_demonstrated(tmp_path):
     source, _ = _source(tmp_path)
     outputs = []
