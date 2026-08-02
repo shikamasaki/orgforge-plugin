@@ -4,8 +4,12 @@
 OrgForge reviewer-outage exercise report, the constitution, and the scenario; it never reads or
 writes an OrgForge ledger, and it never changes those input artifacts.
 
-The fixed lock in `integrations/delegation-resilience/v0alpha2.lock.json` binds the DR tag object
-and commit. Export refuses a checkout that does not resolve both values exactly.
+The fixed lock in `integrations/delegation-resilience/v0alpha2.lock.json` binds the DR tag object,
+commit, and verifier code digest. Export requires `HEAD` and both tag resolutions to match,
+rejects tracked, staged, untracked, or import-source ignored files in the checkout, and verifies
+that imported modules resolve inside that checkout. The standalone contract test supplies the
+lock-held code digest as its expected value; the packet's measured environment digest remains
+platform-specific evidence rather than an independent code pin.
 
 ## Mapping boundary
 
