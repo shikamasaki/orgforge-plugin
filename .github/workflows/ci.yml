@@ -35,7 +35,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: shikamasaki/delegation-resilience
-          ref: bbd23510f6a5aae5e430a9d5626f8591f9db055d
+          ref: e098ed6f04a4af12e564f102276f15cbc4b9ed2f
           path: .delegation-resilience
           fetch-depth: 0
 
