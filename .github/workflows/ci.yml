@@ -22,7 +22,10 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-        python: ["3.12"]
+        # The pinned DR v0alpha2 portable verifier declares CPython 3.12.8.
+        # Do not float to a newer 3.12 patch release: that would invalidate the
+        # verifier-environment assertion rather than independently verify it.
+        python: ["3.12.8"]
 
     steps:
       - name: Check out the tested revision
