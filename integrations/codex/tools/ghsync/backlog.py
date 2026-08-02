@@ -90,6 +90,39 @@ def _composed_body(a):
     return body
 
 
+# `Depends on:` 行の見出し。正書法は `Depends on: #n, #m`（_composed_body が書く形）だが、
+# 人間は markdown 装飾（**強調**・リスト・引用）、`Depends-on`/`depends_on`、コロン前の空白を
+# 付けて書く — 実地で全部観測された（#103 rework 2）。読みは寛容に、書きは正書法のまま。
+_DEP_HEADER = re.compile(r"^[>*_\s•-]*depends[\s_-]*on\s*:\s*(.*)$", re.I)
+
+
+def _depends_refs(body):
+    """body の全 Depends-on 行から機械可読な Issue 参照（`#N`、および裸の番号 token）を集める。
+
+    参照は `#(\\d+)` で回収する — 注釈付き token（`#63 (main 未統合)`）や and 連結を黙って
+    捨てない。**捨てた結果が OBS-051 の再現だった**（skeptic の refutation, #103 rework 2）:
+    docs が指示する手書きの行に人間が注釈を足しただけで、ready が依存ゼロ扱いにした。
+    参照が1つも無い行（`Depends on: none`）は「依存なし」の明示宣言 — 静かに通す。"""
+    refs = []
+    for line in str(body or "").splitlines():
+        m = _DEP_HEADER.match(line)
+        if not m:
+            continue
+        rest = m.group(1)
+        line_refs = re.findall(r"#(\d+)", rest)
+        for tok in rest.split(","):
+            tok = tok.strip().strip("*_` ")
+            if re.fullmatch(r"\d+", tok):
+                line_refs.append(tok)   # 裸の番号 token（`Depends on: 63`）も従来どおり受理
+        refs += line_refs
+    return list(dict.fromkeys(refs))
+
+
+# GitHub の closing keyword（Fixes/Closes/Resolves #N）は「閉じる先」の参照であって依存ではない。
+# これを prose-WARN の引き金にすると偽陽性が operator に警告を読み飛ばす訓練をさせる。
+_CLOSING_REF = re.compile(r"\b(?:clos(?:e[sd]?)|fix(?:e[sd])?|resolv(?:e[sd]?))\s*:?\s*#(\d+)", re.I)
+
+
 def _prose_dependency_warning(a):
     """Body が他 Issue を `#N` で参照しているのに `Depends on:` 行が無いときの警告文（無ければ None）。
 
@@ -97,11 +130,14 @@ def _prose_dependency_warning(a):
     `ready` は散文を読まないので着手不能な仕事が maker に渡った。散文を自動で依存に解釈は**しない**
     — 推測は警告より悪い（`#63 を置き換える` は依存ではない）。人間に見える形で大声で言うだけ。"""
     raw = _normalized_body(getattr(a, "body", None))
-    refs = list(dict.fromkeys(re.findall(r"#(\d+)", raw)))
+    closing = set(_CLOSING_REF.findall(raw))
+    refs = [r for r in dict.fromkeys(re.findall(r"#(\d+)", raw)) if r not in closing]
     if not refs:
         return None
+    # 宣言があれば黙る — ただし宣言とは**参照を運ぶ**宣言のこと。`Depends on: none` は
+    # 「依存なし」の明示であって、散文が #63 を語っているならその矛盾こそ表に出す。
     declared = bool(getattr(a, "depends", None)) or bool(getattr(a, "carved_from", None)) or \
-        any(l.lower().lstrip().startswith("depends on:") for l in raw.splitlines())
+        bool(_depends_refs(raw))
     if declared:
         return None
     listed = ", ".join(f"#{r}" for r in refs)
@@ -391,21 +427,15 @@ def cmd_ready(a):
                             if n.startswith("orgforge:kind:")), "task")
             if it_kind != kind:
                 continue
-        # dependency: parse EVERY "Depends on: #n, #m" line (a body can carry several — carve-out
-        # plus needs-human each append one; the old parser kept only the LAST line, so an open
-        # dependency on an earlier line was silently dropped, Issue #103). Ready only if all
+        # dependency: parse EVERY Depends-on line (a body can carry several — carve-out plus
+        # needs-human each append one; the old parser kept only the LAST line, Issue #103) and
+        # EVERY ref on each line — an annotated token (`#63 (main 未統合)`) or an and-joined pair
+        # must not be silently dropped (skeptic refutation, #103 rework 2). Ready only if all
         # referenced issues are verifiably CLOSED — an unverifiable dependency withholds too:
-        # "state unknown" is not proof of startability.
-        body = it.get("body") or ""
-        deps = []
-        for line in body.splitlines():
-            if line.lower().lstrip().startswith("depends on:"):
-                deps += [t.strip() for t in line.split(":", 1)[1].split(",") if t.strip()]
+        # "state unknown" is not proof of startability. A line with zero refs (`Depends on: none`)
+        # is an explicit no-dep declaration: silent, no queries.
         blocked = False
-        for d in dict.fromkeys(deps):
-            if not re.fullmatch(r"#?\d+", d):
-                continue   # prose token — not a machine-readable ref; warned at create, never guessed here
-            num = d.lstrip("#")
+        for num in _depends_refs(it.get("body") or ""):
             c, o = gh(["issue", "view", num, "--repo", a.repo, "--json", "state"])
             state = None
             if c == 0:
@@ -416,9 +446,14 @@ def cmd_ready(a):
             if state == "CLOSED":
                 continue
             blocked = True
-            if state != "OPEN":
-                # OPEN は健全な withhold（依存が生きている）。それ以外は「確認できなかった」—
-                # startable の証明が無いので渡さないが、その事実は見える形で外に出す。
+            if state == "OPEN":
+                # 健全な withhold — 警報ではないが、**観測はできる形で**残す。空の ready と
+                # 「依存待ちで空」を stderr で区別できないと、org は原因の観測手段なく止まる。
+                print(f"withheld: issue #{it['number']} waits on open dependency #{num}",
+                      file=sys.stderr)
+            else:
+                # OPEN でも CLOSED でもない = 「確認できなかった」。startable の証明が無いので
+                # 渡さないが、gh の劣化と「仕事なし」を区別できるよう警報として外に出す。
                 withheld_unverifiable.append(it["number"])
                 print(f"WARN: issue #{it['number']} withheld from ready — dependency #{num} could "
                       f"not be verified ({o.strip()[:80] or 'unparseable state'}). Unknown is not "

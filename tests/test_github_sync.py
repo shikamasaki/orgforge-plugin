@@ -1463,6 +1463,83 @@ def test_ready_reports_unverifiable_withholds_machine_readably(monkeypatch, caps
     assert "WARN" in captured.err and "#1" in captured.err and "#9" in captured.err, captured.err
 
 
+# ── #103 rework 2 (skeptic): no token containing a ref is ever silently dropped ──────────────
+# The refutation: `Depends on: #63 (main に統合されるまで着手不能)` — the exact hand-written
+# form the org's own docs instruct (org-decompose.md §4b) — failed the old fullmatch token
+# filter and was DROPPED: ready [1], zero queries, silent stderr. OBS-051 on the documented path.
+
+def _task_listing(*issues):
+    return json.dumps([{"number": n, "title": f"t{n}",
+                        "labels": [{"name": "orgforge:kind:task"}], "body": b}
+                       for n, b in issues])
+
+
+def test_ready_verifies_annotated_dependency_tokens(monkeypatch):
+    fake = FakeGh(replies={"issue list": (0, _task_listing(
+        (1, "Depends on: #63 (main に統合されるまで着手不能)"))),
+        "issue view 63": (0, '{"state": "OPEN"}')})
+    rc, ready = _ready(monkeypatch, fake)
+    assert rc == 0 and ready == [], ready
+    assert fake.calls_matching("issue view 63"), "the annotated ref was never verified"
+
+
+def test_ready_verifies_and_joined_dependency_refs(monkeypatch):
+    fake = FakeGh(replies={"issue list": (0, _task_listing((1, "Depends on: #63 and #64"))),
+                           "issue view 63": (0, '{"state": "OPEN"}'),
+                           "issue view 64": (0, '{"state": "CLOSED"}')})
+    rc, ready = _ready(monkeypatch, fake)
+    assert rc == 0 and ready == [], ready
+
+
+@pytest.mark.parametrize("header", ["Depends On : #9", "Depends-on: #9", "**Depends on:** #9",
+                                    "- Depends on: #9", "> Depends on: #9", "depends_on: #9"])
+def test_ready_recognizes_depends_header_variants(monkeypatch, header):
+    fake = FakeGh(replies={"issue list": (0, _task_listing((1, header))),
+                           "issue view 9": (0, '{"state": "OPEN"}')})
+    rc, ready = _ready(monkeypatch, fake)
+    assert rc == 0 and ready == [], (header, ready)
+
+
+def test_ready_annotated_unverifiable_dependency_is_reported(monkeypatch, capsys):
+    fake = FakeGh(replies={"issue list": (0, _task_listing((1, "Depends on: #9 (integration)"))),
+                           "issue view 9": (1, "gh: Not Found")})
+    monkeypatch.setattr(GS, "gh", fake)
+    rc = GS.cmd_ready(_ns(repo="o/r", kind="task"))
+    captured = capsys.readouterr()
+    out = json.loads(captured.out)
+    assert rc == 0 and out["ready"] == [] and out["withheld_unverifiable"] == [1], out
+    assert "#9" in captured.err, captured.err
+
+
+def test_ready_depends_none_is_an_explicit_no_dep_declaration(monkeypatch):
+    # zero refs on a Depends-on line = explicit "no dependencies": silent, no queries, ready
+    fake = FakeGh(replies={"issue list": (0, _task_listing((1, "Depends on: none")))})
+    rc, ready = _ready(monkeypatch, fake)
+    assert rc == 0 and ready == [1], ready
+    assert not fake.calls_matching("issue view"), "a no-dep declaration must not be queried"
+
+
+def test_create_warns_when_depends_none_but_prose_references_issues(monkeypatch, capsys):
+    # `Depends on: none` must not suppress the prose-ref WARN — the declaration says "no deps"
+    # while the prose says otherwise; that contradiction is exactly what to surface.
+    fake = FakeGh(replies={"issue create": (0, "https://github.com/o/r/issues/90")})
+    monkeypatch.setattr(GS, "gh", fake)
+    rc = GS.cmd_create(_create_ns(body="Depends on: none\n\nNeeds parts produced by #63."))
+    assert rc == 0
+    err = capsys.readouterr().err
+    assert "WARN" in err and "#63" in err, err
+
+
+def test_create_does_not_warn_on_github_closing_keywords(monkeypatch, capsys):
+    # Fixes/Closes/Resolves #N is a closing reference, not a dependency — a false-positive WARN
+    # trains operators to ignore the real one.
+    fake = FakeGh(replies={"issue create": (0, "https://github.com/o/r/issues/91")})
+    monkeypatch.setattr(GS, "gh", fake)
+    rc = GS.cmd_create(_create_ns(body="Fixes #12 by adding a regression guard.\nCloses #13."))
+    assert rc == 0
+    assert "WARN" not in capsys.readouterr().err
+
+
 def test_ready_open_dependency_withhold_is_not_reported_as_unverifiable(monkeypatch, capsys):
     # an OPEN dependency is a normal, healthy withhold — it must NOT trip the degradation alarm
     listing = ('[{"number": 1, "title": "t", "labels": [{"name": "orgforge:kind:task"}],'
@@ -1476,3 +1553,6 @@ def test_ready_open_dependency_withhold_is_not_reported_as_unverifiable(monkeypa
     out = json.loads(captured.out)
     assert out["ready"] == [] and out["withheld_unverifiable"] == [], out
     assert "WARN" not in captured.err, captured.err
+    # ...but the withhold is still OBSERVABLE (info line, not an alarm): empty-because-waiting
+    # must be distinguishable from empty-because-nothing on stderr (skeptic, #103 rework 2)
+    assert "#9" in captured.err, captured.err
