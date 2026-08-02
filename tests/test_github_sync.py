@@ -1260,3 +1260,173 @@ def test_separation_of_duties_compares_decision_by_not_recorded_by(tmp_path):
     # 判断者が別なら通る（記録者が同じでも）
     ev["payload"]["decision_by"] = "gate-signer"
     assert led._distinct_actor_violation(ev, hist) is None, "代理記録が違反扱いになっている"
+
+
+# ── Issue #103: machine-readable dependencies, parked state, honest ready gating ─────────────
+# Observed in Tatekae (OBS-051): `ready` returned 30 items including 4 whose dependency existed
+# only as prose (the carve-out path had no --depends propagation), a "[PARKED]" title with no
+# machine vocabulary, and an integration-waiting Issue. A maker was handed unstartable work.
+
+def _ready(monkeypatch, fake, kind="task"):
+    import io, contextlib
+    monkeypatch.setattr(GS, "gh", fake)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = GS.cmd_ready(_ns(repo="o/r", kind=kind))
+    return rc, json.loads(buf.getvalue())["ready"]
+
+
+def _create_ns(**kw):
+    base = dict(repo="o/r", title="carved-out task", body="Task context", objective=None,
+                source=None, depends=None, priority=None, kind="task", parent=None,
+                carved_from=None)
+    base.update(kw)
+    return _ns(**base)
+
+
+def test_create_carved_from_appends_machine_readable_depends_on(monkeypatch):
+    # the carve-out invariant: 「carve out 先は元に依存する」は例外なく成り立つ — so the create
+    # path must WRITE it, not leave it to prose (Issue #103).
+    fake = FakeGh(replies={"issue create": (0, "https://github.com/o/r/issues/80")})
+    monkeypatch.setattr(GS, "gh", fake)
+    rc = GS.cmd_create(_create_ns(body="Out-of-scope find during rework of the CI floor.",
+                                  carved_from="63"))
+    assert rc == 0
+    create = fake.calls_matching("issue create")[0]
+    body = create[create.index("--body") + 1]
+    assert "Depends on: #63" in body, body
+
+
+def test_create_carved_from_merges_with_explicit_depends_without_duplicates(monkeypatch):
+    fake = FakeGh(replies={"issue create": (0, "https://github.com/o/r/issues/81")})
+    monkeypatch.setattr(GS, "gh", fake)
+    rc = GS.cmd_create(_create_ns(body="Carved out with an extra dependency.",
+                                  depends="7", carved_from="63"))
+    assert rc == 0
+    body = fake.calls_matching("issue create")[0]
+    body = body[body.index("--body") + 1]
+    dep_lines = [l for l in body.splitlines() if l.lower().startswith("depends on:")]
+    assert dep_lines == ["Depends on: #7, #63"], dep_lines
+    # already listed in --depends → no duplicate ref on the line
+    rc = GS.cmd_create(_create_ns(title="second carve", body="Dup-declared dependency.",
+                                  depends="63", carved_from="63"))
+    assert rc == 0
+    body = fake.calls_matching("issue create")[1]
+    body = body[body.index("--body") + 1]
+    dep_lines = [l for l in body.splitlines() if l.lower().startswith("depends on:")]
+    assert dep_lines == ["Depends on: #63"], dep_lines
+
+
+def test_create_warns_on_prose_issue_refs_without_depends_line(monkeypatch, capsys):
+    # the prose-dependency trap: the body names other issues but declares no Depends on: line.
+    # WARN loudly, still create — do NOT auto-parse prose into dependencies (guessing is worse).
+    fake = FakeGh(replies={"issue create": (0, "https://github.com/o/r/issues/82")})
+    monkeypatch.setattr(GS, "gh", fake)
+    rc = GS.cmd_create(_create_ns(body="Needs ci/test-floor.json produced by #63; wire it in."))
+    assert rc == 0
+    err = capsys.readouterr().err
+    assert "WARN" in err and "#63" in err and "Depends on" in err, err
+    assert fake.calls_matching("issue create"), "the warning must not block the create"
+
+
+def test_create_does_not_warn_when_dependency_is_declared(monkeypatch, capsys):
+    fake = FakeGh(replies={"issue create": (0, "https://github.com/o/r/issues/83")})
+    monkeypatch.setattr(GS, "gh", fake)
+    rc = GS.cmd_create(_create_ns(body="Needs ci/test-floor.json produced by #63; wire it in.",
+                                  carved_from="63"))
+    assert rc == 0
+    assert "WARN" not in capsys.readouterr().err
+
+
+# ── parked: a machine-readable vocabulary instead of "[PARKED]" title prose ──────────────────
+def test_park_adds_label_and_comments_why(monkeypatch):
+    fake = FakeGh(replies={"--json labels": (0, '{"labels": []}')})
+    monkeypatch.setattr(GS, "gh", fake)
+    rc = GS.cmd_park(_ns(repo="o/r", issue=42, why="parts live only in an unmerged worktree"))
+    assert rc == 0
+    edits = fake.calls_matching("issue edit 42")
+    assert edits and "orgforge:parked" in edits[0] and "--add-label" in edits[0], fake.calls
+    comments = fake.calls_matching("issue comment 42")
+    assert comments and any("unmerged worktree" in " ".join(c) for c in comments), fake.calls
+
+
+def test_park_is_idempotent_when_already_parked(monkeypatch):
+    fake = FakeGh(replies={"--json labels": (0, '{"labels": [{"name": "orgforge:parked"}]}')})
+    monkeypatch.setattr(GS, "gh", fake)
+    rc = GS.cmd_park(_ns(repo="o/r", issue=42, why="again"))
+    assert rc == 0
+    assert not fake.calls_matching("issue edit") and not fake.calls_matching("issue comment")
+
+
+def test_unpark_removes_label_and_comments_why(monkeypatch):
+    fake = FakeGh(replies={"--json labels": (0, '{"labels": [{"name": "orgforge:parked"}]}')})
+    monkeypatch.setattr(GS, "gh", fake)
+    rc = GS.cmd_unpark(_ns(repo="o/r", issue=42, why="worktree merged; parts exist on main"))
+    assert rc == 0
+    edits = fake.calls_matching("issue edit 42")
+    assert edits and "--remove-label" in edits[0] and "orgforge:parked" in edits[0], fake.calls
+    assert any("worktree merged" in " ".join(c) for c in fake.calls_matching("issue comment 42"))
+
+
+def test_unpark_is_idempotent_when_not_parked(monkeypatch):
+    fake = FakeGh(replies={"--json labels": (0, '{"labels": []}')})
+    monkeypatch.setattr(GS, "gh", fake)
+    rc = GS.cmd_unpark(_ns(repo="o/r", issue=42, why=None))
+    assert rc == 0
+    assert not fake.calls_matching("issue edit")
+
+
+# ── ready: excludes every non-startable state ────────────────────────────────────────────────
+def test_ready_excludes_parked_issues(monkeypatch):
+    listing = ('[{"number": 1, "title": "t", "labels": [{"name": "orgforge:kind:task"}], "body": ""},'
+               ' {"number": 2, "title": "p", "labels": [{"name": "orgforge:kind:task"},'
+               ' {"name": "orgforge:parked"}], "body": ""}]')
+    rc, ready = _ready(monkeypatch, FakeGh(replies={"issue list": (0, listing)}))
+    assert rc == 0 and ready == [1], ready
+
+
+def test_ready_excludes_claimed_and_in_progress_issues(monkeypatch):
+    # claimed = existing behavior (verify); in-progress alongside a stale ready label = the
+    # 7-rounds-reworked, integration-waiting Issue that was listed as untouched (Issue #103).
+    listing = ('[{"number": 1, "title": "t", "labels": [{"name": "orgforge:kind:task"}], "body": ""},'
+               ' {"number": 2, "title": "c", "labels": [{"name": "orgforge:kind:task"},'
+               ' {"name": "orgforge:claimed:bob"}], "body": ""},'
+               ' {"number": 3, "title": "w", "labels": [{"name": "orgforge:kind:task"},'
+               ' {"name": "orgforge:in-progress"}], "body": ""}]')
+    rc, ready = _ready(monkeypatch, FakeGh(replies={"issue list": (0, listing)}))
+    assert rc == 0 and ready == [1], ready
+
+
+def test_ready_withholds_when_any_of_multiple_depends_lines_is_open(monkeypatch):
+    # the old parser kept only the LAST "Depends on:" line — an open dependency on an earlier
+    # line was silently dropped and the issue listed as ready.
+    body = "context\\nDepends on: #5\\nmore context\\nDepends on: #7"
+    listing = ('[{"number": 1, "title": "t", "labels": [{"name": "orgforge:kind:task"}],'
+               f' "body": "{body}"}}]')
+    fake = FakeGh(replies={"issue list": (0, listing),
+                           "issue view 5": (0, '{"state": "OPEN"}'),
+                           "issue view 7": (0, '{"state": "CLOSED"}')})
+    rc, ready = _ready(monkeypatch, fake)
+    assert rc == 0 and ready == [], ready
+
+
+def test_ready_lists_when_all_depends_lines_are_closed(monkeypatch):
+    body = "context\\nDepends on: #5\\nmore context\\nDepends on: #7"
+    listing = ('[{"number": 1, "title": "t", "labels": [{"name": "orgforge:kind:task"}],'
+               f' "body": "{body}"}}]')
+    fake = FakeGh(replies={"issue list": (0, listing),
+                           "issue view 5": (0, '{"state": "CLOSED"}'),
+                           "issue view 7": (0, '{"state": "CLOSED"}')})
+    rc, ready = _ready(monkeypatch, fake)
+    assert rc == 0 and ready == [1], ready
+
+
+def test_ready_withholds_when_a_dependency_cannot_be_verified(monkeypatch):
+    # a declared dependency whose state is UNKNOWN is not proof of startability — honest gating
+    # withholds rather than handing a maker maybe-blocked work.
+    listing = ('[{"number": 1, "title": "t", "labels": [{"name": "orgforge:kind:task"}],'
+               ' "body": "Depends on: #9"}]')
+    fake = FakeGh(replies={"issue list": (0, listing),
+                           "issue view 9": (1, "gh: Not Found")})
+    rc, ready = _ready(monkeypatch, fake)
+    assert rc == 0 and ready == [], ready

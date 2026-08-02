@@ -16,7 +16,7 @@ Commands (all shell out to `gh`, which the host authenticates — the organ does
   claim   --repo R --issue N --agent A     claim an Issue if unclaimed; exit 0 claimed / 10 contended
   release --repo R --issue N --agent A     drop this agent's claim
   create  --repo R --title T [--kind objective|task] [--parent N] [--dept D] [--objective O]
-          --body B [--source mandate|self] [--depends 3,7] [--priority N]
+          --body B [--source mandate|self] [--depends 3,7] [--carved-from N] [--priority N]
                                            mint a backlog Issue. --kind objective = the big-picture
                                            RFP/objective Issue (the parent); --kind task (default) = a
                                            department's unit of work, linked as a NATIVE GitHub
@@ -42,8 +42,14 @@ Commands (all shell out to `gh`, which the host authenticates — the organ does
                                            change was allowed to merge unread. A --why that merely
                                            restates the verdict is REJECTED (docs/11 §4f).
   ready   --repo R [--kind task|objective|any]
-                                           list Issues ready to work (no open dependency, unclaimed);
+                                           list Issues ready to work: unclaimed, not parked /
+                                           in-progress / blocked / needs-human, and EVERY
+                                           `Depends on:` line's targets verifiably closed;
                                            default lists TASKS only (objectives are parents, not work)
+  park    --repo R --issue N [--why W]     mark an Issue PARKED (label orgforge:parked, machine-
+                                           readable — not title prose): ready excludes it until
+                                           unpark. --why is recorded as a comment (Issue #103)
+  unpark  --repo R --issue N [--why W]     remove orgforge:parked; the Issue re-enters ready's view
   branch  --repo R --issue N [--create] [--base B]
                                            print the DETERMINISTIC feature branch for a task Issue —
                                            `feat/issue-N-<slug>` off `develop` (docs/11 §4c). --create
@@ -70,7 +76,7 @@ Two-level hierarchy (the org's structure projected onto GitHub):
 
 Labels: orgforge:claimed:<agent> · orgforge:{ready,in-progress,blocked,needs-human,done} ·
         orgforge:kind:{objective,task} · orgforge:dept:<name> · orgforge:objective:<id> ·
-        orgforge:{mandate,self} · orgforge:off-ranking
+        orgforge:{mandate,self} · orgforge:off-ranking · orgforge:parked
 
 Exit: 0 ok / 10 contended-or-blocked (escalate) / 2 usage or gh error.
 """
@@ -88,7 +94,8 @@ import sys
 sys.path.insert(0, __file__.rsplit("/", 1)[0])
 
 from ghsync.backlog import (STAGES, cmd_claim, cmd_release, cmd_create, cmd_repair_body, cmd_stage,
-                            cmd_ready, cmd_needs_human, cmd_split_check, cmd_candidate_id)
+                            cmd_ready, cmd_needs_human, cmd_split_check, cmd_candidate_id,
+                            cmd_park, cmd_unpark)
 from ghsync._core import banner
 from ghsync.record import cmd_log, cmd_decide, cmd_provisional, DECISIONS
 from ghsync.branch import cmd_branch
@@ -114,6 +121,10 @@ def main(argv):
     q.add_argument("--dept", help="the department this task belongs to (labels orgforge:dept:<name>)")
     q.add_argument("--parent", help="parent Issue number: link this task as a NATIVE GitHub sub-issue "
                                     "of that objective (GitHub shows the hierarchy + progress roll-up)")
+    q.add_argument("--carved-from", dest="carved_from",
+                   help="rework 中の carve-out 元 Issue 番号。「carve out 先は元に依存する」は例外なく"
+                        "成り立つので、`Depends on: #N` を機械可読に自動付与する（Issue #103）。"
+                        "散文で依存を書いても ready は読まない — この option が唯一の伝播経路")
     q = sub.add_parser("repair-body")
     q.add_argument("--repo", help="owner/name（省略時は git remote origin から自動発見）")
     q.add_argument("--issue", required=True, type=int)
@@ -122,6 +133,12 @@ def main(argv):
     q = sub.add_parser("stage")
     q.add_argument("--repo", help="owner/name（省略時は git remote origin から自動発見）"); q.add_argument("--issue", required=True, type=int)
     q.add_argument("--stage", required=True)
+    for name in ("park", "unpark"):
+        q = sub.add_parser(name)
+        q.add_argument("--repo", help="owner/name（省略時は git remote origin から自動発見）")
+        q.add_argument("--issue", required=True, type=int)
+        q.add_argument("--why", help="park/unpark の理由 — Issue のコメントとして残す（散文タイトル "
+                                     "`[PARKED]` の置き換え、Issue #103）")
     q = sub.add_parser("ready"); q.add_argument("--repo", help="owner/name（省略時は git remote origin から自動発見）")
     q.add_argument("--kind", choices=("task", "objective", "any"), default="task",
                    help="which kind of Issue to list as ready (default: task — objectives are "
@@ -258,6 +275,7 @@ def main(argv):
     return {"claim": cmd_claim, "release": cmd_release, "create": cmd_create,
             "repair-body": cmd_repair_body,
             "stage": cmd_stage, "ready": cmd_ready, "log": cmd_log,
+            "park": cmd_park, "unpark": cmd_unpark,
             "branch": cmd_branch, "split-check": cmd_split_check,
             "coverage-check": cmd_coverage_check,
             "candidate-id": cmd_candidate_id, "decide": cmd_decide,
