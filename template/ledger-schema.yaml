@@ -504,12 +504,15 @@ event_classes:
   # integrate phase (docs/11 §4c): the fanned-out siblings merged to `develop` and pass the COMBINED
   # suite together. Green CI on develop is its machine form; result_deployed should require it (the
   # develop→main promotion). Owned by the supervising manager (A3 extended to cross-deliverable).
-  # `issue` is optional but LOAD-BEARING when present: both emitters (orgcycle/ship.py,
-  # ghsync/record.py) write it, and work_in_progress correlates the integration to the started
-  # candidate through it (candidate_id ↔ issue alias bridge, #102/OBS-050). Undeclared it would
-  # be one emitter cleanup away from silently breaking that correlation.
+  # `candidate_id`/`issue` are optional but LOAD-BEARING when present. `candidate_id` (written by
+  # orgcycle/ship.py since #102 rework #2) names WHICH candidate this integration finished — the
+  # work_in_progress view then frees exactly that slot, so a parallel sibling on the same issue or
+  # a later rework start is never silenced by correlation guesswork. `issue` is the legacy bridge:
+  # ledgers whose integrations lack candidate_id (all pre-#102, incl. Tatekae) are correlated
+  # candidate_id ↔ issue via aliases, temporally. Undeclared, either field would be one emitter
+  # cleanup away from silently breaking the OBS-050 fix.
   integration_admitted: { integration_branch, integration_subject_sha, deliverables: [ref],
-                          combined_ci_ref, verdict: pass|fail, admitter, issue }
+                          combined_ci_ref, verdict: pass|fail, admitter, candidate_id, issue }
   # A result may only deploy AFTER the skeptic refuted-and-failed (verdict: survives) for it.
   # requires_prior makes the skeptic load-bearing: without a `survives` for this candidate_id,
   # a result_deployed event is INVALID (the deploy path cannot skip adversarial review).

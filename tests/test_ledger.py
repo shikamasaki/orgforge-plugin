@@ -4125,3 +4125,81 @@ def test_wip_pre_integration_start_still_drops_after_temporal_arm(tmp_path):
           "admitter": "supervisor"},
          ts="2026-07-16T02:00:00Z")   # seq=2 > 1 → 完了扱い
     assert _wip(tmp_path) == []
+
+
+# ── #102 rework #2（skeptic C3/C2）: 完了の判断は cycle 単位であって issue 単位ではない ──
+
+def test_wip_c3_live_sibling_survives_candidate_scoped_integration(tmp_path):
+    # C3: 同一 Issue の並行 sibling（cycle.py --agent の fan-out）。cand-P が完了・統合されても、
+    # 統合より前に始まっていた LIVE の cand-Q は残る — 新形式の integration_admitted は
+    # candidate_id を運ぶので、消えるのは名指しされた候補だけ。
+    seed(tmp_path, "eng-p", "cycle_started",
+         {"role": "eng-p", "candidate_id": "cand-P", "pack_manifest_id": "issue-9"},
+         ts="2026-07-16T01:00:00Z")   # seq=1
+    seed(tmp_path, "eng-q", "cycle_started",
+         {"role": "eng-q", "candidate_id": "cand-Q", "pack_manifest_id": "issue-9"},
+         ts="2026-07-16T01:30:00Z")   # seq=2 — 統合より前に始まった sibling
+    seed(tmp_path, "eng-q", "progress_recorded",
+         {"role": "eng-q", "candidate_id": "cand-Q", "fraction": 0.5, "phase": "impl",
+          "done_so_far": "half", "next_step": "finish", "blocked_by": None, "artifacts": []},
+         ts="2026-07-16T02:00:00Z")
+    seed(tmp_path, "eng-p", "cycle_completed",
+         {"role": "eng-p", "candidate_id": "cand-P", "outputs": []},
+         ts="2026-07-16T03:00:00Z")
+    seed(tmp_path, "supervisor", "integration_admitted",
+         {"integration_branch": "develop", "deliverables": ["9"], "issue": 9,
+          "candidate_id": "cand-P", "integration_subject_sha": "a" * 40,
+          "combined_ci_ref": "pytest -q", "verdict": "pass", "admitter": "supervisor"},
+         ts="2026-07-16T04:00:00Z")   # seq=5 > cand-Q の開始
+    ids = [w["candidate_id"] for w in _wip(tmp_path)]
+    assert ids == ["cand-Q"], (
+        f"sibling cand-P の統合が LIVE の cand-Q を巻き添えにした（/org-resume が沈黙する）: {ids}")
+
+
+def test_wip_c2_backfilled_integration_receipt_does_not_kill_later_rework(tmp_path):
+    # C2: --backfill-ts で1日「前」の時刻を持つ統合 receipt（seq は後）。legacy 形式
+    # （candidate_id 無し）でも、時間順は ts で比較する — backfill された過去の統合が
+    # それより後に始まった rework を殺してはならない。
+    seed(tmp_path, "eng", "cycle_started",
+         {"role": "eng", "candidate_id": "cand-old", "pack_manifest_id": "issue-9"},
+         ts="2026-07-16T01:00:00Z")   # seq=1
+    seed(tmp_path, "eng", "cycle_completed",
+         {"role": "eng", "candidate_id": "cand-old", "outputs": []},
+         ts="2026-07-16T02:00:00Z")   # seq=2
+    seed(tmp_path, "eng", "cycle_started",
+         {"role": "eng", "candidate_id": "cand-B", "pack_manifest_id": "issue-9"},
+         ts="2026-07-17T10:00:00Z")   # seq=3 — rework の開始（統合の実時点より1日後）
+    seed(tmp_path, "eng", "progress_recorded",
+         {"role": "eng", "candidate_id": "cand-B", "fraction": 0.4, "phase": "impl",
+          "done_so_far": "rework going", "next_step": "keep going", "blocked_by": None,
+          "artifacts": []},
+         ts="2026-07-17T11:00:00Z")
+    # 本物の --backfill-ts CLI で、rework 開始より1日前の実時点を後から補う（legacy 形式）
+    code, out = run("ledger.py", "append", str(tmp_path), "--actor", "supervisor",
+                    "--class", "integration_admitted",
+                    "--payload", json.dumps(
+                        {"integration_branch": "develop", "issue": 9, "verdict": "pass",
+                         "admitter": "supervisor"}),
+                    "--backfill-ts", "2026-07-16T12:00:00Z")   # seq=5, ts は seq3 より前
+    assert code == 0, out
+    ids = [w["candidate_id"] for w in _wip(tmp_path)]
+    assert ids == ["cand-B"], (
+        f"backfill された統合 receipt（ts が前・seq が後）が rework を殺した: {ids}")
+
+
+def test_wip_candidate_scoped_integration_finishes_exactly_its_candidate(tmp_path):
+    # 新形式: candidate_id を運ぶ統合は、名指しした候補「だけ」を完了させる。
+    # 統合の後に始まった同一 Issue の rework も、時系列比較なしで無事。
+    seed(tmp_path, "eng", "cycle_started",
+         {"role": "eng", "candidate_id": "cand-P", "pack_manifest_id": "issue-9"},
+         ts="2026-07-16T01:00:00Z")   # seq=1
+    seed(tmp_path, "supervisor", "integration_admitted",
+         {"integration_branch": "develop", "issue": 9, "candidate_id": "cand-P",
+          "verdict": "pass", "admitter": "supervisor"},
+         ts="2026-07-16T02:00:00Z")   # seq=2 → cand-P だけが完了
+    seed(tmp_path, "eng", "cycle_started",
+         {"role": "eng", "candidate_id": "cand-R", "pack_manifest_id": "issue-9"},
+         ts="2026-07-16T03:00:00Z")   # seq=3 — 統合後の rework
+    wip = _wip(tmp_path)
+    ids = [w["candidate_id"] for w in wip]
+    assert ids == ["cand-R"], f"名指しの統合が正確に1候補だけを消していない: {ids}"
