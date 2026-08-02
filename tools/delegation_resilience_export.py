@@ -28,10 +28,26 @@ def _digest(raw: bytes) -> str:
     return "sha256:" + hashlib.sha256(raw).hexdigest()
 
 
+def _is_importable_source_path(relative: str) -> bool:
+    path = Path(relative)
+    return bool(path.parts) and path.parts[0] in {"tools", "game_days"} and "__pycache__" not in path.parts
+
+
 def _json(raw: bytes, label: str) -> dict[str, Any]:
+    def reject_constant(value: str) -> None:
+        raise ValueError(f"non-finite JSON number {value}")
+
+    def reject_duplicate(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        value: dict[str, Any] = {}
+        for key, item in pairs:
+            if key in value:
+                raise ValueError(f"duplicate JSON key {key!r}")
+            value[key] = item
+        return value
+
     try:
-        value = json.loads(raw)
-    except json.JSONDecodeError as exc:
+        value = json.loads(raw, parse_constant=reject_constant, object_pairs_hook=reject_duplicate)
+    except (json.JSONDecodeError, ValueError) as exc:
         raise ExportError(f"{label} is not valid JSON") from exc
     if not isinstance(value, dict):
         raise ExportError(f"{label} must be a JSON object")
@@ -42,20 +58,48 @@ def _dr_modules(root: Path, lock: dict[str, Any]) -> dict[str, Any]:
     expected = lock.get("delegationResilience", {})
     if not root.is_dir():
         raise ExportError("DR v0alpha2 root is unavailable")
-    checks = {"v0alpha2^{}": expected.get("commit"), "v0alpha2": expected.get("tagObject")}
+    checks = {
+        "HEAD": expected.get("commit"),
+        "v0alpha2^{}": expected.get("commit"),
+        "v0alpha2": expected.get("tagObject"),
+    }
     for ref, digest in checks.items():
-        actual = subprocess.run(["git", "-C", str(root), "rev-parse", ref], text=True,
-                                capture_output=True).stdout.strip()
+        result = subprocess.run(["git", "-C", str(root), "rev-parse", ref], text=True,
+                                capture_output=True)
+        actual = result.stdout.strip() if result.returncode == 0 else ""
         if not digest or actual != digest:
             raise ExportError(f"DR lock mismatch for {ref}")
+    status = subprocess.run(
+        ["git", "-C", str(root), "status", "--porcelain=v1", "--ignored", "--untracked-files=all"],
+        text=True, capture_output=True,
+    )
+    if status.returncode != 0:
+        raise ExportError("DR checkout status cannot be read")
+    dirty_source = []
+    for line in status.stdout.splitlines():
+        code, relative = line[:2], line[3:]
+        relative = relative.strip().strip('"')
+        if code != "!!" or _is_importable_source_path(relative):
+            dirty_source.append(line)
+    if dirty_source:
+        raise ExportError("DR checkout is not clean")
     sys.path.insert(0, str(root))
-    return {
+    modules = {
         "builder": importlib.import_module("game_days.refund.portable_bundle"),
         "data": importlib.import_module("tools.data_loading"),
         "trust": importlib.import_module("tools.trust"),
         "export_verifier": importlib.import_module("tools.export_verifier"),
         "manifest": importlib.import_module("tools.verifier_manifest"),
     }
+    root_resolved = root.resolve()
+    for name, module in modules.items():
+        module_file = getattr(module, "__file__", None)
+        if not module_file or not Path(module_file).resolve().is_relative_to(root_resolved):
+            raise ExportError(f"DR module {name} is outside the locked checkout")
+    actual_code_digest = modules["manifest"].verifier_code_digest()
+    if actual_code_digest != expected.get("verifierCodeDigest"):
+        raise ExportError("DR verifier code digest does not match lock")
+    return modules
 
 
 def _validate_inputs(report: dict[str, Any], scenario: bytes, constitution: bytes) -> None:
