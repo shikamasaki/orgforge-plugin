@@ -192,6 +192,15 @@ def test_export_rejects_untracked_module_shadow(tmp_path):
     assert run.returncode != 0
 
 
+def test_export_rejects_ignored_module_shadow(tmp_path):
+    source, _ = _source(tmp_path)
+    clone = _clone_dr(tmp_path)
+    (clone / ".git" / "info" / "exclude").write_text("tools/ignored_shadow.py\n", encoding="utf-8")
+    (clone / "tools" / "ignored_shadow.py").write_text("# shadow\n", encoding="utf-8")
+    run = _export(source, tmp_path / "output", dr_root=clone)
+    assert run.returncode != 0
+
+
 def test_export_rejects_code_digest_mismatch(tmp_path):
     source, _ = _source(tmp_path)
     lock = tmp_path / "lock.json"

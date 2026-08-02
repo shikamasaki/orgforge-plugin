@@ -28,6 +28,11 @@ def _digest(raw: bytes) -> str:
     return "sha256:" + hashlib.sha256(raw).hexdigest()
 
 
+def _is_importable_source_path(relative: str) -> bool:
+    path = Path(relative)
+    return bool(path.parts) and path.parts[0] in {"tools", "game_days"} and "__pycache__" not in path.parts
+
+
 def _json(raw: bytes, label: str) -> dict[str, Any]:
     def reject_constant(value: str) -> None:
         raise ValueError(f"non-finite JSON number {value}")
@@ -65,10 +70,18 @@ def _dr_modules(root: Path, lock: dict[str, Any]) -> dict[str, Any]:
         if not digest or actual != digest:
             raise ExportError(f"DR lock mismatch for {ref}")
     status = subprocess.run(
-        ["git", "-C", str(root), "status", "--porcelain=v1", "--untracked-files=all"],
+        ["git", "-C", str(root), "status", "--porcelain=v1", "--ignored", "--untracked-files=all"],
         text=True, capture_output=True,
     )
-    if status.returncode != 0 or status.stdout:
+    if status.returncode != 0:
+        raise ExportError("DR checkout status cannot be read")
+    dirty_source = []
+    for line in status.stdout.splitlines():
+        code, relative = line[:2], line[3:]
+        relative = relative.strip().strip('"')
+        if code != "!!" or _is_importable_source_path(relative):
+            dirty_source.append(line)
+    if dirty_source:
         raise ExportError("DR checkout is not clean")
     sys.path.insert(0, str(root))
     modules = {
