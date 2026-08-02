@@ -22,6 +22,10 @@ REPO = Path(__file__).resolve().parents[1]
 EXPORTER = REPO / "tools" / "delegation_resilience_export.py"
 LOCK = REPO / "integrations" / "delegation-resilience" / "v0alpha2.lock.json"
 DR_ROOT = Path(os.environ.get("DR_V0ALPHA2_ROOT", "/missing/dr-v0alpha2"))
+pytestmark = pytest.mark.skipif(
+    not DR_ROOT.is_dir(),
+    reason="DR_V0ALPHA2_ROOT is required for the cross-repository adapter contract",
+)
 
 
 def _sha256(path: Path) -> str:
