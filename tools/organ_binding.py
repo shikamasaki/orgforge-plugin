@@ -51,11 +51,31 @@ if len(sys.argv) < 2 or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,79}", sys.
           "  examples: orgforge ledger verify | orgforge org-cycle verify ...", file=sys.stderr)
     raise SystemExit(2)
 organ = sys.argv[1].replace("-", "_")
-tools_root = os.path.realpath(str(binding.get("tools_root") or ""))
-target = os.path.realpath(os.path.join(tools_root, organ + ".py"))
-if not tools_root or os.path.dirname(target) != tools_root or not os.path.isfile(target):
-    print(f"orgforge: bound organ {organ!r} is unavailable under {tools_root!r}\n"
-          "  the plugin may have been updated; restart the host session to refresh the binding",
+# tools_root is tried first, so on a name collision the tools/ organ wins over scripts/.
+roots = [os.path.realpath(str(binding.get(key)))
+         for key in ("tools_root", "scripts_root") if binding.get(key)]
+target = None
+for root in roots:
+    candidate = os.path.realpath(os.path.join(root, organ + ".py"))
+    if os.path.dirname(candidate) == root and os.path.isfile(candidate):
+        target = candidate
+        break
+if target is None:
+    searched = ", ".join(repr(root) for root in roots) or "<no roots recorded>"
+    # A binding written before scripts/ resolution existed lacks scripts_root.  If the bundle
+    # on disk DOES ship scripts/, a restart genuinely fixes this: SessionStart rebinds and
+    # records scripts_root.  Only a scripts_root-aware binding may claim restart won't help.
+    unrecorded_scripts = (not binding.get("scripts_root") and os.path.isdir(
+        os.path.join(str(binding.get("plugin_root") or ""), "scripts")))
+    if not any(os.path.isdir(root) for root in roots):
+        hint = ("  the bound roots no longer exist on disk — the plugin may have been updated;\n"
+                "  restart the host session so SessionStart can rebind it")
+    elif unrecorded_scripts:
+        hint = ("  this binding predates scripts/ resolution but the bundle ships a scripts/\n"
+                "  directory — restart the host session so SessionStart can rebind it")
+    else:
+        hint = "  this organ is not bundled under the bound roots; restarting will not add it"
+    print(f"orgforge: bound organ {organ!r} is unavailable; searched roots: {searched}\n{hint}",
           file=sys.stderr)
     raise SystemExit(12)
 os.environ["ORG_INSTALLED_ORGAN_BINDING"] = binding_path
@@ -173,6 +193,12 @@ def bind(org_root, tools_root, session_id=None):
         "bound_at_unix": time.time(),
         "launcher": launcher_path(org_root, harness),
     }
+    # Plugin bundles ship some organs (e.g. redline_monitor.py) under scripts/, a sibling of
+    # tools/.  Record it so the launcher can resolve them; omit it when the layout has no
+    # scripts/ sibling (e.g. a bare tools checkout), keeping older-shaped bindings valid.
+    scripts_root = os.path.realpath(os.path.join(plugin_root, "scripts"))
+    if os.path.isdir(scripts_root):
+        record["scripts_root"] = scripts_root
     _atomic_write(launcher_path(org_root, harness), _LAUNCHER, mode=0o700)
     _atomic_write(binding_path(org_root, harness),
                   json.dumps(record, ensure_ascii=False, sort_keys=True, indent=2) + "\n")
