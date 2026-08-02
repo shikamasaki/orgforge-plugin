@@ -47,6 +47,12 @@ It does not mean:
 
 Review diversity remains valuable as a quality control, not an identity security claim.
 
+`tools/shared_fate.py` makes this limitation explicit as an axis vector rather than a single
+independence score. A task policy declares `must_differ`, `may_share`, and `must_match` axes;
+missing values remain `unknown` and are never counted as different. This first step is a pure
+evidence projection. The joint-admission writer must consume the same policy before a vector can
+authorize a joint result.
+
 `adaptive` routing derives the primary from the running agent (`Claude Code` or `Codex`), not from a
 static preference in `organization.yaml`. If the opposite product is locally available it selects
 that product. If only one product is available it resolves to `same-harness`, emits a degradation
