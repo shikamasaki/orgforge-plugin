@@ -1353,9 +1353,21 @@ def test_park_adds_label_and_comments_why(monkeypatch):
 def test_park_is_idempotent_when_already_parked(monkeypatch):
     fake = FakeGh(replies={"--json labels": (0, '{"labels": [{"name": "orgforge:parked"}]}')})
     monkeypatch.setattr(GS, "gh", fake)
-    rc = GS.cmd_park(_ns(repo="o/r", issue=42, why="again"))
+    rc = GS.cmd_park(_ns(repo="o/r", issue=42, why=None))
     assert rc == 0
     assert not fake.calls_matching("issue edit") and not fake.calls_matching("issue comment")
+
+
+def test_park_already_parked_still_records_a_new_why(monkeypatch):
+    # gate residual (#103 rework): a --why on an already-parked issue must not be silently
+    # dropped — the reason is the part a later unparker needs.
+    fake = FakeGh(replies={"--json labels": (0, '{"labels": [{"name": "orgforge:parked"}]}')})
+    monkeypatch.setattr(GS, "gh", fake)
+    rc = GS.cmd_park(_ns(repo="o/r", issue=42, why="also blocked by the API freeze"))
+    assert rc == 0
+    assert not fake.calls_matching("issue edit"), "label is already there — no relabel"
+    comments = fake.calls_matching("issue comment 42")
+    assert comments and any("API freeze" in " ".join(c) for c in comments), fake.calls
 
 
 def test_unpark_removes_label_and_comments_why(monkeypatch):
@@ -1430,3 +1442,37 @@ def test_ready_withholds_when_a_dependency_cannot_be_verified(monkeypatch):
                            "issue view 9": (1, "gh: Not Found")})
     rc, ready = _ready(monkeypatch, fake)
     assert rc == 0 and ready == [], ready
+
+
+def test_ready_reports_unverifiable_withholds_machine_readably(monkeypatch, capsys):
+    # gate rework (#103): withholding on an unverifiable dependency while emitting exactly
+    # {"ready": []} is indistinguishable from "no ready work" — during partial gh degradation
+    # the org silently stalls with no observable cause, the same machine-invisible-state class
+    # this issue exists to kill. The withhold must be VISIBLE: machine-readably in the JSON
+    # (additive field) and loudly on stderr, naming the issue and the dep.
+    listing = ('[{"number": 1, "title": "t", "labels": [{"name": "orgforge:kind:task"}],'
+               ' "body": "Depends on: #9"}]')
+    fake = FakeGh(replies={"issue list": (0, listing),
+                           "issue view 9": (1, "gh: Not Found")})
+    monkeypatch.setattr(GS, "gh", fake)
+    rc = GS.cmd_ready(_ns(repo="o/r", kind="task"))
+    captured = capsys.readouterr()
+    assert rc == 0
+    out = json.loads(captured.out)
+    assert out["ready"] == [] and out["withheld_unverifiable"] == [1], out
+    assert "WARN" in captured.err and "#1" in captured.err and "#9" in captured.err, captured.err
+
+
+def test_ready_open_dependency_withhold_is_not_reported_as_unverifiable(monkeypatch, capsys):
+    # an OPEN dependency is a normal, healthy withhold — it must NOT trip the degradation alarm
+    listing = ('[{"number": 1, "title": "t", "labels": [{"name": "orgforge:kind:task"}],'
+               ' "body": "Depends on: #9"}]')
+    fake = FakeGh(replies={"issue list": (0, listing),
+                           "issue view 9": (0, '{"state": "OPEN"}')})
+    monkeypatch.setattr(GS, "gh", fake)
+    rc = GS.cmd_ready(_ns(repo="o/r", kind="task"))
+    captured = capsys.readouterr()
+    assert rc == 0
+    out = json.loads(captured.out)
+    assert out["ready"] == [] and out["withheld_unverifiable"] == [], out
+    assert "WARN" not in captured.err, captured.err

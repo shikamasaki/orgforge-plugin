@@ -371,6 +371,10 @@ def cmd_ready(a):
         return 2
     kind = getattr(a, "kind", None) or "task"   # default: only TASKS are workable ready items
     ready = []
+    # 依存の状態が**確認できなかった**せいで withhold した Issue。空の ready と「gh が半分
+    # 死んでいて確認できない」を同じ {"ready": []} にすると、org は原因の観測手段なく黙って
+    # 止まる — この Issue が潰しに来た machine-invisible-state と同じ類（#103 rework）。
+    withheld_unverifiable = []
     for it in issues:
         names = [l["name"] for l in it.get("labels", [])]
         if any(n.startswith(CLAIM_PREFIX) for n in names):
@@ -401,19 +405,29 @@ def cmd_ready(a):
         for d in dict.fromkeys(deps):
             if not re.fullmatch(r"#?\d+", d):
                 continue   # prose token — not a machine-readable ref; warned at create, never guessed here
-            c, o = gh(["issue", "view", d.lstrip("#"), "--repo", a.repo, "--json", "state"])
+            num = d.lstrip("#")
+            c, o = gh(["issue", "view", num, "--repo", a.repo, "--json", "state"])
             state = None
             if c == 0:
                 try:
                     state = str(json.loads(o).get("state") or "").upper()
                 except Exception:
                     state = None
-            if state != "CLOSED":
-                blocked = True   # OPEN, or could not be verified
-                break
+            if state == "CLOSED":
+                continue
+            blocked = True
+            if state != "OPEN":
+                # OPEN は健全な withhold（依存が生きている）。それ以外は「確認できなかった」—
+                # startable の証明が無いので渡さないが、その事実は見える形で外に出す。
+                withheld_unverifiable.append(it["number"])
+                print(f"WARN: issue #{it['number']} withheld from ready — dependency #{num} could "
+                      f"not be verified ({o.strip()[:80] or 'unparseable state'}). Unknown is not "
+                      f"proof of startability; if gh is degraded, ready is UNDERREPORTING, not "
+                      f"empty (Issue #103).", file=sys.stderr)
+            break
         if not blocked:
             ready.append(it["number"])
-    print(json.dumps({"ready": ready}))
+    print(json.dumps({"ready": ready, "withheld_unverifiable": withheld_unverifiable}))
     return 0
 
 
@@ -426,7 +440,19 @@ def cmd_park(a):
     if labels is None:
         print(f"gh error: {err}", file=sys.stderr)
         return 2
+    why = _normalized_body(getattr(a, "why", None))
     if PARKED_LABEL in labels:
+        # ラベルは冪等 no-op でよいが、--why を黙って捨ててはいけない — 理由こそ、後で
+        # unpark する側が要る部分（#103 rework の gate residual）。
+        if why:
+            code, out = gh(["issue", "comment", str(a.issue), "--repo", a.repo,
+                            "--body", f"⏸️ **Still parked** — reason updated.\n\nwhy: {why}"])
+            if code != 0:
+                print(f"WARN: issue #{a.issue} is already parked, and the new --why could not be "
+                      f"recorded: {out.strip()[:120]}", file=sys.stderr)
+                return 10
+            print(f"issue #{a.issue} is already parked; new why recorded as a comment.")
+            return 0
         print(f"issue #{a.issue} is already parked; idempotent no-op.")
         return 0
     _ensure_labels(a.repo, [(PARKED_LABEL, PARKED_COLOR)])
@@ -434,7 +460,6 @@ def cmd_park(a):
     if code != 0:
         print(f"gh error parking: {out}", file=sys.stderr)
         return 2
-    why = _normalized_body(getattr(a, "why", None))
     if why:
         comment = (f"⏸️ **Parked** — excluded from `ready` until `github_sync park`'s counterpart "
                    f"`unpark` removes `{PARKED_LABEL}`.\n\nwhy: {why}")

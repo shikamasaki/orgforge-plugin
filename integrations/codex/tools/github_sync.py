@@ -45,7 +45,11 @@ Commands (all shell out to `gh`, which the host authenticates — the organ does
                                            list Issues ready to work: unclaimed, not parked /
                                            in-progress / blocked / needs-human, and EVERY
                                            `Depends on:` line's targets verifiably closed;
-                                           default lists TASKS only (objectives are parents, not work)
+                                           default lists TASKS only (objectives are parents, not
+                                           work). Output also carries `withheld_unverifiable`
+                                           (issues withheld because a dependency's state could
+                                           not be verified — gh degradation is visible, not a
+                                           silent empty list) + a stderr WARN per such withhold
   park    --repo R --issue N [--why W]     mark an Issue PARKED (label orgforge:parked, machine-
                                            readable — not title prose): ready excludes it until
                                            unpark. --why is recorded as a comment (Issue #103)
