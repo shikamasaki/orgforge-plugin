@@ -55,13 +55,15 @@ def _locked_archive(root: Path, expected: dict[str, Any]) -> bytes:
     tag_object = expected.get("tagObject")
     if not commit or not tag_object or not expected.get("verifierCodeDigest"):
         raise ExportError("DR lock is incomplete")
+    # --no-replace-objects: a repo-local replace ref could otherwise swap the archived
+    # content while rev-parse still reports the locked SHAs.
     for ref, digest in (("v0alpha2^{}", commit), ("v0alpha2", tag_object)):
-        result = subprocess.run(["git", "-C", str(root), "rev-parse", ref], text=True,
-                                capture_output=True)
+        result = subprocess.run(["git", "--no-replace-objects", "-C", str(root),
+                                 "rev-parse", ref], text=True, capture_output=True)
         if result.returncode != 0 or result.stdout.strip() != digest:
             raise ExportError(f"DR lock mismatch for {ref}")
-    archive = subprocess.run(["git", "-C", str(root), "archive", "--format=tar", commit],
-                             capture_output=True)
+    archive = subprocess.run(["git", "--no-replace-objects", "-C", str(root), "archive",
+                              "--format=tar", commit], capture_output=True)
     if archive.returncode != 0:
         raise ExportError("unable to archive locked DR commit")
     return archive.stdout

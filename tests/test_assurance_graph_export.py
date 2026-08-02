@@ -41,7 +41,8 @@ def _locked(lock: Path = LOCK) -> dict:
 
 def _git_show(path: str, *, dr_root: Path = DR_ROOT) -> bytes:
     return subprocess.run(
-        ["git", "-C", str(dr_root), "show", f"{_locked()['commit']}:{path}"],
+        ["git", "--no-replace-objects", "-C", str(dr_root), "show",
+         f"{_locked()['commit']}:{path}"],
         check=True, capture_output=True, timeout=60,
     ).stdout
 
@@ -152,7 +153,8 @@ def test_consumer_lock_matches_dr_release_lock_at_locked_commit():
     ours = _locked()
     for ref, expected in ((f"{ours['tag']}^{{}}", ours["commit"]),
                           (ours["tag"], ours["tagObject"])):
-        actual = subprocess.run(["git", "-C", str(DR_ROOT), "rev-parse", ref],
+        actual = subprocess.run(["git", "--no-replace-objects", "-C", str(DR_ROOT),
+                                 "rev-parse", ref],
                                 check=True, capture_output=True, text=True,
                                 timeout=60).stdout.strip()
         assert actual == expected, ref
@@ -161,6 +163,7 @@ def test_consumer_lock_matches_dr_release_lock_at_locked_commit():
     assert theirs["schemaDigest"] == ours["schemaDigest"]
     assert theirs["verifierCodeDigest"] == ours["verifierCodeDigest"]
     assert theirs["schemaPath"] == ours["schemaPath"]
+    assert theirs["verifierManifestPath"] == ours["verifierManifestPath"]
     schema_raw = _git_show(ours["schemaPath"])
     assert "sha256:" + hashlib.sha256(schema_raw).hexdigest() == ours["schemaDigest"]
 
@@ -193,6 +196,7 @@ def test_standalone_verifier_is_the_locked_dr_code(tmp_path):
         ("lock", "wrong commit"),
         ("lock", "wrong schema digest"),
         ("lock", "wrong verifier code digest"),
+        ("lock", "wrong manifest path"),
         ("lock", "capability claimed"),
         ("observed-at", "not a UTC timestamp"),
     ],
@@ -220,6 +224,8 @@ def test_export_fails_closed_without_partial_output(tmp_path, mutation):
             lock_data["delegationResilience"]["schemaDigest"] = "sha256:" + "0" * 64
         elif mutation[1] == "wrong verifier code digest":
             lock_data["delegationResilience"]["verifierCodeDigest"] = "sha256:" + "0" * 64
+        elif mutation[1] == "wrong manifest path":
+            lock_data["delegationResilience"]["verifierManifestPath"] = "tools/nonexistent.py"
         else:
             lock_data["recoveryCapability"] = "DEMONSTRATED"
         lock.write_text(json.dumps(lock_data, sort_keys=True), encoding="utf-8")
@@ -271,6 +277,35 @@ def test_export_ignores_wrong_head_and_dirty_checkout(tmp_path):
     tracked = clone / "tools" / "data_loading.py"
     tracked.write_bytes(tracked.read_bytes() + b"\n# dirty\n")
     (clone / "tools" / "untracked_shadow.py").write_text("# shadow\n", encoding="utf-8")
+    run = _export(source, tmp_path / "output", dr_root=clone)
+    assert run.returncode == 0, run.stderr
+    clean = tmp_path / "clean"
+    assert _export(source, clean).returncode == 0
+    for name in ("graph.json", "verification-result.json"):
+        assert (tmp_path / "output" / name).read_bytes() == (clean / name).read_bytes()
+
+
+def test_export_ignores_replace_refs(tmp_path):
+    """A repo-local `git replace` ref must not swap the archived locked content."""
+    source, _ = _source(tmp_path)
+    clone = tmp_path / "dr-checkout"
+    subprocess.run(["git", "clone", "--no-local", str(DR_ROOT), str(clone)],
+                   check=True, capture_output=True, text=True, timeout=120)
+    locked = _locked()["commit"]
+    empty_tree = subprocess.run(["git", "-C", str(clone), "hash-object", "-t", "tree",
+                                 os.devnull], check=True, capture_output=True, text=True,
+                                timeout=60).stdout.strip()
+    poison = subprocess.run(["git", "-C", str(clone), "commit-tree", empty_tree,
+                             "-m", "poison"],
+                            check=True, capture_output=True, text=True,
+                            env={**os.environ,
+                                 "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+                                 "GIT_AUTHOR_DATE": "2026-01-01T00:00:00Z",
+                                 "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t",
+                                 "GIT_COMMITTER_DATE": "2026-01-01T00:00:00Z"},
+                            timeout=60).stdout.strip()
+    subprocess.run(["git", "-C", str(clone), "replace", "-f", locked, poison],
+                   check=True, capture_output=True, text=True, timeout=60)
     run = _export(source, tmp_path / "output", dr_root=clone)
     assert run.returncode == 0, run.stderr
     clean = tmp_path / "clean"

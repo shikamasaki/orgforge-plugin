@@ -77,13 +77,15 @@ def _locked_archive(root: Path, expected: dict[str, Any]) -> bytes:
     if not root.is_dir():
         raise ExportError("DR checkout root is unavailable")
     tag = expected["tag"]
+    # --no-replace-objects: a repo-local replace ref could otherwise swap the archived
+    # content while rev-parse still reports the locked SHAs.
     for ref, digest in ((f"{tag}^{{}}", expected["commit"]), (tag, expected["tagObject"])):
-        result = subprocess.run(["git", "-C", str(root), "rev-parse", ref], text=True,
-                                capture_output=True)
+        result = subprocess.run(["git", "--no-replace-objects", "-C", str(root),
+                                 "rev-parse", ref], text=True, capture_output=True)
         if result.returncode != 0 or result.stdout.strip() != digest:
             raise ExportError(f"DR graph lock mismatch for {ref}")
-    archive = subprocess.run(["git", "-C", str(root), "archive", "--format=tar",
-                              expected["commit"]], capture_output=True)
+    archive = subprocess.run(["git", "--no-replace-objects", "-C", str(root), "archive",
+                              "--format=tar", expected["commit"]], capture_output=True)
     if archive.returncode != 0:
         raise ExportError("unable to archive locked DR commit")
     return archive.stdout
@@ -204,6 +206,9 @@ def _run_graph_child(*, archive_root: Path, graph_path: Path, mapping_path: Path
             raise ExportError(f"DR graph module {name} is outside the archive root")
     mapping = _json(mapping_path.read_bytes(), "graph mapping")
     expected = mapping["delegationResilience"]
+    manifest_file = Path(getattr(modules["manifest"], "__file__", "")).resolve()
+    if manifest_file != (root / expected["verifierManifestPath"]).resolve():
+        raise ExportError("DR verifier manifest path does not match lock")
     schema_path = (root / expected["schemaPath"]).resolve()
     if not schema_path.is_relative_to(root) or not schema_path.is_file():
         raise ExportError("locked schema path escapes or is missing from the archive")

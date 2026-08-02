@@ -219,6 +219,30 @@ def test_export_ignores_ignored_module_shadow(tmp_path):
     _assert_locked_archive_output(source, tmp_path / "output", tmp_path)
 
 
+def test_export_ignores_replace_refs(tmp_path):
+    """A repo-local `git replace` ref must not swap the archived locked content."""
+    source, _ = _source(tmp_path)
+    clone = _clone_dr(tmp_path)
+    locked = json.loads(LOCK.read_text())["delegationResilience"]["commit"]
+    empty_tree = subprocess.run(["git", "-C", str(clone), "hash-object", "-t", "tree",
+                                 os.devnull], check=True, capture_output=True, text=True,
+                                timeout=60).stdout.strip()
+    poison = subprocess.run(["git", "-C", str(clone), "commit-tree", empty_tree,
+                             "-m", "poison"],
+                            check=True, capture_output=True, text=True,
+                            env={**os.environ,
+                                 "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+                                 "GIT_AUTHOR_DATE": "2026-01-01T00:00:00Z",
+                                 "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t",
+                                 "GIT_COMMITTER_DATE": "2026-01-01T00:00:00Z"},
+                            timeout=60).stdout.strip()
+    subprocess.run(["git", "-C", str(clone), "replace", "-f", locked, poison],
+                   check=True, capture_output=True, text=True, timeout=60)
+    run = _export(source, tmp_path / "output", dr_root=clone)
+    assert run.returncode == 0, run.stderr
+    _assert_locked_archive_output(source, tmp_path / "output", tmp_path)
+
+
 def test_export_rejects_code_digest_mismatch(tmp_path):
     source, _ = _source(tmp_path)
     lock = tmp_path / "lock.json"
