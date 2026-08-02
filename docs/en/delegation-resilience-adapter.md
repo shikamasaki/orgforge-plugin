@@ -29,3 +29,38 @@ of the OrgForge organization.
 
 The exported standalone verifier is copied from the pinned DR checkout and contains neither
 OrgForge imports nor exercise execution code.
+
+## Assurance Graph export
+
+The consumer lock now pins the separate DR Assurance Graph v0alpha1 profile while retaining the
+transactional-action v0alpha2 packet profile. `graph` resolves only the pinned
+`assurance-graph-v0alpha1` tag object and commit, imports from its path-safe archive, checks the
+consumer-held schema and verifier digests, and runs the standalone DR verifier before emitting any
+output. A schema/verifier or digest mismatch emits no partial artifact.
+
+The current mapping is deliberately minimal and source-bound:
+
+| OrgForge evidence | Candidate graph element | Required treatment |
+| --- | --- | --- |
+| actor identity and role record | `actor` | stable mapping plus source artifact digest |
+| declared critical function / intent | `intent` or `capability` | declaration only; never inferred support |
+| exercise attempt and fault receipt | `attempt` / `exercise` | observed conditions and bounded outcome |
+| ledger or exercise observation | `evidence` | epistemic status and sourceRef |
+| attestation or signed packet | `attestation` / `artifact` | digest-bound opaque source |
+| declared dependency or seam | `dependency` | only when explicitly present in source |
+
+The adapter currently emits only the explicit reviewer-outage `exercise`, its observed report
+`evidence`/`artifact`, and the schema-defined `produces_artifact` relationship. It emits no actor,
+claim, capability, dependency, external effect, or inferred edge when the OrgForge source does not
+declare one. Missing evidence, unsupported edge types, duplicate IDs, dangling references, graph
+digest changes, and mapping omissions fail closed in the pinned DR verifier. Graph verification
+leaves recovery capability `not_demonstrated`; graph existence is never a recovery claim.
+
+This is intentionally a design boundary, not a new OrgForge assurance claim. The purpose is to
+make evidence, dependencies, external effects, and recoverability explainable with tamper
+resistance and reproducibility—not to treat the existence of a graph as a guarantee.
+
+The adapter tests duplicate/invalid JSON and digest failures at the trust boundary, deterministic
+byte-identical regeneration, source immutability, standalone verification, and the DR verifier's
+duplicate/dangling/mutation checks. `GRAPH_VERIFIED` only means the derived graph is internally
+valid and reproducible; it does not demonstrate recovery capability or human takeover.
