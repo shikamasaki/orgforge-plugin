@@ -1,7 +1,7 @@
 {
   "apiVersion": "orgforge.delegation-resilience-assurance-graph-lock/v1",
   "kind": "AssuranceGraphAdapterLock",
-  "status": "pending_export",
+  "status": "export_implemented",
   "mappingVersion": "orgforge-assurance-graph/v0alpha1",
   "delegationResilience": {
     "repository": "https://github.com/shikamasaki/delegation-resilience.git",
