@@ -105,6 +105,14 @@ def test_export_contract_is_deterministic_independent_and_non_demonstrative(tmp_
 
     assert before == {path.name: _sha256(path) for path in sorted(source.iterdir())}
     assert (first / "bundle.dsse.json").read_bytes() == (second / "bundle.dsse.json").read_bytes()
+    mapping = json.loads((first / "orgforge-mapping.json").read_text())
+    assert mapping["mappingVersion"] == "orgforge-reviewer-outage/v0alpha1"
+    assert {
+        Path(artifact["uri"]).name: artifact["digest"].removeprefix("sha256:")
+        for artifact in mapping["sourceArtifacts"]
+    } == before
+    assert mapping["claimMapping"].startswith("none:")
+    assert mapping["capabilityDisposition"] == "not_demonstrated"
     assert _verify(first) == _verify(second)
     result = json.loads(_verify(first))
     assert result["packetVerificationOutcome"] == "PACKET_VERIFIED"
