@@ -22,7 +22,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-        # The pinned DR v0alpha2 portable verifier declares CPython 3.12.8.
+        # The pinned DR graph verifier and v0alpha2 portable verifier declare CPython 3.12.8.
         # Do not float to a newer 3.12 patch release: that would invalidate the
         # verifier-environment assertion rather than independently verify it.
         python: ["3.12.8"]
@@ -35,7 +35,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: shikamasaki/delegation-resilience
-          ref: 67960e093217d6d2512b1d55d5d9afba658198f8
+          ref: e098ed6f04a4af12e564f102276f15cbc4b9ed2f
           path: .delegation-resilience
           fetch-depth: 0
 
