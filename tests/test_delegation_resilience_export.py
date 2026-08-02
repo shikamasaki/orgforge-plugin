@@ -117,6 +117,7 @@ def test_export_contract_is_deterministic_independent_and_non_demonstrative(tmp_
     [
         ("report", "unknown scenario"),
         ("report", "missing assertion"),
+        ("report", "contradictory outcome"),
         ("lock", "wrong commit"),
     ],
 )
@@ -129,6 +130,8 @@ def test_export_contract_fails_closed_for_unmappable_or_unpinned_input(tmp_path,
         report = json.loads(report_path.read_text())
         if mutation[1] == "unknown scenario":
             report["scenario"] = "unknown"
+        elif mutation[1] == "contradictory outcome":
+            report["outcome"] = {"observed": "verified_delivery", "acceptable": False}
         else:
             report["assertions"].pop("fault_reached_production_preflight")
         report_path.write_text(json.dumps(report, sort_keys=True), encoding="utf-8")

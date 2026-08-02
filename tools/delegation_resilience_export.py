@@ -65,6 +65,8 @@ def _validate_inputs(report: dict[str, Any], scenario: bytes, constitution: byte
         raise ExportError("unknown OrgForge scenario mapping")
     if report.get("exercise_status") != "GREEN":
         raise ExportError("OrgForge exercise is not a completed deterministic report")
+    if report.get("outcome") != {"observed": "safe_stop", "acceptable": True}:
+        raise ExportError("OrgForge report has a contradictory or unmapped outcome")
     assertions = report.get("assertions")
     if not isinstance(assertions, dict) or not all(
         assertions.get(name) is True for name in (
