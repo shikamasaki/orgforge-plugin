@@ -3043,6 +3043,44 @@ def cmd_derive_admission(a):
                               "detail": f"2件が別の対象を見ている: {sorted(map(str, subs))}"},
                              ensure_ascii=False))
             return 3
+        # Two independent positive judgments may still agree on the same obsolete premise.  Strict
+        # orgs therefore re-resolve the integration ref after both votes exist and immediately
+        # before the joint event is created.  This does not fetch or rebase; uncertainty stops here.
+        try:
+            from discover import constitution
+            from review_freshness import descriptor_status, freshness_policy
+            _constitution_path = constitution()
+            _declared, _strict_freshness, _freshness_error = freshness_policy(_constitution_path)
+        except Exception as exc:
+            _strict_freshness, _freshness_error = False, str(exc)
+        if _freshness_error:
+            print(json.dumps({"ok": False, "reason": "freshness_policy_unreadable",
+                              "detail": _freshness_error}, ensure_ascii=False))
+            return 4
+        if _strict_freshness:
+            for lineage, provisional in sorted(found.items()):
+                descriptor = provisional.get("review_subject")
+                if not isinstance(descriptor, dict):
+                    print(json.dumps({
+                        "ok": False, "reason": "subject_descriptor_missing",
+                        "detail": (f"{lineage} の provisional は integration ref/base の descriptor "
+                                   "を持たない。旧判定は strict admission に再利用できない。"
+                                   "verify と判定をやり直すこと。")}, ensure_ascii=False))
+                    return 7
+                if descriptor.get("review_subject_id") != provisional.get("review_subject_id"):
+                    print(json.dumps({"ok": False, "reason": "subject_descriptor_mismatch",
+                                      "detail": f"{lineage} の descriptor が subject と一致しない"},
+                                     ensure_ascii=False))
+                    return 7
+                freshness = descriptor_status(descriptor, os.getcwd())
+                if not freshness["ok"]:
+                    print(json.dumps({"ok": False, "reason": freshness["reason"],
+                                      "detail": (f"{lineage}: {freshness['detail']}。"
+                                                 "自動 rebase はせず、再検証を要求する。"),
+                                      "review_subject_id": provisional.get("review_subject_id"),
+                                      "integration_ref": descriptor.get("integration_ref"),
+                                      "observed": freshness}, ensure_ascii=False))
+                    return 7
         verdicts = {v.get("verdict") for v in found.values()}
         if len(verdicts) != 1:
             print(json.dumps({"ok": False, "reason": "verdicts_disagree",
@@ -3099,6 +3137,8 @@ def cmd_derive_admission(a):
                    "decision_by": f"system:joint({','.join(lineages)})",
                    "recorded_by": "system:writer", "identity_assurance": "derived",
                    "recorder_assurance": "observed", "workload_isolation": "none"}
+        if _strict_freshness:
+            payload["review_subject"] = next(iter(found.values()))["review_subject"]
         bad, _w = validate_event(a.event, payload, snap, writer_op=a.event)
         if bad:
             print(json.dumps({"ok": False, "reason": "schema_rejected", "detail": bad},

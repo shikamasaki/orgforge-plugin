@@ -166,13 +166,34 @@ def _issue_decision_comments(issue, event):
 def cmd_verify(a):
     """gate / skeptic を起動するための材料を組み立てて印字する。判定はしない。"""
     role = a.role
+    from review_freshness import descriptor_status, freshness_policy, persist_descriptor
+    try:
+        from discover import constitution
+        _constitution_path = constitution()
+    except Exception:
+        _constitution_path = None
+    _declared, _strict_freshness, _policy_error = freshness_policy(_constitution_path)
+    if _policy_error:
+        print(f"review freshness policy が不正: {_policy_error}", file=sys.stderr)
+        return 2
+    _sid, _sparts = review_subject(
+        a.issue, role, getattr(a, "phase", None), integration_ref=getattr(a, "base", None))
+    _subject_path = persist_descriptor(_sid, _sparts)
+    _freshness = descriptor_status({**_sparts, "review_subject_id": _sid}, os.getcwd())
+    if _strict_freshness and not _freshness["ok"]:
+        print(f"review subject が現在の統合先に対して有効でない: "
+              f"{_freshness['reason']} — {_freshness['detail']}\n"
+              f"  subject: {_sid}\n  evidence: {_subject_path}\n"
+              "  自動 rebase はしない。統合先を取り込み、同じ verify で再判定すること。",
+              file=sys.stderr)
+        return 11
     # **記録のためだけに judge を回さない。** subject は git と受け入れ基準から決まるので、
     # 材料を組む前に答えられる。
     if getattr(a, "print_subject", False):
-        sid, parts = review_subject(a.issue, role, getattr(a, "phase", None))
-        print(sid)
-        for k, v in parts.items():
+        print(_sid)
+        for k, v in _sparts.items():
             print(f"  {k:20}= {v or '(なし)'}", file=sys.stderr)
+        print(f"  {'descriptor':20}= {_subject_path}", file=sys.stderr)
         return 0
     charter, cpath = _role_charter(role)
     if charter is None:
@@ -376,10 +397,10 @@ def cmd_verify(a):
     # **判定対象の同一性を、判定の前に固定する。** judge が subject を書けるなら、別の成果物を
     # 見た2件を「同じものを見た」と申告して一致を作れる（監査が実証: revision A と B の admit で
     # joint が生成された）。verify が観測し、judge は運ぶだけ。
-    _sid, _sparts = review_subject(a.issue, role, getattr(a, "phase", None))
     out.append(f"\n## 判定対象（review_subject_id — **変更しないこと**）\n\n"
                f"    {_sid}\n\n"
                + "\n".join(f"    {k:20}= {v or '(なし)'}" for k, v in _sparts.items())
+               + f"\n    {'descriptor':20}= {_subject_path}"
                + "\n\nこの id は監督が記録に載せる。**あなたが作る値ではない。**"
                  " 別の血統の judge にも同じ id が渡っており、"
                  "**2件の id が一致しない限り admission は生成されない** —"

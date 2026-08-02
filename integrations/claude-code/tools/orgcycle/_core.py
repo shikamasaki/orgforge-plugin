@@ -358,7 +358,7 @@ def _worktree_tree_sha(cwd=None):
                 pass
 
 
-def review_subject(issue, role, phase=None, cwd=None):
+def review_subject(issue, role, phase=None, cwd=None, integration_ref=None):
     """**判定対象の同一性**を1つの digest に束ねる。`verify` が一度だけ生成する。
 
     0.32.1 の一致要求は (issue, role, lineage, verdict) だけで一致を判定していた。そのため
@@ -370,6 +370,8 @@ def review_subject(issue, role, phase=None, cwd=None):
         issue                その Issue
         role                 gate か skeptic か（判定の種類）
         phase                どのフェーズの判定か
+        integration_ref     統合先 ref
+        integration_head_sha 判定時点の統合先 head
         base_sha             分岐元（何からの差分を見ているのか）
         reviewed_tree_sha    **実際にレビューされた木**。commit ではなく tree にする —
                              同じ内容の commit を作り直しても対象は変わらない
@@ -395,11 +397,8 @@ def review_subject(issue, role, phase=None, cwd=None):
     # （`git diff HEAD` は未追跡の内容を含まないので、それでは足りない）。
     tree = _worktree_tree_sha(cwd) or head_tree
     dirty = "1" if tree != head_tree else ""
-    base = ""
-    for ref in ("origin/develop", "develop", "origin/main", "main"):
-        base = _git("merge-base", "HEAD", ref)
-        if base:
-            break
+    from review_freshness import integration_observation, subject_digest
+    integration = integration_observation(cwd or os.getcwd(), integration_ref)
 
     req_digest = ""
     for name in ("REQUIREMENTS.md",):
@@ -410,9 +409,8 @@ def review_subject(issue, role, phase=None, cwd=None):
             break
 
     parts = {"issue": str(issue), "role": role, "phase": phase or "",
-             "base_sha": base, "reviewed_tree_sha": tree,
+             **integration, "reviewed_tree_sha": tree,
              "dirty": dirty, "head_tree_sha": head_tree,
              "requirements_digest": req_digest}
-    sid = hashlib.sha256(
-        json.dumps(parts, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+    sid = subject_digest(parts)
     return sid, parts
