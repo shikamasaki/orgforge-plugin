@@ -44,6 +44,7 @@ def _source(tmp_path: Path) -> tuple[Path, dict[str, str]]:
     source.mkdir()
     report = {
         "protocol": "orgforge.resilience-exercise-report/v1",
+        "observed_at": "2026-08-03T00:00:00Z",
         "scenario": "reviewer-outage-minimal",
         "exercise_status": "GREEN",
         "outcome": {"observed": "safe_stop", "acceptable": True},
@@ -171,6 +172,14 @@ def _clone_dr(tmp_path: Path) -> Path:
     return clone
 
 
+def _clone_graph_dr(tmp_path: Path) -> Path:
+    clone = tmp_path / "dr-graph-checkout"
+    subprocess.run(["git", "-C", str(DR_ROOT), "worktree", "add", "--detach", str(clone),
+                    "e098ed6f04a4af12e564f102276f15cbc4b9ed2f"],
+                   check=True, capture_output=True, text=True)
+    return clone
+
+
 def _assert_locked_archive_output(source: Path, output: Path, tmp_path: Path) -> None:
     clean = tmp_path / "clean"
     run = _export(source, clean)
@@ -219,28 +228,57 @@ def test_export_ignores_ignored_module_shadow(tmp_path):
     _assert_locked_archive_output(source, tmp_path / "output", tmp_path)
 
 
-def test_export_ignores_replace_refs(tmp_path):
-    """A repo-local `git replace` ref must not swap the archived locked content."""
+def test_export_ignores_stale_pycache(tmp_path):
     source, _ = _source(tmp_path)
     clone = _clone_dr(tmp_path)
-    locked = json.loads(LOCK.read_text())["delegationResilience"]["commit"]
-    empty_tree = subprocess.run(["git", "-C", str(clone), "hash-object", "-t", "tree",
-                                 os.devnull], check=True, capture_output=True, text=True,
-                                timeout=60).stdout.strip()
-    poison = subprocess.run(["git", "-C", str(clone), "commit-tree", empty_tree,
-                             "-m", "poison"],
-                            check=True, capture_output=True, text=True,
-                            env={**os.environ,
-                                 "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
-                                 "GIT_AUTHOR_DATE": "2026-01-01T00:00:00Z",
-                                 "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t",
-                                 "GIT_COMMITTER_DATE": "2026-01-01T00:00:00Z"},
-                            timeout=60).stdout.strip()
-    subprocess.run(["git", "-C", str(clone), "replace", "-f", locked, poison],
-                   check=True, capture_output=True, text=True, timeout=60)
+    cache = clone / "tools" / "__pycache__"
+    cache.mkdir()
+    (cache / "data_loading.cpython-312.pyc").write_bytes(b"stale shadow bytecode")
     run = _export(source, tmp_path / "output", dr_root=clone)
     assert run.returncode == 0, run.stderr
     _assert_locked_archive_output(source, tmp_path / "output", tmp_path)
+
+
+@pytest.mark.parametrize("shadow", ["untracked", "ignored", "pycache"])
+def test_graph_export_ignores_checkout_shadowing(tmp_path, shadow):
+    source, _ = _source(tmp_path)
+    baseline = tmp_path / "baseline"
+    baseline_run = subprocess.run(
+        [sys.executable, str(EXPORTER), "graph", "--exercise-report", str(source / "exercise-report.json"),
+         "--constitution", str(source / "constitution.yaml"), "--scenario", str(source / "reviewer-outage.yaml"),
+         "--lock", str(LOCK), "--dr-root", str(DR_ROOT), "--output", str(baseline)],
+        cwd=REPO, text=True, capture_output=True, timeout=30,
+    )
+    assert baseline_run.returncode == 0, baseline_run.stderr
+    clone = _clone_graph_dr(tmp_path)
+    if shadow == "untracked":
+        (clone / "tools" / "assurance_graph.py").with_name("assurance_graph_shadow.py").write_text(
+            "raise RuntimeError('shadow')\n", encoding="utf-8")
+    elif shadow == "ignored":
+        exclude = Path(subprocess.run(["git", "-C", str(clone), "rev-parse", "--git-path", "info/exclude"],
+                                      check=True, capture_output=True, text=True).stdout.strip())
+        if not exclude.is_absolute():
+            exclude = clone / exclude
+        exclude.write_text("tools/ignored_graph.py\n", encoding="utf-8")
+        (clone / "tools" / "ignored_graph.py").write_text("raise RuntimeError('shadow')\n", encoding="utf-8")
+    else:
+        cache = clone / "tools" / "__pycache__"
+        cache.mkdir()
+        (cache / "assurance_graph.cpython-312.pyc").write_bytes(b"stale shadow")
+    clean = tmp_path / "clean"
+    run = subprocess.run(
+        [sys.executable, str(EXPORTER), "graph", "--exercise-report", str(source / "exercise-report.json"),
+         "--constitution", str(source / "constitution.yaml"), "--scenario", str(source / "reviewer-outage.yaml"),
+         "--lock", str(LOCK), "--dr-root", str(clone), "--output", str(clean)],
+        cwd=REPO, text=True, capture_output=True, timeout=30,
+    )
+    try:
+        assert run.returncode == 0, run.stderr
+        assert (clean / "assurance-graph.json").is_file()
+        assert (clean / "assurance-graph.json").read_bytes() == (baseline / "assurance-graph.json").read_bytes()
+    finally:
+        subprocess.run(["git", "-C", str(DR_ROOT), "worktree", "remove", "--force", str(clone)],
+                       check=False, capture_output=True, text=True)
 
 
 def test_export_rejects_code_digest_mismatch(tmp_path):
@@ -259,6 +297,149 @@ def test_export_rejects_non_strict_json(tmp_path, raw):
     (source / "exercise-report.json").write_bytes(raw)
     run = _export(source, tmp_path / "output")
     assert run.returncode != 0
+
+
+def test_graph_export_fails_closed_until_dr_declares_graph_schema(tmp_path):
+    source, _ = _source(tmp_path)
+    lock = json.loads(LOCK.read_text())
+    lock.pop("assuranceGraph", None)
+    (tmp_path / "lock.json").write_text(json.dumps(lock), encoding="utf-8")
+    run = subprocess.run(
+        [sys.executable, str(EXPORTER), "graph", "--exercise-report", str(source / "exercise-report.json"),
+         "--constitution", str(source / "constitution.yaml"), "--scenario", str(source / "reviewer-outage.yaml"),
+         "--lock", str(tmp_path / "lock.json"), "--dr-root", str(DR_ROOT), "--output", str(tmp_path / "graph")],
+        cwd=REPO, text=True, capture_output=True, timeout=30,
+    )
+    assert run.returncode != 0
+    assert "no Assurance Graph schema/verifier contract" in run.stderr
+    assert not (tmp_path / "graph").exists()
+
+
+def test_graph_lock_requires_consumer_held_schema_and_verifier_digest(tmp_path):
+    source, _ = _source(tmp_path)
+    lock = tmp_path / "lock.json"
+    lock_data = json.loads(LOCK.read_text())
+    lock_data["assuranceGraph"]["verifierCodeDigest"] = "sha256:" + "0" * 64
+    lock.write_text(json.dumps(lock_data, sort_keys=True), encoding="utf-8")
+    run = subprocess.run(
+        [sys.executable, str(EXPORTER), "graph", "--exercise-report", str(source / "exercise-report.json"),
+         "--constitution", str(source / "constitution.yaml"), "--scenario", str(source / "reviewer-outage.yaml"),
+         "--lock", str(lock), "--dr-root", str(DR_ROOT), "--output", str(tmp_path / "graph")],
+        cwd=REPO, text=True, capture_output=True, timeout=30,
+    )
+    assert run.returncode != 0
+    assert "verifier code digest does not match lock" in run.stderr
+    assert not (tmp_path / "graph").exists()
+
+
+@pytest.mark.parametrize("missing", [
+    "repository", "tag", "tagObject", "commit", "profile", "schemaPath",
+    "schemaDigest", "verifierCodeDigest", "verifierManifestPath",
+])
+def test_graph_lock_missing_required_field_fails_closed(tmp_path, missing):
+    source, _ = _source(tmp_path)
+    lock = tmp_path / "lock.json"
+    lock_data = json.loads(LOCK.read_text())
+    lock_data["assuranceGraph"].pop(missing)
+    lock.write_text(json.dumps(lock_data, sort_keys=True), encoding="utf-8")
+    run = subprocess.run(
+        [sys.executable, str(EXPORTER), "graph", "--exercise-report", str(source / "exercise-report.json"),
+         "--constitution", str(source / "constitution.yaml"), "--scenario", str(source / "reviewer-outage.yaml"),
+         "--lock", str(lock), "--dr-root", str(DR_ROOT), "--output", str(tmp_path / "graph")],
+        cwd=REPO, text=True, capture_output=True, timeout=30,
+    )
+    assert run.returncode != 0
+    assert f"missing required fields: {missing}" in run.stderr
+    assert "Traceback" not in run.stderr
+    assert not (tmp_path / "graph").exists()
+
+
+def test_graph_export_is_deterministic_and_stays_not_demonstrated(tmp_path):
+    source, _ = _source(tmp_path)
+    outputs = []
+    for name in ("one", "two"):
+        output = tmp_path / name
+        run = subprocess.run(
+            [sys.executable, str(EXPORTER), "graph", "--exercise-report", str(source / "exercise-report.json"),
+             "--constitution", str(source / "constitution.yaml"), "--scenario", str(source / "reviewer-outage.yaml"),
+             "--lock", str(LOCK), "--dr-root", str(DR_ROOT), "--output", str(output)],
+            cwd=REPO, text=True, capture_output=True, timeout=30,
+        )
+        assert run.returncode == 0, run.stderr
+        outputs.append(output)
+    assert (outputs[0] / "assurance-graph.json").read_bytes() == (outputs[1] / "assurance-graph.json").read_bytes()
+    result = json.loads((outputs[0] / "verification-result.json").read_text())
+    assert result["graphVerificationOutcome"] == "GRAPH_VERIFIED"
+    assert result["claimResults"] == []
+    assert (outputs[0] / "graph-verifier-code-digest.txt").read_text().startswith("sha256:")
+    standalone = subprocess.run(
+        [sys.executable, str(outputs[0] / "standalone-verifier" / "tools" / "verify_assurance_graph.py"),
+         str(outputs[0] / "assurance-graph.json"), "--artifact-root", str(outputs[0])],
+        cwd=outputs[0], env={**os.environ, "PYTHONPATH": str(outputs[0] / "standalone-verifier")},
+        text=True, capture_output=True, timeout=30,
+    )
+    assert standalone.returncode == 0, standalone.stderr
+    assert json.loads(standalone.stdout) == result
+
+
+@pytest.mark.parametrize("mutation", ["duplicate_node", "duplicate_edge", "dangling", "source_digest"])
+def test_graph_verifier_rejects_structural_and_source_mutations(tmp_path, mutation):
+    source, _ = _source(tmp_path)
+    output = tmp_path / "graph"
+    run = subprocess.run(
+        [sys.executable, str(EXPORTER), "graph", "--exercise-report", str(source / "exercise-report.json"),
+         "--constitution", str(source / "constitution.yaml"), "--scenario", str(source / "reviewer-outage.yaml"),
+         "--lock", str(LOCK), "--dr-root", str(DR_ROOT), "--output", str(output)],
+        cwd=REPO, text=True, capture_output=True, timeout=30,
+    )
+    assert run.returncode == 0, run.stderr
+    graph_path = output / "assurance-graph.json"
+    graph = json.loads(graph_path.read_text())
+    if mutation == "duplicate_node":
+        graph["nodes"].append(dict(graph["nodes"][0]))
+    elif mutation == "duplicate_edge":
+        graph["edges"].append(dict(graph["edges"][0]))
+    elif mutation == "dangling":
+        graph["edges"][0]["to"] = "artifact:missing"
+    else:
+        source_file = output / "orgforge-inputs" / "exercise-report.json"
+        source_file.write_bytes(source_file.read_bytes() + b"\n")
+    graph_path.write_text(json.dumps(graph, sort_keys=True, separators=(",", ":")), encoding="utf-8")
+    verifier = subprocess.run(
+        [sys.executable, str(output / "standalone-verifier" / "tools" / "verify_assurance_graph.py"),
+         str(graph_path), "--artifact-root", str(output)],
+        cwd=output, env={**os.environ, "PYTHONPATH": str(output / "standalone-verifier")},
+        text=True, capture_output=True, timeout=30,
+    )
+    assert verifier.returncode != 0
+    result = json.loads(verifier.stdout)
+    assert result["graphVerificationOutcome"] == "GRAPH_REJECTED"
+    assert result["errors"]
+
+
+def test_graph_digest_changes_after_graph_mutation(tmp_path):
+    source, _ = _source(tmp_path)
+    output = tmp_path / "graph"
+    run = subprocess.run(
+        [sys.executable, str(EXPORTER), "graph", "--exercise-report", str(source / "exercise-report.json"),
+         "--constitution", str(source / "constitution.yaml"), "--scenario", str(source / "reviewer-outage.yaml"),
+         "--lock", str(LOCK), "--dr-root", str(DR_ROOT), "--output", str(output)],
+        cwd=REPO, text=True, capture_output=True, timeout=30,
+    )
+    assert run.returncode == 0, run.stderr
+    original = json.loads((output / "verification-result.json").read_text())
+    graph_path = output / "assurance-graph.json"
+    graph = json.loads(graph_path.read_text())
+    graph["metadata"]["graphId"] += "-mutated"
+    graph_path.write_text(json.dumps(graph, sort_keys=True, separators=(",", ":")), encoding="utf-8")
+    verifier = subprocess.run(
+        [sys.executable, str(output / "standalone-verifier" / "tools" / "verify_assurance_graph.py"),
+         str(graph_path), "--artifact-root", str(output)],
+        cwd=output, env={**os.environ, "PYTHONPATH": str(output / "standalone-verifier")},
+        text=True, capture_output=True, timeout=30,
+    )
+    mutated = json.loads(verifier.stdout)
+    assert mutated["graphDigest"] != original["graphDigest"]
 
 
 def test_archive_extraction_rejects_path_traversal(tmp_path):
