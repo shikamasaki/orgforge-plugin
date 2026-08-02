@@ -20,6 +20,11 @@ def derived_branch_name(issue, title):
     """(issue, title) の純関数としての導出名 — 作成時の規約。恒久 identity ではない（#107）:
     タイトルが後から変われば実在の branch とずれるので、**実在の branch を答える文脈**では
     そのまま使わず resolve_issue_branch で突合すること。"""
+    if not title:
+        # タイトル不明（gh に届かない等）の導出は**本当に** slug 無し。空文字にも _slug は
+        # hash（te3b0c442…）を返すので、ここで落とさないと「slug を省く」と告知しながら
+        # 幻の hash 付き名を導出する — 告知と実際の名前が食い違う（#107 rework）。
+        return f"feat/issue-{issue}"
     slug = _slug(title)
     return f"feat/issue-{issue}-{slug}" if slug else f"feat/issue-{issue}"
 

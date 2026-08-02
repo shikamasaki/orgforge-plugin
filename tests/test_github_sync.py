@@ -319,6 +319,12 @@ def test_branch_japanese_title_falls_back_to_stable_hash():
     assert out[0].startswith("feat/issue-6-t") and len(out[0]) > len("feat/issue-6-"), out[0]
 
 
+def test_derived_branch_name_empty_title_is_genuinely_slugless():
+    """#107 rework (3a): タイトル不明の導出は本当に slug 無し。「slug を省く」と告知しながら
+    空文字の hash（te3b0c442…）を付けた幻の名前を出さない。"""
+    assert GS.derived_branch_name(9, "") == "feat/issue-9"
+
+
 def test_branch_query_reports_worktree_head_not_stale_derived_name(tmp_path, monkeypatch, capsys):
     """#107 (a)(b) Tatekae shape: the Issue worktree's HEAD is `feat/issue-15-login-redirect`
     but the title now derives `feat/issue-15-google` → query mode reports the REAL branch and

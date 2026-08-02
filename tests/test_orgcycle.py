@@ -617,6 +617,70 @@ def test_integrate_explicit_nonstandard_branch_and_sha_are_supported(tmp_path, m
     assert branch == sha and subject_sha == sha and error is None
 
 
+# ── #107 rework: integrate も worktree の実 HEAD を候補に入れる ────────────────
+# skeptic の反証: retitle 後の begin 再実行が新 slug の branch を切り、実作業は旧 branch の
+# worktree に居る形で、_resolve_integration_branch の add() が `feat/issue-N*` しか候補に
+# 入れないため worktree 解決済みの非規約 branch が捨てられ、迷子の規約名 branch が
+# sole candidate として**未レビューのまま exit 0 で merge** された。
+
+
+def _worktree_repo(tmp_path, work_branch, *stray_branches):
+    """実作業が worktree の branch に載っている repo（+ 迷子の規約名 branch）。"""
+    repo = _branch_repo(tmp_path, *stray_branches)
+    wt = repo / ".orgforge" / "wt" / "issue-42"
+    subprocess.run(["git", "worktree", "add", "-q", "-b", work_branch, str(wt), "main"],
+                   cwd=repo, check=True)
+    (wt / "work.txt").write_text("real reviewed work", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=wt, check=True)
+    subprocess.run(["git", "commit", "-qm", "real work"], cwd=wt, check=True)
+    return repo, wt
+
+
+def test_integrate_plan_stops_on_worktree_vs_conventional_split_brain(
+        tmp_path, monkeypatch, capsys):
+    """(a) skeptic の split-brain shape: worktree の実 branch と迷子の規約名 branch が併存 →
+    integrate --plan は迷子を黙って選ばず、両方を名指しして止まる。"""
+    ship = _ship_module()
+    repo, _wt = _worktree_repo(tmp_path, "fix/login-redirect", "feat/issue-42-old-title")
+    subprocess.run(["git", "update-ref", "refs/remotes/origin/main", "main"],
+                   cwd=repo, check=True)
+    (repo / "organization.yaml").write_text("roles: []\n", encoding="utf-8")
+    (repo / "constitution.yaml").write_text(
+        "enforcement:\n  judges:\n    integration_ref: origin/main\n", encoding="utf-8")
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(ship, "_branch_for", lambda _i: "feat/issue-42-new-title")
+    rc = ship.cmd_integrate(argparse.Namespace(issue=42, branch=None, plan=True,
+                                               base=None, test=None))
+    cap = capsys.readouterr()
+    assert rc != 0, \
+        "迷子の feat/issue-42-old-title を sole candidate として選び、素通りで統合できてしまう"
+    assert "fix/login-redirect" in cap.err and "feat/issue-42-old-title" in cap.err, \
+        f"両方の branch を名指しして止まっていない: {cap.err!r}"
+
+
+def test_integrate_branch_resolution_targets_worktree_head_without_stray(
+        tmp_path, monkeypatch):
+    """(b) worktree の実 branch（非規約名）だけがある → それが統合対象になる。"""
+    ship = _ship_module()
+    repo, _wt = _worktree_repo(tmp_path, "fix/login-redirect")
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(ship, "_branch_for", lambda _i: "feat/issue-42-new-title")
+    branch, subject_sha, error = ship._resolve_integration_branch(42)
+    assert error is None, f"worktree の実 branch を候補に入れていない: {error!r}"
+    assert branch == "fix/login-redirect" and len(subject_sha) == 40
+
+
+def test_integrate_explicit_branch_keeps_current_behavior_despite_worktree(
+        tmp_path, monkeypatch):
+    """明示 --branch は従来どおり — worktree 解決に上書きされない（operator override）。"""
+    ship = _ship_module()
+    repo, _wt = _worktree_repo(tmp_path, "fix/login-redirect", "feat/issue-42-old-title")
+    monkeypatch.chdir(repo)
+    branch, subject_sha, error = ship._resolve_integration_branch(42, "feat/issue-42-old-title")
+    assert (branch, error) == ("feat/issue-42-old-title", None)
+    assert len(subject_sha) == 40
+
+
 def test_integrate_preview_fails_instead_of_reporting_zero_for_missing_ref(tmp_path, monkeypatch):
     ship = _ship_module()
     repo = _branch_repo(tmp_path)
@@ -2535,6 +2599,19 @@ def test_resolve_issue_branch_uses_existing_derived_without_worktree(tmp_path):
     g("branch", "feat/issue-7-add-login")
     br, warn, err = core.resolve_issue_branch(7, derived="feat/issue-7-add-login", cwd=str(org))
     assert (br, warn, err) == ("feat/issue-7-add-login", None, None)
+
+
+def test_resolve_issue_branch_names_detached_worktree_truthfully(tmp_path):
+    """#107 rework (3b): worktree が在るのに「worktree も無い」と嘘を言わない —
+    在るが detached HEAD で branch を指していない、と事実を言う。"""
+    core = _cycle_mod("_core")
+    org, g = _declared_org(tmp_path, integration_ref="origin/main", develop=False, name="org107t")
+    wt = org / ".orgforge" / "wt" / "issue-9"
+    g("worktree", "add", "-q", "--detach", str(wt), "origin/main")
+    br, warn, err = core.resolve_issue_branch(9, derived="feat/issue-9-ghost", cwd=str(org))
+    assert br is None and err
+    assert "も無い" not in err, f"worktree が在るのに「無い」と診断した: {err!r}"
+    assert "detached" in err, f"実状態（detached HEAD）を言っていない: {err!r}"
 
 
 def test_resolve_issue_branch_fails_closed_when_nothing_exists(tmp_path):

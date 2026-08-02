@@ -442,27 +442,47 @@ def resolve_issue_branch(issue, derived=None, cwd=None):
         wt = issue_worktree(issue, cwd)
     except Exception:
         wt = None
-    if wt and worktree_rooted_at(wt):
-        code, head = _raw(["git", "-C", wt, "symbolic-ref", "--short", "-q", "HEAD"])
-        head = (head or "").strip()
-        if code == 0 and head:
-            warn = None
-            if derived and derived != head:
-                warn = (f"導出名 `{derived}` と worktree の実 branch `{head}` が一致しない"
-                        f"（タイトル変更か手動命名）。worktree "
-                        f".orgforge/wt/issue-{issue} の HEAD を採用する（#107）。")
-            return head, warn, None
+    wt_exists = bool(wt and worktree_rooted_at(wt))
+    head = issue_worktree_head(issue, cwd) if wt_exists else None
+    if head:
+        warn = None
+        if derived and derived != head:
+            warn = (f"導出名 `{derived}` と worktree の実 branch `{head}` が一致しない"
+                    f"（タイトル変更か手動命名）。worktree "
+                    f".orgforge/wt/issue-{issue} の HEAD を採用する（#107）。")
+        return head, warn, None
     if derived:
         code, _out = _raw(["git"] + (["-C", cwd] if cwd else [])
                           + ["rev-parse", "--verify", "--quiet", f"refs/heads/{derived}"])
         if code == 0:
             return derived, None, None
+    # 事実だけを言う: worktree が「無い」のか「在るが branch を指していない（detached HEAD）」
+    # のかは別の状態で、直し方も違う。嘘の診断は直し方まで誤らせる。
+    wt_state = (f"worktree .orgforge/wt/issue-{issue} は在るが detached HEAD で"
+                f"（branch を指していない）" if wt_exists
+                else f"worktree .orgforge/wt/issue-{issue} も無い")
     return None, None, (
         f"Issue #{issue} の branch を解決できない: 導出名 `{derived or '(導出できず)'}` は"
-        f"実在の branch ではなく、worktree .orgforge/wt/issue-{issue} も無い。\n"
+        f"実在の branch ではなく、{wt_state}。\n"
         f"  実在の候補は `git branch --list 'feat/issue-{issue}*'` で探せる。\n"
         f"  これから作るなら `github_sync branch --issue {issue} --worktree` で"
         f"branch ごと worktree を作ること。")
+
+
+def issue_worktree_head(issue, cwd=None):
+    """Issue worktree（.orgforge/wt/issue-N）が実在するなら、その HEAD branch 名。
+
+    無い / 偽 worktree / detached HEAD なら None。実在する Issue worktree の HEAD が
+    その Issue の branch の**真値**である（#107）— 実際に作業されたのはそこだから。"""
+    try:
+        wt = issue_worktree(issue, cwd)
+    except Exception:
+        return None
+    if not (wt and worktree_rooted_at(wt)):
+        return None
+    code, head = _raw(["git", "-C", wt, "symbolic-ref", "--short", "-q", "HEAD"])
+    head = (head or "").strip()
+    return head if code == 0 and head else None
 
 
 def worktree_rooted_at(path):
