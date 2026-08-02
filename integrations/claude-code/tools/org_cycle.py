@@ -57,7 +57,9 @@ def main(argv):
         q.add_argument("--parent", help="親 objective 番号（省略時は Issue から自動解決）")
         q.add_argument("--candidate-id", dest="candidate_id",
                        help="省略時は Issue の candidate_id トレーラから読む")
-        q.add_argument("--base", help="worktree を切る元（既定 develop）")
+        q.add_argument("--base", help="worktree を切る元（省略時は constitution の "
+                                      "enforcement.judges.integration_ref。どちらも無ければ"
+                                      "失敗する — develop は推測しない、#106）")
         q.add_argument("--why", help="なぜ今これを選んだか（attention_allocated の reason）")
         q.add_argument("--no-check", dest="no_check", action="store_true",
                        help="着手前の確認（依存の状態・人間の作業待ち）を出さない")
@@ -95,9 +97,12 @@ def main(argv):
 
     q = sub.add_parser("show", help="1つの Issue の全体像（判定履歴・いま何待ちか）")
     q.add_argument("--issue", required=True, type=int)
+    q.add_argument("--base", default=None,
+                   help="不可逆な変更の帰属基準（省略時は constitution の integration_ref）")
 
     q = sub.add_parser("gc", help="溜まった worktree を片付ける（未コミットのものは残す）")
-    q.add_argument("--base", default="develop")
+    q.add_argument("--base", default=None,
+                   help="統合済み判定の基準（省略時は constitution の integration_ref）")
     q.add_argument("--all", action="store_true", help="未統合のものも対象にする")
 
     q = sub.add_parser("intake", help="subagent の報告が成果物の形になっているかを検査する")
@@ -127,21 +132,24 @@ def main(argv):
     q.add_argument("--why", required=True, help="何を見て、何が決め手になったか")
     q.add_argument("--command", help="当時実行したコマンド")
     q.add_argument("--result", help="その実出力")
-    q.add_argument("--base", default="develop")
+    q.add_argument("--base", default=None,
+                   help="integration_admitted の統合先（省略時は constitution の integration_ref）")
 
-    q = sub.add_parser("handback", help="feature ブランチを push → develop 宛 PR → Issue に紐付け")
+    q = sub.add_parser("handback", help="feature ブランチを push → 統合先宛 PR → Issue に紐付け")
     q.add_argument("--issue", required=True, type=int)
     q.add_argument("--branch", help="省略時は Issue から決定的に導出")
-    q.add_argument("--base", default="develop")
+    q.add_argument("--base", default=None,
+                   help="PR の統合先（省略時は constitution の integration_ref）")
     q.add_argument("--summary", help="何を作ったか（1行）")
     q.add_argument("--result", help="DoD コマンドの実出力（PR body と log に入る）")
     q.add_argument("--files", help="変更ファイル")
 
-    q = sub.add_parser("integrate", help="develop への fan-in（前提照合 → マージ → 統合後テスト → 記録）")
+    q = sub.add_parser("integrate", help="統合先への fan-in（前提照合 → マージ → 統合後テスト → 記録）")
     q.add_argument("--issue", required=True, type=int)
     q.add_argument("--role", default="integrator", help="統合を回す役割（記録の actor）")
     q.add_argument("--branch", help="省略時は Issue から決定的に導出")
-    q.add_argument("--base", default="develop")
+    q.add_argument("--base", default=None,
+                   help="統合先（省略時は constitution の integration_ref。無ければ失敗 — #106）")
     q.add_argument("--test", default="npm test", help="統合後に走らせる全体テスト")
     q.add_argument("--force", action="store_true",
                    help="gate/skeptic の前提が無くても進める。**理由を記録すること**")

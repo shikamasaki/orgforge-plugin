@@ -890,7 +890,14 @@ def cmd_record(a):
     payload = {"verdict": a.verdict, "issue": a.issue, "deliverable": str(a.issue),
                "backfilled": True, "why": a.why}
     if a.event == "integration_admitted":
-        payload.update({"integration_branch": a.base, "deliverables": [str(a.issue)],
+        # base を消費するのはこのイベントだけなので、必要になった時だけ解決する（#106）。
+        from ._core import resolve_integration_base
+        base, base_err = resolve_integration_base(getattr(a, "base", None))
+        if base_err:
+            print(f"integration_admitted の統合先が決まらない（#{a.issue}）:\n{base_err}",
+                  file=sys.stderr)
+            return 2
+        payload.update({"integration_branch": base, "deliverables": [str(a.issue)],
                         "combined_ci_ref": a.command or "(記録なし)"})
     if a.result:
         payload["result"] = a.result[:4000]

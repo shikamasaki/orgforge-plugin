@@ -18,6 +18,7 @@ from ._core import (
     _raw,
     _refutation_for,
     _repo,
+    resolve_integration_base,
 )
 
 
@@ -57,6 +58,12 @@ def cmd_show(a):
     ときにどの周のどの判定を見ているのか分からなくなった。ある Issue の反証記録 欠落も の
     reject 欠落も、この視点があれば即座に見つかっていた。
     """
+    # 不可逆な変更の帰属基準。develop を推測すると、他 Issue の成果を「この Issue の
+    # 不可逆な変更」と誤帰属する（OBS-054 / #106）— 決まらないなら誤った帰属を出すより止まる。
+    attribution_base, base_err = resolve_integration_base(getattr(a, "base", None))
+    if base_err:
+        print(f"show の帰属基準が決まらない（#{a.issue}）:\n{base_err}", file=sys.stderr)
+        return 2
     title, _ = _issue_body(a.issue)
     av, aseq, _ = _admission_for(a.issue)
     rv, rseq, _ = _refutation_for(a.issue)
@@ -162,7 +169,7 @@ def cmd_show(a):
         pl = ev.get("payload", {}) or {}
         irreversible.append(pl.get("name") or pl.get("op") or "?")
     br = _branch_for(a.issue)
-    code, mig = _raw(["git", "diff", "--name-only", f"{a.base if hasattr(a, 'base') else 'develop'}...{br}"])
+    code, mig = _raw(["git", "diff", "--name-only", f"{attribution_base}...{br}"])
     migrations = [f for f in (mig or "").split("\n")
                   if re.search(r"(^|/)(migrations?|db/migrate)/", f)]
     total = sorted(set(irreversible) | set(os.path.basename(m) for m in migrations))
@@ -187,6 +194,13 @@ def cmd_gc(a):
     残ったものは誰の仕事でもなかった。統合済みなのに残っていると、次に同じ Issue を
     触ったとき古いツリーを掴む。
     """
+    # 「統合済みか」の基準。develop を推測すると、origin/main に統合済みの worktree を
+    # 「未統合」として永久に残す（OBS-057 / #106）。
+    # 注: branch 名の導出と実 branch の不一致は #107 — ここでは扱わない。
+    merged_base, base_err = resolve_integration_base(getattr(a, "base", None))
+    if base_err:
+        print(f"gc の統合済み判定の基準が決まらない:\n{base_err}", file=sys.stderr)
+        return 2
     base = os.path.join(os.getcwd(), ".orgforge", "wt")
     if not os.path.isdir(base):
         print("worktree はありません。")
@@ -204,9 +218,9 @@ def cmd_gc(a):
         if not a.all:
             # 既定は「統合済みだけ」を消す。まだ取り込まれていない仕事は消さない。
             br = _branch_for(issue)
-            code, merged = _raw(["git", "branch", "--merged", a.base, "--list", br])
+            code, merged = _raw(["git", "branch", "--merged", merged_base, "--list", br])
             if code != 0 or not (merged or "").strip():
-                kept.append((name, f"{a.base} に未統合"))
+                kept.append((name, f"{merged_base} に未統合"))
                 continue
         code, out = _raw(["git", "worktree", "remove", wt])
         (removed if code == 0 else kept).append(
