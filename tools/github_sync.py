@@ -16,12 +16,16 @@ Commands (all shell out to `gh`, which the host authenticates — the organ does
   claim   --repo R --issue N --agent A     claim an Issue if unclaimed; exit 0 claimed / 10 contended
   release --repo R --issue N --agent A     drop this agent's claim
   create  --repo R --title T [--kind objective|task] [--parent N] [--dept D] [--objective O]
-          [--body B] [--source mandate|self] [--depends 3,7] [--priority N]
+          --body B [--source mandate|self] [--depends 3,7] [--priority N]
                                            mint a backlog Issue. --kind objective = the big-picture
                                            RFP/objective Issue (the parent); --kind task (default) = a
                                            department's unit of work, linked as a NATIVE GitHub
                                            sub-issue of --parent so the hierarchy + roll-up shows in
                                            the UI. --dept tags the owning department.
+  repair-body --repo R --issue N --body B --reason WHY
+                                           explicitly repair an Issue body and record old/new
+                                           digests plus the authenticated GitHub actor in an audit
+                                           comment. Audit failure rolls the body update back.
   stage   --repo R --issue N --stage S     set the lifecycle label (ready|in-progress|blocked|needs-human|done)
   log     --repo R --issue N --event E [--detail T] [--phase P] [--event-id ID]
           [--command C] [--result R] [--files F] [--next-step S] [--blocked-by B]
@@ -83,7 +87,7 @@ import sys
 
 sys.path.insert(0, __file__.rsplit("/", 1)[0])
 
-from ghsync.backlog import (STAGES, cmd_claim, cmd_release, cmd_create, cmd_stage,
+from ghsync.backlog import (STAGES, cmd_claim, cmd_release, cmd_create, cmd_repair_body, cmd_stage,
                             cmd_ready, cmd_needs_human, cmd_split_check, cmd_candidate_id)
 from ghsync._core import banner
 from ghsync.record import cmd_log, cmd_decide, cmd_provisional, DECISIONS
@@ -101,7 +105,8 @@ def main(argv):
         q.add_argument("--agent", required=True)
     q = sub.add_parser("create")
     q.add_argument("--repo", help="owner/name（省略時は git remote origin から自動発見）"); q.add_argument("--title", required=True)
-    q.add_argument("--body"); q.add_argument("--objective"); q.add_argument("--source")
+    q.add_argument("--body", required=True, help="complete non-placeholder Issue context")
+    q.add_argument("--objective"); q.add_argument("--source")
     q.add_argument("--depends"); q.add_argument("--priority", type=int)
     q.add_argument("--kind", choices=("objective", "task"), default="task",
                    help="objective = the big-picture RFP/objective Issue (parent); "
@@ -109,6 +114,11 @@ def main(argv):
     q.add_argument("--dept", help="the department this task belongs to (labels orgforge:dept:<name>)")
     q.add_argument("--parent", help="parent Issue number: link this task as a NATIVE GitHub sub-issue "
                                     "of that objective (GitHub shows the hierarchy + progress roll-up)")
+    q = sub.add_parser("repair-body")
+    q.add_argument("--repo", help="owner/name（省略時は git remote origin から自動発見）")
+    q.add_argument("--issue", required=True, type=int)
+    q.add_argument("--body", required=True, help="complete replacement Issue body")
+    q.add_argument("--reason", required=True, help="why this rewrite is necessary")
     q = sub.add_parser("stage")
     q.add_argument("--repo", help="owner/name（省略時は git remote origin から自動発見）"); q.add_argument("--issue", required=True, type=int)
     q.add_argument("--stage", required=True)
@@ -242,6 +252,7 @@ def main(argv):
                   "run inside a checkout whose origin is a GitHub repo.", file=sys.stderr)
             return 2
     return {"claim": cmd_claim, "release": cmd_release, "create": cmd_create,
+            "repair-body": cmd_repair_body,
             "stage": cmd_stage, "ready": cmd_ready, "log": cmd_log,
             "branch": cmd_branch, "split-check": cmd_split_check,
             "coverage-check": cmd_coverage_check,

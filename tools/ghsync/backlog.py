@@ -21,6 +21,54 @@ from ._core import (
 
 
 STAGES = ("ready", "in-progress", "blocked", "needs-human", "done")
+_PLACEHOLDER_BODIES = frozenset({"(no body)", "no body", "tbd", "todo", "placeholder",
+                                 "n/a", "none", "x", ".", "..."})
+
+
+def _normalized_body(body):
+    return str(body or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+
+
+def _body_problem(body):
+    """Return why an Issue body cannot carry task context, without echoing its contents."""
+    normalized = _normalized_body(body)
+    if not normalized:
+        return "empty"
+    visible = re.sub(r"<!--.*?-->", "", normalized, flags=re.S).strip()
+    token = re.sub(r"\s+", " ", visible).lower().strip("#*_`~- ")
+    if not token or token in _PLACEHOLDER_BODIES:
+        return "placeholder-only"
+    return None
+
+
+def _body_digest(body):
+    return hashlib.sha256(_normalized_body(body).encode("utf-8")).hexdigest()
+
+
+def _issue_body(repo, issue):
+    code, out = gh(["issue", "view", str(issue), "--repo", repo, "--json", "body"])
+    if code != 0:
+        return None, out
+    try:
+        value = json.loads(out)
+        return str(value.get("body") or ""), ""
+    except Exception as exc:
+        return None, f"could not parse Issue body: {exc}"
+
+
+def _composed_body(a):
+    body = _normalized_body(a.body)
+    parent = getattr(a, "parent", None)
+    if parent:
+        body += f"\n\nParent: #{str(parent).lstrip('#')}"
+    depends = getattr(a, "depends", None)
+    if depends:
+        deps = ", ".join(f"#{d.strip().lstrip('#')}" for d in depends.split(",") if d.strip())
+        body += f"\n\nDepends on: {deps}"
+    priority = getattr(a, "priority", None)
+    if priority is not None:
+        body += f"\n\npriority: {priority} (computed by attention.py — a projection, do not hand-edit)"
+    return body
 
 
 def _issue_state(repo, issue):
@@ -83,10 +131,32 @@ def cmd_create(a):
     # sub-issue link (below) makes the hierarchy real in GitHub's UI. Both are ledger projections (SSoT
     # unchanged): an objective Issue projects an org objective; a task Issue projects a candidate.
     kind = getattr(a, "kind", None) or "task"
+    problem = _body_problem(getattr(a, "body", None))
+    if problem:
+        print(f"create: refusing {problem} Issue body before GitHub write. A {kind} must carry "
+              f"the context another session needs to act; pass a non-placeholder --body.",
+              file=sys.stderr)
+        return 2
+    body = _composed_body(a)
     # idempotency (docs/11 §0): if an open Issue with this title (+objective) already exists, this is a
-    # replay — return it instead of minting a duplicate.
+    # replay only when the body is also the same. Title equality must not silently discard context.
     existing, state = _find_open_issue(a.repo, a.title, a.objective)
     if existing is not None:
+        current_body, err = _issue_body(a.repo, existing)
+        if current_body is None:
+            print(f"create: issue #{existing} exists but its body could not be verified: {err}. "
+                  f"Refusing both a duplicate and an unverified no-op.", file=sys.stderr)
+            return 2
+        current_digest, wanted_digest = _body_digest(current_body), _body_digest(body)
+        if _normalized_body(current_body) != _normalized_body(body):
+            quality = _body_problem(current_body)
+            condition = f"existing body is {quality}" if quality else "existing body differs"
+            print(f"create: issue #{existing} matches the title but {condition}; refusing an "
+                  f"idempotent no-op that would discard context. old_sha256={current_digest} "
+                  f"new_sha256={wanted_digest}. Repair explicitly with `github_sync.py repair-body "
+                  f"--repo {a.repo} --issue {existing} --body <correct-body> --reason <why>`.",
+                  file=sys.stderr)
+            return 10
         if state == "CLOSED":
             # already DELIVERED — re-minting it would duplicate finished work and re-open settled scope
             print(f"issue #{existing} already exists for {a.title!r} and is CLOSED (delivered) — "
@@ -113,16 +183,8 @@ def cmd_create(a):
         lbl = f"orgforge:{a.source}"
         labels.append(lbl); ensure.append((lbl, "fbca04"))
     _ensure_labels(a.repo, ensure)
-    body = a.body or ""
     parent = getattr(a, "parent", None)
-    if parent:
-        body += f"\n\nParent: #{str(parent).lstrip('#')}"   # human-readable; the native link is added below
-    if a.depends:
-        deps = ", ".join(f"#{d.strip().lstrip('#')}" for d in a.depends.split(",") if d.strip())
-        body += f"\n\nDepends on: {deps}"
-    if a.priority is not None:
-        body += f"\n\npriority: {a.priority} (computed by attention.py — a projection, do not hand-edit)"
-    args = ["issue", "create", "--repo", a.repo, "--title", a.title, "--body", body or "(no body)"]
+    args = ["issue", "create", "--repo", a.repo, "--title", a.title, "--body", body]
     for l in labels:
         args += ["--label", l]
     code, out = gh(args)
@@ -139,6 +201,61 @@ def cmd_create(a):
             return 0
         ok, detail = _link_sub_issue(a.repo, int(str(parent).lstrip("#")), child_number)
         print(detail if ok else f"WARN: {detail}", file=(sys.stdout if ok else sys.stderr))
+    return 0
+
+
+def cmd_repair_body(a):
+    """Replace an Issue body through an explicit, digest-recorded, rollback-on-audit-failure path."""
+    problem = _body_problem(a.body)
+    if problem:
+        print(f"repair-body: refusing {problem} replacement body before GitHub write.", file=sys.stderr)
+        return 2
+    reason = _normalized_body(a.reason)
+    if not reason:
+        print("repair-body: --reason is required; a body rewrite without rationale is not auditable.",
+              file=sys.stderr)
+        return 2
+    old_body, err = _issue_body(a.repo, a.issue)
+    if old_body is None:
+        print(f"repair-body: could not read issue #{a.issue}: {err}", file=sys.stderr)
+        return 2
+    new_body = _normalized_body(a.body)
+    old_digest, new_digest = _body_digest(old_body), _body_digest(new_body)
+    if _normalized_body(old_body) == new_body:
+        print(f"repair-body: issue #{a.issue} already has sha256={new_digest}; idempotent no-op.")
+        return 0
+    code, actor = gh(["api", "user", "--jq", ".login"])
+    actor = actor.strip() if code == 0 else ""
+    if not actor:
+        print("repair-body: authenticated GitHub actor could not be observed; refusing an "
+              "unattributed rewrite.", file=sys.stderr)
+        return 2
+    code, out = gh(["issue", "edit", str(a.issue), "--repo", a.repo, "--body", new_body])
+    if code != 0:
+        print(f"repair-body: GitHub body update failed; no audit success was recorded: {out}",
+              file=sys.stderr)
+        return 2
+    marker = f"<!-- orgforge:issue-body-repair:{new_digest} -->"
+    audit = (f"## Issue body repaired\n\n"
+             f"- issue: `#{a.issue}`\n"
+             f"- actor: `{actor}`\n"
+             f"- old_sha256: `{old_digest}`\n"
+             f"- new_sha256: `{new_digest}`\n"
+             f"- reason: {reason}\n\n{marker}")
+    code, out = gh(["issue", "comment", str(a.issue), "--repo", a.repo, "--body", audit])
+    if code != 0:
+        rollback_code, rollback_out = gh(
+            ["issue", "edit", str(a.issue), "--repo", a.repo, "--body", old_body])
+        if rollback_code == 0:
+            print("repair-body: audit comment failed, so the body update was rolled back; no "
+                  f"unaudited repair remains: {out}", file=sys.stderr)
+        else:
+            print("repair-body: audit comment failed AND rollback failed. The body may be changed "
+                  f"without completion evidence; inspect issue #{a.issue} immediately. "
+                  f"audit_error={out} rollback_error={rollback_out}", file=sys.stderr)
+        return 2
+    print(f"repair-body: issue #{a.issue} updated by {actor}; old_sha256={old_digest} "
+          f"new_sha256={new_digest}; audit comment recorded.")
     return 0
 
 

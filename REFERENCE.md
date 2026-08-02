@@ -364,8 +364,14 @@ lock, the native sub-issue is the hierarchy). Two levels:
   atomic unit, carrying a `coverage_row:` trailer) or by `/orgforge-plugin:org-discover` (self-raised, no trailer).
 
 ```
-github_sync.py create --repo R --kind objective --objective <id> --title T                # the parent
-github_sync.py create --repo R --kind task --parent <objective#> --dept D --objective <id> --title T
+github_sync.py create --repo R --kind objective --objective <id> --title T --body B       # the parent
+github_sync.py create --repo R --kind task --parent <objective#> --dept D --objective <id> --title T --body B
+                              # empty/placeholder bodies are rejected before a GitHub write;
+                              # same title + different body is not an idempotent replay
+github_sync.py repair-body --repo R --issue N --body B --reason WHY
+                              # explicit governed repair: records the authenticated actor and
+                              # old/new body SHA-256 digests in an Issue audit comment; rolls back
+                              # the edit if the audit comment cannot be written
 github_sync.py claim  --repo R --issue N --agent A     # exit 10 if already claimed (concurrent-write lock)
 github_sync.py stage  --repo R --issue N --stage ready|in-progress|blocked|needs-human|done
 github_sync.py log    --repo R --issue N --event E [--phase P] [--detail T] --event-id <ledger id>

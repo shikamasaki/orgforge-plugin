@@ -5,6 +5,7 @@
 linking) without touching GitHub. The one thing we assert is that the org builds the right gh calls and
 makes the right decisions from their results — the reproducible, testable part."""
 import importlib.util
+import hashlib
 import json
 import os
 import pathlib
@@ -89,11 +90,21 @@ def test_issue_number_parsed_from_url():
     assert GS._issue_number("not a url") is None
 
 
+def test_repair_body_is_reachable_through_cli_dispatch():
+    spec = importlib.util.spec_from_file_location("github_sync_cli", REPO / "tools" / "github_sync.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    rc = module.main(["github_sync.py", "repair-body", "--repo", "o/r", "--issue", "5",
+                      "--body", "placeholder", "--reason", "repair missing context"])
+    assert rc == 2
+
+
 # ── two-level hierarchy: objective vs task ───────────────────────────────────
 def test_create_objective_labels_kind_objective(monkeypatch):
     fake = FakeGh(replies={"issue create": (0, "https://github.com/o/r/issues/10")})
     monkeypatch.setattr(GS, "gh", fake)
-    rc = GS.cmd_create(_ns(repo="o/r", title="Ship the settle-up app", body=None, objective="obj1",
+    rc = GS.cmd_create(_ns(repo="o/r", title="Ship the settle-up app", body="Objective context",
+                           objective="obj1",
                            source=None, depends=None, priority=None, kind="objective",
                            dept=None, parent=None))
     assert rc == 0
@@ -110,7 +121,7 @@ def test_create_task_with_parent_links_native_sub_issue(monkeypatch):
         "sub_issues": (0, ""),                                     # link succeeds
     })
     monkeypatch.setattr(GS, "gh", fake)
-    rc = GS.cmd_create(_ns(repo="o/r", title="build money core", body=None, objective="obj1",
+    rc = GS.cmd_create(_ns(repo="o/r", title="build money core", body="Task context", objective="obj1",
                            source=None, depends=None, priority=None, kind="task",
                            dept="engineering", parent="10"))
     assert rc == 0
@@ -136,12 +147,106 @@ def test_sub_issue_link_treats_already_linked_as_idempotent(monkeypatch):
 def test_create_is_idempotent_on_existing_open_issue(monkeypatch):
     # an open issue with the same title+objective already exists → no second create
     existing = '[{"number": 5, "title": "build money core", "labels": [{"name": "orgforge:objective:obj1"}]}]'
-    fake = FakeGh(replies={"issue list": (0, existing)})
+    fake = FakeGh(replies={"issue list": (0, existing),
+                           "issue view": (0, json.dumps({"body": "Task context"}))})
     monkeypatch.setattr(GS, "gh", fake)
-    rc = GS.cmd_create(_ns(repo="o/r", title="build money core", body=None, objective="obj1",
+    rc = GS.cmd_create(_ns(repo="o/r", title="build money core", body="Task context", objective="obj1",
                            source=None, depends=None, priority=None, kind="task", dept=None, parent=None))
     assert rc == 0
     assert not fake.calls_matching("issue create"), "must NOT create a duplicate"
+
+
+@pytest.mark.parametrize("body", [None, "", "  \n", "(no body)", "TBD", "placeholder", "x",
+                                  "<!-- generated placeholder -->"])
+def test_create_rejects_empty_or_placeholder_body_before_github_write(monkeypatch, body):
+    fake = FakeGh(); monkeypatch.setattr(GS, "gh", fake)
+    rc = GS.cmd_create(_ns(repo="o/r", title="T", body=body, objective=None, source=None,
+                           depends=None, priority=None, kind="task", dept=None, parent=None))
+    assert rc == 2
+    assert not fake.calls
+
+
+def test_create_existing_placeholder_requires_explicit_repair(monkeypatch, capsys):
+    listing = '[{"number": 5, "title": "T", "state": "OPEN", "labels": []}]'
+    fake = FakeGh(replies={"issue list": (0, listing),
+                           "issue view": (0, json.dumps({"body": "(no body)"}))})
+    monkeypatch.setattr(GS, "gh", fake)
+    rc = GS.cmd_create(_ns(repo="o/r", title="T", body="Correct context", objective=None,
+                           source=None, depends=None, priority=None, kind="task", dept=None,
+                           parent=None))
+    out = capsys.readouterr().err
+    assert rc == 10 and "repair-body" in out and "old_sha256=" in out and "new_sha256=" in out
+    assert not fake.calls_matching("issue create") and not fake.calls_matching("issue edit")
+
+
+def test_create_existing_different_nonempty_body_is_not_silent(monkeypatch, capsys):
+    listing = '[{"number": 5, "title": "T", "state": "OPEN", "labels": []}]'
+    fake = FakeGh(replies={"issue list": (0, listing),
+                           "issue view": (0, json.dumps({"body": "Earlier valid context"}))})
+    monkeypatch.setattr(GS, "gh", fake)
+    rc = GS.cmd_create(_ns(repo="o/r", title="T", body="Different valid context", objective=None,
+                           source=None, depends=None, priority=None, kind="task", dept=None,
+                           parent=None))
+    out = capsys.readouterr().err
+    assert rc == 10 and "differs" in out and "repair-body" in out
+    assert "Earlier valid context" not in out and "Different valid context" not in out
+
+
+def test_repair_body_records_digests_actor_and_reason(monkeypatch):
+    fake = FakeGh(replies={"issue view": (0, json.dumps({"body": "(no body)"})),
+                           "api user": (0, "octocat\n"), "issue edit": (0, ""),
+                           "issue comment": (0, "")})
+    monkeypatch.setattr(GS, "gh", fake)
+    rc = GS.cmd_repair_body(_ns(repo="o/r", issue=5, body="Correct context",
+                                reason="restore missing decomposition context"))
+    assert rc == 0
+    edit = fake.calls_matching("issue edit")[0]
+    assert edit[edit.index("--body") + 1] == "Correct context"
+    comment = fake.calls_matching("issue comment")[0]
+    audit = comment[comment.index("--body") + 1]
+    assert "#5" in audit and "octocat" in audit and "old_sha256" in audit and "new_sha256" in audit
+    assert hashlib.sha256(b"(no body)").hexdigest() in audit
+    assert hashlib.sha256(b"Correct context").hexdigest() in audit
+    assert "restore missing decomposition context" in audit
+    assert "(no body)" not in audit and "Correct context" not in audit
+
+
+def test_repair_body_rolls_back_when_audit_comment_fails(monkeypatch):
+    class AuditFailureGh(FakeGh):
+        def __call__(self, args, check=True):
+            self.calls.append(args)
+            joined = " ".join(args)
+            if "issue view" in joined:
+                return 0, json.dumps({"body": "old context"})
+            if "api user" in joined:
+                return 0, "octocat"
+            if "issue comment" in joined:
+                return 1, "comment denied"
+            return 0, ""
+    fake = AuditFailureGh(); monkeypatch.setattr(GS, "gh", fake)
+    rc = GS.cmd_repair_body(_ns(repo="o/r", issue=5, body="new context", reason="repair"))
+    assert rc == 2
+    edits = fake.calls_matching("issue edit")
+    assert len(edits) == 2
+    assert edits[0][edits[0].index("--body") + 1] == "new context"
+    assert edits[1][edits[1].index("--body") + 1] == "old context"
+
+
+def test_repair_body_github_update_failure_records_no_success(monkeypatch):
+    fake = FakeGh(replies={"issue view": (0, json.dumps({"body": "old context"})),
+                           "api user": (0, "octocat"), "issue edit": (1, "edit denied")})
+    monkeypatch.setattr(GS, "gh", fake)
+    rc = GS.cmd_repair_body(_ns(repo="o/r", issue=5, body="new context", reason="repair"))
+    assert rc == 2
+    assert not fake.calls_matching("issue comment")
+
+
+def test_repair_body_same_valid_body_is_idempotent_without_write(monkeypatch):
+    fake = FakeGh(replies={"issue view": (0, json.dumps({"body": "valid context\n"}))})
+    monkeypatch.setattr(GS, "gh", fake)
+    rc = GS.cmd_repair_body(_ns(repo="o/r", issue=5, body="valid context", reason="replay"))
+    assert rc == 0
+    assert not fake.calls_matching("issue edit") and not fake.calls_matching("issue comment")
 
 
 # ── work-log: idempotent per ledger event id ─────────────────────────────────
@@ -411,12 +516,14 @@ def test_create_does_not_remint_a_closed_delivered_issue(monkeypatch):
     on the documented 're-run after a manifest amendment' repair path."""
     listing = ('[{"number": 42, "title": "split engine", "state": "CLOSED",'
                ' "labels": [{"name": "orgforge:objective:obj1"}]}]')
-    fake = FakeGh(replies={"issue list": (0, listing)})
+    fake = FakeGh(replies={"issue list": (0, listing),
+                           "issue view": (0, json.dumps({"body": "Delivered task context"}))})
     monkeypatch.setattr(GS, "gh", fake)
     import io, contextlib
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
-        rc = GS.cmd_create(_ns(repo="o/r", title="split engine", body=None, objective="obj1",
+        rc = GS.cmd_create(_ns(repo="o/r", title="split engine", body="Delivered task context",
+                               objective="obj1",
                                source="mandate", depends=None, priority=None, kind="task",
                                dept="settlement", parent=None))
     assert rc == 0
