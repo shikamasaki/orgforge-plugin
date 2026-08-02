@@ -17,6 +17,8 @@ STATUS = REPO / "integrations" / "claude-code" / "scheduler-status.sh"
 UNINSTALL = REPO / "integrations" / "claude-code" / "scheduler-uninstall.sh"
 PLUGIN = REPO / "integrations" / "claude-code"
 TICK = PLUGIN / "scripts" / "scheduler_tick.py"
+PLUGIN_VERSION = json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text(
+    encoding="utf-8"))["version"]
 
 
 def _executable(path: Path, body: str) -> None:
@@ -107,7 +109,7 @@ def _fixture(tmp_path: Path) -> tuple[dict[str, str], Path, Path, Path]:
     binding.parent.mkdir(parents=True, exist_ok=True)
     binding.write_text(json.dumps({
         "schema": "orgforge-installed-organ/v1",
-        "version": "2.0.28",
+        "version": PLUGIN_VERSION,
         "plugin_root": str(PLUGIN),
         "org_root": str(workdir),
         "harness": "claude-code",
