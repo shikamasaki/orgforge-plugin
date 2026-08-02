@@ -51,6 +51,7 @@ if len(sys.argv) < 2 or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,79}", sys.
           "  examples: orgforge ledger verify | orgforge org-cycle verify ...", file=sys.stderr)
     raise SystemExit(2)
 organ = sys.argv[1].replace("-", "_")
+# tools_root is tried first, so on a name collision the tools/ organ wins over scripts/.
 roots = [os.path.realpath(str(binding.get(key)))
          for key in ("tools_root", "scripts_root") if binding.get(key)]
 target = None
@@ -61,9 +62,17 @@ for root in roots:
         break
 if target is None:
     searched = ", ".join(repr(root) for root in roots) or "<no roots recorded>"
+    # A binding written before scripts/ resolution existed lacks scripts_root.  If the bundle
+    # on disk DOES ship scripts/, a restart genuinely fixes this: SessionStart rebinds and
+    # records scripts_root.  Only a scripts_root-aware binding may claim restart won't help.
+    unrecorded_scripts = (not binding.get("scripts_root") and os.path.isdir(
+        os.path.join(str(binding.get("plugin_root") or ""), "scripts")))
     if not any(os.path.isdir(root) for root in roots):
         hint = ("  the bound roots no longer exist on disk — the plugin may have been updated;\n"
                 "  restart the host session so SessionStart can rebind it")
+    elif unrecorded_scripts:
+        hint = ("  this binding predates scripts/ resolution but the bundle ships a scripts/\n"
+                "  directory — restart the host session so SessionStart can rebind it")
     else:
         hint = "  this organ is not bundled under the bound roots; restarting will not add it"
     print(f"orgforge: bound organ {organ!r} is unavailable; searched roots: {searched}\n{hint}",

@@ -123,6 +123,35 @@ def test_binding_without_scripts_root_resolves_tools_organs_as_before(tmp_path):
     assert run.stdout.strip() == "v1:org_cycle.py"
 
 
+def test_old_binding_requesting_scripts_organ_advises_restart_to_rebind(tmp_path):
+    """The upgrade gap: a pre-#108 binding (no scripts_root) on a bundle that DOES ship scripts/.
+
+    Restart genuinely fixes this state (SessionStart rebinds and records scripts_root), so the
+    launcher must say so — and must NOT claim restarting won't help.
+    """
+    org = _org(tmp_path)
+    tools, scripts = _fake_bundle(tmp_path / "bundle", "v1")
+    record = BINDING.bind(org, tools)
+    path = pathlib.Path(BINDING.binding_path(org, record["harness"]))
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data["plugin_root"] == os.path.realpath(str(tmp_path / "bundle"))
+    data.pop("scripts_root")  # simulate a binding written before issue #108
+    path.write_text(json.dumps(data), encoding="utf-8")
+    run = subprocess.run([record["launcher"], "redline-monitor"], capture_output=True, text=True)
+    assert run.returncode == 12
+    assert "restart the host session" in run.stderr
+    assert "will not add it" not in run.stderr
+
+
+def test_tools_root_wins_over_scripts_root_on_name_collision(tmp_path):
+    org = _org(tmp_path)
+    tools, scripts = _fake_bundle(tmp_path / "bundle", "v1")
+    (scripts / "org_cycle.py").write_text("print('shadowed')\n", encoding="utf-8")
+    record = BINDING.bind(org, tools)
+    run = subprocess.run([record["launcher"], "org-cycle"], capture_output=True, text=True)
+    assert run.returncode == 0 and run.stdout.strip() == "v1:org_cycle.py"
+
+
 def test_unavailable_organ_names_searched_roots_and_does_not_advise_restart(tmp_path):
     org = _org(tmp_path)
     tools, scripts = _fake_bundle(tmp_path / "bundle", "v1")
