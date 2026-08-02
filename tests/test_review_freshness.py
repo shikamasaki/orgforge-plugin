@@ -100,21 +100,24 @@ def test_verify_reports_stale_diverged_and_unresolvable_targets(tmp_path):
     stale = _org(tmp_path / "stale")
     _advance_main(stale)
     result = _run(stale, "org_cycle.py", "verify", "--issue", "7", "--role", "gate",
-                  "--phase", "implement", "--base", "main", "--print-subject")
+                  "--phase", "implement", "--base", "main", "--print-subject",
+                  "--subject-root", ".")
     assert result.returncode == 11
     assert "stale" in result.stderr and "1 commit" in result.stderr
 
     diverged = _org(tmp_path / "diverged", feature_commit=True)
     _advance_main(diverged)
     result = _run(diverged, "org_cycle.py", "verify", "--issue", "7", "--role", "gate",
-                  "--phase", "implement", "--base", "main", "--print-subject")
+                  "--phase", "implement", "--base", "main", "--print-subject",
+                  "--subject-root", ".")
     assert result.returncode == 11
     assert "diverged" in result.stderr or "分岐" in result.stderr
 
     missing = _org(tmp_path / "missing")
     _git(missing, "branch", "-D", "main")
     result = _run(missing, "org_cycle.py", "verify", "--issue", "7", "--role", "gate",
-                  "--phase", "implement", "--base", "main", "--print-subject")
+                  "--phase", "implement", "--base", "main", "--print-subject",
+                  "--subject-root", ".")
     assert result.returncode == 11
     assert "unresolvable" in result.stderr or "解決できない" in result.stderr
 
@@ -123,7 +126,8 @@ def test_strict_verify_uses_declared_ref_when_main_and_develop_both_exist(tmp_pa
     org = _org(tmp_path)
     _git(org, "branch", "develop", "main")
     result = _run(org, "org_cycle.py", "verify", "--issue", "7", "--role", "gate",
-                  "--phase", "implement", "--print-subject")
+                  "--phase", "implement", "--print-subject",
+                  "--subject-root", ".")
     assert result.returncode == 0, result.stdout + result.stderr
     assert "integration_ref" in result.stderr and "= main" in result.stderr
 
@@ -135,12 +139,14 @@ def test_strict_verify_requires_declared_ref_but_cli_can_override(tmp_path):
         constitution.read_text(encoding="utf-8").replace("    integration_ref: main\n", ""),
         encoding="utf-8")
     missing = _run(org, "org_cycle.py", "verify", "--issue", "7", "--role", "gate",
-                   "--phase", "implement", "--print-subject")
+                   "--phase", "implement", "--print-subject",
+                  "--subject-root", ".")
     assert missing.returncode == 11
     assert "統合先を推測しない" in missing.stderr
 
     explicit = _run(org, "org_cycle.py", "verify", "--issue", "7", "--role", "gate",
-                    "--phase", "implement", "--base", "main", "--print-subject")
+                    "--phase", "implement", "--base", "main", "--print-subject",
+                  "--subject-root", ".")
     assert explicit.returncode == 0, explicit.stdout + explicit.stderr
     assert "integration_ref" in explicit.stderr and "= main" in explicit.stderr
 

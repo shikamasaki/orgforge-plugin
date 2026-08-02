@@ -161,8 +161,10 @@ def test_verify_injects_charter_and_leaves_verdict_unfilled():
     """憲章と decide 雛形は出すが、verdict は placeholder のまま（判定を先取りしない）。"""
     import subprocess, os
     env = dict(os.environ, ORG_GITHUB_REPO="")
+    # #101 以降、subject は Issue の worktree から mint する。この開発リポジトリに
+    # issue-1 の worktree は無いので、逃げ道を明示する（テストの主題は憲章の注入）。
     p = subprocess.run([sys.executable, str(TOOLS / "org_cycle.py"), "verify",
-                        "--issue", "1", "--role", "gate"],
+                        "--issue", "1", "--role", "gate", "--subject-root", "."],
                        capture_output=True, text=True, env=env, timeout=60)
     out = p.stdout + p.stderr
     # gh が無い/認証が無い環境では Issue を読めず 3 で落ちるのが正しい挙動
@@ -1988,8 +1990,10 @@ def test_print_subject_does_not_launch_a_judge(tmp_path, monkeypatch):
                     "commit", "-qm", "x"], cwd=org, check=True)
     # PATH から codex を外す — 起動しようとしたなら落ちるので、起動していないことが分かる
     monkeypatch.setenv("PATH", "/nonexistent")
+    # #101 以降、subject は Issue の worktree（か明示の --subject-root）から mint する。
+    # この org に worktree は無いので、逃げ道を明示する — cwd への暗黙 fallback は無い。
     code, out = run("org_cycle.py", "verify", "--issue", "7", "--role", "gate",
-                    "--print-subject", cwd=str(org))
+                    "--print-subject", "--subject-root", str(org), cwd=str(org))
     assert code == 0, out
     assert re.search(r"^[0-9a-f]{64}$", out.strip().splitlines()[0])
 
@@ -2117,7 +2121,10 @@ def test_verify_stops_before_any_judge_work_when_preflight_fails(monkeypatch, ca
                         lambda *args, **kwargs: (False, ['{"id":"db","status":"fail"}']))
     monkeypatch.setattr(judge, "_seam",
                         lambda *args: pytest.fail("seam/judge material was built after failure"))
-    args = argparse.Namespace(issue=36, role="gate", phase="implement", print_subject=False)
+    # #101: subject は worktree（か明示の --subject-root）から。issue-36 の worktree は
+    # 無いので明示する — このテストの主題は「preflight 失敗で judge を起動しない」。
+    args = argparse.Namespace(issue=36, role="gate", phase="implement", print_subject=False,
+                              subject_root=os.getcwd())
     assert judge.cmd_verify(args) == 8
     err = capsys.readouterr().err
     assert "judge は起動していない" in err
@@ -2235,3 +2242,94 @@ def test_subject_records_dirty_and_head_tree_separately(tmp_path):
     _, dirty = review_subject(7, "gate", "implement", cwd=str(org))
     assert dirty["dirty"] == "1"
     assert dirty["reviewed_tree_sha"] != dirty["head_tree_sha"]
+
+
+# ── #101: verify の subject は Issue の worktree を記述する ──────────────────
+# 本体（リポジトリ直下）から `verify --issue N` を打つと cwd の tree が subject に
+# なり、どの Issue でも同一 subject（ahead=0 の main）が mint された（OBS-031/055/071）。
+# joint admission は subject の一致を「二血統が同じものを見た」証拠に使うので、
+# subject が cwd 依存だと独立判定の同一性が壊れる。
+
+def _subject_org(tmp_path, issues=(7, 8)):
+    """scratch org: main+develop を持つ primary と、Issue ごとの worktree（各1コミット先行）。"""
+    repo = tmp_path / "org"
+    repo.mkdir()
+    def g(*a, cwd=repo):
+        return subprocess.run(["git", *a], cwd=cwd, capture_output=True, text=True)
+    g("init", "-q", "-b", "main")
+    g("config", "user.email", "t@t"); g("config", "user.name", "t")
+    (repo / "organization.yaml").write_text("name: t\n", encoding="utf-8")
+    g("add", "-A"); g("commit", "-qm", "seed"); g("branch", "develop")
+    for issue in issues:
+        code, out = run("github_sync.py", "branch", "--issue", str(issue), "--worktree",
+                        "--repo", "o/n", cwd=str(repo))
+        assert code == 0, out
+        wt = repo / ".orgforge" / "wt" / f"issue-{issue}"
+        (wt / f"F{issue}.txt").write_text("x\n", encoding="utf-8")
+        g("add", "-A", cwd=wt); g("commit", "-qm", f"i{issue}", cwd=wt)
+    return repo, g
+
+
+def _print_subject(repo, issue, *extra, cwd=None):
+    """verify --print-subject を叩き、(returncode, sid, parts, stderr) を返す。"""
+    p = subprocess.run([sys.executable, str(TOOLS / "org_cycle.py"), "verify",
+                        "--issue", str(issue), "--role", "gate", "--print-subject", *extra],
+                       capture_output=True, text=True, cwd=str(cwd or repo))
+    sid = next((l.strip() for l in p.stdout.splitlines()
+                if re.fullmatch(r"[0-9a-f]{64}", l.strip())), None)
+    parts = dict(re.findall(r"^\s*(\w+)\s*=\s*(\S+)", p.stderr, re.M))
+    return p.returncode, sid, parts, p.stderr
+
+
+def test_verify_subject_is_the_issue_worktree_not_cwd(tmp_path):
+    """回帰そのもの: 本体 cwd から打っても、subject は Issue worktree の tree を記述する。"""
+    repo, g = _subject_org(tmp_path)
+    wt_tree = g("rev-parse", "HEAD^{tree}",
+                cwd=repo / ".orgforge" / "wt" / "issue-7").stdout.strip()
+    root_tree = g("rev-parse", "HEAD^{tree}").stdout.strip()
+    assert wt_tree != root_tree, "前提: worktree は本体より先行している"
+
+    code, sid, parts, err = _print_subject(repo, 7)
+    assert code == 0, err
+    assert parts["reviewed_tree_sha"] == wt_tree, \
+        "cwd（本体）の tree が subject になっている — #101 の回帰"
+    assert parts["reviewed_tree_sha"] != root_tree
+    assert parts["ahead"] == "1", "worktree は develop より1コミット先行のはず（ahead=0 は cwd 観測）"
+
+    # cwd がその worktree 自身のときは従来どおり（同じ subject）
+    code2, sid2, _, err2 = _print_subject(repo, 7,
+                                          cwd=repo / ".orgforge" / "wt" / "issue-7")
+    assert code2 == 0, err2
+    assert sid2 == sid, "worktree 内から打った場合と subject が一致しない"
+
+
+def test_verify_subjects_differ_across_issues(tmp_path):
+    """worktree が異なる2つの Issue は、同じ cwd から打っても別 subject になる。"""
+    repo, _ = _subject_org(tmp_path)
+    code7, sid7, p7, err7 = _print_subject(repo, 7)
+    code8, sid8, p8, err8 = _print_subject(repo, 8)
+    assert code7 == 0 and code8 == 0, err7 + err8
+    assert sid7 != sid8, "別 Issue が同一 subject — 「同じ対象を見た」偽証拠が作れてしまう"
+    assert p7["reviewed_tree_sha"] != p8["reviewed_tree_sha"]
+
+
+def test_verify_fails_closed_when_worktree_is_missing(tmp_path):
+    """worktree が無ければ非ゼロ exit。cwd への暗黙 fallback で subject を mint しない。"""
+    repo, _ = _subject_org(tmp_path, issues=())
+    code, sid, _, err = _print_subject(repo, 42)
+    assert code != 0
+    assert sid is None, "worktree 不在でも subject が mint された — fail-open"
+    assert os.path.join(".orgforge", "wt", "issue-42") in err, \
+        "期待した worktree のパスがエラーに出ていない"
+    assert "--subject-root" in err
+
+
+def test_verify_subject_root_override(tmp_path):
+    """--subject-root は worktree 運用でないレイアウトの明示的な逃げ道。印字にも残る。"""
+    repo, g = _subject_org(tmp_path, issues=())
+    root_tree = g("rev-parse", "HEAD^{tree}").stdout.strip()
+    code, sid, parts, err = _print_subject(repo, 42, "--subject-root", str(repo))
+    assert code == 0, err
+    assert sid and parts["reviewed_tree_sha"] == root_tree
+    assert parts.get("subject_root") == os.path.abspath(str(repo)), \
+        "どの checkout を意図して判定したかが印字に残っていない"

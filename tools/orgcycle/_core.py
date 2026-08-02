@@ -358,6 +358,29 @@ def _worktree_tree_sha(cwd=None):
                 pass
 
 
+def issue_worktree(issue, cwd=None):
+    """`begin` が作る Issue worktree の正準パス `.orgforge/wt/issue-<N>` を解決する。
+
+    レイアウトの出所は `ghsync.branch._make_worktree`（primary checkout の toplevel 直下）。
+    第2のレイアウトを発明しない — ここは**解決だけ**を再現する。linked worktree の中から
+    呼ばれても primary に解決する（`git worktree list --porcelain` の先頭は常に primary）。
+    解決できなければ None（呼び手が fail-closed にする — cwd で代用しない）。
+    """
+    d = os.path.abspath(cwd or os.getcwd())
+    try:
+        r = subprocess.run(["git", "-C", d, "worktree", "list", "--porcelain"],
+                           capture_output=True, text=True, timeout=30)
+    except Exception:
+        return None
+    if r.returncode != 0:
+        return None
+    for line in (r.stdout or "").splitlines():
+        if line.startswith("worktree "):
+            primary = os.path.abspath(line[len("worktree "):])
+            return os.path.join(primary, ".orgforge", "wt", f"issue-{int(issue)}")
+    return None
+
+
 def review_subject(issue, role, phase=None, cwd=None, integration_ref=None):
     """**判定対象の同一性**を1つの digest に束ねる。`verify` が一度だけ生成する。
 

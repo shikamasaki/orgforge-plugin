@@ -16,6 +16,7 @@ from organ_binding import BindingError
 
 from ._core import (
     HERE,
+    issue_worktree,
     review_subject,
     _agents_dir,
     _events_for,
@@ -188,10 +189,36 @@ def cmd_verify(a):
               "今回だけ `verify --base <ref>` を明示すること。", file=sys.stderr)
         return 11
     _integration_ref = getattr(a, "base", None) or _configured_ref
+    # 判定対象は **Issue の worktree** の tree（#101）。cwd の tree を黙って記述すると、
+    # 本体から打った verify がどの Issue でも同じ subject（ahead=0 の main）を mint し、
+    # joint admission が使う「二血統が同じものを見た」証拠が壊れる — 実測 OBS-031/055/071。
+    _subject_override = getattr(a, "subject_root", None)
+    if _subject_override:
+        _subject_cwd = os.path.abspath(_subject_override)
+        if not os.path.isdir(_subject_cwd):
+            print(f"--subject-root が存在しない: {_subject_cwd}", file=sys.stderr)
+            return 2
+    else:
+        _subject_cwd = issue_worktree(a.issue)
+        if not _subject_cwd or not os.path.isdir(_subject_cwd):
+            _expected = _subject_cwd or os.path.join(
+                ".orgforge", "wt", f"issue-{a.issue}")
+            print(f"Issue #{a.issue} の worktree が無い: {_expected}\n"
+                  "  cwd の tree では代用しない — 本体から打つと、どの Issue でも同じ "
+                  "subject が mint され、判定の同一性が壊れる（#101）。\n"
+                  "  `org_cycle begin --issue N` で worktree を作るか、worktree 以外の "
+                  "checkout を意図して判定するなら `--subject-root <path>` を明示すること。",
+                  file=sys.stderr)
+            return 12
     _sid, _sparts = review_subject(
-        a.issue, role, getattr(a, "phase", None), integration_ref=_integration_ref)
-    _subject_path = persist_descriptor(_sid, _sparts)
-    _freshness = descriptor_status({**_sparts, "review_subject_id": _sid}, os.getcwd())
+        a.issue, role, getattr(a, "phase", None), cwd=_subject_cwd,
+        integration_ref=_integration_ref)
+    if _subject_override:
+        # digest には入らない（SUBJECT_FIELDS 外）が、どの checkout を意図して判定した
+        # かは印字に残す — escape hatch は黙って使わせない。
+        _sparts = {**_sparts, "subject_root": _subject_cwd}
+    _subject_path = persist_descriptor(_sid, _sparts, cwd=_subject_cwd)
+    _freshness = descriptor_status({**_sparts, "review_subject_id": _sid}, _subject_cwd)
     if _strict_freshness and not _freshness["ok"]:
         print(f"review subject が現在の統合先に対して有効でない: "
               f"{_freshness['reason']} — {_freshness['detail']}\n"

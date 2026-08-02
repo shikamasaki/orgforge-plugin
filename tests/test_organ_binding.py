@@ -173,7 +173,10 @@ def test_judge_prompt_uses_stable_launcher_not_a_tools_checkout(
     monkeypatch.setattr(judge, "review_subject",
                         lambda *args, **kwargs: ("a" * 64, {"issue": "37"}))
     monkeypatch.setattr(judge, "_run", lambda *args, **kwargs: (1, ""))
-    args = argparse.Namespace(issue=37, role="gate", phase="implement", print_subject=False)
+    # #101: subject は Issue の worktree（か明示の --subject-root）から。この org に
+    # issue-37 の worktree は無いので明示する — このテストの主題は launcher の注入。
+    args = argparse.Namespace(issue=37, role="gate", phase="implement", print_subject=False,
+                              subject_root=str(org))
     assert judge.cmd_verify(args) == 0
     captured = capsys.readouterr()
     output = captured.out + captured.err
