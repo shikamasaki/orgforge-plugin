@@ -2514,12 +2514,46 @@ def test_show_attributes_nothing_when_clean_against_constitution_ref(tmp_path):
     assert "不可逆" not in out, f"差分ゼロなのに不可逆変更を帰属させた:\n{out}"
 
 
-def test_show_fails_closed_without_declared_base(tmp_path):
-    """(c) show も develop を推測しない — 誤帰属（OBS-054）の温床なので非ゼロで止まる。"""
+def test_show_without_declared_base_prints_status_warns_and_skips_attribution(tmp_path):
+    """rework #106: show は読み取り専用の orientation — 基準が無くても台帳由来の状態は出す。
+
+    fail-closed は base を**消費する判断**（帰属ブロック）にだけかける: ブロックを省き、
+    warn-don't-stop（cmd_plan と同じ形）で警告する。develop の推測はしない。
+    """
     org, _ = _declared_org(tmp_path, integration_ref=None, develop=True)
     code, out = run("org_cycle.py", "show", "--issue", "7", cwd=str(org))
-    assert code != 0, "統合先が宣言されていないのに show が develop 基準で帰属した"
-    assert "--base" in out and "integration_ref" in out, out
+    assert code == 0, f"基準が無いだけで orientation 全体を閉め出した:\n{out}"
+    assert "判定" in out and "次:" in out, f"台帳由来の状態が出ていない:\n{out}"
+    assert "--base" in out and "integration_ref" in out, f"警告が両方の選択肢を名指ししていない:\n{out}"
+    # 帰属ブロックの行ラベルは「不可逆:」。警告文（不可逆な変更の帰属は表示しない）とは区別する。
+    assert "不可逆:" not in out, f"基準が無いのに帰属ブロックを出した:\n{out}"
+    assert "帰属は表示しない" in out, f"帰属を省いたことを言っていない:\n{out}"
+
+
+def test_show_attribution_block_fires_when_base_is_declared(tmp_path):
+    """宣言があれば帰属ブロックは従来どおり働く（rework で警告側に倒しすぎていないか）。"""
+    org, g = _declared_org(tmp_path, integration_ref="origin/main", develop=False)
+    g("checkout", "-q", "-b", "feat/issue-9")
+    (org / "migrations").mkdir()
+    for n in ("0001_a.sql", "0002_b.sql", "0003_c.sql"):
+        (org / "migrations" / n).write_text("select 1;", encoding="utf-8")
+    g("add", "-A")
+    g("commit", "-qm", "migrations")
+    g("checkout", "-q", "main")
+    code, out = run("org_cycle.py", "show", "--issue", "9", cwd=str(org))
+    assert code == 0, out
+    assert "不可逆" in out and "3 件" in out, f"宣言済みの基準で帰属ブロックが働いていない:\n{out}"
+
+
+def test_gc_all_works_without_declared_base(tmp_path):
+    """rework #106: --all は統合済み判定をしない = base を消費しない → 宣言を要求しない。"""
+    org, g = _declared_org(tmp_path, integration_ref=None, develop=True)
+    wt = org / ".orgforge" / "wt" / "issue-6"
+    wt.parent.mkdir(parents=True, exist_ok=True)
+    g("worktree", "add", "-q", "-b", "feat/issue-6", str(wt), "main")
+    code, out = run("org_cycle.py", "gc", "--all", cwd=str(org))
+    assert code == 0, f"base を消費しない --all が宣言を要求した:\n{out}"
+    assert not wt.is_dir(), f"クリーンな worktree を --all が消していない:\n{out}"
 
 
 def test_integrate_plan_targets_constitution_ref(tmp_path):
