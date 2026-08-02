@@ -239,6 +239,14 @@ self-declared actor. Those are recorded in CHANGELOG 0.32.1 under "Known limitat
 fixed" rather than being written out of the README. **Treat this as research and supervised
 operation, not as unattended production control.**
 
+### Delegation Resilience adapter
+
+The [Delegation Resilience adapter](docs/en/delegation-resilience-adapter.md) exports OrgForge
+exercise evidence to the formally pinned DR v0alpha1 Assurance Graph and v0alpha2 packet profiles.
+The graph is a deterministic, source-bound derived artifact: `GRAPH_VERIFIED` means only that the
+graph is internally valid and reproducible. Recovery capability, human takeover, and deployment
+approval remain `not_demonstrated` unless independently established by DR evidence.
+
 ## Status & honesty
 
 v2.0.0. This is a **framing + template**, distilled from published organizational theory and the
