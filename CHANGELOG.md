@@ -6,6 +6,18 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 2.0.28 — explicit integration target
+
+### Fixed
+
+- Stop guessing a strict review's integration target from whichever conventional branch name is
+  present; repositories that retain both `develop` and `main` can otherwise validate the obsolete
+  branch as current.
+- Require strict organizations to declare `enforcement.judges.integration_ref`, while preserving an
+  explicit per-review `verify --base` override and binding the selected ref into the subject.
+- Make doctor reject missing, malformed, or locally unresolvable strict integration refs in Git
+  repositories so the ambiguity is detected before a judgment is dispatched.
+
 ## 2.0.27 — integration-base freshness
 
 ### Fixed

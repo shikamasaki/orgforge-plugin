@@ -100,6 +100,15 @@ def test_doctor_requires_explicit_review_freshness_migration(tmp_path):
     assert "require_current_integration_head" in check["detail"]
 
 
+def test_doctor_rejects_unresolvable_strict_integration_ref_in_git_repo(tmp_path):
+    ADOPT.prepare(tmp_path, "ja")
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    result = ADOPT.doctor(tmp_path)
+    check = next(item for item in result["checks"] if item["name"] == "review_integration_ref")
+    assert check["ok"] is False
+    assert "cannot be resolved" in check["detail"]
+
+
 def test_doctor_rejects_invalid_baseline_and_organization(tmp_path):
     ADOPT.prepare(tmp_path, "ja")
     (tmp_path / "organization.yaml").write_text("roles: []\n", encoding="utf-8")

@@ -963,6 +963,9 @@ git -C <plugin> rev-parse --short HEAD             # 検証対象の版を記録
 - **移行**: `adopt doctor` が
   `enforcement.judges.require_current_integration_head: true|false` の明示を要求する。旧subjectは
   descriptorを持たないため、strict admissionへ再利用せずverifyからやり直す
+- **統合先**: strict orgは`enforcement.judges.integration_ref`を明示する。`main`と`develop`の
+  どちらも存在するだけでは実際のfan-in先を導出できないため、固定順で推測しない。個別reviewの
+  `verify --base <ref>`だけが宣言を明示的に上書きできる
 - 拒否: 別 subject の provisional が一致しない（exit 6）／同一血統の verdict 差し替え（exit 4）
 - **脱出**: 案内された `correction` を**実際に打って**、その後に新しい判定が入ること
 - **権限**: judgmentを出したjudge自身と別judgeのcorrectionは拒否し、constitutionで宣言した

@@ -117,6 +117,27 @@ def freshness_policy(constitution_path):
     return True, value, None
 
 
+def integration_ref_policy(constitution_path):
+    """Return ``(declared, ref, error)`` for the integration target declaration."""
+    if not constitution_path or not os.path.isfile(constitution_path):
+        return False, None, None
+    try:
+        import yaml
+        with open(constitution_path, encoding="utf-8") as handle:
+            doc = yaml.safe_load(handle) or {}
+        judges = ((doc.get("enforcement") or {}).get("judges") or {})
+    except Exception as exc:
+        return False, None, f"constitution を読めない: {exc}"
+    if not isinstance(judges, dict):
+        return False, None, "enforcement.judges が map でない"
+    if "integration_ref" not in judges:
+        return False, None, None
+    value = judges["integration_ref"]
+    if not isinstance(value, str) or not value.strip():
+        return True, None, "integration_ref が空でない文字列でない"
+    return True, value.strip(), None
+
+
 def descriptor_status(parts, cwd):
     """Re-resolve a descriptor and return a structured, fail-closed freshness result."""
     if not isinstance(parts, dict):

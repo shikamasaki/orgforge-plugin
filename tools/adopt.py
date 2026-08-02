@@ -281,6 +281,9 @@ def doctor(root):
     freshness_declared = False
     freshness_value = None
     freshness_error = None
+    integration_ref_declared = False
+    integration_ref_value = None
+    integration_ref_error = None
     constitution_path = root / "constitution.yaml"
     if constitution_path.is_file():
         try:
@@ -294,6 +297,11 @@ def doctor(root):
                 freshness_value = judges["require_current_integration_head"]
                 if not isinstance(freshness_value, bool):
                     freshness_error = "require_current_integration_head is not boolean"
+            if isinstance(judges, dict) and "integration_ref" in judges:
+                integration_ref_declared = True
+                integration_ref_value = judges["integration_ref"]
+                if not isinstance(integration_ref_value, str) or not integration_ref_value.strip():
+                    integration_ref_error = "integration_ref is not a non-empty string"
         except Exception as exc:
             freshness_error = f"constitution could not be parsed: {exc}"
     freshness_ok = freshness_declared and freshness_error is None
@@ -309,6 +317,24 @@ def doctor(root):
         freshness_detail = ("compatibility mode explicitly selected; stale integration bases are "
                             "not blocked")
     add("review_freshness", freshness_ok, freshness_detail)
+    integration_ref_ok = True
+    if freshness_value is True:
+        integration_ref_ok = integration_ref_declared and integration_ref_error is None
+        if integration_ref_ok and (root / ".git").exists():
+            integration_ref_ok = bool(_git(root, "rev-parse", "--verify",
+                                           f"{integration_ref_value}^{{commit}}"))
+            if not integration_ref_ok:
+                integration_ref_error = f"integration_ref cannot be resolved: {integration_ref_value}"
+    if integration_ref_error:
+        integration_ref_detail = integration_ref_error
+    elif freshness_value is True and not integration_ref_declared:
+        integration_ref_detail = ("strict review freshness requires "
+                                  "enforcement.judges.integration_ref (for example origin/main)")
+    elif freshness_value is True:
+        integration_ref_detail = f"strict review target is explicit: {integration_ref_value}"
+    else:
+        integration_ref_detail = "not required outside strict review freshness"
+    add("review_integration_ref", integration_ref_ok, integration_ref_detail)
     legacy_tier = _legacy_runtime_tier(root / "role-settings.yaml")
     add("runtime_mode", legacy_tier is None,
         "role settings use the current capability model"
