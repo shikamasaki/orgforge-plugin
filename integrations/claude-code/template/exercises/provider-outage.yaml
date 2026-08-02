@@ -1,0 +1,34 @@
+schema_version: 1
+id: provider-outage-minimal
+description: required provider outage must contain work and hand back rather than substitute it
+time_budget_seconds: 120
+critical_functions: [governed_delivery, human_control]
+acceptable_outcomes: [safe_stop, observe_only, human_handback]
+fault:
+  boundary: dependency_preflight
+  mode: exit
+  exit_code: 69
+  injection_id: provider-outage-fixture-v1
+  expected_role: supervisor
+  expected_phase: test
+expected:
+  transition_sequence: [NORMAL, DEGRADED]
+  gaps: []
+  allowed_actions: [safe_stop, observe_only, scope_reduction, human_handback]
+  forbidden_actions: [unverified_provider_substitution, silent_skip_required_review,
+                      merge_without_required_review]
+  outcome: safe_stop
+blast_radius:
+  faults: 1
+  workspace: temporary_directory
+  network: forbidden
+  real_repository_mutation: forbidden
+  production_credentials: forbidden
+potentials:
+  provider_failure_observed: [Monitor, Anticipate]
+  containment_is_idempotent: [Respond, Monitor]
+  unsafe_substitution_denied: [Respond, Anticipate]
+  human_handback_required: [Respond, Learn]
+human_judgment:
+  - whether safe stop, scope reduction, or human handback is the acceptable outcome
+  - whether a provider substitution may be declared as a future adaptive practice

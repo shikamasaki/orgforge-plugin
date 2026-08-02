@@ -12,6 +12,7 @@ REPO = pathlib.Path(__file__).resolve().parents[1]
 TOOL = REPO / "tools" / "resilience_exercise.py"
 SCENARIO = REPO / "template" / "exercises" / "reviewer-outage.yaml"
 FALSE_GREEN_SCENARIO = REPO / "template" / "exercises" / "false-green-mutation.yaml"
+PROVIDER_OUTAGE_SCENARIO = REPO / "template" / "exercises" / "provider-outage.yaml"
 
 
 def _run(*args):
@@ -125,3 +126,45 @@ def test_false_green_scenario_has_the_same_bounded_blast_radius():
         "production_credentials": "forbidden",
     }
     assert any(len(potentials) > 1 for potentials in scenario["potentials"].values())
+
+
+def test_provider_outage_contains_work_without_duplicate_claim_or_provider_substitution():
+    run = _run("provider-outage", "--expect", "GREEN", "--json")
+    assert run.returncode == 0, run.stdout + run.stderr
+    report = json.loads(run.stdout)
+    assert report["exercise_status"] == "GREEN"
+    assert report["gaps"] == []
+    assert report["fault_injection"]["reached"] is True
+    assert report["decision_path"]["duplicate_degrade"] is True
+    assert report["operational_state"]["observed"] == "DEGRADED"
+    assert report["operational_state"]["transition_sequence"] == ["NORMAL", "DEGRADED"]
+    assert report["operational_state"]["circuit"]["to_state"] == "OPEN"
+    assert report["recovery"]["returncode"] == 3
+    assert "human handback" in report["recovery"]["result"]["error"]
+    assert report["outcome"] == {"observed": "safe_stop", "acceptable": True}
+    assert report["resilience_score"] is None
+
+
+def test_provider_outage_scenario_has_a_bounded_runtime_and_blast_radius():
+    scenario = yaml.safe_load(PROVIDER_OUTAGE_SCENARIO.read_text(encoding="utf-8"))
+    assert scenario["time_budget_seconds"] <= 180
+    assert scenario["blast_radius"] == {
+        "faults": 1,
+        "workspace": "temporary_directory",
+        "network": "forbidden",
+        "real_repository_mutation": "forbidden",
+        "production_credentials": "forbidden",
+    }
+    assert any(len(potentials) > 1 for potentials in scenario["potentials"].values())
+
+
+def test_provider_outage_noop_fault_is_invalid_not_green(tmp_path):
+    scenario = yaml.safe_load(PROVIDER_OUTAGE_SCENARIO.read_text(encoding="utf-8"))
+    scenario["fault"]["mode"] = "noop"
+    path = tmp_path / "provider-noop.yaml"
+    path.write_text(yaml.safe_dump(scenario, sort_keys=False), encoding="utf-8")
+    run = _run("provider-outage", "--scenario", str(path), "--json")
+    assert run.returncode == 10
+    report = json.loads(run.stdout)
+    assert report["exercise_status"] == "INVALID"
+    assert "no-op" in report["error"]

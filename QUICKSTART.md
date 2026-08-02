@@ -169,6 +169,15 @@ skeptic-intake boundary and is GREEN only when that boundary rejects the false e
 orgforge resilience-exercise false-green-mutation --expect GREEN
 ```
 
+The provider-outage exercise verifies the complementary containment path. A required provider
+fails at the production preflight boundary; the declared envelope permits only safe responses,
+rejects an unverified substitution and merge, deduplicates repeated containment, and requires
+human handback rather than a retry claim:
+
+```bash
+orgforge resilience-exercise provider-outage --expect GREEN
+```
+
 A "department" is a Claude Code (or Codex) turn pointed at one role's profile. Use the runner —
 it projects the role onto the harness and attaches the plugin so the guardrails apply:
 

@@ -67,6 +67,15 @@ skeptic intakeが拒否することを検証できます。
 orgforge resilience-exercise false-green-mutation --expect GREEN
 ```
 
+reviewer failoverではなくprovider停止時のcontainmentを検証するには、次を実行します。
+
+```bash
+orgforge resilience-exercise provider-outage --expect GREEN
+```
+
+`DEGRADED`を維持し、未検証のprovider代替とmergeを拒否し、retry budgetが尽きたときは
+人間へ判断を返さなければなりません。
+
 無人運転をread-only-firstで始める場合は、決定的なmachine tickだけを登録します。
 
 ```bash

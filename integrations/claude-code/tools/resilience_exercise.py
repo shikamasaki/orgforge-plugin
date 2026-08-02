@@ -26,6 +26,7 @@ BUNDLE = HERE.parent
 TEMPLATE = BUNDLE / "template"
 DEFAULT_SCENARIO = TEMPLATE / "exercises" / "reviewer-outage.yaml"
 DEFAULT_FALSE_GREEN_SCENARIO = TEMPLATE / "exercises" / "false-green-mutation.yaml"
+DEFAULT_PROVIDER_OUTAGE_SCENARIO = TEMPLATE / "exercises" / "provider-outage.yaml"
 
 
 class ExerciseError(RuntimeError):
@@ -434,6 +435,129 @@ def run_false_green_mutation(scenario_path=DEFAULT_FALSE_GREEN_SCENARIO):
         }
 
 
+def run_provider_outage(scenario_path=DEFAULT_PROVIDER_OUTAGE_SCENARIO):
+    """Exercise safe containment when a required provider cannot be used.
+
+    This deliberately differs from reviewer outage: the declared envelope has no retry budget and
+    no provider-substitution permission.  The production state machine must retain the safe-stop
+    path and hand the decision to a human rather than manufacture a replacement claim.
+    """
+    scenario = _load_scenario(scenario_path)
+    fault = scenario["fault"]
+    expected = scenario["expected"]
+    with tempfile.TemporaryDirectory(prefix="orgforge-exercise-") as temporary:
+        root = Path(temporary) / "org"
+        maker, tracker, inventory = _prepare_org(root)
+        from orgcycle.preflight import Probe, result_evidence, run_probe
+
+        probe = Probe(
+            "exercise-required-provider",
+            (sys.executable, str(Path(__file__).resolve()), "_fake-dependency",
+             "--mode", str(fault["mode"]), "--exit-code", str(fault["exit_code"]),
+             "--injection-id", str(fault["injection_id"])),
+            2.0,
+        )
+        measured = run_probe(probe, issue="exercise-3", role=fault["expected_role"],
+                             phase=fault["expected_phase"], cwd=root)
+        try:
+            dependency_receipt = json.loads(measured.stdout)
+        except json.JSONDecodeError as exc:
+            raise ExerciseError("provider outage did not return its protocol receipt") from exc
+        reached = (
+            not measured.ok and measured.returncode == fault["exit_code"] and
+            dependency_receipt.get("injection_id") == fault["injection_id"] and
+            dependency_receipt.get("observed_context", {}).get("role") == fault["expected_role"] and
+            dependency_receipt.get("observed_context", {}).get("phase") == fault["expected_phase"]
+        )
+        if not reached:
+            raise ExerciseError("fault injection was a no-op or did not reach dependency preflight")
+        receipt_path = root / "provider-outage-receipt.json"
+        receipt_path.write_text(json.dumps({
+            "protocol": "orgforge.exercise.fault-receipt/v1",
+            "boundary": "orgcycle.preflight.run_probe", "injection_id": fault["injection_id"],
+            "reached": True, "measurement": json.loads(result_evidence(measured)),
+            "dependency_receipt": dependency_receipt,
+        }, sort_keys=True), encoding="utf-8")
+
+        code, activated = _adapt(
+            root, "activate", "--envelope", "required-provider-outage",
+            "--trigger", "required_provider_unavailable", "--source", "dependency_preflight",
+            "--baseline-ref", f"file:{tracker}",
+            "--evidence", f"outage_receipt=file:{receipt_path}",
+            "--evidence", f"affected_artifact_inventory=file:{inventory}",
+            "--confidence", "1.0")
+        if code:
+            raise ExerciseError(f"production provider adaptation activation failed: {activated}")
+        activation = activated["activation"]
+        session_id = os.environ.get("ORG_ORGAN_SESSION_ID") or "exercise-provider-outage-session"
+        degrade_args = (
+            "degrade", "--envelope", "required-provider-outage", "--circuit", "provider:required",
+            "--dependency", "required-provider", "--artifact", str(maker),
+            "--reason", "fault receipt proves the required provider is unavailable",
+            "--evidence", f"file:{receipt_path}", "--confidence", "1.0",
+            "--session-id", session_id, "--by", "supervisor")
+        code, degraded = _operate(root, *degrade_args)
+        if code:
+            raise ExerciseError(f"production provider DEGRADED transition failed: {degraded}")
+        code, repeated = _operate(root, *degrade_args)
+        if code:
+            raise ExerciseError(f"idempotent provider containment failed: {repeated}")
+
+        decisions = {}
+        for action in expected["allowed_actions"] + expected["forbidden_actions"]:
+            action_code, decision = _operate(
+                root, "authorize", "--envelope", "required-provider-outage", "--action", action,
+                "--phase", fault["expected_phase"], "--artifact", str(maker))
+            decisions[action] = {"allowed": action_code == 0 and bool(decision.get("allowed")),
+                                 "reason": decision.get("reason")}
+        code, outcome = _adapt(
+            root, "outcome", "--critical-function", "governed_delivery",
+            "--outcome", expected["outcome"], "--evidence", f"file:{receipt_path}",
+            "--judged-by", "exercise:declared-scenario")
+        if code:
+            raise ExerciseError(f"production safe outcome record failed: {outcome}")
+
+        # The envelope declares retry_budget=0.  A successful-looking recovery argument cannot
+        # create a half-open probe or a substitute provider claim; it must hand back to a human.
+        recovery_code, recovery = _operate(
+            root, "begin-recovery", "--actor", "supervisor", "--circuit", "provider:required",
+            "--reason", "fixture asks whether recovery may begin", "--evidence", f"file:{receipt_path}",
+            "--confidence", "1.0", "--session-id", session_id, "--by", "supervisor", "--result", "pass")
+        code, operational = _operate(root, "status")
+        if code:
+            raise ExerciseError(f"production operational status failed: {operational}")
+        state = operational["state"]
+        sequence = [row["to_state"] for row in state["transitions"]]
+        circuit = state["circuits"]["provider:required"]
+        assertions = {
+            "fault_reached_dependency_preflight": reached,
+            "degraded_was_explicit": degraded["state"]["effective_state"] == "DEGRADED",
+            "duplicate_containment_is_idempotent": repeated.get("idempotent") is True,
+            "allowed_actions_match": all(decisions[action]["allowed"] for action in expected["allowed_actions"]),
+            "forbidden_actions_match": all(not decisions[action]["allowed"] for action in expected["forbidden_actions"]),
+            "safe_stop_is_acceptable": outcome["outcome"]["outcome"] in scenario["acceptable_outcomes"],
+            "retry_is_refused_and_handed_to_human": recovery_code == 3 and "human handback" in recovery.get("error", ""),
+            "no_recovery_claim_was_created": sequence == expected["transition_sequence"],
+            "circuit_remains_open": circuit["to_state"] == "OPEN" and circuit["retry_count"] == 1,
+            "taint_remains_for_revalidation": state["unresolved_taints"] == [str(maker)],
+        }
+        gaps = [name for name, passed in assertions.items() if not passed]
+        return {
+            "scenario": scenario["id"], "exercise_status": "GREEN" if not gaps else "RED",
+            "assertions": assertions, "gaps": gaps, "expected_gaps": expected.get("gaps") or [],
+            "fault_injection": {"receipt_sha256": _sha(receipt_path), "reached": reached,
+                                "boundary": "orgcycle.preflight.run_probe"},
+            "decision_path": {"actions": decisions, "activation_id": activation["activation_id"],
+                              "duplicate_degrade": repeated.get("idempotent") is True},
+            "operational_state": {"observed": state["effective_state"], "transition_sequence": sequence,
+                                  "circuit": circuit, "unresolved_taints": state["unresolved_taints"]},
+            "recovery": {"returncode": recovery_code, "result": recovery},
+            "outcome": {"observed": outcome["outcome"]["outcome"], "acceptable": True},
+            "potentials": scenario["potentials"], "human_judgment": scenario["human_judgment"],
+            "resilience_score": None, "blast_radius": scenario["blast_radius"],
+        }
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="resilience-exercise")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -449,12 +573,17 @@ def main(argv=None):
     false_green.add_argument("--scenario", default=str(DEFAULT_FALSE_GREEN_SCENARIO))
     false_green.add_argument("--expect", choices=("RED", "GREEN"))
     false_green.add_argument("--json", action="store_true")
+    provider = sub.add_parser("provider-outage")
+    provider.add_argument("--scenario", default=str(DEFAULT_PROVIDER_OUTAGE_SCENARIO))
+    provider.add_argument("--expect", choices=("RED", "GREEN"))
+    provider.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
     if args.command == "_fake-dependency":
         return _fake_dependency(args)
     try:
         report = (run_reviewer_outage(args.scenario) if args.command == "reviewer-outage"
-                  else run_false_green_mutation(args.scenario))
+                  else run_false_green_mutation(args.scenario) if args.command == "false-green-mutation"
+                  else run_provider_outage(args.scenario))
     except ExerciseError as exc:
         report = {"scenario": args.command, "exercise_status": "INVALID",
                   "error": str(exc), "resilience_score": None}
