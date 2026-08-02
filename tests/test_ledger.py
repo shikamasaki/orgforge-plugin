@@ -142,7 +142,7 @@ def test_scheduler_receipt_cannot_be_forged_by_generic_append(tmp_path):
     payload = json.dumps({
         "check_id": "machine_sensors", "scheduled_for_min": 100,
         "execution_id": "forged", "result": "ok", "exit_code": 0,
-        "command_sha256": "a" * 64, "plugin_version": "2.0.25",
+        "command_sha256": "a" * 64, "plugin_version": "2.0.26",
     })
     code, out = run("ledger.py", "append", str(tmp_path),
                     "--actor", "system:scheduler_tick",
@@ -454,6 +454,44 @@ def test_correction_backfill_is_not_voided(tmp_path):
            {"seq": 10, "class": "correction",
             "payload": {"corrects": [2], "kind": "probe", "reason": "検証"}}]
     assert m.corrected_seqs(evs) == {2}, "backfill まで無効化した"
+
+
+def test_effective_voided_seqs_unifies_current_and_legacy_correction_semantics(tmp_path):
+    """Every projection must fold one correction contract, including pre-effect ledgers."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("ledger_effect", TOOLS / "ledger.py")
+    module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+    events = [
+        {"seq": 10, "class": "correction",
+         "payload": {"corrects": [1], "kind": "superseded", "effect": "voids"}},
+        {"seq": 11, "class": "correction",
+         "payload": {"corrects": [2], "kind": "probe", "effect": "voids"}},
+        {"seq": 12, "class": "correction",
+         "payload": {"corrects": [3], "kind": "superseded"}},  # legacy v2.0.22
+        {"seq": 13, "class": "correction",
+         "payload": {"corrects": [4], "kind": "backfill", "effect": "records_backfill"}},
+    ]
+    assert module.voided_seqs(events) == {1, 2, 3}
+    assert module.corrected_seqs(events) == {2}, "low-level kind query changed compatibility"
+
+
+def test_effective_voided_seqs_honors_correction_of_correction(tmp_path):
+    """A later active correction can reinstate the event an earlier correction had voided."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("ledger_effect_nested", TOOLS / "ledger.py")
+    module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+    events = [
+        {"seq": 1, "class": "admission_decided", "payload": {"verdict": "admit"}},
+        {"seq": 10, "class": "correction",
+         "payload": {"corrects": [1], "kind": "superseded", "effect": "voids"}},
+        {"seq": 11, "class": "correction",
+         "payload": {"corrects": [10], "kind": "mistake", "effect": "voids"}},
+    ]
+    assert module.voided_seqs(events) == {10}
+
+    events.append({"seq": 12, "class": "correction",
+                   "payload": {"corrects": [11], "kind": "mistake", "effect": "voids"}})
+    assert module.voided_seqs(events) == {1, 11}
 
 
 def _correction_org(tmp_path, policy=True):

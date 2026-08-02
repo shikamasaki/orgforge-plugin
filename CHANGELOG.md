@@ -6,6 +6,19 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 2.0.26 — effective correction projection
+
+### Fixed
+
+- Project current ledger truth through one shared `voided_seqs` resolver, using the writer-derived
+  correction effect for current events and preserving legacy kind semantics for older ledgers.
+- Apply that resolver consistently to status, joint-admission derivation, integration, GitHub
+  synchronization, drift, and exposure accounting without treating backfills as voids.
+- Honor corrections of corrections, so voiding an earlier correction restores its target instead
+  of leaving an irreversible phantom decision.
+- Distinguish a provisional cross-harness skeptic refutation from a missing skeptic record and
+  surface the pending joint/rework materialization as AMBER rather than a false RED.
+
 ## 2.0.25 — scheduler check receipts
 
 ### Fixed

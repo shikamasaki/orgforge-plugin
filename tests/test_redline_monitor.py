@@ -161,8 +161,8 @@ def test_claude_bundle_is_generated_and_default_status_path_exists():
 def test_both_harnesses_bundle_the_same_monitor_registry_contract():
     assert CODEX_BUNDLE.read_bytes() == SOURCE.read_bytes()
     assert (CODEX_BUNDLE.resolve().parents[1] / "tools" / "status.py").is_file()
-    assert MONITOR.plugin_version(BUNDLE) == "2.0.25"
-    assert MONITOR.plugin_version(CODEX_BUNDLE).startswith("2.0.25+codex.")
+    assert MONITOR.plugin_version(BUNDLE) == "2.0.26"
+    assert MONITOR.plugin_version(CODEX_BUNDLE).startswith("2.0.26+codex.")
 
 
 def test_shipped_entry_point_deduplicates_a_real_subprocess(tmp_path):

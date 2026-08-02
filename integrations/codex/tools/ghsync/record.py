@@ -229,7 +229,7 @@ def _prior_admission(issue):
     try:
         sys.path.insert(0, HERE)          # HERE = tools/（_core に集約。0.22.1 の教訓）
         from discover import ledger_root
-        from ledger import corrected_seqs
+        from ledger import voided_seqs
         root = ledger_root()
     except Exception:
         return None, None
@@ -242,7 +242,7 @@ def _prior_admission(issue):
             evs.append(json.loads(line))
         except Exception:
             continue
-    voided = corrected_seqs(evs)
+    voided = voided_seqs(evs)
     want = str(issue).lstrip("#")
     hit = (None, None)
     for e in evs:
@@ -399,7 +399,7 @@ def _has_lineage_verdict(issue, event, lineage):
     try:
         sys.path.insert(0, HERE)
         from discover import ledger_root
-        from ledger import corrected_seqs
+        from ledger import voided_seqs
         root = ledger_root()
     except Exception:
         return False
@@ -412,7 +412,7 @@ def _has_lineage_verdict(issue, event, lineage):
             evs.append(json.loads(line))
         except Exception:
             continue
-    voided = corrected_seqs(evs)
+    voided = voided_seqs(evs)
     want = str(issue).lstrip("#")
     for e in evs:
         if e.get("class") != event or e.get("seq") in voided:
@@ -738,20 +738,14 @@ def cmd_provisional(a):
 def _provisional_for(issue, event, lineage):
     """その Issue・その event・その血統の **有効な** 暫定判定を返す。
 
-    無効化の扱いは `correction` の kind に従う:
-
-      probe / mistake  — 実判定ではない。`corrected_seqs` が既定で除外する
-      superseded       — 実判定だが後続に置き換えられた。**ここで除外する** —
-                         `corrected_seqs` は superseded を消さない（時系列の解決が扱う領域と
-                         して分けられている）ので、置き換えの解決はこの関数の責任である。
-                         これを見落とすと、案内した correction を打っても判定を差し替えられない
-                         （0.32.1 の実態。append は成功するので効いたように見える）。
-      backfill         — 後から書いた実判定。無効ではない
+    無効化は共有の `voided_seqs` projectionに従う。v2.0.23以降はwriterが付けた
+    `effect: voids|records_backfill`が正本で、旧ledgerだけkindから互換導出する。この関数だけで
+    supersededを特別扱いすると、statusやderive-admissionと現在値が分岐する（OBS-042）。
     """
     try:
         sys.path.insert(0, HERE)
         from discover import ledger_root
-        from ledger import corrected_seqs
+        from ledger import voided_seqs
         root = ledger_root()
     except Exception:
         return None
@@ -764,7 +758,7 @@ def _provisional_for(issue, event, lineage):
             evs.append(json.loads(line))
         except Exception:
             continue
-    voided = set(corrected_seqs(evs)) | set(corrected_seqs(evs, kinds=("superseded",)))
+    voided = set(voided_seqs(evs))
     want, hit = str(issue).lstrip("#"), None
     for e in evs:
         if e.get("class") != "verdict_provisional" or e.get("seq") in voided:
