@@ -83,6 +83,14 @@ To exercise liveness correlation, run:
 orgforge resilience-exercise heartbeat-correlation --expect GREEN
 ```
 
+The repeated-failure-learning exercise feeds three distinct candidate failures through the
+production learning organ. It must escalate the recurring cause and print a doctrine handoff,
+while leaving permanent role/doctrine changes to a human and a bounded microexperiment.
+
+```bash
+orgforge resilience-exercise repeated-failure-learning --expect GREEN
+```
+
 Duplicate or stale heartbeats remain `ATTENTION` even when a single ledger probe is healthy.
 
 For unattended read-only-first operation, install the deterministic machine tick:

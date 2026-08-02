@@ -30,6 +30,7 @@ DEFAULT_SCENARIO = TEMPLATE / "exercises" / "reviewer-outage.yaml"
 DEFAULT_FALSE_GREEN_SCENARIO = TEMPLATE / "exercises" / "false-green-mutation.yaml"
 DEFAULT_PROVIDER_OUTAGE_SCENARIO = TEMPLATE / "exercises" / "provider-outage.yaml"
 DEFAULT_HEARTBEAT_SCENARIO = TEMPLATE / "exercises" / "heartbeat-correlation.yaml"
+DEFAULT_REPEATED_LEARNING_SCENARIO = TEMPLATE / "exercises" / "repeated-failure-learning.yaml"
 
 
 class ExerciseError(RuntimeError):
@@ -95,6 +96,29 @@ def _load_false_green_scenario(path):
         raise ExerciseError("expected outcome is not declared acceptable")
     if expected.get("intake_returncode") != 10:
         raise ExerciseError("false-GREEN exercise must expect the production intake rejection (exit 10)")
+    return document
+
+
+def _load_repeated_learning_scenario(path):
+    """Load the bounded contract for the repeated-failure learning exercise."""
+    document = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
+    required = {"schema_version", "id", "critical_functions", "acceptable_outcomes",
+                "repeated_failure", "expected", "blast_radius", "potentials", "human_judgment"}
+    missing = sorted(required - set(document))
+    if missing:
+        raise ExerciseError(f"scenario is missing fields: {', '.join(missing)}")
+    if document.get("schema_version") != 1:
+        raise ExerciseError("scenario schema_version must be 1")
+    radius = document.get("blast_radius") or {}
+    bounded = {"faults": 0, "workspace": "temporary_directory", "network": "forbidden",
+               "real_repository_mutation": "forbidden", "production_credentials": "forbidden"}
+    if radius != bounded:
+        raise ExerciseError("scenario blast radius must prohibit network, credentials, and real repo mutation")
+    expected = document.get("expected") or {}
+    if expected.get("outcome") not in set(document.get("acceptable_outcomes") or []):
+        raise ExerciseError("expected outcome is not declared acceptable")
+    if expected.get("learning_returncode") != 10:
+        raise ExerciseError("repeated-learning exercise must expect production escalation (exit 10)")
     return document
 
 
@@ -561,6 +585,55 @@ def run_provider_outage(scenario_path=DEFAULT_PROVIDER_OUTAGE_SCENARIO):
         }
 
 
+def run_repeated_failure_learning(scenario_path=DEFAULT_REPEATED_LEARNING_SCENARIO):
+    """Prove that a repeated death is escalated and made actionable, not reported clean.
+
+    The fixture supplies only an append-only ledger snapshot.  The production ``learning.py``
+    detector performs the join, emits ``repeated_death_detected``, and prints the handoff command.
+    No doctrine or role file is mutated: deciding the permanent practice remains human-held.
+    """
+    scenario = _load_repeated_learning_scenario(scenario_path)
+    repeated = scenario["repeated_failure"]
+    expected = scenario["expected"]
+    with tempfile.TemporaryDirectory(prefix="orgforge-exercise-") as temporary:
+        root = Path(temporary) / "org"
+        root.mkdir(parents=True)
+        ledger = root / "ledger.jsonl"
+        events = []
+        for seq, candidate in enumerate(repeated["candidate_ids"], start=1):
+            events.append({"seq": seq, "class": "rework_requested",
+                           "payload": {"candidate_id": candidate,
+                                       "reason": repeated["cause"]}})
+        ledger.write_text("\n".join(json.dumps(event, sort_keys=True) for event in events) + "\n",
+                          encoding="utf-8")
+        learning = HERE / "learning.py"
+        run = subprocess.run([sys.executable, str(learning), "repeats", str(root),
+                              "--recurrence", str(repeated["recurrence"])],
+                             cwd=root, capture_output=True, text=True, timeout=30)
+        output = run.stdout + run.stderr
+        marker = str(expected["escalation_marker"])
+        event_marker = "LEDGER-EVENT {\"class\": \"repeated_death_detected\""
+        assertions = {
+            "all_deaths_have_distinct_candidates": len(set(repeated["candidate_ids"])) == len(events),
+            "production_learning_escalated": run.returncode == expected["learning_returncode"],
+            "repeated_event_was_emitted": event_marker in output,
+            "actionable_handoff_was_printed": marker in output,
+            "no_doctrine_was_auto_mutated": not (root / "doctrine").exists(),
+            "safe_observation_is_acceptable": expected["outcome"] in scenario["acceptable_outcomes"],
+        }
+        gaps = [name for name, passed in assertions.items() if not passed]
+        return {
+            "scenario": scenario["id"], "exercise_status": "GREEN" if not gaps else "RED",
+            "assertions": assertions, "gaps": gaps, "expected_gaps": expected.get("gaps") or [],
+            "learning": {"returncode": run.returncode, "output": output,
+                         "candidate_ids": repeated["candidate_ids"],
+                         "cause": repeated["cause"]},
+            "outcome": {"observed": expected["outcome"], "acceptable": True},
+            "potentials": scenario["potentials"], "human_judgment": scenario["human_judgment"],
+            "resilience_score": None, "blast_radius": scenario["blast_radius"],
+        }
+
+
 def _redline_monitor_module():
     """Load the installed projection's monitor implementation in source or bundled layouts."""
     import importlib.util
@@ -681,6 +754,10 @@ def main(argv=None):
     heartbeat.add_argument("--scenario", default=str(DEFAULT_HEARTBEAT_SCENARIO))
     heartbeat.add_argument("--expect", choices=("RED", "GREEN"))
     heartbeat.add_argument("--json", action="store_true")
+    repeated = sub.add_parser("repeated-failure-learning")
+    repeated.add_argument("--scenario", default=str(DEFAULT_REPEATED_LEARNING_SCENARIO))
+    repeated.add_argument("--expect", choices=("RED", "GREEN"))
+    repeated.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
     if args.command == "_fake-dependency":
         return _fake_dependency(args)
@@ -688,7 +765,8 @@ def main(argv=None):
         report = (run_reviewer_outage(args.scenario) if args.command == "reviewer-outage"
                   else run_false_green_mutation(args.scenario) if args.command == "false-green-mutation"
                   else run_provider_outage(args.scenario) if args.command == "provider-outage"
-                  else run_heartbeat_correlation(args.scenario))
+                  else run_heartbeat_correlation(args.scenario) if args.command == "heartbeat-correlation"
+                  else run_repeated_failure_learning(args.scenario))
     except ExerciseError as exc:
         report = {"scenario": args.command, "exercise_status": "INVALID",
                   "error": str(exc), "resilience_score": None}
