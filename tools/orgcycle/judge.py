@@ -808,6 +808,19 @@ def cmd_rework(a):
     payload = {"deliverable": str(a.issue), "issue": a.issue,
                "verdict": "rework", "reason": a.reason,
                "from_verdict": a.after, "to_role": a.to or ""}
+    # 死因の根の分類（Issue #104）。再発検出（learning.py repeats）は root の一致で数える —
+    # 記録時に分類されなければ、この rework が同根の再発でも検出器は文字列一致でしか見えない。
+    # 語彙は learning.DEATH_ROOTS が単一の情報源（schema の enum とはテストが突き合わせる）。
+    root = (getattr(a, "root", None) or "").strip()
+    if root:
+        sys.path.insert(0, HERE)
+        from learning import DEATH_ROOTS
+        if root not in DEATH_ROOTS:
+            print(f"rework: --root {root!r} は死因の根の語彙に無い。許される値:\n"
+                  + "\n".join(f"  {k:<24}{v}" for k, v in DEATH_ROOTS.items()),
+                  file=sys.stderr)
+            return 2
+        payload["root"] = root
     rc = _execute([
         # GitHub を先に作業可能な状態へ戻す。ここが失敗したら台帳へ rework を記録しない —
         # CLOSED/COMPLETED のまま ledger だけ次周へ進む分岐が実地で起きた。
