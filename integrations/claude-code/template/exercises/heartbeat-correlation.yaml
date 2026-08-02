@@ -1,0 +1,27 @@
+schema_version: 1
+id: heartbeat-correlation-minimal
+description: stale or duplicate monitor heartbeats cannot be hidden by a single healthy probe
+time_budget_seconds: 60
+critical_functions: [human_control, evidence_integrity]
+acceptable_outcomes: [observe_only, safe_stop, human_handback]
+signals:
+  current_version: 2.0.34
+  required: [heartbeat, pid_liveness, ledger_probe]
+expected:
+  attention_exit: 4
+  outcome: observe_only
+  gaps: []
+blast_radius:
+  faults: 0
+  workspace: temporary_directory
+  network: forbidden
+  real_repository_mutation: forbidden
+  production_credentials: forbidden
+potentials:
+  heartbeat_duplicate_observed: [Monitor, Anticipate]
+  heartbeat_stale_observed: [Monitor, Respond]
+  probe_disagreement_preserved: [Monitor, Learn]
+  false_green_prevented: [Respond, Anticipate]
+human_judgment:
+  - whether to stop, observe, or hand back when liveness evidence disagrees
+  - whether a persistent duplicate monitor indicates an installation or host lifecycle change

@@ -178,6 +178,14 @@ human handback rather than a retry claim:
 orgforge resilience-exercise provider-outage --expect GREEN
 ```
 
+The heartbeat-correlation exercise checks the monitor's real registry and probe paths. Duplicate
+or stale heartbeats remain `ATTENTION` even when a single ledger probe is quiet, so no one signal
+can manufacture a healthy claim:
+
+```bash
+orgforge resilience-exercise heartbeat-correlation --expect GREEN
+```
+
 A "department" is a Claude Code (or Codex) turn pointed at one role's profile. Use the runner —
 it projects the role onto the harness and attaches the plugin so the guardrails apply:
 
