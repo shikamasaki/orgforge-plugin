@@ -3002,11 +3002,14 @@ def cmd_derive_admission(a):
                 _subject_now = _p.get("review_subject_id")
         # **同じ一致から2件目を作らない。** joint は「2つの判定が一致した」という
         # *事実の関数* であって、新しい判断ではない。事実は一度きりなので、
-        # 同じ issue / event に admission が既に在るなら、もう作ってはいけない。
+        # 同じ issue / event に joint が既に在るなら、もう作ってはいけない。
         # 作れてしまうと、1つの成果物が2回 admit されたように見える（二重計上）。
         # 実測: derive-admission を2回呼ぶと admission が2件になっていた。
         for e in evs:
-            if e.get("class") != "admission_decided":
+            # Gate の joint だけに固定すると skeptic の `refutation_attempted` は毎回
+            # 素通りし、同じ provisional pair から無限に複製できる。呼び出しが派生する
+            # event class 自体を natural key の一部として照合する。
+            if e.get("class") != a.event:
                 continue
             # **訂正・取り消しされた admission は「既にある」に数えない。**
             # 数えると、対象を差し替えて訂正したあと **二度と admit できない**
@@ -3026,7 +3029,7 @@ def cmd_derive_admission(a):
                 print(json.dumps(
                     {"ok": False, "reason": "already_admitted",
                      "seq": e.get("seq"),
-                     "detail": f"#{a.issue} / {a.event} の admission は seq="
+                     "detail": f"#{a.issue} / {a.event} の joint は seq="
                                f"{e.get('seq')} に既にある。**一致は事実なので、"
                                f"同じ一致から2件目は作らない**（二重計上になる）。"},
                     ensure_ascii=False))

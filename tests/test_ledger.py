@@ -3410,6 +3410,60 @@ def test_A_joint_is_not_created_twice(tmp_path):
     assert len(adm) == 1, f"derive を2回呼ぶと admission が {len(adm)} 件になった（二重計上）"
 
 
+def test_A_refutation_joint_is_not_created_twice(tmp_path):
+    """skeptic側も同じ一致からjointを1件だけ生成する。
+
+    冪等ガードが ``admission_decided`` に固定されると、同一のsurvives pairを再派生する
+    たびに ``refutation_attempted`` が増え、1つの反証結果を複数件として数えてしまう。
+    """
+    org, led = _A_org(tmp_path)
+    _A_key(org, "k1", "gate-signer"); _A_key(org, "k2", "skeptic-signer")
+    payload = {**_A_PL, "verdict": "survives", "for_event": "refutation_attempted"}
+    for key, lin in (("k1", "same-harness"), ("k2", "cross-harness")):
+        rc = _A_receipt(org, key, lineage=lin, verdict="survives", out=f"{key}.json")
+        assert _A_append(org, led, rc, {**payload, "lineage": lin}).returncode == 0
+
+    first = subprocess.run(
+        [sys.executable, str(TOOLS / "ledger.py"), "derive-admission", str(led),
+         "--issue", "7", "--event", "refutation_attempted", "--require-attested"],
+        cwd=org, capture_output=True, text=True, env=_A_env(org))
+    second = subprocess.run(
+        [sys.executable, str(TOOLS / "ledger.py"), "derive-admission", str(led),
+         "--issue", "7", "--event", "refutation_attempted", "--require-attested"],
+        cwd=org, capture_output=True, text=True, env=_A_env(org))
+
+    assert first.returncode == 0, first.stdout + first.stderr
+    assert second.returncode == 6, second.stdout + second.stderr
+    assert json.loads(second.stdout)["reason"] == "already_admitted"
+    joints = [json.loads(line) for line in (led / "ledger.jsonl").read_text(
+        encoding="utf-8").splitlines()
+        if line.strip() and json.loads(line)["class"] == "refutation_attempted"]
+    assert len(joints) == 1, f"deriveを2回呼ぶとrefutation jointが{len(joints)}件になった"
+
+
+def test_A_refutation_joint_allows_a_new_review_subject(tmp_path):
+    """同じIssueでも別subjectの反証結果は新しいjointとして記録できる。"""
+    org, led = _A_org(tmp_path)
+    _A_key(org, "k1", "gate-signer"); _A_key(org, "k2", "skeptic-signer")
+    for subject in ("rev-A", "rev-B"):
+        payload = {**_A_PL, "verdict": "survives", "for_event": "refutation_attempted",
+                   "review_subject_id": subject}
+        for key, lin in (("k1", "same-harness"), ("k2", "cross-harness")):
+            rc = _A_receipt(org, key, lineage=lin, verdict="survives", subject=subject,
+                            out=f"{subject}-{key}.json")
+            assert _A_append(org, led, rc, {**payload, "lineage": lin}).returncode == 0
+        result = subprocess.run(
+            [sys.executable, str(TOOLS / "ledger.py"), "derive-admission", str(led),
+             "--issue", "7", "--event", "refutation_attempted", "--require-attested"],
+            cwd=org, capture_output=True, text=True, env=_A_env(org))
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    joints = [json.loads(line) for line in (led / "ledger.jsonl").read_text(
+        encoding="utf-8").splitlines()
+        if line.strip() and json.loads(line)["class"] == "refutation_attempted"]
+    assert [event["payload"]["review_subject_id"] for event in joints] == ["rev-A", "rev-B"]
+
+
 def test_A_joint_needs_only_one_provisional_to_hold(tmp_path):
     """**1件だけでは joint を作らない。** 片方の判定だけで通れば、独立性は無い。"""
     org, led = _A_org(tmp_path)
@@ -3536,25 +3590,27 @@ _AA_PL = {"for_event": "admission_decided", "verdict": "admit", "role": "gate",
 _AA_ENV = dict(os.environ, ORG_WRITER_TRUST_SELF="1")
 
 
-def _AA_prov(org, led, issue, lineage, subject="S1"):
+def _AA_prov(org, led, issue, lineage, subject="S1", *, event="admission_decided",
+             verdict="admit"):
     return subprocess.run(
         [sys.executable, str(TOOLS / "ledger.py"), "append", led, "--actor", "gate",
          "--class", "verdict_provisional",
          "--payload", json.dumps({**_AA_PL, "issue": issue, "lineage": lineage,
-                                  "review_subject_id": subject})],
+                                  "review_subject_id": subject, "for_event": event,
+                                  "verdict": verdict})],
         capture_output=True, text=True, cwd=str(org), env=_AA_ENV, timeout=60)
 
 
-def _AA_derive(org, led, issue):
+def _AA_derive(org, led, issue, event="admission_decided"):
     return subprocess.run(
         [sys.executable, str(TOOLS / "ledger.py"), "derive-admission", led,
-         "--issue", issue, "--event", "admission_decided"],
+         "--issue", issue, "--event", event],
         capture_output=True, text=True, cwd=str(org), env=_AA_ENV, timeout=60)
 
 
-def _AA_adm(led):
+def _AA_adm(led, event="admission_decided"):
     return [json.loads(l) for l in open(os.path.join(led, "ledger.jsonl"), encoding="utf-8")
-            if json.loads(l).get("class") == "admission_decided"]
+            if json.loads(l).get("class") == event]
 
 
 def test_already_admitted_keys_on_subject_not_just_issue(tmp_path):
@@ -3598,6 +3654,29 @@ def test_corrected_admission_does_not_block_forever(tmp_path):
         _AA_prov(org, led, "7", lin, "S1")
     r2 = _AA_derive(org, led, "7")
     assert r2.returncode == 0, f"訂正後も admit できない（デッドロック）: {r2.stdout}"
+
+
+def test_corrected_refutation_joint_does_not_block_forever(tmp_path):
+    """void済みのskeptic jointは既存扱いせず、同じpairから再派生できる。"""
+    org, led = _AA_org(tmp_path)
+    for lin in ("same-harness", "cross-harness"):
+        assert _AA_prov(org, led, "7", lin, event="refutation_attempted",
+                        verdict="survives").returncode == 0
+    assert _AA_derive(org, led, "7", "refutation_attempted").returncode == 0
+    seq = _AA_adm(led, "refutation_attempted")[0]["seq"]
+    receipt = _correction_receipt(org, pathlib.Path(led), "ceo", seq, issue="7",
+                                  reason="反証jointを取り消して再派生する")
+    corrected = subprocess.run(
+        [sys.executable, str(TOOLS / "ledger.py"), "append", led, "--actor", "ceo",
+         "--class", "correction",
+         "--payload", json.dumps({"corrects": [seq], "kind": "superseded",
+                                  "reason": "反証jointを取り消して再派生する"}),
+         "--receipt", str(receipt)],
+        capture_output=True, text=True, cwd=str(org), env=_AA_ENV, timeout=60)
+    assert corrected.returncode == 0, corrected.stdout + corrected.stderr
+    derived = _AA_derive(org, led, "7", "refutation_attempted")
+    assert derived.returncode == 0, derived.stdout + derived.stderr
+    assert len(_AA_adm(led, "refutation_attempted")) == 2
 
 
 def test_issue_notation_does_not_split_the_dedupe(tmp_path):
