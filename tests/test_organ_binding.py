@@ -3,6 +3,7 @@ import argparse
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 
@@ -31,6 +32,17 @@ def _fake_tools(root, answer):
         (root / name).write_text(
             "import sys\nprint(" + repr(answer + ":" + name) + ")\n", encoding="utf-8")
     return root
+
+
+def _fake_bundle(base, answer):
+    """A plugin-bundle layout: <base>/tools plus its sibling <base>/scripts (issue #108)."""
+    base.mkdir()
+    tools = _fake_tools(base / "tools", answer)
+    scripts = base / "scripts"
+    scripts.mkdir()
+    (scripts / "redline_monitor.py").write_text(
+        "print(" + repr(answer + ":redline_monitor.py") + ")\n", encoding="utf-8")
+    return tools, scripts
 
 
 def _org(tmp_path):
@@ -63,11 +75,63 @@ def test_launcher_diagnoses_a_removed_plugin_cache(tmp_path):
     org = _org(tmp_path)
     tools = _fake_tools(tmp_path / "cache-v1", "v1")
     record = BINDING.bind(org, tools)
-    (tools / "ledger.py").unlink()
+    shutil.rmtree(tools)
     run = subprocess.run([record["launcher"], "ledger", "verify"],
                          capture_output=True, text=True)
     assert run.returncode == 12
     assert "restart" in run.stderr and "unavailable" in run.stderr
+
+
+def test_launcher_resolves_an_organ_under_scripts_root(tmp_path):
+    org = _org(tmp_path)
+    tools, scripts = _fake_bundle(tmp_path / "bundle", "v1")
+    record = BINDING.bind(org, tools)
+    assert record["scripts_root"] == os.path.realpath(str(scripts))
+    run = subprocess.run([record["launcher"], "redline-monitor"],
+                         capture_output=True, text=True)
+    assert run.returncode == 0, run.stderr
+    assert run.stdout.strip() == "v1:redline_monitor.py"
+
+
+def test_traversal_is_refused_for_both_roots(tmp_path):
+    org = _org(tmp_path)
+    tools, scripts = _fake_bundle(tmp_path / "bundle", "v1")
+    secret = tmp_path / "secret.py"
+    secret.write_text("print('escaped')\n", encoding="utf-8")
+    record = BINDING.bind(org, tools)
+    run = subprocess.run([record["launcher"], "../secret"], capture_output=True, text=True)
+    assert run.returncode != 0 and "escaped" not in run.stdout
+    # a symlink inside either root must not resolve to a file outside that root
+    (tools / "sneaky_t.py").symlink_to(secret)
+    (scripts / "sneaky_s.py").symlink_to(secret)
+    for organ in ("sneaky-t", "sneaky-s"):
+        run = subprocess.run([record["launcher"], organ], capture_output=True, text=True)
+        assert run.returncode == 12, organ
+        assert "escaped" not in run.stdout
+
+
+def test_binding_without_scripts_root_resolves_tools_organs_as_before(tmp_path):
+    org = _org(tmp_path)
+    tools = _fake_tools(tmp_path / "tools-old", "v1")
+    record = BINDING.bind(org, tools)
+    path = pathlib.Path(BINDING.binding_path(org, record["harness"]))
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data.pop("scripts_root", None)  # simulate a binding written before issue #108
+    path.write_text(json.dumps(data), encoding="utf-8")
+    run = subprocess.run([record["launcher"], "org-cycle"], capture_output=True, text=True)
+    assert run.returncode == 0, run.stderr
+    assert run.stdout.strip() == "v1:org_cycle.py"
+
+
+def test_unavailable_organ_names_searched_roots_and_does_not_advise_restart(tmp_path):
+    org = _org(tmp_path)
+    tools, scripts = _fake_bundle(tmp_path / "bundle", "v1")
+    record = BINDING.bind(org, tools)
+    run = subprocess.run([record["launcher"], "never-bundled"], capture_output=True, text=True)
+    assert run.returncode == 12
+    assert os.path.realpath(str(tools)) in run.stderr
+    assert os.path.realpath(str(scripts)) in run.stderr
+    assert "restart the host session" not in run.stderr
 
 
 def test_foreign_checkout_is_rejected_before_ledger_write(tmp_path):
