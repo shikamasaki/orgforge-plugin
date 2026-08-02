@@ -65,8 +65,10 @@ def test_legacy_unclassified_clean_states_basis_and_limitation(tmp_path):
 
 def test_mixed_clean_reports_unclassified_count(tmp_path):
     # 分類済み1件 + 未分類1件、再発なし → clean だが未分類件数が読める
+    # （root=other は判別する根ではないため「分類済み」に数えない — 判別根を使う）
     seed(tmp_path, "gate", "result_retired",
-         {"candidate_id": "A", "cause": "x", "root": "other"}, ts="2026-07-16T01:00:00Z")
+         {"candidate_id": "A", "cause": "x", "root": "declaration_drift"},
+         ts="2026-07-16T01:00:00Z")
     seed(tmp_path, "gate", "result_retired",
          {"candidate_id": "B", "cause": "y"}, ts="2026-07-16T02:00:00Z")
     code, out = run("learning.py", "repeats", str(tmp_path))
@@ -107,3 +109,30 @@ def test_vocabulary_matches_schema_enum():
 def test_death_roots_have_ja_descriptions():
     for k, v in learning.DEATH_ROOTS.items():
         assert isinstance(v, str) and v.strip(), f"{k} に説明が無い"
+
+
+# ── REWORK（gate指摘）: `other` は「根の同一性」を主張できない ─────────────────────
+def test_two_unrelated_other_records_do_not_escalate_as_same_root(tmp_path):
+    """`other` は判別する根ではない — 無関係な2つの死が両方 `other` なだけで
+    「文言は違っても根は同じ」と主張して escalate してはならない（それは記録されて
+    いない意味一致の捏造で、escalation チャネルを無視する訓練になる）。
+    選択(a): `other` は文字列一致にフォールバックし、単独で root 再発グループを作らない。"""
+    seed(tmp_path, "gate", "result_retired",
+         {"candidate_id": "A", "cause": "依存パッケージのライセンス問題",
+          "root": "other"}, ts="2026-07-16T01:00:00Z")
+    seed(tmp_path, "gate", "result_retired",
+         {"candidate_id": "B", "cause": "顧客要件の撤回",
+          "root": "other"}, ts="2026-07-16T02:00:00Z")
+    code, out = run("learning.py", "repeats", str(tmp_path))
+    assert code == 0 and "clean" in out, \
+        f"無関係な other 2件を『根は同じ』として escalate した: {out}"
+    assert "REPEATED DEATH" not in out
+
+
+def test_same_string_other_records_still_detected(tmp_path):
+    # フォールバック先の文字列一致は生きている: other + 同一文言 → 検出
+    for cid, ts in (("A", "2026-07-16T01:00:00Z"), ("B", "2026-07-16T02:00:00Z")):
+        seed(tmp_path, "gate", "result_retired",
+             {"candidate_id": cid, "cause": "同じ死因", "root": "other"}, ts=ts)
+    code, out = run("learning.py", "repeats", str(tmp_path))
+    assert code == 10 and "REPEATED DEATH" in out, out

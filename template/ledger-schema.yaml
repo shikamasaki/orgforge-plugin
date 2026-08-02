@@ -173,7 +173,10 @@ validation:
       #   declaration_drift      宣言と実装が乖離した
       #   integration_base_moved 統合先が動いて前提が崩れた
       #   self_written_premise   検査される当事者が検査の前提を書ける
-      #   other                  上記のどれでもない（自由文 cause で根を補足すること）
+      #   other                  上記のどれでもない（自由文 cause で根を補足すること）。
+      #                          **other は判別する根ではない** — 検出器は root グループを
+      #                          形成せず、文字列一致にフォールバックする（無関係な死2件を
+      #                          「根は同じ」と escalate しないため）
       root: [placebo_test, declaration_drift, integration_base_moved,
              self_written_premise, other]
     result_retired:

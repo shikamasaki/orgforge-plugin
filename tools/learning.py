@@ -40,7 +40,8 @@ DEATH_ROOTS = {
     "declaration_drift":     "宣言と実装が乖離した",
     "integration_base_moved": "統合先が動いて前提が崩れた",
     "self_written_premise":  "検査される当事者が検査の前提を書ける",
-    "other":                 "上記のどれでもない（自由文 cause で根を補足すること）",
+    "other":                 "上記のどれでもない（自由文 cause で根を補足すること。判別する根では"
+                             "ないので再発は文字列一致でしか見えない — root グループを形成しない）",
 }
 
 
@@ -139,11 +140,15 @@ def cmd_repeats(a):
             continue
         if e["class"] == "refutation_attempted" and p.get("verdict") != "refuted":
             continue      # survives は死ではない
-        root = p.get("root")
+        root = str(p.get("root") or "").strip()
         cause = _cause_text_of(p)
-        if root and str(root).strip():
+        # `other` は判別する根ではない — 「上記のどれでもない」が2件あっても、根が同じ
+        # ことは何も記録されていない。root グループにすると、無関係な死2件を「文言は
+        # 違っても根は同じ」と escalate する（意味一致の捏造。gate が実測で検出）。
+        # `other` は **マーカー付きの未分類** として文字列一致にフォールバックする。
+        if root and root != "other":
             classified += 1
-            key = ("root", str(root).strip())
+            key = ("root", root)
         elif cause:
             unclassified += 1
             key = ("cause", str(cause).strip().lower())
