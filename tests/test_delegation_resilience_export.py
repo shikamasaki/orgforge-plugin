@@ -91,7 +91,7 @@ def _verify(packet: Path) -> bytes:
         capture_output=True,
         timeout=60,
     )
-    assert result.returncode == 0, result.stderr.decode()
+    assert result.returncode == 0, result.stdout.decode() + result.stderr.decode()
     assert b"orgforge" not in verifier.read_bytes().lower()
     return result.stdout
 
