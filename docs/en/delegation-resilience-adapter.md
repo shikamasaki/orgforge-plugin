@@ -29,18 +29,3 @@ of the OrgForge organization.
 
 The exported standalone verifier is copied from the pinned DR checkout and contains neither
 OrgForge imports nor exercise execution code.
-
-## Assurance Graph status
-
-The current OrgForge adapter exports the v0alpha2 packet only. It does not yet generate an
-Assurance Graph. The Graph profile is a separate, formally pinned DR artifact; its reference lock
-is `integrations/delegation-resilience/assurance-graph-v0alpha1.lock.json`.
-
-That lock binds the `assurance-graph-v0alpha1.1` tag object, commit, schema digest, and standalone
-Graph verifier code digest. It is a consumer-held reference for a future one-way export and does
-not claim that OrgForge currently conforms to the Graph profile.
-
-When Graph export is implemented, it must remain derived from OrgForge evidence, fail closed on
-missing or contradictory mappings, and never treat `GRAPH_VERIFIED` as recovery capability,
-human takeover, deployment approval, or authorization. Until an export and independent exercise
-exist, all recovery capability remains `NOT_DEMONSTRATED`.
