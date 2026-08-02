@@ -161,6 +161,14 @@ declared cross-harness failover, enters `RECOVERING` after a successful half-ope
 every tainted artifact, and returns to `NORMAL`. Safe stop remains an acceptable outcome rather than
 being counted as a failure; an injected fault that does not reach judge preflight is `INVALID`.
 
+The companion false-GREEN exercise proves a distinct critical function: a passing test process
+cannot establish a mutation that never took effect. It routes the claim through the production
+skeptic-intake boundary and is GREEN only when that boundary rejects the false evidence:
+
+```bash
+orgforge resilience-exercise false-green-mutation --expect GREEN
+```
+
 A "department" is a Claude Code (or Codex) turn pointed at one role's profile. Use the runner —
 it projects the role onto the harness and attaches the plugin so the guardrails apply:
 

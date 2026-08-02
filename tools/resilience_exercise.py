@@ -25,6 +25,7 @@ HERE = Path(__file__).resolve().parent
 BUNDLE = HERE.parent
 TEMPLATE = BUNDLE / "template"
 DEFAULT_SCENARIO = TEMPLATE / "exercises" / "reviewer-outage.yaml"
+DEFAULT_FALSE_GREEN_SCENARIO = TEMPLATE / "exercises" / "false-green-mutation.yaml"
 
 
 class ExerciseError(RuntimeError):
@@ -67,6 +68,29 @@ def _load_scenario(path):
     expected = document.get("expected") or {}
     if expected.get("outcome") not in set(document.get("acceptable_outcomes") or []):
         raise ExerciseError("expected outcome is not declared acceptable")
+    return document
+
+
+def _load_false_green_scenario(path):
+    """Load the deliberately narrow false-GREEN exercise contract."""
+    document = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
+    required = {"schema_version", "id", "critical_functions", "acceptable_outcomes",
+                "false_green", "expected", "blast_radius", "potentials", "human_judgment"}
+    missing = sorted(required - set(document))
+    if missing:
+        raise ExerciseError(f"scenario is missing fields: {', '.join(missing)}")
+    if document.get("schema_version") != 1:
+        raise ExerciseError("scenario schema_version must be 1")
+    radius = document.get("blast_radius") or {}
+    bounded = {"faults": 1, "workspace": "temporary_directory", "network": "forbidden",
+               "real_repository_mutation": "forbidden", "production_credentials": "forbidden"}
+    if radius != bounded:
+        raise ExerciseError("scenario blast radius must prohibit network, credentials, and real repo mutation")
+    expected = document.get("expected") or {}
+    if expected.get("outcome") not in set(document.get("acceptable_outcomes") or []):
+        raise ExerciseError("expected outcome is not declared acceptable")
+    if expected.get("intake_returncode") != 10:
+        raise ExerciseError("false-GREEN exercise must expect the production intake rejection (exit 10)")
     return document
 
 
@@ -336,6 +360,80 @@ def run_reviewer_outage(scenario_path=DEFAULT_SCENARIO):
         }
 
 
+def run_false_green_mutation(scenario_path=DEFAULT_FALSE_GREEN_SCENARIO):
+    """Prove that a GREEN test cannot turn an unestablished mutation into skeptic evidence.
+
+    The fake owns only a local test result and the target artifact. The decision is made by the
+    real ``org_cycle intake`` command, not a second parser that could drift from production.
+    """
+    scenario = _load_false_green_scenario(scenario_path)
+    false_green = scenario["false_green"]
+    expected = scenario["expected"]
+    with tempfile.TemporaryDirectory(prefix="orgforge-exercise-") as temporary:
+        root = Path(temporary) / "org"
+        root.mkdir(parents=True)
+        target = root / "candidate-policy.txt"
+        baseline = "required_review = true\n"
+        target.write_text(baseline, encoding="utf-8")
+
+        # A test process reports GREEN. It has no authority to claim that a mutation was applied.
+        test = subprocess.run(
+            [sys.executable, str(Path(__file__).resolve()), "_fake-dependency", "--mode", "noop",
+             "--exit-code", "0", "--injection-id", str(false_green["test_injection_id"])],
+            cwd=root, capture_output=True, text=True, timeout=30)
+        try:
+            test_receipt = json.loads(test.stdout)
+        except json.JSONDecodeError as exc:
+            raise ExerciseError("GREEN test did not return its protocol receipt") from exc
+        test_green = test.returncode == 0 and test_receipt.get("injection_id") == false_green["test_injection_id"]
+
+        # The attempted mutation is deliberately a no-op. Retain the negative postcondition rather
+        # than treating the test result as proof of a state change.
+        observed_after_attempt = target.read_text(encoding="utf-8")
+        mutation_applied = observed_after_attempt != baseline
+        report = {
+            "verdict": "survives",
+            "why": "A local test process reported GREEN, but the required mutation did not establish its postcondition.",
+            "evidence": "fixture test receipt=" + json.dumps(test_receipt, sort_keys=True),
+            "mutations": [{
+                "what": "set required_review = false",
+                "applied": mutation_applied,
+                "postcondition": "candidate-policy.txt after attempt: " + observed_after_attempt.strip(),
+                "restore_postcondition": "candidate-policy.txt after restore: " + target.read_text(encoding="utf-8").strip(),
+                "detected": False,
+                "note": "The test was GREEN, but the mutation was never established.",
+            }],
+            "out_of_scope": [],
+            "risk": "A GREEN test without an established mutation is not mutation evidence.",
+        }
+        intake = subprocess.run(
+            [sys.executable, str(HERE / "org_cycle.py"), "intake", "--issue", "2",
+             "--role", "skeptic", "--report", "-"],
+            cwd=root, input=json.dumps(report, ensure_ascii=False), capture_output=True, text=True,
+            timeout=30)
+        rejection = intake.stdout + intake.stderr
+        expected_marker = str(expected["rejection_marker"])
+        assertions = {
+            "test_was_green": test_green,
+            "mutation_was_not_applied": not mutation_applied,
+            "production_intake_rejected": intake.returncode == expected["intake_returncode"],
+            "rejection_identifies_missing_mutation_establishment": expected_marker in rejection,
+            "safe_stop_is_acceptable": expected["outcome"] in scenario["acceptable_outcomes"],
+        }
+        gaps = [name for name, passed in assertions.items() if not passed]
+        return {
+            "scenario": scenario["id"], "exercise_status": "GREEN" if not gaps else "RED",
+            "assertions": assertions, "gaps": gaps, "expected_gaps": expected.get("gaps") or [],
+            "test": {"receipt": test_receipt, "green": test_green},
+            "mutation": {"target": str(target), "applied": mutation_applied,
+                         "observed_after_attempt": observed_after_attempt.strip()},
+            "intake": {"returncode": intake.returncode, "rejection": rejection},
+            "outcome": {"observed": expected["outcome"], "acceptable": True},
+            "potentials": scenario["potentials"], "human_judgment": scenario["human_judgment"],
+            "resilience_score": None, "blast_radius": scenario["blast_radius"],
+        }
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="resilience-exercise")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -347,13 +445,18 @@ def main(argv=None):
     run.add_argument("--scenario", default=str(DEFAULT_SCENARIO))
     run.add_argument("--expect", choices=("RED", "GREEN"))
     run.add_argument("--json", action="store_true")
+    false_green = sub.add_parser("false-green-mutation")
+    false_green.add_argument("--scenario", default=str(DEFAULT_FALSE_GREEN_SCENARIO))
+    false_green.add_argument("--expect", choices=("RED", "GREEN"))
+    false_green.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
     if args.command == "_fake-dependency":
         return _fake_dependency(args)
     try:
-        report = run_reviewer_outage(args.scenario)
+        report = (run_reviewer_outage(args.scenario) if args.command == "reviewer-outage"
+                  else run_false_green_mutation(args.scenario))
     except ExerciseError as exc:
-        report = {"scenario": "reviewer-outage-minimal", "exercise_status": "INVALID",
+        report = {"scenario": args.command, "exercise_status": "INVALID",
                   "error": str(exc), "resilience_score": None}
     print(json.dumps(report, ensure_ascii=False, sort_keys=True,
                      indent=None if args.json else 2))
