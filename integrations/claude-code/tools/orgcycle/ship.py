@@ -19,6 +19,7 @@ from ._core import (
     _raw,
     _refutation_for,
     _repo,
+    issue_worktree_head,
     local_branch_for,
     resolve_integration_base,
 )
@@ -33,8 +34,22 @@ def _resolve_integration_branch(issue, requested=None):
     sole ``feat/issue-N[-…]`` candidate, but ambiguity and local/tracking divergence always stop.
     A tracking-only ref is diagnostic, not a merge target: without a local branch we cannot know
     whether the last fetch is fresh, so the operator must fetch/checkout explicitly.
+
+    Implicit resolution (no ``requested``) consults the Issue worktree FIRST (#107): the worktree's
+    HEAD branch is authoritative even when it does not match the `feat/issue-N*` convention — a
+    retitle + re-run of begin cuts a fresh slug branch while the real work sits in the old
+    worktree, and admitting only conventional names would merge that stray branch's unreviewed
+    content with exit 0. If both the worktree's branch and a conventional candidate exist and
+    disagree, we STOP and name both — auto-picking either would hide the split-brain.
     """
     derived = requested or _branch_for(issue)
+    # #107: 明示 --branch が無いときは worktree の実 HEAD が最優先の統合対象。導出名は
+    # 作成規約であって恒久 identity ではない — 規約名しか候補に入れないと、worktree の
+    # 非規約 branch が捨てられ、迷子の `feat/issue-N-*` が sole candidate として
+    # **未レビューのまま warning 無しで merge される**（skeptic の反証で実証）。
+    wt_head = None if requested else issue_worktree_head(issue)
+    if wt_head:
+        derived = wt_head
     prefix = f"feat/issue-{issue}"
     requested_logical = derived[len("origin/"):] if derived.startswith("origin/") else derived
     code, out = _raw([
@@ -48,7 +63,8 @@ def _resolve_integration_branch(issue, requested=None):
 
     def add(logical, ref, available):
         is_issue_candidate = logical == prefix or logical.startswith(prefix + "-")
-        if not is_issue_candidate and not (requested and logical == requested_logical):
+        if not is_issue_candidate and not ((requested or wt_head)
+                                           and logical == requested_logical):
             return
         entry = entries.setdefault(logical, {"local": None, "tracking": None})
         if available == "local":
@@ -92,6 +108,18 @@ def _resolve_integration_branch(issue, requested=None):
                                 "`git fetch --prune origin` と checkout を行い、"
                                 "local branch として内容を確認してから統合すること。")
         return None, None, None
+
+    if wt_head:
+        # 実 HEAD と規約名の候補が両方存在して食い違うなら、**選ばずに止める**（#107 rework）。
+        # どちらかを黙って選ぶと、片方の内容が未レビューのまま消えるか merge される。
+        strays = [n for n in sorted(entries)
+                  if n != requested_logical and (n == prefix or n.startswith(prefix + "-"))]
+        if strays:
+            return None, None, (
+                f"worktree .orgforge/wt/issue-{issue} の実 branch {wt_head} と、規約名の候補 "
+                f"{', '.join(strays)} が両方存在して食い違う。どちらが統合対象かは判定しない — "
+                f"中身を確認して --branch で明示すること（迷子の規約名 branch なら "
+                f"`git branch -D` で片付けてから再実行する）。")
 
     exact_ref, exact_sha, exact_error = resolve(requested_logical)
     if exact_error:

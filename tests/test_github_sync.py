@@ -275,9 +275,33 @@ def test_log_is_idempotent_when_event_already_logged(monkeypatch):
 
 
 # ── ready: tasks by default, objectives excluded ─────────────────────────────
-def test_branch_name_is_deterministic_and_off_develop(monkeypatch):
+def _git_org(tmp_path, name="r"):
+    """query-mode の branch 解決（#107）が実物の git を見るための最小 repo。"""
+    import subprocess
+    repo = tmp_path / name
+    repo.mkdir()
+
+    def g(*a, cwd=repo):
+        return subprocess.run(["git", *a], cwd=cwd, capture_output=True, text=True)
+
+    g("init", "-q", "-b", "main")
+    g("config", "user.email", "t@t")
+    g("config", "user.name", "t")
+    (repo / "s.txt").write_text("s", encoding="utf-8")
+    g("add", "-A")
+    g("commit", "-qm", "seed")
+    g("update-ref", "refs/remotes/origin/main", "main")
+    return repo, g
+
+
+def test_branch_name_is_deterministic_and_off_develop(tmp_path, monkeypatch):
+    # (c) no worktree + the derived name EXISTS as a real branch → it is reported (#107:
+    # query mode answers with a branch that exists, never with an unverified derivation).
     fake = FakeGh(replies={"issue view": (0, '{"title": "Add login endpoint"}')})
     monkeypatch.setattr(GS, "gh", fake)
+    repo, g = _git_org(tmp_path)
+    g("branch", "feat/issue-42-add-login-endpoint")
+    monkeypatch.chdir(repo)
     import io, contextlib
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
@@ -286,19 +310,53 @@ def test_branch_name_is_deterministic_and_off_develop(monkeypatch):
     assert buf.getvalue().strip() == "feat/issue-42-add-login-endpoint"
 
 
-def test_branch_japanese_title_falls_back_to_stable_hash(monkeypatch):
-    # a Japanese task title (output_language: ja) must NOT collapse to an empty/meaningless slug
-    fake = FakeGh(replies={"issue view": (0, '{"title": "領域A: 認証 + プロジェクト"}')})
-    monkeypatch.setattr(GS, "gh", fake)
-    import io, contextlib
-    out = []
-    for _ in range(2):
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            GS.cmd_branch(_ns(repo="o/r", issue=6, create=False, base=None))
-        out.append(buf.getvalue().strip())
+def test_branch_japanese_title_falls_back_to_stable_hash():
+    # a Japanese task title (output_language: ja) must NOT collapse to an empty/meaningless slug.
+    # Determinism lives in the pure derivation (issue, title) → name; the query command now
+    # additionally verifies existence (#107), tested separately below.
+    out = [GS.derived_branch_name(6, "領域A: 認証 + プロジェクト") for _ in range(2)]
     assert out[0] == out[1], "same Issue must yield the same branch (reproducible)"
     assert out[0].startswith("feat/issue-6-t") and len(out[0]) > len("feat/issue-6-"), out[0]
+
+
+def test_derived_branch_name_empty_title_is_genuinely_slugless():
+    """#107 rework (3a): タイトル不明の導出は本当に slug 無し。「slug を省く」と告知しながら
+    空文字の hash（te3b0c442…）を付けた幻の名前を出さない。"""
+    assert GS.derived_branch_name(9, "") == "feat/issue-9"
+
+
+def test_branch_query_reports_worktree_head_not_stale_derived_name(tmp_path, monkeypatch, capsys):
+    """#107 (a)(b) Tatekae shape: the Issue worktree's HEAD is `feat/issue-15-login-redirect`
+    but the title now derives `feat/issue-15-google` → query mode reports the REAL branch and
+    warns about the mismatch instead of silently printing a branch that does not exist."""
+    fake = FakeGh(replies={"issue view": (0, '{"title": "Google"}')})
+    monkeypatch.setattr(GS, "gh", fake)
+    repo, g = _git_org(tmp_path)
+    wt = repo / ".orgforge" / "wt" / "issue-15"
+    g("worktree", "add", "-q", "-b", "feat/issue-15-login-redirect", str(wt), "main")
+    monkeypatch.chdir(repo)
+    rc = GS.cmd_branch(_ns(repo="o/r", issue=15, create=False, base=None))
+    cap = capsys.readouterr()
+    assert rc == 0
+    assert cap.out.strip() == "feat/issue-15-login-redirect", \
+        f"worktree の実 HEAD ではなく導出名を報告した: {cap.out!r}"
+    assert "feat/issue-15-google" in cap.err and "feat/issue-15-login-redirect" in cap.err, \
+        f"導出名と実在名の不一致が警告されていない: {cap.err!r}"
+
+
+def test_branch_query_fails_closed_when_derived_branch_missing(tmp_path, monkeypatch, capsys):
+    """#107 (d) no worktree and the derived name is NOT a real branch → non-zero, and the
+    message names the derived name and how to fix (never silently trust a non-existent name)."""
+    fake = FakeGh(replies={"issue view": (0, '{"title": "Add login endpoint"}')})
+    monkeypatch.setattr(GS, "gh", fake)
+    repo, _ = _git_org(tmp_path)
+    monkeypatch.chdir(repo)
+    rc = GS.cmd_branch(_ns(repo="o/r", issue=42, create=False, base=None))
+    cap = capsys.readouterr()
+    assert rc != 0, "実在しない導出名を成功として印字した"
+    assert "feat/issue-42-add-login-endpoint" in cap.err, \
+        f"どの導出名が実在しないのか名指ししていない: {cap.err!r}"
+    assert "--worktree" in cap.err, f"直し方が書かれていない: {cap.err!r}"
 
 
 def test_slug_helper_distinct_titles_differ():
