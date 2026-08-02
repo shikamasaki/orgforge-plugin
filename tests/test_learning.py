@@ -136,3 +136,151 @@ def test_same_string_other_records_still_detected(tmp_path):
              {"candidate_id": cid, "cause": "同じ死因", "root": "other"}, ts=ts)
     code, out = run("learning.py", "repeats", str(tmp_path))
     assert code == 10 and "REPEATED DEATH" in out, out
+
+
+# ═══ REWORK #2（skeptic指摘: 修正が休眠 — 本番の書き手が root を運べない）═══════════
+import argparse
+import importlib
+import os
+import subprocess
+
+
+def _mod(name):
+    if str(TOOLS) not in sys.path:
+        sys.path.insert(0, str(TOOLS))
+    return importlib.import_module(name)
+
+
+# ── 変更1a: org_cycle rework が --root を台帳 payload まで運ぶ ─────────────────────
+def test_org_cycle_rework_carries_root_into_payload(monkeypatch):
+    m = _mod("orgcycle.judge")
+    calls = []
+    monkeypatch.setattr(m, "_gh_sync", lambda *a: (calls.append(("gh",) + a) or (0, "ok")))
+    monkeypatch.setattr(m, "_ledger", lambda *a: (calls.append(("ledger",) + a) or (0, "ok")))
+    ns = argparse.Namespace(issue=32, after="refuted", by="supervisor",
+                            reason="placebo テストを直す", to="maker", round=2,
+                            root="placebo_test")
+    assert m.cmd_rework(ns) == 0
+    led = [c for c in calls if c[0] == "ledger"][0]
+    payload = json.loads(led[led.index("--payload") + 1])
+    assert payload.get("root") == "placebo_test", payload
+
+
+def test_org_cycle_rework_rejects_unknown_root(monkeypatch, capsys):
+    m = _mod("orgcycle.judge")
+    calls = []
+    monkeypatch.setattr(m, "_gh_sync", lambda *a: (calls.append(("gh",) + a) or (0, "ok")))
+    monkeypatch.setattr(m, "_ledger", lambda *a: (calls.append(("ledger",) + a) or (0, "ok")))
+    ns = argparse.Namespace(issue=32, after="refuted", by="supervisor",
+                            reason="x", to="maker", round=2, root="totally_made_up_root")
+    rc = m.cmd_rework(ns)
+    out = capsys.readouterr()
+    assert rc == 2, f"未知の root が拒否されなかった (rc={rc})"
+    assert not calls, "拒否したのに副作用（gh/ledger）が走った"
+    assert "placebo_test" in out.err + out.out, "許される値の一覧が出ていない"
+
+
+def test_org_cycle_rework_help_offers_root():
+    p = subprocess.run([sys.executable, str(TOOLS / "org_cycle.py"), "rework", "--help"],
+                       capture_output=True, text=True, timeout=60)
+    assert p.returncode == 0 and "--root" in p.stdout, p.stdout + p.stderr
+
+
+# ── 変更1b: github_sync decide が --root を台帳 payload まで運ぶ ────────────────────
+def _decide_ns(**kw):
+    base = dict(repo="o/r", issue=5, event="refutation_attempted", verdict="refuted",
+                why="スケルトンの検査は fixture 経由で本番経路を迂回しており、性質が壊れる場所を測っていない。",
+                by="skeptic", phase=None, evidence=None, alternatives=None,
+                standard=None, risk=None, event_id="ev-r1", lineage=None,
+                claimed=None, verified=None, root=None)
+    base.update(kw)
+    return argparse.Namespace(**base)
+
+
+def _fake_gh(posted):
+    def gh(args, check=True):
+        if args[:2] == ["issue", "view"]:
+            return 0, json.dumps({"comments": [{"body": b} for b in posted]})
+        if args[:2] == ["issue", "comment"]:
+            posted.append(args[args.index("--body") + 1])
+            return 0, "ok"
+        return 0, ""
+    return gh
+
+
+def test_github_sync_decide_carries_root_into_payload(monkeypatch, tmp_path):
+    rec = _mod("ghsync.record")
+    posted = []
+    monkeypatch.setattr(rec, "gh", _fake_gh(posted))
+    led = tmp_path / "led"
+    monkeypatch.setenv("ORG_LEDGER_ROOT", str(led))
+    rc = rec.cmd_decide(_decide_ns(root="placebo_test"))
+    assert rc == 0, rc
+    rows = [json.loads(l) for l in
+            (led / "ledger.jsonl").read_text(encoding="utf-8").splitlines() if l]
+    ev = [r for r in rows if r["class"] == "refutation_attempted"][-1]
+    assert ev["payload"].get("root") == "placebo_test", ev["payload"]
+
+
+def test_github_sync_decide_rejects_unknown_root(monkeypatch, tmp_path, capsys):
+    rec = _mod("ghsync.record")
+    posted = []
+    monkeypatch.setattr(rec, "gh", _fake_gh(posted))
+    led = tmp_path / "led"
+    monkeypatch.setenv("ORG_LEDGER_ROOT", str(led))
+    rc = rec.cmd_decide(_decide_ns(root="totally_made_up_root"))
+    out = capsys.readouterr()
+    assert rc == 2, f"未知の root が拒否されなかった (rc={rc})"
+    assert not posted and not (led / "ledger.jsonl").exists(), \
+        "拒否したのに Issue / 台帳に書いた"
+    assert "placebo_test" in out.err + out.out, "許される値の一覧が出ていない"
+
+
+def test_github_sync_decide_help_offers_root():
+    p = subprocess.run([sys.executable, str(TOOLS / "github_sync.py"), "decide", "--help"],
+                       capture_output=True, text=True, timeout=60)
+    assert p.returncode == 0 and "--root" in p.stdout, p.stdout + p.stderr
+
+
+# ── 変更2 (M4): 移行期でも限界警告は消えない（unclassified >= 1 で出す）──────────────
+def test_limitation_warning_survives_migration_mix(tmp_path):
+    """skeptic lab2: 分類済み1 + 未分類1（根は同じだが片方に root が無い）→ clean のまま
+    だが、文字列一致の限界警告は**出続けなければならない**。移行期に警告が消えると、
+    未分類の1件が同根の再発でも黙って clean に見える。"""
+    seed(tmp_path, "gate", "result_retired",
+         {"candidate_id": "A", "cause": "検査が本番経路を測っていない",
+          "root": "placebo_test"}, ts="2026-07-16T01:00:00Z")
+    seed(tmp_path, "gate", "result_retired",
+         {"candidate_id": "B", "cause": "テスト硬化（同じ根、root 無し）"},
+         ts="2026-07-16T02:00:00Z")
+    code, out = run("learning.py", "repeats", str(tmp_path))
+    assert code == 0 and "clean" in out, out
+    assert "注意" in out and "文字列" in out, \
+        f"移行期（未分類1件）で限界警告が消えた: {out}"
+
+
+# ── 変更3 (M5): 語彙の外の root で再発を捏造しない（旧 schema 経由でしか書けない値）────
+def test_unknown_root_string_does_not_fabricate_recurrence(tmp_path):
+    """skeptic lab4: enum の無い旧 schema（main 相当）の下でだけ書ける未知の root 文字列は、
+    root グループを形成してはならない — 無関係な死2件が `totally_made_up_root` を共有する
+    だけで「根は同じ」と escalate するのは再発の捏造。文字列一致にフォールバックする。"""
+    old_schema = tmp_path / "old-schema.yaml"
+    # main（#104 以前）の形: result_retired は宣言されているが root の enum が無い
+    old_schema.write_text(
+        "event_classes:\n"
+        "  result_retired: {candidate_id, cause, observed_outcome, root}\n"
+        "validation: {}\n", encoding="utf-8")
+    env = {**os.environ, "ORG_LEDGER_SCHEMA": str(old_schema)}
+    for cid, cause, ts in (("A", "依存ライセンス問題", "2026-07-16T01:00:00Z"),
+                           ("B", "顧客要件の撤回", "2026-07-16T02:00:00Z")):
+        p = subprocess.run(
+            [sys.executable, str(TOOLS / "ledger.py"), "append", str(tmp_path),
+             "--actor", "gate", "--class", "result_retired", "--ts", ts,
+             "--payload", json.dumps({"candidate_id": cid, "cause": cause,
+                                      "root": "totally_made_up_root"})],
+            capture_output=True, text=True, timeout=60, env=env)
+        assert p.returncode == 0, p.stdout + p.stderr
+    code, out = run("learning.py", "repeats", str(tmp_path))
+    assert code == 0 and "clean" in out, \
+        f"語彙に無い root 文字列の共有だけで再発を escalate した: {out}"
+    assert "REPEATED DEATH" not in out

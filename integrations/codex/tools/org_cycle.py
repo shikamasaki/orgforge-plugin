@@ -110,6 +110,10 @@ def main(argv):
     q.add_argument("--reason", required=True, help="maker に直させることを1行で")
     q.add_argument("--round", default="1", help="何周目か（冪等キーに入る）")
     q.add_argument("--to", help="誰に発注したか")
+    q.add_argument("--root", help="死因の根の分類（learning.py DEATH_ROOTS: placebo_test / "
+                                  "declaration_drift / integration_base_moved / "
+                                  "self_written_premise / other）— 再発検出は root の一致で"
+                                  "数える（Issue #104）")
 
     q = sub.add_parser("record", help="済んだ判定を遡って台帳に記録する（backfill 印が付く）")
     q.add_argument("--issue", required=True, type=int)

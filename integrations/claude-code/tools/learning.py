@@ -146,7 +146,10 @@ def cmd_repeats(a):
         # ことは何も記録されていない。root グループにすると、無関係な死2件を「文言は
         # 違っても根は同じ」と escalate する（意味一致の捏造。gate が実測で検出）。
         # `other` は **マーカー付きの未分類** として文字列一致にフォールバックする。
-        if root and root != "other":
+        # 同じ理由で **語彙（DEATH_ROOTS）の外の文字列も root グループにしない** —
+        # enum の無い旧 schema 経由でしか書けない値で、共有していても根の同一性は
+        # 何も記録されていない（skeptic が実測で検出）。文字列一致に落とす。
+        if root and root != "other" and root in DEATH_ROOTS:
             classified += 1
             key = ("root", root)
         elif cause:
@@ -180,7 +183,10 @@ def cmd_repeats(a):
             # 見えていない未分類の件数を分けて言う（両者の保証は同じではない）。
             print(f"  判定基準: 根分類（root）{classified} 件 / 文字列完全一致（root 未分類）"
                   f"{unclassified} 件。")
-        if unclassified >= a.recurrence:
+        if unclassified >= 1:
+            # **移行期でも警告は消えない**（unclassified が1件でも出す）。分類済みが増えて
+            # 未分類が recurrence 未満に減った途端に警告が消えると、残った未分類の1件が
+            # 同根の再発でも黙って clean に見える（skeptic が実測で検出）。
             # root の無い記録は完全一致でしか繰り返しを見ない。実地では「端数の偏り」と
             # 「テスト硬化」という別々の文言で記録された2件が、根は同じ（性質が壊れる場所を
             # 検証していない）だった。clean を「同じ失敗をしていない」証明として読ませない

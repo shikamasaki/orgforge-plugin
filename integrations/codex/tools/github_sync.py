@@ -193,6 +193,10 @@ def main(argv):
     q.add_argument("--alternatives", help="the options considered and why they were rejected")
     q.add_argument("--standard", help="the acceptance standard applied (the bar, not a vibe)")
     q.add_argument("--risk", help="a known risk knowingly accepted by this decision")
+    q.add_argument("--root", help="死因の根の分類（learning.py DEATH_ROOTS: placebo_test / "
+                                  "declaration_drift / integration_base_moved / "
+                                  "self_written_premise / other）— reject/refuted の記録に"
+                                  "付けると再発検出が根で数えられる（Issue #104）")
     q.add_argument("--event-id", dest="event_id", help="the ledger event's id — keys the idempotent dedup")
     q = sub.add_parser("branch")
     q.add_argument("--repo", help="owner/name（省略時は git remote origin から自動発見）"); q.add_argument("--issue", required=True, type=int)

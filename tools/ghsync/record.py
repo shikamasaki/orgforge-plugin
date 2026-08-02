@@ -966,6 +966,19 @@ def cmd_decide(a):
     payload = {"verdict": a.verdict, "deliverable": str(a.issue), "issue": a.issue,
                "reasoning_sha256": digest,
         **({"lineage": a.lineage} if getattr(a, "lineage", None) else {})}
+    # 死因の根の分類（Issue #104）。再発検出（learning.py repeats）は root の一致で数える —
+    # 記録時に分類されなければ、同根の失敗が別の言葉で書かれるだけで検出器を素通りする。
+    # 語彙は learning.DEATH_ROOTS が単一の情報源（schema の enum とはテストが突き合わせる）。
+    root = (getattr(a, "root", None) or "").strip()
+    if root:
+        sys.path.insert(0, HERE)
+        from learning import DEATH_ROOTS
+        if root not in DEATH_ROOTS:
+            print(f"decide: --root {root!r} は死因の根の語彙に無い。許される値:\n"
+                  + "\n".join(f"  {k:<24}{v}" for k, v in DEATH_ROOTS.items()),
+                  file=sys.stderr)
+            return 2
+        payload["root"] = root
     if getattr(a, "phase", None):
         payload["phase"] = a.phase
     if getattr(a, "risk", None):
