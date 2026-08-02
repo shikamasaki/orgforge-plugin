@@ -6,6 +6,16 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 2.0.30 — idempotent skeptic joints
+
+### Fixed
+
+- Apply joint-admission idempotency to the event being derived instead of hard-coding only
+  `admission_decided`, preventing repeated `refutation_attempted` derivations from duplicating the
+  same two-lineage skeptic decision.
+- Preserve new joints for a different review subject and permit re-derivation after the prior joint
+  has been explicitly voided.
+
 ## 2.0.29 — evidence-based env examples
 
 ### Fixed
