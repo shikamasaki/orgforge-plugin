@@ -143,7 +143,7 @@ def _events_for(issue):
     try:
         sys.path.insert(0, HERE)
         from discover import ledger_root
-        from ledger import corrected_seqs
+        from ledger import voided_seqs
         root = ledger_root()
     except Exception:
         return [], set()
@@ -156,7 +156,7 @@ def _events_for(issue):
             evs.append(json.loads(line))
         except Exception:
             continue
-    voided = corrected_seqs(evs)
+    voided = voided_seqs(evs)
     want = str(issue).lstrip("#")
     mine = []
     for e in evs:

@@ -211,12 +211,12 @@ def cmd_status(a):
     # 残り続け、rework 中の成果物を「admit 済み」と数える。運用では admit → reject の順で
     # 記録されたのに board が RED を出し続けた。台帳は追記型なので、
     # 「一度でも admit があった」と「いま admit されている」は別物。
-    # correction{kind: probe|mistake} で無効化された記録は数えない。実地では仕様検証の
-    # 検証用のプローブが実判定として board に出ていた（RED が出続けた直接の原因）。
+    # correction{effect:voids} で無効化された記録は数えない。kind を organ ごとに解釈すると
+    # status と derive-admission が同じ台帳から違う現在値を作る（OBS-042）。
     try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        from ledger import corrected_seqs
-        voided = corrected_seqs(events)
+        from ledger import voided_seqs
+        voided = voided_seqs(events)
     except Exception:
         voided = set()
 
@@ -254,7 +254,25 @@ def cmd_status(a):
     refutes = {str((e.get("payload", {}) or {}).get("issue") or
                    (e.get("payload", {}) or {}).get("claim_id") or
                    (e.get("payload", {}) or {}).get("deliverable") or "")
-               for e in events if e["class"] == "refutation_attempted"}
+               for e in events if e["class"] == "refutation_attempted"
+               and e.get("seq") not in voided}
+    # In a strict cross-harness org, a negative verdict is recorded provisionally before any joint
+    # event exists.  Calling that "no skeptic record" is observably false.  It is not a positive
+    # joint decision either, so surface the pending rework/materialization as AMBER.
+    provisional_refutes = {
+        str((e.get("payload", {}) or {}).get("issue") or
+            (e.get("payload", {}) or {}).get("claim_id") or
+            (e.get("payload", {}) or {}).get("deliverable") or "")
+        for e in events
+        if e["class"] == "verdict_provisional" and e.get("seq") not in voided
+        and (e.get("payload", {}) or {}).get("role") == "skeptic"
+        and (e.get("payload", {}) or {}).get("for_event") == "refutation_attempted"
+        and (e.get("payload", {}) or {}).get("verdict") == "refuted"
+    }
+    provisional_refutes.discard("")
+    pending_refuted = sorted(admits & provisional_refutes - refutes)
+    for issue in pending_refuted[:5]:
+        amber.append(f"#{issue} skeptic が refuted — joint記録またはrework反映待ち")
     # reject されたまま放置されているものは board に出す。RED（あなたを待っている）ではなく
     # AMBER（回っているが見ておくこと）— 差し戻しは正常な過程であって障害ではない。
     # ただし黙って消えると、rework が止まっていることに誰も気づかない。
@@ -281,7 +299,7 @@ def cmd_status(a):
             amber.append(f"#{k} rework 待ち" + (f" — {reason}" if reason else ""))
         amber.append("詳細は `org_cycle.py show --issue N`")
 
-    unrefuted = {a for a in admits if a and a not in refutes}
+    unrefuted = {a for a in admits if a and a not in refutes and a not in provisional_refutes}
     if unrefuted:
         red.append(f"admit 済みだが skeptic の記録が無い: {len(unrefuted)} 件"
                    f"（{', '.join('#' + x for x in sorted(unrefuted)[:5])}）— "

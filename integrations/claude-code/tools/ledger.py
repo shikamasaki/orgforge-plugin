@@ -154,15 +154,11 @@ def _same_work(pa, pb, hist=None):
 
 
 def corrected_seqs(events, kinds=("probe", "mistake")):
-    """`correction` で無効化された seq の集合。
+    """Return correction targets selected by an explicit legacy ``kind`` query.
 
-    追記型なので過去は消せない。「これは実判定ではない」を機械が読める形で宣言するのが
-    correction で、status / learning はこれを見て除外する。自由記述の note では読めず、
-    実地ではプローブ4件が実判定として数えられ board が現実と食い違った。
-
-    既定では probe / mistake だけを除外する — backfill は「後から書いた実判定」であって
-    無効ではないし、superseded は最新判定の解決（時系列）が扱う領域なので、ここで消すと
-    二重に効いてしまう。
+    This compatibility helper answers a narrow historical question and intentionally keeps its
+    probe/mistake default.  Consumers projecting current truth must use :func:`voided_seqs` instead;
+    otherwise each organ invents a different list of correction kinds (OBS-042).
     """
     out = set()
     for e in events:
@@ -174,6 +170,45 @@ def corrected_seqs(events, kinds=("probe", "mistake")):
         for s in (pl.get("corrects") or []):
             try:
                 out.add(int(s))
+            except (TypeError, ValueError):
+                continue
+    return out
+
+
+def voided_seqs(events):
+    """Return every sequence whose correction has the authoritative ``voids`` effect.
+
+    Since v2.0.23 the writer derives ``effect`` from the correction kind and schema-validates it.
+    Older ledgers have no effect field, so replay maps the historical voiding kinds to the same
+    meaning.  An explicit effect wins over the legacy fallback; ``records_backfill`` never erases
+    the target.  This is the single effective-event projection shared by status, admission,
+    integration, drift, and budget accounting.
+    """
+    # Corrections are themselves correctable. Evaluate newest-to-oldest so a later active
+    # correction can disable an earlier correction before that earlier event affects its target.
+    # This also makes a correction-of-a-correction genuinely reversible instead of merely adding
+    # another inert row to the append-only log.
+    def event_sequence(event):
+        try:
+            return int(event.get("seq", 0))
+        except (TypeError, ValueError):
+            return 0
+
+    out = set()
+    for event in sorted(events, key=event_sequence, reverse=True):
+        if event.get("class") != "correction":
+            continue
+        if event_sequence(event) in out:
+            continue
+        payload = event.get("payload", {}) or {}
+        effect = payload.get("effect")
+        is_voiding = effect == "voids" or (
+            effect is None and payload.get("kind") in VOIDING_CORRECTION_KINDS)
+        if not is_voiding:
+            continue
+        for target_sequence in payload.get("corrects") or []:
+            try:
+                out.add(int(target_sequence))
             except (TypeError, ValueError):
                 continue
     return out
@@ -2455,7 +2490,7 @@ def cmd_reserve_exposure(a):
         # **writer が数える。** caller の申告は受け取らない。
         voided = set()
         try:
-            voided = set(corrected_seqs(hist))
+            voided = set(voided_seqs(hist))
         except Exception:
             pass
         committed = 0.0
@@ -2945,7 +2980,7 @@ def cmd_derive_admission(a):
             print(json.dumps({"ok": False, "reason": "ledger_unreadable", "detail": str(e)},
                              ensure_ascii=False))
             return 4
-        voided = set(corrected_seqs(evs)) | set(corrected_seqs(evs, kinds=("superseded",)))
+        voided = set(voided_seqs(evs))
         found = {}
         for e in evs:
             if e.get("class") != "verdict_provisional" or e.get("seq") in voided:

@@ -94,3 +94,43 @@ def test_risk_accepted_admit_not_counted_after_reject(tmp_path):
     ])
     out = _status(led).stdout
     assert "リスク付き admit" not in out, out
+
+
+def test_voiding_superseded_correction_removes_admit_from_redline(tmp_path):
+    """The effective-event projection must honor the writer's effect, not a local kind list."""
+    led = _write_ledger(tmp_path, "superseded-effect", [
+        {"seq": 1, "class": "admission_decided",
+         "payload": {"issue": 63, "verdict": "admit"}},
+        {"seq": 2, "class": "correction",
+         "payload": {"corrects": [1], "kind": "superseded", "effect": "voids",
+                     "reason": "skeptic refuted the admitted revision"}},
+    ])
+    out = _status(led).stdout
+    assert "skeptic の記録が無い" not in out, out
+
+
+def test_legacy_superseded_correction_remains_voiding_after_schema_migration(tmp_path):
+    """A v2.0.22 ledger has no effect field and must not regain a superseded admission."""
+    led = _write_ledger(tmp_path, "legacy-superseded", [
+        {"seq": 1, "class": "admission_decided",
+         "payload": {"issue": 63, "verdict": "admit"}},
+        {"seq": 2, "class": "correction",
+         "payload": {"corrects": [1], "kind": "superseded", "reason": "legacy correction"}},
+    ])
+    out = _status(led).stdout
+    assert "skeptic の記録が無い" not in out, out
+
+
+def test_provisional_skeptic_refutation_is_not_reported_as_missing(tmp_path):
+    """One strict cross-harness negative is evidence, even before a joint event exists."""
+    led = _write_ledger(tmp_path, "provisional-refuted", [
+        {"seq": 1, "class": "admission_decided",
+         "payload": {"issue": 63, "verdict": "admit"}},
+        {"seq": 2, "class": "verdict_provisional",
+         "payload": {"issue": 63, "role": "skeptic", "lineage": "cross-harness",
+                     "verdict": "refuted", "for_event": "refutation_attempted",
+                     "review_subject_id": "subject-63", "reasoning_sha256": "digest-63"}},
+    ])
+    out = _status(led).stdout
+    assert "skeptic の記録が無い" not in out, out
+    assert "skeptic が refuted" in out, out

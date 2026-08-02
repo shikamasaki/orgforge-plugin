@@ -67,7 +67,7 @@ def _sh(cmd):
 def _ledger_rejections(window_days):
     """台帳から (issue, class, verdict, actor, ts) を集める。訂正済みは数えない。"""
     from discover import ledger_root
-    from ledger import corrected_seqs
+    from ledger import voided_seqs
     root = ledger_root()
     path = os.path.join(root, "ledger.jsonl") if root else None
     if not path or not os.path.isfile(path):
@@ -79,7 +79,7 @@ def _ledger_rejections(window_days):
             evs.append(json.loads(line))
         except Exception:
             continue
-    voided = corrected_seqs(evs)
+    voided = voided_seqs(evs)
     out = []
     for e in evs:
         if e.get("seq") in voided:
