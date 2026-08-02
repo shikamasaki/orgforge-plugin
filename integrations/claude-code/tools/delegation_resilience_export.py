@@ -208,6 +208,28 @@ def export(*, report_path: Path, constitution_path: Path, scenario_path: Path,
         shutil.copytree(child_output, output)
 
 
+def export_assurance_graph(*, lock_path: Path, output: Path) -> None:
+    """Fail closed until DR publishes a locked Assurance Graph profile.
+
+    The fixed v0alpha2 commit has assurance-model prose and a transactional-action profile, but
+    no machine-readable Assurance Graph schema or verifier contract. Emitting an OrgForge graph
+    would invent DR semantics and could be mistaken for a verified artifact. Only a future
+    consumer-held lock entry naming both the schema and verifier may enable this path.
+    """
+    if output.exists():
+        raise ExportError("graph output must not already exist")
+    lock = _json(lock_path.read_bytes(), "adapter lock")
+    if lock.get("apiVersion") != "orgforge.delegation-resilience-adapter/v1":
+        raise ExportError("unknown adapter lock version")
+    graph = lock.get("assuranceGraph")
+    if not isinstance(graph, dict) or not graph.get("schemaRef") or not graph.get("verifierCodeDigest"):
+        raise ExportError(
+            "DR v0alpha2 lock declares no Assurance Graph schema/verifier contract; "
+            "graph export is unavailable and no artifact was emitted"
+        )
+    raise ExportError("Assurance Graph export contract is not implemented for this lock")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
@@ -217,12 +239,17 @@ def main() -> int:
     child = sub.add_parser("run-dr")
     for name in ("archive-root", "exercise-report", "constitution", "scenario", "mapping", "output"):
         child.add_argument(f"--{name}", required=True, type=Path)
+    graph = sub.add_parser("graph")
+    graph.add_argument("--lock", required=True, type=Path)
+    graph.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
     try:
         if args.command == "run-dr":
             _run_dr_child(archive_root=args.archive_root, report_path=args.exercise_report,
                           constitution_path=args.constitution, scenario_path=args.scenario,
                           mapping_path=args.mapping, output=args.output)
+        elif args.command == "graph":
+            export_assurance_graph(lock_path=args.lock, output=args.output)
         else:
             export(report_path=args.exercise_report, constitution_path=args.constitution,
                    scenario_path=args.scenario, lock_path=args.lock, dr_root=args.dr_root, output=args.output)

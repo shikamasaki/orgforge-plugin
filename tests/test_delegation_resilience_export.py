@@ -86,6 +86,13 @@ def _export(source: Path, output: Path, *, lock: Path = LOCK,
     )
 
 
+def _graph(output: Path, *, lock: Path = LOCK) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(EXPORTER), "graph", "--lock", str(lock), "--output", str(output)],
+        cwd=REPO, text=True, capture_output=True, timeout=30,
+    )
+
+
 def _verify(packet: Path) -> bytes:
     verifier = packet / "standalone-verifier" / "tools" / "verify_bundle.py"
     lock_data = json.loads(LOCK.read_text())
@@ -219,6 +226,17 @@ def test_export_ignores_ignored_module_shadow(tmp_path):
     _assert_locked_archive_output(source, tmp_path / "output", tmp_path)
 
 
+def test_export_ignores_stale_pycache(tmp_path):
+    source, _ = _source(tmp_path)
+    clone = _clone_dr(tmp_path)
+    cache = clone / "tools" / "__pycache__"
+    cache.mkdir()
+    (cache / "data_loading.cpython-312.pyc").write_bytes(b"stale shadow bytecode")
+    run = _export(source, tmp_path / "output", dr_root=clone)
+    assert run.returncode == 0, run.stderr
+    _assert_locked_archive_output(source, tmp_path / "output", tmp_path)
+
+
 def test_export_rejects_code_digest_mismatch(tmp_path):
     source, _ = _source(tmp_path)
     lock = tmp_path / "lock.json"
@@ -235,6 +253,25 @@ def test_export_rejects_non_strict_json(tmp_path, raw):
     (source / "exercise-report.json").write_bytes(raw)
     run = _export(source, tmp_path / "output")
     assert run.returncode != 0
+
+
+def test_graph_export_fails_closed_until_dr_declares_graph_schema(tmp_path):
+    run = _graph(tmp_path / "graph")
+    assert run.returncode != 0
+    assert "no Assurance Graph schema/verifier contract" in run.stderr
+    assert not (tmp_path / "graph").exists()
+
+
+def test_graph_lock_requires_consumer_held_schema_and_verifier_digest(tmp_path):
+    lock = tmp_path / "lock.json"
+    lock_data = json.loads(LOCK.read_text())
+    lock_data["assuranceGraph"] = {"schemaRef": "dr://graph/v0alpha2",
+                                    "verifierCodeDigest": "sha256:" + "0" * 64}
+    lock.write_text(json.dumps(lock_data, sort_keys=True), encoding="utf-8")
+    run = _graph(tmp_path / "graph", lock=lock)
+    assert run.returncode != 0
+    assert "not implemented for this lock" in run.stderr
+    assert not (tmp_path / "graph").exists()
 
 
 def test_archive_extraction_rejects_path_traversal(tmp_path):
