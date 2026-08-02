@@ -6,6 +6,17 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 2.0.32 — atomic hold guidance
+
+### Fixed
+
+- State explicitly that a Bash/exec call held by PreToolUse never started: its preparation,
+  mutation, and verification segments are all unexecuted, not partially successful.
+- Give the governed GitHub and integration routes a three-call preparation → mutation → verification
+  example, while retaining fail-closed handling for compound mutations.
+- Keep non-shell tool messages atomic to their own tool call, rather than implying shell-segment
+  semantics for Write/Edit-style inputs.
+
 ## 2.0.31 — governed Issue-body repair
 
 ### Fixed

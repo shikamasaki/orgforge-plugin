@@ -834,6 +834,8 @@ def _integration_bypass(tool_name, ti):
             f"    python3 \"{oc}\" integrate --issue <N>          # 前提を確認して統合する\n"
             f"  `integrate` は前提が無ければ exit 4 で止まり、マージ手順に入らない。"
             f"統合後のテスト・`integration_admitted` の記録・Issue への log もまとめて行う。\n"
+            f"  準備・統合・確認は別々の Bash/exec call に分ける（例: 準備だけ → "
+            f"`org_cycle integrate` だけ → `git status`/CI確認だけ）。\n"
             f"  **意図的に手で統合する場合**は `ORG_ALLOW_MANUAL_MERGE=1` を付けること。"
             f"その宣言は台帳に `bypass_declared` として残る — 塞げないことを記録する形にしてある。")
 
@@ -1043,6 +1045,8 @@ def _gh_bypass(tool_name, ti):
                 f"起票が objective に紐づかず、`cycle_completed` の `domain_model` が飛ぶ"
                 f"（すべて運用で起きた）。\n"
                 f"  読み取り（`gh issue view` / `gh issue list`）は止めていない。"
+                f"準備・mutation・確認は別々の Bash/exec call に分ける（例: 本文を準備して"
+                f"確認する → 上の organ command だけ → `gh issue view <N>` だけ）。"
                 f"手で書き換えるなら同じ Bash 呼び出しで "
                 f"`ORG_ALLOW_MANUAL_GH=1 gh issue …` と宣言すること。"
                 f"1呼び出し1 mutation とし、複数件は個別に実行する（台帳に1対1で残る）。")
@@ -1078,6 +1082,23 @@ _SHELL_TOOLS = ("bash", "shell", "terminal", "sh", "zsh")
 
 def _is_shell_tool(tool_name):
     return str(tool_name or "").strip().lower() in _SHELL_TOOLS
+
+
+def _held_call_atomicity(tool_name):
+    """State precisely what a PreToolUse hold did (and did not) execute.
+
+    A Bash/exec hook runs before the shell starts.  Saying only that its final mutation was held
+    led operators to assume an earlier temporary-file or preparation command had succeeded, then
+    to feed nonexistent/empty data to the next call.  Non-shell tools are atomic at this boundary,
+    so do not incorrectly describe their input as a shell command sequence.
+    """
+    if _is_shell_tool(tool_name):
+        return ("\n\n  **この Bash/exec 呼び出しは PreToolUse が実行前に止めたため、"
+                "前段・後段を含む全コマンドが未実行です。** 準備、mutation、確認は"
+                "別々の tool call に分けてください。")
+    return (f"\n\n  **この {tool_name or 'tool'} 呼び出しは実行前に止めたため、"
+            "この tool call 自体は未実行です。** Bash のような前段・後段のコマンド列を"
+            "部分実行した、とは解釈しません。")
 
 
 def _command_text(ti):
@@ -2012,7 +2033,8 @@ def main():
     else:
         byp = _integration_bypass(tool_name, tool_input)
         if byp:
-            _deny(f"org guardrail HELD this {tool_name}: {byp}")
+            _deny(f"org guardrail HELD this {tool_name}: {byp}"
+                  f"{_held_call_atomicity(tool_name)}")
 
     # 同じ形で、organ を通さない Issue の書き換えも hold する
     if (os.environ.get("ORG_ALLOW_MANUAL_GH") == "1"
@@ -2029,7 +2051,8 @@ def main():
     else:
         ghb = _gh_bypass(tool_name, tool_input)
         if ghb:
-            _deny(f"org guardrail HELD this {tool_name}: {ghb}")
+            _deny(f"org guardrail HELD this {tool_name}: {ghb}"
+                  f"{_held_call_atomicity(tool_name)}")
 
     # **HALT の検査。** 台帳を要する他の検査より前に置く — 止まっている org では、
     # cap の予約を試すことにも意味が無い（そして予約は台帳に書く＝止まっているのに書く）。

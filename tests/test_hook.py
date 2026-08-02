@@ -514,6 +514,18 @@ def _org_repo(tmp_path, branch="develop"):
     return repo
 
 
+def _pretooluse(repo, command, *, tool_name="Bash", env_extra=None):
+    """Run the real hook without running the command it is asked to judge."""
+    env = dict(os.environ, ORG_TOOLS_DIR=str(TOOLS))
+    if env_extra:
+        env.update(env_extra)
+    event = {"hook_event_name": "PreToolUse", "session_id": "atomicity-test",
+             "tool_use_id": f"toolu_atomicity{_next_tu():04d}", "tool_name": tool_name,
+             "tool_input": {"command": command}, "cwd": str(repo)}
+    return subprocess.run([sys.executable, str(HOOK)], input=json.dumps(event),
+                          capture_output=True, text=True, env=env, cwd=str(repo))
+
+
 def test_direct_merge_into_a_protected_branch_is_held(tmp_path, monkeypatch):
     """`integrate` は呼ばれなければ何も検査しない。
 
@@ -706,6 +718,42 @@ def test_manual_issue_writes_are_held(tmp_path, monkeypatch):
         r = h._gh_bypass("Bash", {"command": cmd})
         assert r is not None, f"organ の外の Issue 書き換えが通った: {cmd}"
         assert "github_sync" in r or "org_cycle" in r, "打つべきコマンドが示されていない"
+
+
+def test_held_bash_call_states_that_every_segment_was_not_run(tmp_path):
+    """PreToolUse denies before Bash starts, not after it reaches the forbidden segment."""
+    repo = _org_repo(tmp_path, "develop")
+    result = _pretooluse(repo, "printf prepared > scratch.txt; gh issue create --title x")
+    output = result.stdout + result.stderr
+    assert result.returncode == 2, output
+    assert "前段・後段を含む全コマンドが未実行" in output
+    assert "別々の tool call" in output
+
+
+def test_declared_manual_mutation_with_a_later_read_is_whole_call_held(tmp_path):
+    """A one-shot bypass cannot let a later read create a misleading partial-success narrative."""
+    repo = _org_repo(tmp_path, "develop")
+    result = _pretooluse(
+        repo, "ORG_ALLOW_MANUAL_GH=1 gh issue close 42; gh issue view 42")
+    output = result.stdout + result.stderr
+    assert result.returncode == 2, output
+    assert "前段・後段を含む全コマンドが未実行" in output
+    assert "1呼び出し1 mutation" in output
+
+
+def test_non_shell_tool_does_not_interpret_command_text_as_an_executed_sequence(tmp_path):
+    """Documentation mentioning a forbidden command in Write input is not a Bash mutation."""
+    h = _hook()
+    repo = _org_repo(tmp_path, "develop")
+    old_cwd = os.getcwd()
+    try:
+        os.chdir(repo)
+        assert h._gh_bypass("Write", {"command": "example: gh issue create --title x"}) is None
+        note = h._held_call_atomicity("Write")
+    finally:
+        os.chdir(old_cwd)
+    assert "tool call 自体は未実行" in note
+    assert "全コマンドが未実行" not in note
 
 
 def test_quoted_cat_heredoc_body_is_data_not_an_executed_command(tmp_path, monkeypatch):
