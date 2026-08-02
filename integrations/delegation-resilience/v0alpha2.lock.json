@@ -1,0 +1,10 @@
+{
+  "apiVersion": "orgforge.delegation-resilience-adapter/v1",
+  "mappingVersion": "orgforge-reviewer-outage/v0alpha1",
+  "delegationResilience": {
+    "repository": "https://github.com/shikamasaki/delegation-resilience.git",
+    "tag": "v0alpha2",
+    "tagObject": "22f7a4c8dad78114e6a6bf3732836dec39f294f9",
+    "commit": "67960e093217d6d2512b1d55d5d9afba658198f8"
+  }
+}
