@@ -21,6 +21,17 @@ from ._core import (
 
 
 STAGES = ("ready", "in-progress", "blocked", "needs-human", "done")
+
+# PARKED は「仕事として存在するが、いま着手させない」の機械可読な語彙。Tatekae で
+# `[PARKED]` というタイトル散文しか手段が無く、`ready` が止めた仕事を maker に渡した
+# （OBS-051 / Issue #103）。ラベルは park/unpark が ensure する（label-ensure list の一部）。
+PARKED_LABEL = "orgforge:parked"
+PARKED_COLOR = "ededed"
+
+# ready 名簿から外す「着手不能」状態。`orgforge:ready` と同居していても（rework 中や
+# ラベル片寄せ漏れ）、こちらが立っている Issue は startable ではない。
+_NON_STARTABLE_LABELS = (PARKED_LABEL, "orgforge:in-progress", "orgforge:blocked",
+                         "orgforge:needs-human")
 _PLACEHOLDER_BODIES = frozenset({"(no body)", "no body", "tbd", "todo", "placeholder",
                                  "n/a", "none", "x", ".", "..."})
 
@@ -61,14 +72,80 @@ def _composed_body(a):
     parent = getattr(a, "parent", None)
     if parent:
         body += f"\n\nParent: #{str(parent).lstrip('#')}"
+    dep_refs = []
     depends = getattr(a, "depends", None)
     if depends:
-        deps = ", ".join(f"#{d.strip().lstrip('#')}" for d in depends.split(",") if d.strip())
+        dep_refs += [d.strip().lstrip("#") for d in depends.split(",") if d.strip()]
+    # carve-out 経路: rework 中に範囲外発見を切り出した Issue は、例外なく元 Issue に依存する
+    # （部品は元の worktree にしか無い）。散文に任せると ready が見えない（Issue #103）。
+    carved = getattr(a, "carved_from", None)
+    if carved:
+        dep_refs.append(str(carved).strip().lstrip("#"))
+    if dep_refs:
+        deps = ", ".join(f"#{d}" for d in dict.fromkeys(dep_refs))
         body += f"\n\nDepends on: {deps}"
     priority = getattr(a, "priority", None)
     if priority is not None:
         body += f"\n\npriority: {priority} (computed by attention.py — a projection, do not hand-edit)"
     return body
+
+
+# `Depends on:` 行の見出し。正書法は `Depends on: #n, #m`（_composed_body が書く形）だが、
+# 人間は markdown 装飾（**強調**・リスト・引用）、`Depends-on`/`depends_on`、コロン前の空白を
+# 付けて書く — 実地で全部観測された（#103 rework 2）。読みは寛容に、書きは正書法のまま。
+_DEP_HEADER = re.compile(r"^[>*_\s•-]*depends[\s_-]*on\s*:\s*(.*)$", re.I)
+
+
+def _depends_refs(body):
+    """body の全 Depends-on 行から機械可読な Issue 参照（`#N`、および裸の番号 token）を集める。
+
+    参照は `#(\\d+)` で回収する — 注釈付き token（`#63 (main 未統合)`）や and 連結を黙って
+    捨てない。**捨てた結果が OBS-051 の再現だった**（skeptic の refutation, #103 rework 2）:
+    docs が指示する手書きの行に人間が注釈を足しただけで、ready が依存ゼロ扱いにした。
+    参照が1つも無い行（`Depends on: none`）は「依存なし」の明示宣言 — 静かに通す。"""
+    refs = []
+    for line in str(body or "").splitlines():
+        m = _DEP_HEADER.match(line)
+        if not m:
+            continue
+        rest = m.group(1)
+        line_refs = re.findall(r"#(\d+)", rest)
+        for tok in rest.split(","):
+            tok = tok.strip().strip("*_` ")
+            if re.fullmatch(r"\d+", tok):
+                line_refs.append(tok)   # 裸の番号 token（`Depends on: 63`）も従来どおり受理
+        refs += line_refs
+    return list(dict.fromkeys(refs))
+
+
+# GitHub の closing keyword（Fixes/Closes/Resolves #N）は「閉じる先」の参照であって依存ではない。
+# これを prose-WARN の引き金にすると偽陽性が operator に警告を読み飛ばす訓練をさせる。
+_CLOSING_REF = re.compile(r"\b(?:clos(?:e[sd]?)|fix(?:e[sd])?|resolv(?:e[sd]?))\s*:?\s*#(\d+)", re.I)
+
+
+def _prose_dependency_warning(a):
+    """Body が他 Issue を `#N` で参照しているのに `Depends on:` 行が無いときの警告文（無ければ None）。
+
+    Tatekae の実測（OBS-051）: carve-out された4 Issue すべてが依存を本文の散文にしか書いておらず、
+    `ready` は散文を読まないので着手不能な仕事が maker に渡った。散文を自動で依存に解釈は**しない**
+    — 推測は警告より悪い（`#63 を置き換える` は依存ではない）。人間に見える形で大声で言うだけ。"""
+    raw = _normalized_body(getattr(a, "body", None))
+    closing = set(_CLOSING_REF.findall(raw))
+    refs = [r for r in dict.fromkeys(re.findall(r"#(\d+)", raw)) if r not in closing]
+    if not refs:
+        return None
+    # 宣言があれば黙る — ただし宣言とは**参照を運ぶ**宣言のこと。`Depends on: none` は
+    # 「依存なし」の明示であって、散文が #63 を語っているならその矛盾こそ表に出す。
+    declared = bool(getattr(a, "depends", None)) or bool(getattr(a, "carved_from", None)) or \
+        bool(_depends_refs(raw))
+    if declared:
+        return None
+    listed = ", ".join(f"#{r}" for r in refs)
+    return (f"WARN: the body references {listed} but declares NO `Depends on:` line. `ready` reads "
+            f"only `Depends on:` lines — a dependency written in prose is invisible, and a maker can "
+            f"be handed unstartable work (Issue #103). If any of {listed} gates this task, re-run "
+            f"with --depends or --carved-from; prose is NOT auto-parsed into dependencies "
+            f"(guessing is worse than warning).")
 
 
 def _issue_state(repo, issue):
@@ -137,6 +214,9 @@ def cmd_create(a):
               f"the context another session needs to act; pass a non-placeholder --body.",
               file=sys.stderr)
         return 2
+    prose_warning = _prose_dependency_warning(a)
+    if prose_warning:
+        print(prose_warning, file=sys.stderr)
     body = _composed_body(a)
     # idempotency (docs/11 §0): if an open Issue with this title (+objective) already exists, this is a
     # replay only when the body is also the same. Title equality must not silently discard context.
@@ -314,7 +394,7 @@ def cmd_stage(a):
 
 
 def cmd_ready(a):
-    # list open Issues labeled orgforge:ready, unclaimed, with no open dependency
+    # list open Issues labeled orgforge:ready, unclaimed, not parked/in-progress, no open dependency
     code, out = gh(["issue", "list", "--repo", a.repo, "--label", "orgforge:ready",
                     "--state", "open", "--json", "number,title,labels,body"])
     if code != 0:
@@ -327,10 +407,19 @@ def cmd_ready(a):
         return 2
     kind = getattr(a, "kind", None) or "task"   # default: only TASKS are workable ready items
     ready = []
+    # 依存の状態が**確認できなかった**せいで withhold した Issue。空の ready と「gh が半分
+    # 死んでいて確認できない」を同じ {"ready": []} にすると、org は原因の観測手段なく黙って
+    # 止まる — この Issue が潰しに来た machine-invisible-state と同じ類（#103 rework）。
+    withheld_unverifiable = []
     for it in issues:
         names = [l["name"] for l in it.get("labels", [])]
         if any(n.startswith(CLAIM_PREFIX) for n in names):
             continue   # already claimed
+        # parked / in-progress / blocked / needs-human are all NOT startable, even when the Issue
+        # still carries a stale orgforge:ready (rework that never went through `stage`). Tatekae:
+        # a 7-round-reworked, integration-waiting Issue was listed as untouched (Issue #103).
+        if any(n in _NON_STARTABLE_LABELS for n in names):
+            continue
         # kind filter: an objective Issue is a parent/roll-up, not a claimable unit of work. Default to
         # tasks; pass --kind objective to list objectives, or --kind any for both.
         if kind != "any":
@@ -338,21 +427,110 @@ def cmd_ready(a):
                             if n.startswith("orgforge:kind:")), "task")
             if it_kind != kind:
                 continue
-        # dependency: parse "Depends on: #n, #m"; ready only if all referenced issues are closed
-        body = it.get("body") or ""
-        deps = []
-        for line in body.splitlines():
-            if line.lower().startswith("depends on:"):
-                deps = [t.strip().lstrip("#") for t in line.split(":", 1)[1].split(",") if t.strip()]
+        # dependency: parse EVERY Depends-on line (a body can carry several — carve-out plus
+        # needs-human each append one; the old parser kept only the LAST line, Issue #103) and
+        # EVERY ref on each line — an annotated token (`#63 (main 未統合)`) or an and-joined pair
+        # must not be silently dropped (skeptic refutation, #103 rework 2). Ready only if all
+        # referenced issues are verifiably CLOSED — an unverifiable dependency withholds too:
+        # "state unknown" is not proof of startability. A line with zero refs (`Depends on: none`)
+        # is an explicit no-dep declaration: silent, no queries.
         blocked = False
-        for d in deps:
-            c, o = gh(["issue", "view", d, "--repo", a.repo, "--json", "state"])
-            if c == 0 and json.loads(o).get("state") == "OPEN":
-                blocked = True
-                break
+        for num in _depends_refs(it.get("body") or ""):
+            c, o = gh(["issue", "view", num, "--repo", a.repo, "--json", "state"])
+            state = None
+            if c == 0:
+                try:
+                    state = str(json.loads(o).get("state") or "").upper()
+                except Exception:
+                    state = None
+            if state == "CLOSED":
+                continue
+            blocked = True
+            if state == "OPEN":
+                # 健全な withhold — 警報ではないが、**観測はできる形で**残す。空の ready と
+                # 「依存待ちで空」を stderr で区別できないと、org は原因の観測手段なく止まる。
+                print(f"withheld: issue #{it['number']} waits on open dependency #{num}",
+                      file=sys.stderr)
+            else:
+                # OPEN でも CLOSED でもない = 「確認できなかった」。startable の証明が無いので
+                # 渡さないが、gh の劣化と「仕事なし」を区別できるよう警報として外に出す。
+                withheld_unverifiable.append(it["number"])
+                print(f"WARN: issue #{it['number']} withheld from ready — dependency #{num} could "
+                      f"not be verified ({o.strip()[:80] or 'unparseable state'}). Unknown is not "
+                      f"proof of startability; if gh is degraded, ready is UNDERREPORTING, not "
+                      f"empty (Issue #103).", file=sys.stderr)
+            break
         if not blocked:
             ready.append(it["number"])
-    print(json.dumps({"ready": ready}))
+    print(json.dumps({"ready": ready, "withheld_unverifiable": withheld_unverifiable}))
+    return 0
+
+
+def cmd_park(a):
+    """Issue を PARKED にする — 機械可読なラベルで（タイトル散文 `[PARKED]` の置き換え、Issue #103）。
+
+    parked は「仕事として存在するが、いま着手させない」。`ready` はこのラベルを見て除外する。
+    --why は Issue にコメントとして残す — 止めた理由が散文のまま消えると、誰も解除できなくなる。"""
+    labels, err = issue_labels(a.repo, a.issue)
+    if labels is None:
+        print(f"gh error: {err}", file=sys.stderr)
+        return 2
+    why = _normalized_body(getattr(a, "why", None))
+    if PARKED_LABEL in labels:
+        # ラベルは冪等 no-op でよいが、--why を黙って捨ててはいけない — 理由こそ、後で
+        # unpark する側が要る部分（#103 rework の gate residual）。
+        if why:
+            code, out = gh(["issue", "comment", str(a.issue), "--repo", a.repo,
+                            "--body", f"⏸️ **Still parked** — reason updated.\n\nwhy: {why}"])
+            if code != 0:
+                print(f"WARN: issue #{a.issue} is already parked, and the new --why could not be "
+                      f"recorded: {out.strip()[:120]}", file=sys.stderr)
+                return 10
+            print(f"issue #{a.issue} is already parked; new why recorded as a comment.")
+            return 0
+        print(f"issue #{a.issue} is already parked; idempotent no-op.")
+        return 0
+    _ensure_labels(a.repo, [(PARKED_LABEL, PARKED_COLOR)])
+    code, out = gh(["issue", "edit", str(a.issue), "--repo", a.repo, "--add-label", PARKED_LABEL])
+    if code != 0:
+        print(f"gh error parking: {out}", file=sys.stderr)
+        return 2
+    if why:
+        comment = (f"⏸️ **Parked** — excluded from `ready` until `github_sync park`'s counterpart "
+                   f"`unpark` removes `{PARKED_LABEL}`.\n\nwhy: {why}")
+        code, out = gh(["issue", "comment", str(a.issue), "--repo", a.repo, "--body", comment])
+        if code != 0:
+            print(f"WARN: issue #{a.issue} IS parked (label applied) but the why-comment failed: "
+                  f"{out.strip()[:120]} — re-run with --why to record it.", file=sys.stderr)
+            return 10
+        print(f"issue #{a.issue} parked; why recorded as a comment.")
+    else:
+        print(f"issue #{a.issue} parked (no --why given — a reason makes unparking decidable later).")
+    return 0
+
+
+def cmd_unpark(a):
+    """PARKED を解除して Issue を通常の backlog 判定に戻す（`ready` から再び見える）。"""
+    labels, err = issue_labels(a.repo, a.issue)
+    if labels is None:
+        print(f"gh error: {err}", file=sys.stderr)
+        return 2
+    if PARKED_LABEL not in labels:
+        print(f"issue #{a.issue} is not parked; idempotent no-op.")
+        return 0
+    code, out = gh(["issue", "edit", str(a.issue), "--repo", a.repo, "--remove-label", PARKED_LABEL])
+    if code != 0:
+        print(f"gh error unparking: {out}", file=sys.stderr)
+        return 2
+    why = _normalized_body(getattr(a, "why", None))
+    if why:
+        code, out = gh(["issue", "comment", str(a.issue), "--repo", a.repo,
+                        "--body", f"▶️ **Unparked** — back in `ready`'s view.\n\nwhy: {why}"])
+        if code != 0:
+            print(f"WARN: issue #{a.issue} IS unparked but the why-comment failed: "
+                  f"{out.strip()[:120]}", file=sys.stderr)
+            return 10
+    print(f"issue #{a.issue} unparked.")
     return 0
 
 

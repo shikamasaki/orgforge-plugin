@@ -154,8 +154,9 @@ python3 "${CLAUDE_PLUGIN_ROOT}/tools/github_sync.py" needs-human \
 ```
 
 `--blocks` を書いたら、**その下流 Issue の body に `Depends on: #<この Issue 番号>` を追記する**
-こと。そうして初めて `ready` が人間待ちを依存として解釈し、ブロックされた task を maker に
-渡さなくなる。
+こと（正書法はこの literal — 参照の後ろに注釈を足すのは許容されるが、依存は必ず `#番号` の形で。
+散文だけの依存は `ready` に見えない、Issue #103）。そうして初めて `ready` が人間待ちを依存として
+解釈し、ブロックされた task を maker に渡さなくなる。
 
 5. **REPORT UP for CEO review.** Summarize concisely: the must/should/nice counts, the layers +
    seams, the roles you defined, the **coverage manifest** (every must-have → its one owning role +

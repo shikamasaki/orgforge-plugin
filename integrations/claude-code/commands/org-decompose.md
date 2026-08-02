@@ -173,6 +173,16 @@ appends a `Depends on: #N` line that `github_sync ready` parses to decide whethe
 reads. Omit `--depends` and a blocked task will be handed to a maker as ready; omit the SPEC line and the
 maker gets no idea what they're waiting on.
 
+`ready` が受理する literal は **`Depends on: #N[, #M]`**（`--depends`/`--carved-from` が書く正書法）。
+読み取りは寛容で、見出しの markdown 装飾（`**Depends on:**`・リスト・引用）、`Depends-on`/`depends_on`、
+コロン前の空白、**参照の後ろの注釈**（例 `Depends on: #63 (main 未統合)`）は許容される。
+`Depends on: none` は「依存なし」の明示宣言。ただし依存は必ず `#番号` の形で書くこと —
+散文だけの依存は `ready` に見えない（Issue #103 / OBS-051）。
+
+**rework 中に「これは #N の範囲外」を切り出して Issue にするときは `create --carved-from <元 Issue 番号>`
+を使うこと。** carve out 先は元 Issue に依存する — 例外なく（部品は元の worktree にしか無い）。
+`--carved-from` が `Depends on: #N` を自動付与し、元が閉じるまで `ready` が maker に渡さない。
+
 Then shape-check each new Issue — it warns (exit 10) when a task is too coarse (`owns` spanning
 territories), depends on something still open, or has non-EARS acceptance:
 
@@ -210,8 +220,9 @@ python3 "${CLAUDE_PLUGIN_ROOT}/tools/github_sync.py" needs-human \
 ```
 
 `--blocks` を書いたら、**その下流 Issue の body に `Depends on: #<この Issue 番号>` を追記する**
-こと。そうして初めて `ready` が人間待ちを依存として解釈し、ブロックされた task を maker に
-渡さなくなる。
+こと（正書法はこの literal — 参照の後ろに注釈を足すのは許容されるが、依存は必ず `#番号` の形で。
+散文だけの依存は `ready` に見えない、Issue #103）。そうして初めて `ready` が人間待ちを依存として
+解釈し、ブロックされた task を maker に渡さなくなる。
 
 ## 5. The coverage gate — prove no must-have was dropped
 
