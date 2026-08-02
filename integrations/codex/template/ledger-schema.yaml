@@ -166,6 +166,22 @@ validation:
       verdict: [admit, reject, park]
     refutation_attempted:
       verdict: [refuted, survives]
+      # 死因の「根」の分類（Issue #104 / OBS-052）。再発検出（learning.py repeats）は
+      # 文字列完全一致では同根の言い換えを素通りするため、**記録時に閉じた語彙で分類**する。
+      # 語彙は tools/learning.py の DEATH_ROOTS と同一でなければならない（テストが突き合わせる）:
+      #   placebo_test           検査が本番経路を測っていない（テスト硬化・placebo テスト）
+      #   declaration_drift      宣言と実装が乖離した
+      #   integration_base_moved 統合先が動いて前提が崩れた
+      #   self_written_premise   検査される当事者が検査の前提を書ける
+      #   other                  上記のどれでもない（自由文 cause で根を補足すること）
+      root: [placebo_test, declaration_drift, integration_base_moved,
+             self_written_premise, other]
+    result_retired:
+      root: [placebo_test, declaration_drift, integration_base_moved,
+             self_written_premise, other]
+    rework_requested:
+      root: [placebo_test, declaration_drift, integration_base_moved,
+             self_written_premise, other]
     correction:
       kind:    [probe, mistake, backfill, superseded]
       effect:  [voids, records_backfill]
@@ -267,7 +283,8 @@ event_classes:
   design_decided:       { issue, deliverable, verdict, reasoning_sha256 }
   rework_requested:     { issue, deliverable, verdict, reasoning_sha256, phase, role,
                           candidate_id, requester, evidence_ref, reason, from_verdict, to_role,
-                          risk_accepted }
+                          risk_accepted,
+                          root: "死因の根の分類（validation.enums 参照、任意）— Issue #104" }
   scope_decided:        { issue, deliverable, verdict, reasoning_sha256, phase, in_scope,
                           out_of_scope, reason }
   tradeoff_decided:     { issue, deliverable, verdict, reasoning_sha256, chosen, rejected, reason }
@@ -425,6 +442,7 @@ event_classes:
                           distinct_actor: "actor != the actor of cycle_started/cycle_completed for this candidate" }
   refutation_attempted: { skeptic, claim_id, verdict: refuted|survives, checklist_ref, issue,
                           reasoning_sha256, lineage,
+                          root: "死因の根の分類（validation.enums 参照、任意、refuted のとき）— Issue #104",
                           distinct_actor: "actor != the maker's and != the admitting gate's" }
   # ── 判断の receipt（H1）─────────────────────────────────────────────────────
   # judge が自分の判断に署名したもの。**監督はこれを運ぶだけ**で、判断者の identity は失われない。
@@ -512,7 +530,10 @@ event_classes:
   # observed_outcome: the realized result the organs diff against predicted_outcome (docs/05 §5.4).
   result_deployed:      { candidate_id, net_effect_ref, observed_outcome,
                           requires_prior: "refutation_attempted{claim_id==candidate_id, verdict==survives}" }
-  result_retired:       { candidate_id, cause, observed_outcome }
+  result_retired:       { candidate_id, cause, observed_outcome,
+                          root: "死因の根の分類（validation.enums 参照、任意）。自由文 cause の
+                                 言い換えを再発検出（learning.py repeats）が素通りしないための
+                                 記録時分類（Issue #104 / OBS-052）" }
   # structure (Organ 7 / moves)
   sensor_reading:       { sensor, value, window, inputs_ref }
   move_executed:        { move_id, tier, diff_ref, precondition_evidence: [sensor_reading.id], lint_report_ref }

@@ -30,6 +30,19 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _organ import ESCALATE, OK, read_events, emit_event   # noqa: E402
 
+# ── 死因の「根」の分類語彙（closed vocabulary、Issue #104 / OBS-052）────────────────
+# 実地（Tatekae）では、同じ根の失敗が別の言葉で記録され、文字列完全一致の検出器が
+# 3回連続で clean を出した。**自由文の意味一致を機械に推測させない** — 記録する側が
+# 記録時に分類する。語彙は ledger-schema.yaml validation.enums の `root` と同一で
+# なければならない（tests/test_learning.py が突き合わせる）。
+DEATH_ROOTS = {
+    "placebo_test":          "検査が本番経路を測っていない（テスト硬化・placebo テスト）",
+    "declaration_drift":     "宣言と実装が乖離した",
+    "integration_base_moved": "統合先が動いて前提が崩れた",
+    "self_written_premise":  "検査される当事者が検査の前提を書ける",
+    "other":                 "上記のどれでもない（自由文 cause で根を補足すること）",
+}
+
 
 def cmd_delta(a):
     events = read_events(a.root)
@@ -97,37 +110,49 @@ def cmd_repeats(a):
     on a LATER candidate, the org failed to feed its own lesson forward — it re-made a mistake it had
     already recorded (the org's core purpose, missed). This escalates a cause that recurs >= --recurrence
     times, naming the deaths, so "learning lifts quality" is a checked fact, not a hope. Silent when every
-    death cause is distinct (no lesson was ignored)."""
+    death cause is distinct (no lesson was ignored).
+
+    再発は記録時の根分類 `root`（DEATH_ROOTS）で数え、root の無いレガシー記録だけ文字列完全一致に
+    フォールバックする（Issue #104: 完全一致は同根の言い換えを素通りした）。"""
     events = read_events(a.root)
-    by_cause = {}
+    by_key = {}
     # 「死因」を運ぶフィールドは書き手によって揺れる。以前は `cause` しか読まず、
     # rework_requested は対象ですらなかったため、**同じ失敗を3回した org に対して
     # 「学習が使われている」と報告した**。検出器が読むキーは、実際に書かれるキーに合わせる。
     _CAUSE_KEYS = ("cause", "hypothesized_cause", "reason", "why", "checklist_ref")
     _DEATH_CLASSES = ("result_retired", "rework_requested", "refutation_attempted")
 
-    def _cause_of(e, p):
-        if e["class"] == "refutation_attempted" and p.get("verdict") != "refuted":
-            return None      # survives は死ではない
+    def _cause_text_of(p):
         for k in _CAUSE_KEYS:
             v = p.get(k)
             if v and str(v).strip():
                 return v
         return None
 
-    readable = 0
+    # 再発は **記録時の根分類（`root`、DEATH_ROOTS）** で数える。文字列一致は、root の無い
+    # レガシー記録への後方互換フォールバック（Issue #104: 完全一致は同根の言い換えを素通りした）。
+    classified = 0        # root が付いた死
+    unclassified = 0      # 自由文しか無い死（文字列完全一致でしか見えない）
     for e in events:
         p = e.get("payload", {})
         if e["class"] not in _DEATH_CLASSES:
             continue
-        cause = _cause_of(e, p)
-        if cause:
-            readable += 1
-        if cause:
-            key = str(cause).strip().lower()
-            by_cause.setdefault(key, []).append({"seq": e["seq"], "cause": cause,
-                                                 "candidate_id": p.get("candidate_id")})
-    repeated = {c: hits for c, hits in by_cause.items() if len(hits) >= a.recurrence}
+        if e["class"] == "refutation_attempted" and p.get("verdict") != "refuted":
+            continue      # survives は死ではない
+        root = p.get("root")
+        cause = _cause_text_of(p)
+        if root and str(root).strip():
+            classified += 1
+            key = ("root", str(root).strip())
+        elif cause:
+            unclassified += 1
+            key = ("cause", str(cause).strip().lower())
+        else:
+            continue      # 死因を読み取れない（下の unknown 分岐で数える）
+        by_key.setdefault(key, []).append({"seq": e["seq"], "cause": cause, "root": root or None,
+                                           "candidate_id": p.get("candidate_id")})
+    readable = classified + unclassified
+    repeated = {k: hits for k, hits in by_key.items() if len(hits) >= a.recurrence}
     deaths = sum(1 for e in events if e["class"] in _DEATH_CLASSES
                  and not (e["class"] == "refutation_attempted"
                           and e.get("payload", {}).get("verdict") != "refuted"))
@@ -138,31 +163,52 @@ def cmd_repeats(a):
             # 検出器が無いより悪い（実地でまさにこれが起きた）。
             print(f"unknown: {deaths} 件の差し戻し/反証があるが、死因を読み取れたものが0件。"
                   f"繰り返しの有無は判定できていない。\n"
-                  f"  payload に {' / '.join(_CAUSE_KEYS)} のいずれかで死因を書くこと。"
+                  f"  payload に {' / '.join(_CAUSE_KEYS)} のいずれかで死因を書き、あわせて "
+                  f"`root`（{'/'.join(DEATH_ROOTS)}）で根を分類すること。"
                   f"書かれていない限り、同じ失敗を何度繰り返してもこの検出器は気づけない。")
             return OK
         print(f"clean: no death cause recurred >= {a.recurrence} times — accumulated learning is being "
               f"used, no known mistake re-made. Silent."
               + (f" ({readable} 件の死因を読んだ)" if readable else ""))
-        if readable >= a.recurrence:
-            # 完全一致でしか繰り返しを見ない。実地では「端数の偏り」と「テスト硬化」という
-            # 別々の文言で記録された2件が、根は同じ（性質が壊れる場所を検証していない）だった。
-            # clean を「同じ失敗をしていない」証明として読ませないために、限界を明示する。
-            print(f"  注意: 一致は死因の**文字列**で見ている。同じ根の失敗が別の言葉で"
-                  f"書かれていれば、この検出器は素通りする。{readable} 件の死因を並べて"
-                  f"読み直す価値はある（`ledger.py view` / Issue のコメント）。")
+        if readable:
+            # clean の判定基準を明示する — root 分類で見た件数と、文字列一致でしか
+            # 見えていない未分類の件数を分けて言う（両者の保証は同じではない）。
+            print(f"  判定基準: 根分類（root）{classified} 件 / 文字列完全一致（root 未分類）"
+                  f"{unclassified} 件。")
+        if unclassified >= a.recurrence:
+            # root の無い記録は完全一致でしか繰り返しを見ない。実地では「端数の偏り」と
+            # 「テスト硬化」という別々の文言で記録された2件が、根は同じ（性質が壊れる場所を
+            # 検証していない）だった。clean を「同じ失敗をしていない」証明として読ませない
+            # ために、限界を明示する。
+            print(f"  注意: root 未分類の {unclassified} 件は死因の**文字列**でしか見ていない。"
+                  f"同じ根の失敗が別の言葉で書かれていれば、この検出器は素通りする。"
+                  f"並べて読み直し、`root`（{'/'.join(DEATH_ROOTS)}）を付けて記録し直す価値が"
+                  f"ある（`ledger.py view` / Issue のコメント）。")
         return OK
-    for cause, hits in sorted(repeated.items(), key=lambda kv: -len(kv[1])):
+    for key, hits in sorted(repeated.items(), key=lambda kv: -len(kv[1])):
         emit_event("repeated_death_detected", {
-            "cause": hits[0]["cause"], "occurrences": len(hits),
+            "cause": hits[0]["cause"] or hits[0]["root"], "occurrences": len(hits),
+            "root": hits[0]["root"], "basis": key[0],
             "candidate_ids": [h["candidate_id"] for h in hits]})
     worst = max(repeated.items(), key=lambda kv: len(kv[1]))
-    cause = worst[1][0]["cause"]
-    print(f"REPEATED DEATH: cause {cause!r} recurred {len(worst[1])} times "
-          f"(candidates {[h['candidate_id'] for h in worst[1]]}) — the org re-made a mistake it had "
-          f"already recorded. Accumulated learning was NOT fed forward; strengthen the death into "
-          f"doctrine and inject it before the next attempt (docs/06). This is the org's core purpose "
-          f"failing — escalate.", file=sys.stderr)
+    wkey, whits = worst
+    if wkey[0] == "root":
+        root = wkey[1]
+        cause = whits[0]["cause"] or DEATH_ROOTS.get(root, root)
+        wordings = sorted({str(h["cause"]) for h in whits if h["cause"]})
+        print(f"REPEATED DEATH: root {root!r}（{DEATH_ROOTS.get(root, '未知の分類')}）recurred "
+              f"{len(whits)} times (candidates {[h['candidate_id'] for h in whits]}) — 文言は"
+              f"違っても根は同じ: {wordings}. The org re-made a mistake it had already recorded. "
+              f"Accumulated learning was NOT fed forward; strengthen the death into doctrine and "
+              f"inject it before the next attempt (docs/06). This is the org's core purpose "
+              f"failing — escalate.", file=sys.stderr)
+    else:
+        cause = whits[0]["cause"]
+        print(f"REPEATED DEATH: cause {cause!r} recurred {len(whits)} times "
+              f"(candidates {[h['candidate_id'] for h in whits]}) — the org re-made a mistake it had "
+              f"already recorded. Accumulated learning was NOT fed forward; strengthen the death into "
+              f"doctrine and inject it before the next attempt (docs/06). This is the org's core purpose "
+              f"failing — escalate.", file=sys.stderr)
     # 「doctrine に強化せよ」と散文で言うだけでは強化されない。実地では検出も蓄積も配布も
     # 動かないまま同じ失敗を3回繰り返した。**打つべきコマンドを出す** — 経路が無い指示は、
     # 指示ではなく願望になる。何を doctrine にするか（文言・対象役割）は人が決める。
