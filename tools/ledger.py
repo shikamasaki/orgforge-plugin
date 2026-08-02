@@ -3298,24 +3298,46 @@ def cmd_view(a):
                          indent=2, ensure_ascii=False))
         return 0
     if a.view_id == "work_in_progress":
-        # RESOLVE (not raw rows): candidates started but not completed, each with its LATEST progress
+        # RESOLVE (not raw rows): candidates started but not FINISHED, each with its LATEST progress
         # checkpoint. This is the recovery source after a context wipe — the SessionStart hook and
         # /org-resume read it to answer "what was this role mid-way through, and what's the next step?"
-        started, completed, latest = {}, set(), {}
+        # "Finished" is any of (#102 / OBS-050 — cycle_completed alone leaks WIP slots forever):
+        #   - cycle_completed for the candidate;
+        #   - integration_admitted{verdict: pass} for the SAME WORK — the integrate step records
+        #     `issue`, not candidate_id, so correlate through the ledger's own alias bridge
+        #     (cycle_started.pack_manifest_id "issue-N" ↔ integration_admitted.issue);
+        #   - the cycle_started itself voided by a correction — voided_seqs, the single
+        #     effective-event projection derive-admission uses (OBS-042: no third semantics).
+        started, completed, latest, integrated = {}, set(), {}, []
         for e in events:
-            cid = e["payload"].get("candidate_id")
+            pl = e["payload"]
+            if e["class"] == "integration_admitted":
+                if str(pl.get("verdict", "")).strip().lower() in ("pass", "admit"):
+                    integrated.append(pl)
+                continue
+            cid = pl.get("candidate_id")
             if not cid:
                 continue
             if e["class"] == "cycle_started":
-                started[cid] = {"candidate_id": cid, "role": e["payload"].get("role"),
-                                "started_seq": e["seq"]}
+                started[cid] = {"candidate_id": cid, "role": pl.get("role"),
+                                "started_seq": e["seq"], "payload": pl}
             elif e["class"] == "cycle_completed":
                 completed.add(cid)
             elif e["class"] == "progress_recorded":
-                latest[cid] = {k: e["payload"].get(k) for k in
+                latest[cid] = {k: pl.get(k) for k in
                                ("fraction", "phase", "done_so_far", "next_step", "blocked_by", "artifacts")}
-        wip = [{**started[cid], "progress": latest.get(cid)}
-               for cid in started if cid not in completed]
+        voided = voided_seqs(events)
+        find = _work_aliases(events)
+        integrated_roots = {find(x) for p in integrated for x in _correlation_ids(p)}
+        wip = []
+        for cid, row in started.items():
+            if cid in completed or row["started_seq"] in voided:
+                continue
+            if {find(x) for x in (_correlation_ids(row["payload"]) | _alias_ids(row["payload"]))} \
+                    & integrated_roots:
+                continue
+            wip.append({"candidate_id": cid, "role": row["role"],
+                        "started_seq": row["started_seq"], "progress": latest.get(cid)})
         wip.sort(key=lambda w: w["started_seq"])
         print(json.dumps({"view": "work_in_progress", "in_progress": wip}, indent=2, ensure_ascii=False))
         return 0

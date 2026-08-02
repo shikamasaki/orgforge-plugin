@@ -659,7 +659,9 @@ views:
   parts_inventory:      { from: [admission_decided, result_retired], shape: admitted orthogonal components }
   combination_history:  { from: [candidate_submitted, admission_decided], shape: tried combinations and outcomes }
   open_experiments:     { from: [candidate_submitted, cycle_completed], shape: backlog awaiting execution }
-  work_in_progress:     { from: [cycle_started, progress_recorded, cycle_completed], shape: candidates STARTED but not yet completed, each with its latest progress checkpoint (how far / next step / blocker) — the recovery source after a context wipe (/org-resume) }
+  work_in_progress:     { from: [cycle_started, progress_recorded, cycle_completed,
+                                 candidate_submitted, integration_admitted, correction],
+                          shape: candidates STARTED but not yet finished — finished means cycle_completed, OR the same work integrated (integration_admitted verdict pass, correlated via candidate_id↔issue aliases), OR the start voided by a correction — each with its latest progress checkpoint (how far / next step / blocker); the recovery source after a context wipe (/org-resume). Without the integration/void arms an integrated candidate holds a WIP slot forever (OBS-050) }
   goal_state:           { from: [goal_started, goal_progressed, goal_paused,
                                  goal_blocker_observed, goal_blocked, goal_resumed,
                                  goal_completed, goal_host_synced],
