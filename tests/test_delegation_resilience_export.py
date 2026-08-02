@@ -255,7 +255,11 @@ def test_graph_export_ignores_checkout_shadowing(tmp_path, shadow):
         (clone / "tools" / "assurance_graph.py").with_name("assurance_graph_shadow.py").write_text(
             "raise RuntimeError('shadow')\n", encoding="utf-8")
     elif shadow == "ignored":
-        (clone / ".git" / "info" / "exclude").write_text("tools/ignored_graph.py\n", encoding="utf-8")
+        exclude = Path(subprocess.run(["git", "-C", str(clone), "rev-parse", "--git-path", "info/exclude"],
+                                      check=True, capture_output=True, text=True).stdout.strip())
+        if not exclude.is_absolute():
+            exclude = clone / exclude
+        exclude.write_text("tools/ignored_graph.py\n", encoding="utf-8")
         (clone / "tools" / "ignored_graph.py").write_text("raise RuntimeError('shadow')\n", encoding="utf-8")
     else:
         cache = clone / "tools" / "__pycache__"
