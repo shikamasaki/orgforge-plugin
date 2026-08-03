@@ -178,6 +178,10 @@ def _build_graph(*, report_raw: bytes, constitution_raw: bytes, scenario_raw: by
 def _run_graph_child(*, archive_root: Path, graph_path: Path, mapping_path: Path,
                      output: Path) -> None:
     """Run only in a fresh subprocess whose import root is the extracted archive."""
+    # The pinned DR checkout intentionally has no package marker under tools/.
+    # Support both its package-style imports and its flat fallback imports,
+    # while keeping every imported module inside the extracted archive.
+    sys.path.insert(0, str(archive_root / "tools"))
     sys.path.insert(0, str(archive_root))
     modules = {
         "graph": importlib.import_module("tools.assurance_graph"),
