@@ -56,6 +56,9 @@ def test_resilience_contract_doctor_and_lint_reject_invariant_weakening(tmp_path
     report = _json(doctor)
     assert report["ready"] is True
     assert report["resilience_score"] is None
+    assert set(report["evidence_profile"]) == {"Respond", "Monitor", "Learn", "Anticipate"}
+    assert all(row["confidence"] == "unknown" for row in report["evidence_profile"].values())
+    assert all(item["value"] is None for item in report["outcome_indicators"].values())
     assert report["work_observation_model"]["work_as_recorded"] == ["ledger", "git", "ci", "trace"]
     assert "inferred work-as-done" in report["human_judgment_remains"]
     assert report["human_judgment_remains"]
