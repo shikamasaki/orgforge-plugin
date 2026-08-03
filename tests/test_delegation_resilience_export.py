@@ -219,6 +219,17 @@ def test_export_ignores_ignored_module_shadow(tmp_path):
     _assert_locked_archive_output(source, tmp_path / "output", tmp_path)
 
 
+def test_export_is_stable_when_git_attributes_try_to_change_archive(tmp_path):
+    """Repo-local export-ignore/export-subst must not select a different DR implementation."""
+    source, _ = _source(tmp_path)
+    clone = _clone_dr(tmp_path)
+    attributes = clone / ".git" / "info" / "attributes"
+    attributes.write_text("tools/data_loading.py export-ignore\n", encoding="utf-8")
+    run = _export(source, tmp_path / "output", dr_root=clone)
+    assert run.returncode == 0, run.stderr
+    _assert_locked_archive_output(source, tmp_path / "output", tmp_path)
+
+
 def test_export_ignores_replace_refs(tmp_path):
     """A repo-local `git replace` ref must not swap the archived locked content."""
     source, _ = _source(tmp_path)
