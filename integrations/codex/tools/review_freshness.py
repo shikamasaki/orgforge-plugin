@@ -210,6 +210,11 @@ def persist_descriptor(subject_id, parts, cwd=None):
     target.parent.mkdir(parents=True, exist_ok=True)
     payload = {**{key: parts.get(key, "") for key in SUBJECT_FIELDS},
                "review_subject_id": subject_id}
+    # subject_root is an audit-only sidecar. It identifies the explicit checkout selected by
+    # the operator, but is intentionally excluded from the subject digest so it cannot alter
+    # the reviewed tree identity.
+    if parts.get("subject_root"):
+        payload["subject_root"] = str(parts["subject_root"])
     temp = target.with_suffix(".tmp")
     temp.write_text(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n",
                     encoding="utf-8")
