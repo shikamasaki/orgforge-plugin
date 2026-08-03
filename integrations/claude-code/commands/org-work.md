@@ -228,8 +228,13 @@ python3 "${CLAUDE_PLUGIN_ROOT}/tools/org_cycle.py" intake --issue <N> \
 
 ```
 python3 "${CLAUDE_PLUGIN_ROOT}/tools/org_cycle.py" rework --issue <N> \
-  --after reject|refuted --by <あなたの役割> --reason "<maker に直させることを1行で>" --round <何周目か>
+  --after reject|refuted --by <あなたの役割> --reason "<maker に直させることを1行で>" \
+  --root <DEATH_ROOTSの根分類> --round <何周目か>
 ```
+
+`--root` は必須です。死因の根分類（`placebo_test` / `contract_gap` / `context_stale` /
+`tool_boundary` / `identity` / `dependency` / `resource` / `other`）を省略せず、再発学習に
+使える形で記録してください。
 
 **これを打たないと `show` の rework 警告が沈黙する** — 警告は台帳の `rework_requested` を数える
 ので、記録が無ければ閾値に届かない。実地では reject/refuted **28件**に対し記録が無く（1件は
@@ -351,7 +356,10 @@ With no human approving, an unrecorded judgment is indistinguishable from no jud
 can actually be inferred later). This applies to the gate's admission, the skeptic's refutation attempt,
 each `phase_admitted`, the integrate verdict, and any consequential design/scope/trade-off call:
 
-!`echo 'Per judgment: python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/github_sync.py" decide --repo "$ORG_GITHUB_REPO" --issue <N> --event admission_decided|refutation_attempted|phase_admitted|integration_admitted|design_decided|tradeoff_decided|rework_requested --verdict <admit|reject|pass|rework|survives|refuted> --why "<the REASONING: what was weighed, what decided it>" --by <role> [--phase <p>] [--evidence "<command output / CI run / repro_lint verdict>"] [--alternatives "<what was rejected and why>"] [--standard "<the bar applied>"] [--risk "<a known risk knowingly accepted>"] --event-id <ledger event id>'`
+!`echo 'Per judgment: python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/github_sync.py" decide --repo "$ORG_GITHUB_REPO" --issue <N> --event admission_decided|refutation_attempted|phase_admitted|integration_admitted|design_decided|tradeoff_decided|rework_requested --verdict <admit|reject|pass|rework|survives|refuted> --why "<the REASONING: what was weighed, what decided it>" --by <role> [--phase <p>] [--root <DEATH_ROOTSの根分類>] [--evidence "<command output / CI run / repro_lint verdict>"] [--alternatives "<what was rejected and why>"] [--standard "<the bar applied>"] [--risk "<a known risk knowingly accepted>"] --event-id <ledger event id>'`
+
+`rework_requested` と `refutation_attempted` では `--root` を必須にし、未分類の死因を
+後から復元できないまま流さないでください。
 
 `decide` は **Issue と台帳の両方に1コマンドで書く**（0.21.0）。以前は雛形を印字して人に
 `ledger append` を打たせており、実地で片側落ちが3回起きた。順序は台帳が先 — 統制が拒否する
