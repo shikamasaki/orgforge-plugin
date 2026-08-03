@@ -66,6 +66,15 @@ def _advance_main(org):
     return commit
 
 
+def test_select_integration_ref_never_guesses_local_branches(tmp_path):
+    org = _org(tmp_path)
+    _git(org, "branch", "develop")
+    sys.path.insert(0, str(TOOLS))
+    from review_freshness import select_integration_ref
+    assert select_integration_ref(str(org)) is None
+    assert select_integration_ref(str(org), "main") == "main"
+
+
 def _append_provisional(org, lineage, descriptor):
     payload = {
         "issue": 7, "deliverable": "7", "role": "gate", "lineage": lineage,
