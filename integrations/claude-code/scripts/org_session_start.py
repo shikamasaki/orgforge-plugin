@@ -165,6 +165,27 @@ def _work_in_progress():
     return "\n".join(lines)
 
 
+def _schema_drift_context():
+    """Read-only schema rollout check; never mutates an adopted org at session start."""
+    if not LEDGER_ROOT:
+        return ""
+    try:
+        proc = subprocess.run([sys.executable, os.path.join(TOOLS, "ledger.py"),
+                               "schema", LEDGER_ROOT], capture_output=True,
+                              text=True, timeout=20)
+    except Exception:
+        return ""
+    if proc.returncode != 1:
+        return ""
+    output = (proc.stdout or "").strip()
+    if not output:
+        return ""
+    return ("## Ledger schema drift detected (read-only)\n"
+            "The adopted org schema is behind the installed template. Do not append new fields "
+            "until the owner reviews and runs `ledger.py schema --fix`; the session hook never "
+            "modifies the org schema automatically.\n\n" + output)
+
+
 def _render(tool, root, subcmd_args, out_path):
     if not root:
         return ""
@@ -210,6 +231,9 @@ def main():
     wip = _work_in_progress()
     if wip.strip():
         parts.append(wip)
+    drift = _schema_drift_context()
+    if drift.strip():
+        parts.append(drift)
     # start-the-metabolism nudge — only when the org is configured (ledger + role). A hook CANNOT run a
     # command or /loop itself (SessionStart hooks cannot invoke tools), so this is an INSTRUCTION the
     # model acts on: it asks you to run /org-start, which prints the /loop invocations that drive the org.
