@@ -43,12 +43,18 @@ def _make_worktree(name, base, issue):
     R0: git の worktree をそのまま借りる。ref ストアも並行制御も作らない。"""
     import os
     import subprocess
-    root = subprocess.run(["git", "rev-parse", "--show-toplevel"],
-                          capture_output=True, text=True, timeout=30)
-    if root.returncode != 0:
+    roots = subprocess.run(["git", "worktree", "list", "--porcelain"],
+                           capture_output=True, text=True, timeout=30)
+    if roots.returncode != 0:
         print("git リポジトリの外にいる。", file=sys.stderr)
         return 2
-    wt = os.path.join(root.stdout.strip(), ".orgforge", "wt", f"issue-{issue}")
+    primary = next((line[len("worktree "):].strip()
+                    for line in roots.stdout.splitlines()
+                    if line.startswith("worktree ")), None)
+    if not primary:
+        print("primary worktree を解決できない。", file=sys.stderr)
+        return 2
+    wt = os.path.join(primary, ".orgforge", "wt", f"issue-{issue}")
     if os.path.isdir(wt):
         print(f"worktree は既にある（冪等）: {wt}")
         print(f"\ncd {wt}    # ここで作業すること。元のツリーには触らない")
