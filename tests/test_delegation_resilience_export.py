@@ -219,6 +219,23 @@ def test_export_ignores_ignored_module_shadow(tmp_path):
     _assert_locked_archive_output(source, tmp_path / "output", tmp_path)
 
 
+def test_export_is_stable_when_git_attributes_try_to_change_archive(tmp_path):
+    """Repo-local export-ignore/export-subst must not select a different DR implementation."""
+    source, _ = _source(tmp_path)
+    clone = _clone_dr(tmp_path)
+    attributes = clone / ".git" / "info" / "attributes"
+    attributes.write_text("tools/data_loading.py export-ignore\n", encoding="utf-8")
+    run = _export(source, tmp_path / "output", dr_root=clone)
+    # Either the archive is byte-identical, or the adapter rejects the altered
+    # archive before producing an artifact. Both outcomes preserve the trust
+    # contract; silently accepting a changed archive is forbidden.
+    assert run.returncode in (0, 2), run.stderr
+    if run.returncode == 0:
+        _assert_locked_archive_output(source, tmp_path / "output", tmp_path)
+    else:
+        assert not (tmp_path / "output" / "graph.json").exists()
+
+
 def test_export_ignores_replace_refs(tmp_path):
     """A repo-local `git replace` ref must not swap the archived locked content."""
     source, _ = _source(tmp_path)
