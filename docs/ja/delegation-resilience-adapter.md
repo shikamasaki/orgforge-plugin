@@ -23,12 +23,10 @@ git呼び出しは `--no-replace-objects` で行います。
 
 - source artifactから直接読めるnode/edge（exercise、report evidence、constitution artifact、
   reviewer/harness dependency、宣言されたshared-fateとdepends_on）は `observed`。
-- adapter自身が導入するもの — recovery claim nodeと、そこへ入るすべての `supports` /
-  `depends_on` edge — は `derived` であり、決して `observed` にしません。claimの要求statusは
-  `NOT_DEMONSTRATED` のみです。
-- したがって固定verifierはclaimを2つの独立した理由（derived support、shared-fate dependency）で
-  `NOT_DEMONSTRATED` に保ちます。それ以外を要求・検証するclaim resultが生じた場合、exporterは
-  fail-closedします。
+- adapterは意味論的な `supports` edgeを推測しません。`NOT_DEMONSTRATED` のclaim nodeを
+  保持することはありますが、reportやconstitutionをsupport evidenceへ変換しません。
+  supportの意味はDR verifierだけが所有し、recovery capabilityが要求・返却された場合は
+  exporterがfail-closedします。
 
 duplicate、dangling reference、digest mismatchは固定DR verifierがfail-closedで拒否します。
 `GRAPH_VERIFIED` はグラフ構造・source artifact digest・参照・再現性の証明にすぎません。

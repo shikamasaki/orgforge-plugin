@@ -102,9 +102,9 @@ def _build_graph(*, report_raw: bytes, constitution_raw: bytes, scenario_raw: by
     """Map only what the OrgForge evidence records.
 
     Nodes and edges read directly from a source artifact are `observed`; every
-    relation this adapter itself introduces (the supports/depends_on links to the
-    recovery claim, and the claim node) is `derived` so the locked DR verifier
-    keeps the claim at NOT_DEMONSTRATED.
+    The adapter does not invent semantic claim edges. In particular, it never
+    emits `supports` based on an OrgForge report or constitution. The claim
+    disposition remains NOT_DEMONSTRATED and the DR verifier owns its meaning.
     """
     digests = {
         "report": _digest(report_raw),
@@ -164,21 +164,6 @@ def _build_graph(*, report_raw: bytes, constitution_raw: bytes, scenario_raw: by
          "to": "dependency:orgforge/review-harness",
          "sourceRefs": [src["scenario"]], "observedAt": observed_at,
          "assurance": "observed", "provenance": observed([src["scenario"]])},
-        {"id": "edge:orgforge/report-supports-claim", "type": "supports",
-         "from": "evidence:orgforge/exercise-report",
-         "to": "claim:orgforge/reviewer-outage-recovery",
-         "sourceRefs": [src["report"]], "assurance": "derived",
-         "provenance": derived([src["report"]])},
-        {"id": "edge:orgforge/constitution-supports-claim", "type": "supports",
-         "from": "artifact:orgforge/constitution",
-         "to": "claim:orgforge/reviewer-outage-recovery",
-         "sourceRefs": [src["constitution"]], "assurance": "derived",
-         "provenance": derived([src["constitution"]])},
-        {"id": "edge:orgforge/claim-depends-on-reviewer", "type": "depends_on",
-         "from": "claim:orgforge/reviewer-outage-recovery",
-         "to": "dependency:orgforge/required-reviewer",
-         "sourceRefs": [src["scenario"]], "assurance": "derived",
-         "provenance": derived([src["scenario"]])},
     ]
     seed = json.dumps([observed_at, *sorted(digests.values())], separators=(",", ":"))
     graph_id = "graph:orgforge/reviewer-outage/" + hashlib.sha256(seed.encode()).hexdigest()[:16]
