@@ -66,13 +66,14 @@ def _advance_main(org):
     return commit
 
 
-def test_select_integration_ref_never_guesses_local_branches(tmp_path):
+def test_persist_descriptor_keeps_subject_root_as_audit_sidecar(tmp_path):
     org = _org(tmp_path)
-    _git(org, "branch", "develop")
     sys.path.insert(0, str(TOOLS))
-    from review_freshness import select_integration_ref
-    assert select_integration_ref(str(org)) is None
-    assert select_integration_ref(str(org), "main") == "main"
+    from review_freshness import persist_descriptor
+    parts = {"issue": "7", "role": "gate", "subject_root": str(org)}
+    path = persist_descriptor("a" * 64, parts, str(org))
+    recorded = json.loads(Path(path).read_text(encoding="utf-8"))
+    assert recorded["subject_root"] == str(org)
 
 
 def _append_provisional(org, lineage, descriptor):
