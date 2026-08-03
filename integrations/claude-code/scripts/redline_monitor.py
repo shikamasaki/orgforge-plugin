@@ -31,6 +31,15 @@ def _safe(value):
     return re.sub(r"[^A-Za-z0-9_.-]+", "-", str(value or "monitor")).strip("-.") or "monitor"
 
 
+def _instance_for(role, ledger_root=None):
+    """Scope the logical identity to the org when a root is explicitly supplied."""
+    base = f"redline-{_safe(role)}"
+    if not ledger_root:
+        return base
+    digest = hashlib.sha256(str(Path(ledger_root).expanduser().resolve()).encode("utf-8")).hexdigest()[:12]
+    return f"{base}-{digest}"
+
+
 def _atomic_json(path, value):
     """Write one registry fact atomically so status never observes a partial heartbeat."""
     path = Path(path)
@@ -271,7 +280,9 @@ def _monitor_identity(command):
     rest = tokens[index + 1:]
     if rest and rest[0] in {"status", "rearm-check", "stop"}:
         return None                                   # registry queries never own the instance
-    role, instance = "", None
+    role, instance, root = "", None, None
+    if rest and not rest[0].startswith("-"):
+        root = rest[0]
     position = 0
     while position < len(rest):
         token = rest[position]
@@ -286,7 +297,7 @@ def _monitor_identity(command):
         else:
             position += 1
     role = role or "supervisor"
-    return role, instance or f"redline-{_safe(role)}"
+    return role, instance or _instance_for(role, root)
 
 
 def unregistered_monitors(registry, role=None, instance=None, ps_rows=None, own_pid=None):
@@ -498,7 +509,7 @@ def main(argv=None):
     if registry is None:
         parser.error("could not discover the monitor registry; pass a ledger root or --registry")
     role = args.role or "supervisor"
-    instance = args.instance or f"redline-{_safe(role)}"
+    instance = args.instance or _instance_for(role, args.root)
     try:
         # Fail closed (OBS-065): a monitor that cannot register would be invisible to
         # status/stop and would later trick rearm-check into authorizing a duplicate.

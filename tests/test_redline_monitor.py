@@ -154,6 +154,16 @@ def test_probe_forwards_root_and_role(tmp_path):
         "RED redline|/tmp/ledger|--role|supervisor")
 
 
+def test_monitor_identity_scopes_default_instance_to_ledger_root():
+    first = MONITOR._monitor_identity(
+        "python redline_monitor.py /tmp/org-a --role supervisor")
+    second = MONITOR._monitor_identity(
+        "python redline_monitor.py /tmp/org-b --role supervisor")
+    assert first[0] == second[0] == "supervisor"
+    assert first[1] != second[1]
+    assert first[1].startswith("redline-supervisor-")
+
+
 def test_claude_bundle_is_generated_and_default_status_path_exists():
     assert BUNDLE.read_bytes() == SOURCE.read_bytes()
     assert (BUNDLE.resolve().parents[1] / "tools" / "status.py").is_file()
