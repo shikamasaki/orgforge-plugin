@@ -35,11 +35,11 @@ you. The adapter emits the first RED and each changed RED, suppresses an unchang
 GREEN so a later recurrence notifies again:
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/redline_monitor.py" rearm-check \
+"<injected launcher>" redline-monitor rearm-check \
   --role ${1:-supervisor} --instance redline-${1:-supervisor}
 
 # Run Monitor only when rearm-check prints READY TO ARM:
-Monitor (persistent): python3 "${CLAUDE_PLUGIN_ROOT}/scripts/redline_monitor.py" \
+Monitor (persistent): "<injected launcher>" redline-monitor \
   --role ${1:-supervisor} --instance redline-${1:-supervisor}
 ```
 
@@ -47,12 +47,12 @@ Do **not** rearm when the check prints `DO NOT REARM`: a process is still alive 
 `TaskList` forgot it. Inspect every registered PID/version/identity with:
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/redline_monitor.py" status \
+"<injected launcher>" redline-monitor status \
   --role ${1:-supervisor} --instance redline-${1:-supervisor}
 ```
 
 For a duplicate or old-version process, request a cooperative stop of the exact record shown by
-`status`: `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/redline_monitor.py" stop <record-id>`. This writes a
+`status`: `"<injected launcher>" redline-monitor stop <record-id>`. This writes a
 token-bound stop request checked by that monitor; it does not signal a reused PID or kill another
 session. Run `rearm-check` again before creating the replacement.
 
