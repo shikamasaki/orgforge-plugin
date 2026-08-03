@@ -1,0 +1,27 @@
+schema_version: 1
+id: shared-fate-observation-minimal
+description: record declared dependency-axis observations without judging DR independence
+dependencies:
+  - id: maker
+    model: model-a
+    provider: provider-a
+    workspace: workspace-1
+    test_oracle: oracle-1
+  - id: reviewer
+    model: model-b
+    provider: provider-a
+    workspace: workspace-1
+    test_oracle: oracle-1
+axes: [model, provider, workspace, test_oracle, context_digest]
+expected:
+  capability_disposition: not_demonstrated
+  gaps: []
+blast_radius:
+  faults: 0
+  workspace: temporary_directory
+  network: forbidden
+  real_repository_mutation: forbidden
+  production_credentials: forbidden
+human_judgment:
+  - whether the observed dependency facts are sufficient for the DR verifier's declared policy
+  - whether an additional independent signal should be collected

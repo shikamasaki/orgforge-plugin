@@ -90,6 +90,15 @@ learning organ がエスカレーションし、doctrine への引き渡しコ�
 orgforge resilience-exercise repeated-failure-learning --expect GREEN
 ```
 
+DR verifierへ依存関係の事実だけをexportし、OrgForge側でshared-fateを判定しない演習は次です。
+
+```bash
+orgforge resilience-exercise shared-fate-observation --expect GREEN
+```
+
+結果はdeclared-equal、declared-different、unknownと欠測だけを含み、独立性判定、support edge、
+score、recovery claimは生成しません。意味論の判定はDR verifierが行います。
+
 ledger probeが正常でも、duplicateまたはstaleなheartbeatは`ATTENTION`のままです。
 
 無人運転をread-only-firstで始める場合は、決定的なmachine tickだけを登録します。
