@@ -1,0 +1,10 @@
+{
+  "accepted_debt": [
+    "complexity-bounded",
+    "dup-dead-code",
+    "no-inline-suppress",
+    "one-command",
+    "toolchain-pin"
+  ],
+  "note": "採用時点で失敗していた項目＝既知の負債。新たな失敗はブロックされる。返済したら再実行して締め直すこと（docs/11 §4e drain-then-ratchet）。"
+}
