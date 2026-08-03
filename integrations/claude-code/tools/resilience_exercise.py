@@ -31,6 +31,7 @@ DEFAULT_FALSE_GREEN_SCENARIO = TEMPLATE / "exercises" / "false-green-mutation.ya
 DEFAULT_PROVIDER_OUTAGE_SCENARIO = TEMPLATE / "exercises" / "provider-outage.yaml"
 DEFAULT_HEARTBEAT_SCENARIO = TEMPLATE / "exercises" / "heartbeat-correlation.yaml"
 DEFAULT_REPEATED_LEARNING_SCENARIO = TEMPLATE / "exercises" / "repeated-failure-learning.yaml"
+DEFAULT_SHARED_FATE_SCENARIO = TEMPLATE / "exercises" / "shared-fate-observation.yaml"
 
 
 class ExerciseError(RuntimeError):
@@ -634,6 +635,63 @@ def run_repeated_failure_learning(scenario_path=DEFAULT_REPEATED_LEARNING_SCENAR
         }
 
 
+def _load_shared_fate_scenario(path):
+    document = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
+    required = {"schema_version", "id", "dependencies", "axes", "expected",
+                "blast_radius", "human_judgment"}
+    missing = sorted(required - set(document))
+    if missing:
+        raise ExerciseError(f"scenario is missing fields: {', '.join(missing)}")
+    if document.get("schema_version") != 1:
+        raise ExerciseError("shared-fate scenario schema_version must be 1")
+    radius = document.get("blast_radius") or {}
+    bounded = {"faults": 0, "workspace": "temporary_directory", "network": "forbidden",
+               "real_repository_mutation": "forbidden", "production_credentials": "forbidden"}
+    if radius != bounded:
+        raise ExerciseError("shared-fate scenario blast radius must prohibit network, credentials, and repo mutation")
+    if not isinstance(document["dependencies"], list) or len(document["dependencies"]) < 2:
+        raise ExerciseError("shared-fate scenario needs at least two dependencies")
+    return document
+
+
+def run_shared_fate_observation(scenario_path=DEFAULT_SHARED_FATE_SCENARIO):
+    """Export declared dependency observations without evaluating DR shared-fate semantics.
+
+    The output deliberately uses ``declared_equal``/``declared_different``/``unknown`` and
+    carries no support, independence, or capability verdict.  The DR verifier owns interpretation.
+    """
+    scenario = _load_shared_fate_scenario(scenario_path)
+    dependencies = scenario["dependencies"]
+    observations = []
+    for axis in scenario["axes"]:
+        values = [dep.get(axis) for dep in dependencies]
+        missing = [dep.get("id") for dep, value in zip(dependencies, values)
+                   if value in (None, "")]
+        if missing:
+            observation = "unknown"
+        else:
+            observation = "declared_equal" if len({str(value) for value in values}) == 1 \
+                else "declared_different"
+        observations.append({"axis": axis, "observation": observation,
+                             "source": "scenario.declared_dependency",
+                             "missing": missing})
+    expected = scenario["expected"]
+    assertions = {
+        "all_declared_axes_observed": [item["axis"] for item in observations] == list(scenario["axes"]),
+        "missingness_is_explicit": all("missing" in item for item in observations),
+        "no_dr_semantic_verdict": not any(key in json.dumps(observations)
+                                           for key in ("supports", "independent", "shared_fate")),
+        "no_capability_claim": expected.get("capability_disposition") == "not_demonstrated",
+    }
+    gaps = [name for name, passed in assertions.items() if not passed]
+    return {"scenario": scenario["id"], "exercise_status": "GREEN" if not gaps else "RED",
+            "assertions": assertions, "gaps": gaps, "expected_gaps": expected.get("gaps") or [],
+            "observations": observations, "shared_fate_verdict": None,
+            "outcome": {"observed": "observe_only", "acceptable": True},
+            "human_judgment": scenario["human_judgment"], "resilience_score": None,
+            "blast_radius": scenario["blast_radius"]}
+
+
 def _redline_monitor_module():
     """Load the installed projection's monitor implementation in source or bundled layouts."""
     import importlib.util
@@ -758,6 +816,10 @@ def main(argv=None):
     repeated.add_argument("--scenario", default=str(DEFAULT_REPEATED_LEARNING_SCENARIO))
     repeated.add_argument("--expect", choices=("RED", "GREEN"))
     repeated.add_argument("--json", action="store_true")
+    shared = sub.add_parser("shared-fate-observation")
+    shared.add_argument("--scenario", default=str(DEFAULT_SHARED_FATE_SCENARIO))
+    shared.add_argument("--expect", choices=("RED", "GREEN"))
+    shared.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
     if args.command == "_fake-dependency":
         return _fake_dependency(args)
@@ -766,7 +828,8 @@ def main(argv=None):
                   else run_false_green_mutation(args.scenario) if args.command == "false-green-mutation"
                   else run_provider_outage(args.scenario) if args.command == "provider-outage"
                   else run_heartbeat_correlation(args.scenario) if args.command == "heartbeat-correlation"
-                  else run_repeated_failure_learning(args.scenario))
+                  else run_repeated_failure_learning(args.scenario) if args.command == "repeated-failure-learning"
+                  else run_shared_fate_observation(args.scenario))
     except ExerciseError as exc:
         report = {"scenario": args.command, "exercise_status": "INVALID",
                   "error": str(exc), "resilience_score": None}

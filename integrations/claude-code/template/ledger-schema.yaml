@@ -463,6 +463,13 @@ event_classes:
                                       CLI flag. A receipt bound to another org/subject/lineage is
                                       refused, so it cannot be replayed into a different judgment." }
 
+  # Cross-harness judge key custody.  The judge creates the private key in its own
+  # execution boundary; the writer records only this public registration.  A
+  # registration is evidence of the key advertised to the writer, not a DR
+  # semantic verdict or an independence decision.
+  judge_key_registered: { key_id, signer_id, public_key_digest, role, lineage,
+                          registered_by, registration_reason }
+
   # ── judge の血統（スイスチーズ層。docs/03 §3, docs/11）──────────────────────
   # 同一ハーネスの subagent は親のモデルを継ぐので、`role-settings.yaml` が別系統を宣言しても
   # 血統は分かれない。constitution の `enforcement.judges.lineage: cross-harness` を宣言した org は

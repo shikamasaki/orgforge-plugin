@@ -15,6 +15,7 @@ FALSE_GREEN_SCENARIO = REPO / "template" / "exercises" / "false-green-mutation.y
 PROVIDER_OUTAGE_SCENARIO = REPO / "template" / "exercises" / "provider-outage.yaml"
 HEARTBEAT_SCENARIO = REPO / "template" / "exercises" / "heartbeat-correlation.yaml"
 REPEATED_LEARNING_SCENARIO = REPO / "template" / "exercises" / "repeated-failure-learning.yaml"
+SHARED_FATE_SCENARIO = REPO / "template" / "exercises" / "shared-fate-observation.yaml"
 
 
 def _run(*args):
@@ -221,3 +222,27 @@ def test_repeated_failure_learning_scenario_has_bounded_inputs():
         "production_credentials": "forbidden",
     }
     assert any(len(potentials) > 1 for potentials in scenario["potentials"].values())
+
+
+def test_shared_fate_observation_exports_facts_without_dr_semantics():
+    run = _run("shared-fate-observation", "--expect", "GREEN", "--json")
+    assert run.returncode == 0, run.stdout + run.stderr
+    report = json.loads(run.stdout)
+    assert report["exercise_status"] == "GREEN"
+    assert report["shared_fate_verdict"] is None
+    assert report["outcome"] == {"observed": "observe_only", "acceptable": True}
+    assert report["resilience_score"] is None
+    observations = {item["axis"]: item["observation"] for item in report["observations"]}
+    assert observations["model"] == "declared_different"
+    assert observations["provider"] == "declared_equal"
+    assert observations["workspace"] == "declared_equal"
+    assert observations["context_digest"] == "unknown"
+
+
+def test_shared_fate_observation_scenario_is_bounded():
+    scenario = yaml.safe_load(SHARED_FATE_SCENARIO.read_text(encoding="utf-8"))
+    assert scenario["blast_radius"] == {
+        "faults": 0, "workspace": "temporary_directory", "network": "forbidden",
+        "real_repository_mutation": "forbidden", "production_credentials": "forbidden",
+    }
+    assert scenario["expected"]["capability_disposition"] == "not_demonstrated"

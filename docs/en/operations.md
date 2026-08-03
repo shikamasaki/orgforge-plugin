@@ -91,6 +91,15 @@ while leaving permanent role/doctrine changes to a human and a bounded microexpe
 orgforge resilience-exercise repeated-failure-learning --expect GREEN
 ```
 
+To export dependency facts for a DR verifier without making an OrgForge shared-fate judgment, run:
+
+```bash
+orgforge resilience-exercise shared-fate-observation --expect GREEN
+```
+
+The result contains only declared-equal, declared-different, or unknown observations and explicit
+missingness. It never emits an independence verdict, support edge, score, or recovery claim.
+
 Duplicate or stale heartbeats remain `ATTENTION` even when a single ledger probe is healthy.
 
 For unattended read-only-first operation, install the deterministic machine tick:
