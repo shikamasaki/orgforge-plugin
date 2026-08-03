@@ -101,10 +101,11 @@ def _build_graph(*, report_raw: bytes, constitution_raw: bytes, scenario_raw: by
                  observed_at: str) -> dict[str, Any]:
     """Map only what the OrgForge evidence records.
 
-    Nodes and edges read directly from a source artifact are `observed`; every
-    The adapter does not invent semantic claim edges. In particular, it never
-    emits `supports` based on an OrgForge report or constitution. The claim
-    disposition remains NOT_DEMONSTRATED and the DR verifier owns its meaning.
+    Nodes and edges read directly from a source artifact are `observed`.
+    The adapter does not invent semantic claim or independence edges. In
+    particular, it never emits `supports` or `shares_fate_with` based on an
+    OrgForge report or constitution. The claim disposition remains
+    NOT_DEMONSTRATED and the DR verifier owns its meaning.
     """
     digests = {
         "report": _digest(report_raw),
@@ -157,11 +158,6 @@ def _build_graph(*, report_raw: bytes, constitution_raw: bytes, scenario_raw: by
         {"id": "edge:orgforge/exercise-depends-on-reviewer", "type": "depends_on",
          "from": "exercise:orgforge/reviewer-outage-minimal",
          "to": "dependency:orgforge/required-reviewer",
-         "sourceRefs": [src["scenario"]], "observedAt": observed_at,
-         "assurance": "observed", "provenance": observed([src["scenario"]])},
-        {"id": "edge:orgforge/reviewer-shares-fate-with-harness", "type": "shares_fate_with",
-         "from": "dependency:orgforge/required-reviewer",
-         "to": "dependency:orgforge/review-harness",
          "sourceRefs": [src["scenario"]], "observedAt": observed_at,
          "assurance": "observed", "provenance": observed([src["scenario"]])},
     ]
@@ -276,8 +272,8 @@ def export(*, report_path: Path, constitution_path: Path, scenario_path: Path,
                 {"uri": SOURCE_URIS["scenario"], "digest": _digest(scenario_raw),
                  "localPath": str(scenario_path.resolve())},
             ],
-            "claimMapping": "derived-only: the recovery claim and its support edges are "
-                            "adapter-derived and are never observed evidence",
+            "claimMapping": "none: recovery claim status and semantic relation edges "
+                            "are not inferred by the adapter",
             "capabilityDisposition": "not_demonstrated",
         }
         mapping_path = temp_root / "mapping.json"
