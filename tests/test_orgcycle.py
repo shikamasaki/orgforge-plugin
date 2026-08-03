@@ -2400,6 +2400,17 @@ def test_verify_subject_root_override(tmp_path):
         "どの checkout を意図して判定したかが印字に残っていない"
 
 
+def test_verify_rejects_issue_worktree_with_unbound_branch(tmp_path):
+    """Issue worktree が detached/別branchなら issue の成果物として受理しない。"""
+    repo, g = _subject_org(tmp_path, issues=(7,))
+    wt = repo / ".orgforge" / "wt" / "issue-7"
+    g("checkout", "--detach", "develop", cwd=wt)
+    code, sid, _, err = _print_subject(repo, 7)
+    assert code == 12
+    assert sid is None
+    assert "branch" in err and "束縛" in err
+
+
 # ── #101 rework: isdir では偽 worktree が通る（skeptic の反証）─────────────────
 # 空の残骸ディレクトリ・prune せず再作成されたディレクトリ・repo root への symlink は
 # どれも primary の内側に居るので、git -C が primary に解決し、subject が primary の
