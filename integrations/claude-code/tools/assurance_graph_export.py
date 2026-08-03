@@ -101,10 +101,11 @@ def _build_graph(*, report_raw: bytes, constitution_raw: bytes, scenario_raw: by
                  observed_at: str) -> dict[str, Any]:
     """Map only what the OrgForge evidence records.
 
-    Nodes and edges read directly from a source artifact are `observed`; every
-    relation this adapter itself introduces (the supports/depends_on links to the
-    recovery claim, and the claim node) is `derived` so the locked DR verifier
-    keeps the claim at NOT_DEMONSTRATED.
+    Nodes and edges read directly from a source artifact are `observed`.
+    The adapter does not invent semantic claim or independence edges. In
+    particular, it never emits `supports` or `shares_fate_with` based on an
+    OrgForge report or constitution. The claim disposition remains
+    NOT_DEMONSTRATED and the DR verifier owns its meaning.
     """
     digests = {
         "report": _digest(report_raw),
@@ -159,26 +160,6 @@ def _build_graph(*, report_raw: bytes, constitution_raw: bytes, scenario_raw: by
          "to": "dependency:orgforge/required-reviewer",
          "sourceRefs": [src["scenario"]], "observedAt": observed_at,
          "assurance": "observed", "provenance": observed([src["scenario"]])},
-        {"id": "edge:orgforge/reviewer-shares-fate-with-harness", "type": "shares_fate_with",
-         "from": "dependency:orgforge/required-reviewer",
-         "to": "dependency:orgforge/review-harness",
-         "sourceRefs": [src["scenario"]], "observedAt": observed_at,
-         "assurance": "observed", "provenance": observed([src["scenario"]])},
-        {"id": "edge:orgforge/report-supports-claim", "type": "supports",
-         "from": "evidence:orgforge/exercise-report",
-         "to": "claim:orgforge/reviewer-outage-recovery",
-         "sourceRefs": [src["report"]], "assurance": "derived",
-         "provenance": derived([src["report"]])},
-        {"id": "edge:orgforge/constitution-supports-claim", "type": "supports",
-         "from": "artifact:orgforge/constitution",
-         "to": "claim:orgforge/reviewer-outage-recovery",
-         "sourceRefs": [src["constitution"]], "assurance": "derived",
-         "provenance": derived([src["constitution"]])},
-        {"id": "edge:orgforge/claim-depends-on-reviewer", "type": "depends_on",
-         "from": "claim:orgforge/reviewer-outage-recovery",
-         "to": "dependency:orgforge/required-reviewer",
-         "sourceRefs": [src["scenario"]], "assurance": "derived",
-         "provenance": derived([src["scenario"]])},
     ]
     seed = json.dumps([observed_at, *sorted(digests.values())], separators=(",", ":"))
     graph_id = "graph:orgforge/reviewer-outage/" + hashlib.sha256(seed.encode()).hexdigest()[:16]
@@ -193,6 +174,10 @@ def _build_graph(*, report_raw: bytes, constitution_raw: bytes, scenario_raw: by
 def _run_graph_child(*, archive_root: Path, graph_path: Path, mapping_path: Path,
                      output: Path) -> None:
     """Run only in a fresh subprocess whose import root is the extracted archive."""
+    # The pinned DR checkout intentionally has no package marker under tools/.
+    # Support both its package-style imports and its flat fallback imports,
+    # while keeping every imported module inside the extracted archive.
+    sys.path.insert(0, str(archive_root / "tools"))
     sys.path.insert(0, str(archive_root))
     modules = {
         "graph": importlib.import_module("tools.assurance_graph"),
@@ -287,8 +272,8 @@ def export(*, report_path: Path, constitution_path: Path, scenario_path: Path,
                 {"uri": SOURCE_URIS["scenario"], "digest": _digest(scenario_raw),
                  "localPath": str(scenario_path.resolve())},
             ],
-            "claimMapping": "derived-only: the recovery claim and its support edges are "
-                            "adapter-derived and are never observed evidence",
+            "claimMapping": "none: recovery claim status and semantic relation edges "
+                            "are not inferred by the adapter",
             "capabilityDisposition": "not_demonstrated",
         }
         mapping_path = temp_root / "mapping.json"

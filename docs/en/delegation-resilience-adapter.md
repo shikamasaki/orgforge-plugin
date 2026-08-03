@@ -50,12 +50,10 @@ Mapping rules, in addition to the v0alpha2 boundary above:
 - Nodes and edges read directly from a source artifact (the exercise, its report evidence, the
   constitution artifact, the reviewer and harness dependencies, the declared shared-fate and
   depends_on relations) are `observed`.
-- Everything the adapter itself introduces — the recovery claim node and every `supports` /
-  `depends_on` edge into it — is `derived`, never `observed`. The claim requests only
-  `NOT_DEMONSTRATED`.
-- The locked verifier therefore keeps the claim at `NOT_DEMONSTRATED` for two independent
-  reasons (derived support, shared-fate dependencies). The exporter additionally fails closed if
-  any claim result requests or verifies anything else.
+- The adapter does not invent semantic `supports` edges. It may carry a
+  `NOT_DEMONSTRATED` claim node, but does not turn reports or constitutions into
+  support evidence. The DR verifier owns support semantics; the exporter fails
+  closed if any claim result requests or verifies anything else.
 
 `GRAPH_VERIFIED` only proves graph structure, source-artifact digests, references, and
 reproducibility. It is not recovery capability, human takeover, deployment approval, or

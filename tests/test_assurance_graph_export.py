@@ -125,15 +125,12 @@ def test_export_is_deterministic_source_preserving_and_non_demonstrative(tmp_pat
     assert all(node["assurance"] == "derived" for node in claims)
     assert all(node["attributes"]["status"] == "NOT_DEMONSTRATED" for node in claims)
     claim_ids = {node["id"] for node in claims}
-    for edge in graph["edges"]:
-        if edge["to"] in claim_ids:
-            assert edge["assurance"] == "derived", edge["id"]
-            assert edge["provenance"]["mode"] == "derived", edge["id"]
+    assert not any(edge["to"] in claim_ids for edge in graph["edges"])
 
     mapping = json.loads((first / "orgforge-graph-mapping.json").read_text())
     assert mapping["mappingVersion"] == "orgforge-assurance-graph/v0alpha1"
     assert mapping["capabilityDisposition"] == "not_demonstrated"
-    assert mapping["claimMapping"].startswith("derived-only:")
+    assert mapping["claimMapping"].startswith("none:")
 
     verify_first, verify_second = _verify(first), _verify(second)
     assert verify_first.returncode == 0, verify_first.stderr.decode()
@@ -145,8 +142,6 @@ def test_export_is_deterministic_source_preserving_and_non_demonstrative(tmp_pat
     for claim in result["claimResults"]:
         assert claim["verifiedSupport"] == "NOT_DEMONSTRATED"
         assert claim["requestedStatus"] == "NOT_DEMONSTRATED"
-        assert "support contains inferred or derived relations" in claim["reasons"]
-        assert "dependency shares fate with another dependency" in claim["reasons"]
 
 
 def test_consumer_lock_matches_dr_release_lock_at_locked_commit():
