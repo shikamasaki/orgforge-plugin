@@ -200,7 +200,15 @@ def test_cron_install_smokes_receipt_and_verifies_exact_readback(tmp_path):
     receipt = [json.loads(line) for line in (ledger / "ledger.jsonl").read_text(
         encoding="utf-8").splitlines() if line]
     assert receipt[-1]["class"] == "tick_planned"
-    assert [event["class"] for event in receipt].count("scheduled_check_completed") == 2
+    completed = [event for event in receipt
+                 if event["class"] == "scheduled_check_completed"]
+    # A cron command may cross the next period while the smoke command is running.
+    # Require the two configured unattended checks, but do not make the test depend
+    # on how many periods the wall clock happened to serve.
+    assert len(completed) >= 2
+    assert {event["payload"]["check_id"] for event in completed} >= {
+        "machine_sensors", "chain_verify"
+    }
     run = json.loads((ledger / "scheduler-state.json").read_text(encoding="utf-8"))
     assert run["receipt_seq"] == receipt[-1]["seq"]
     registry = json.loads((ledger / "scheduler-installation.json").read_text(encoding="utf-8"))
