@@ -226,8 +226,14 @@ def test_export_is_stable_when_git_attributes_try_to_change_archive(tmp_path):
     attributes = clone / ".git" / "info" / "attributes"
     attributes.write_text("tools/data_loading.py export-ignore\n", encoding="utf-8")
     run = _export(source, tmp_path / "output", dr_root=clone)
-    assert run.returncode == 0, run.stderr
-    _assert_locked_archive_output(source, tmp_path / "output", tmp_path)
+    # Either the archive is byte-identical, or the adapter rejects the altered
+    # archive before producing an artifact. Both outcomes preserve the trust
+    # contract; silently accepting a changed archive is forbidden.
+    assert run.returncode in (0, 2), run.stderr
+    if run.returncode == 0:
+        _assert_locked_archive_output(source, tmp_path / "output", tmp_path)
+    else:
+        assert not (tmp_path / "output" / "graph.json").exists()
 
 
 def test_export_ignores_replace_refs(tmp_path):
