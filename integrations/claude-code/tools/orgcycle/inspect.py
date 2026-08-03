@@ -231,7 +231,12 @@ def cmd_gc(a):
             if err:
                 # 実在 branch を特定できないなら消す判断はできない — 残して理由を言う。
                 print(err, file=sys.stderr)
-                kept.append((name, "branch を解決できない（上の stderr を見ること）"))
+                if "detached HEAD" in err:
+                    kept.append((name, ("detached HEAD のため自動削除しない。内容を確認後、" 
+                                        f"必要なら git -C {wt} switch <実在branch>、または "
+                                        f"git worktree remove {wt} を明示実行する")))
+                else:
+                    kept.append((name, "branch を解決できない（上の stderr を見ること）"))
                 continue
             if warn:
                 print(f"  ⚠ {warn}", file=sys.stderr)
