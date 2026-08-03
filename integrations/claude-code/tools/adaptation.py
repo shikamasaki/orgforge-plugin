@@ -128,6 +128,55 @@ def _current(state, envelope_id):
     return matches[-1] if matches else None
 
 
+_POTENTIAL_EVIDENCE_CLASSES = {
+    "Respond": ("adaptive_envelope_activated", "adaptive_deviation_recorded",
+                "adaptive_envelope_reverted", "adaptive_envelope_expired",
+                "halt_tripped", "halt_released"),
+    "Monitor": ("scheduled_check_completed", "sensor_reading", "heartbeat",
+                 "tick_planned", "dependency_stall_raised"),
+    "Learn": ("outcome_delta", "repeated_death_detected", "microexperiment_concluded",
+              "acceptable_outcome_recorded", "practice_change_proposed"),
+    "Anticipate": ("preflight_completed", "dependency_declared", "risk_accepted",
+                   "adaptive_envelope_activated", "exercise_completed"),
+}
+
+
+def evidence_profile(events):
+    """Project observed event presence and missingness; never score resilience or claims."""
+    counts = {}
+    for event in events:
+        cls = event.get("class")
+        counts[cls] = counts.get(cls, 0) + 1
+    profile = {}
+    for potential, classes in _POTENTIAL_EVIDENCE_CLASSES.items():
+        observed = [{"event_class": cls, "count": counts[cls]}
+                    for cls in classes if counts.get(cls)]
+        missing = [cls for cls in classes if not counts.get(cls)]
+        profile[potential] = {
+            "observed": observed,
+            "missingness": missing,
+            "confidence": "unknown",
+            "interpretation": "observation-only; no capability or support verdict",
+        }
+    return profile
+
+
+def outcome_indicators(events):
+    """Return a non-scoring indicator surface with explicit not-observed values."""
+    classes = {event.get("class") for event in events}
+    return {
+        name: {"value": None, "status": "observed" if source in classes else "not_observed",
+               "confidence": "unknown"}
+        for name, source in {
+            "time_to_detect": "fault_observed",
+            "time_to_contain": "adaptive_envelope_activated",
+            "time_to_recover": "adaptive_envelope_reverted",
+            "repeated_failure_rate": "repeated_death_detected",
+            "evidence_reconstruction": "acceptable_outcome_recorded",
+        }.items()
+    }
+
+
 def authorize(contract, events, envelope_id, action, phase=None, artifacts=None,
               missing_evidence=None, tainted_artifacts=None, now=None):
     action = str(action or "")
@@ -332,7 +381,9 @@ def _evidence(values):
 
 
 def cmd_doctor(args):
+    events = []
     try:
+        events = read_events(args.root)
         contract, document, path = load_contract(args.root, args.constitution)
         from org_lint import Lint, lint_resilience
         lint = Lint()
@@ -351,6 +402,8 @@ def cmd_doctor(args):
               "critical_functions": sorted(_by_id(contract.get("critical_functions"))),
               "adaptive_envelopes": sorted(_by_id(contract.get("adaptive_envelopes"))),
               "errors": errors, "resilience_score": None,
+              "evidence_profile": evidence_profile(events),
+              "outcome_indicators": outcome_indicators(events),
               "work_observation_model": {
                   "work_as_imagined": ["constitution", "workflow", "doctrine"],
                   "work_as_recorded": ["ledger", "git", "ci", "trace"],
