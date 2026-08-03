@@ -285,7 +285,7 @@ event_classes:
   # 形は実データに合わせている。**宣言が実態と違えば、検査は嘘になる。**
   design_decided:       { issue, deliverable, verdict, reasoning_sha256 }
   rework_requested:     { issue, deliverable, verdict, reasoning_sha256, phase, role,
-                          candidate_id, requester, evidence_ref, reason, from_verdict, to_role,
+                          candidate_id, requester, evidence_ref, reason, from_verdict, to_role, round,
                           risk_accepted,
                           root: "死因の根の分類（validation.enums 参照、任意）— Issue #104" }
   scope_decided:        { issue, deliverable, verdict, reasoning_sha256, phase, in_scope,

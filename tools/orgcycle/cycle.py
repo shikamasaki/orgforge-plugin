@@ -14,6 +14,7 @@ from ._core import (
     _branch_for,
     _candidate_id,
     _execute,
+    _events_for,
     _gh_sync,
     _issue_body,
     _ledger,
@@ -327,6 +328,18 @@ def cmd_begin(a):
               file=sys.stderr)
     parent = a.parent or resolve_parent(a.issue)
     cid = a.candidate_id or _candidate_id(a.issue)
+    if not a.candidate_id:
+        events, _ = _events_for(a.issue)
+        rounds = []
+        for event in events:
+            if event.get("class") != "rework_requested":
+                continue
+            try:
+                rounds.append(int((event.get("payload") or {}).get("round")))
+            except (TypeError, ValueError):
+                continue
+        if rounds:
+            cid = f"{cid}-rework-{max(rounds)}"
     if parent is None:
         print(f"注意: #{a.issue} の親 objective が解決できなかった。phase 連鎖は自分の admit だけを "
               f"見る（親から継承しない）。意図した親があるなら --parent で渡すこと。", file=sys.stderr)
