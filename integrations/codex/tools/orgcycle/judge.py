@@ -17,6 +17,7 @@ from organ_binding import BindingError
 from ._core import (
     HERE,
     issue_worktree,
+    issue_worktree_head,
     review_subject,
     worktree_rooted_at,
     _agents_dir,
@@ -215,6 +216,16 @@ def cmd_verify(a):
                   "subject が mint され、判定の同一性が壊れる（#101）。\n"
                   "  `org_cycle begin --issue N` で worktree を作るか、worktree 以外の "
                   "checkout を意図して判定するなら `--subject-root <path>` を明示すること。",
+                  file=sys.stderr)
+            return 12
+        _actual_branch = issue_worktree_head(a.issue, cwd=_subject_cwd)
+        if not _actual_branch or not re.fullmatch(
+                rf"feat/issue-{int(a.issue)}(?:-[A-Za-z0-9][A-Za-z0-9._-]*)?",
+                _actual_branch):
+            print(f"Issue #{a.issue} の worktree branch が束縛規約に一致しない: "
+                  f"{_actual_branch or '(detached)'}。"
+                  f" `feat/issue-{int(a.issue)}[-<slug>]` の worktree を作るか、"
+                  "意図した checkout を `--subject-root` で明示すること。",
                   file=sys.stderr)
             return 12
     _sid, _sparts = review_subject(
