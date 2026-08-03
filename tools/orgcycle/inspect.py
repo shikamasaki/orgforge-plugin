@@ -73,14 +73,19 @@ def cmd_show(a):
     rv, rseq, _ = _refutation_for(a.issue)
     evs, voided = _events_for(a.issue)
 
+    provisional = [e for e in evs if e["class"] == "verdict_provisional"]
     state = ("rework 待ち" if av == "reject" else
              "統合できる" if av == "admit" and rv == "survives" else
              "反証で差し戻し" if rv == "refuted" else
+             "cross-harness 暫定判定あり（joint 確定待ち）" if provisional else
              "skeptic 待ち" if av == "admit" else
              "gate 待ち" if any(e["class"] == "cycle_completed" for e in evs) else
              "実装中" if any(e["class"] == "cycle_started" for e in evs) else "未着手")
 
     print(f"#{a.issue} {title or ''} — {state}")
+    if provisional and not (av or rv):
+        print("  ⚠ 暫定判定は台帳に記録済みだが、最終判定ではない。"
+              "cross-harness の一致を専用 derive-admission で確定すること。")
 
     br = _branch_for(a.issue)
     code, log = _raw(["git", "log", "--oneline", "-3", br])
