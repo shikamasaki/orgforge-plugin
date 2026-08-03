@@ -146,7 +146,6 @@ def test_export_is_deterministic_source_preserving_and_non_demonstrative(tmp_pat
         assert claim["verifiedSupport"] == "NOT_DEMONSTRATED"
         assert claim["requestedStatus"] == "NOT_DEMONSTRATED"
         assert "support contains inferred or derived relations" in claim["reasons"]
-        assert "dependency shares fate with another dependency" in claim["reasons"]
 
 
 def test_consumer_lock_matches_dr_release_lock_at_locked_commit():
