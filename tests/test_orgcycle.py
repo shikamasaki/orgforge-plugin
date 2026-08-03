@@ -128,7 +128,7 @@ def test_worktree_isolates_parallel_makers(tmp_path):
     made = []
     for issue in (7, 8):
         code, out = run("github_sync.py", "branch", "--issue", str(issue), "--worktree",
-                        "--repo", "o/n", cwd=str(repo))
+                        "--base", "develop", "--repo", "o/n", cwd=str(repo))
         assert code == 0, out
         made.append(repo / ".orgforge" / "wt" / f"issue-{issue}")
 
@@ -1239,7 +1239,7 @@ def test_branch_create_does_not_move_main_in_a_worktree_org(tmp_path):
     g("worktree", "add", "-q", "-b", "feat/issue-1", str(wt), "develop")
 
     r = subprocess.run([sys.executable, str(TOOLS / "github_sync.py"), "branch",
-                        "--issue", "9", "--create", "--repo", "o/n"],
+                        "--issue", "9", "--create", "--base", "develop", "--repo", "o/n"],
                        capture_output=True, text=True, cwd=str(repo), timeout=60)
     cur = g("branch", "--show-current").stdout.strip()
     assert cur == "develop", f"メインが {cur} に切り替わった（worktree 運用の org）"
@@ -2324,10 +2324,12 @@ def _subject_org(tmp_path, issues=(7, 8)):
     g("init", "-q", "-b", "main")
     g("config", "user.email", "t@t"); g("config", "user.name", "t")
     (repo / "organization.yaml").write_text("name: t\n", encoding="utf-8")
+    (repo / "constitution.yaml").write_text(
+        "enforcement:\n  judges:\n    integration_ref: develop\n", encoding="utf-8")
     g("add", "-A"); g("commit", "-qm", "seed"); g("branch", "develop")
     for issue in issues:
         code, out = run("github_sync.py", "branch", "--issue", str(issue), "--worktree",
-                        "--repo", "o/n", cwd=str(repo))
+                        "--base", "develop", "--repo", "o/n", cwd=str(repo))
         assert code == 0, out
         wt = repo / ".orgforge" / "wt" / f"issue-{issue}"
         (wt / f"F{issue}.txt").write_text("x\n", encoding="utf-8")

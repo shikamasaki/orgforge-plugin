@@ -113,7 +113,13 @@ def cmd_branch(a):
         print(resolved)
         return 0
     print(name)
-    base = getattr(a, "base", None) or "develop"
+    base = getattr(a, "base", None)
+    if not base:
+        from orgcycle._core import resolve_integration_base
+        base, error = resolve_integration_base()
+        if not base:
+            print(error, file=sys.stderr)
+            return 2
     # --worktree は --create を含意する（worktree を作れば分離した作業場ができる）。
     # 並列 fan-out ではこちらが正解 — checkout はツリーを切り替えるので必ず混ざる。
     if getattr(a, "worktree", False):

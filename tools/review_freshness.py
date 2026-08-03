@@ -40,20 +40,24 @@ def _git(cwd, *args):
 
 
 def select_integration_ref(cwd, requested=None):
-    """Return the explicit target, or the first locally resolvable conventional target."""
+    """Return only an explicit integration target; never infer one from local branches."""
     if requested:
         return str(requested)
-    for ref in ("origin/develop", "develop", "origin/main", "main"):
-        code, _ = _git(cwd, "rev-parse", "--verify", f"{ref}^{{commit}}")
-        if code == 0:
-            return ref
-    # Keep the unresolved intent visible instead of replacing it with HEAD.
-    return "origin/main"
+    return None
 
 
 def integration_observation(cwd, integration_ref=None):
     """Measure the relationship between HEAD and the integration target without changing either."""
     ref = select_integration_ref(cwd, integration_ref)
+    if not ref:
+        return {
+            "integration_ref": "",
+            "integration_head_sha": "",
+            "base_sha": "",
+            "integration_relation": "unresolvable",
+            "behind": "",
+            "ahead": "",
+        }
     code, target = _git(cwd, "rev-parse", "--verify", f"{ref}^{{commit}}")
     if code != 0 or not target:
         return {
