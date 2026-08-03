@@ -100,6 +100,7 @@ facilities. orgforge records and coordinates those controls; it does not reimple
 - [Architecture](architecture.md) — the neutral core, host projection, ledger, and SDLC mold.
 - [Assurance Model](assurance.md) — exact meanings of claims and non-claims.
 - [Operations](operations.md) — daily operation, gates, HALT, caps, and human decisions.
+- [Platform adapter contracts](platform-adapter-contracts.md) — bounded contracts for artifact, backend, OTel, Checks, and external-PDP adapters.
 
 The older mixed-language documents at the repository root and in `docs/` remain design history and
 long-form rationale. When wording conflicts, this English set and the matching Japanese set define
