@@ -2586,8 +2586,12 @@ def test_gc_keeps_worktree_when_branch_cannot_be_resolved(tmp_path, monkeypatch,
     rc = m.cmd_gc(argparse.Namespace(base=None, all=False))
     assert rc == 0
     assert wt.is_dir(), "実在 branch を特定できないのに worktree を消した"
-    err = capsys.readouterr().err
+    captured = capsys.readouterr()
+    err = captured.err
     assert "feat/issue-9-ghost" in err, f"何を解決できなかったのか名指ししていない: {err!r}"
+    out = captured.out
+    assert "detached HEAD のため自動削除しない" in out
+    assert f"git worktree remove {wt}" in out
 
 
 def test_resolve_issue_branch_worktree_head_is_authoritative(tmp_path):
