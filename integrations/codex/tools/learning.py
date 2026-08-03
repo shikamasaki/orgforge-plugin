@@ -21,6 +21,9 @@ A "decision" is an admission_decided (verdict admit) carrying a predicted_outcom
 payload; its "realized outcome" is a later result_deployed / result_retired for the same
 candidate_id carrying an observed_outcome. The delta is |predicted - observed|. Silent when
 predictions matched (the default — no event at all).
+
+  profile <root>   emit an observation-only WAI/WAR/WAD profile. It never infers WAD,
+                   promotes doctrine, or assigns a resilience score.
 """
 import argparse
 import json
@@ -102,6 +105,45 @@ def cmd_delta(a):
         return ESCALATE
     print(f"noted: {len(deltas)} outcome delta(s) past threshold, none recurring >= "
           f"{a.recurrence} — recorded as injectable facts, no CEO traffic yet.")
+    return OK
+
+
+def cmd_profile(a):
+    """Project partial work observations and explicit unknowns without learning claims."""
+    events = read_events(a.root)
+    taxonomy = {
+        "failure": ("refutation_attempted", "result_retired", "rework_requested"),
+        "near_miss": ("rollback_unproven", "halt_tripped", "judges_disagreed"),
+        "adaptation": ("adaptive_envelope_activated", "adaptive_deviation_recorded",
+                       "adaptive_envelope_reverted", "microexperiment_concluded"),
+        "everyday_success": ("acceptable_outcome_recorded", "result_deployed",
+                              "phase_admitted", "cycle_completed"),
+        "control_false_positive": ("correction",),
+    }
+    counts = {name: 0 for name in taxonomy}
+    classified = []
+    for event in events:
+        for name, source in taxonomy.items():
+            if event.get("class") in source:
+                counts[name] += 1
+                classified.append({"seq": event.get("seq"), "taxonomy": name,
+                                   "event_class": event.get("class")})
+    reported_classes = {"progress_recorded", "cycle_completed", "acceptable_outcome_recorded"}
+    report = {
+        "observation_taxonomy": counts, "observations": classified,
+        "wai": {"sources": ["constitution", "workflow", "doctrine"],
+                "status": "reference_only", "confidence": "unknown"},
+        "work_as_recorded": {"event_count": len(events), "coverage": "ledger_only",
+                              "confidence": "unknown"},
+        "work_as_reported": {"event_count": sum(1 for event in events
+                                                   if event.get("class") in reported_classes),
+                              "confidence": "unknown"},
+        "inferred_wad": {"status": "not_inferred", "confidence": "unknown",
+                          "missingness": ["external tool actions", "unreported actions",
+                                          "human internal judgment"], "conflicts": []},
+        "learning_candidates": [], "doctrine_mutated": False, "resilience_score": None,
+    }
+    print(json.dumps(report, ensure_ascii=False, sort_keys=True))
     return OK
 
 
@@ -246,6 +288,8 @@ def main(argv):
     q = sub.add_parser("repeats"); q.set_defaults(fn=cmd_repeats)
     q.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)")
     q.add_argument("--recurrence", type=int, default=2)
+    q = sub.add_parser("profile"); q.set_defaults(fn=cmd_profile)
+    q.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)")
     a = p.parse_args(argv[1:])
     return a.fn(a)
 

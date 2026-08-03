@@ -284,3 +284,22 @@ def test_unknown_root_string_does_not_fabricate_recurrence(tmp_path):
     assert code == 0 and "clean" in out, \
         f"語彙に無い root 文字列の共有だけで再発を escalate した: {out}"
     assert "REPEATED DEATH" not in out
+
+
+def test_profile_preserves_everyday_success_and_wad_unknowns(tmp_path):
+    seed(tmp_path, "gate", "cycle_completed",
+         {"candidate_id": "A", "role": "gate", "outputs": []},
+         ts="2026-07-16T01:00:00Z")
+    seed(tmp_path, "gate", "rework_requested",
+         {"candidate_id": "A", "reason": "near miss"},
+         ts="2026-07-16T02:00:00Z")
+    code, out = run("learning.py", "profile", str(tmp_path))
+    assert code == 0, out
+    profile = json.loads(out)
+    assert profile["observation_taxonomy"]["everyday_success"] == 1
+    assert profile["observation_taxonomy"]["failure"] == 1
+    assert profile["inferred_wad"]["status"] == "not_inferred"
+    assert profile["inferred_wad"]["confidence"] == "unknown"
+    assert profile["learning_candidates"] == []
+    assert profile["doctrine_mutated"] is False
+    assert profile["resilience_score"] is None
