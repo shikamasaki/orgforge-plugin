@@ -300,6 +300,17 @@ def cmd_repair_body(a):
         print(f"repair-body: could not read issue #{a.issue}: {err}", file=sys.stderr)
         return 2
     new_body = _normalized_body(a.body)
+    probe = type("BodyProbe", (), {"body": new_body, "depends": None, "carved_from": None})()
+    prose_warning = _prose_dependency_warning(probe)
+    if prose_warning:
+        print(prose_warning, file=sys.stderr)
+    old_refs, new_refs = _depends_refs(old_body), _depends_refs(new_body)
+    if old_refs and not new_refs and not getattr(a, "confirm_drop_depends", False):
+        print("repair-body: replacement removes existing Depends on references "
+              f"({', '.join('#' + ref for ref in old_refs)}). "
+              "Pass --confirm-drop-depends to make that audited choice explicitly.",
+              file=sys.stderr)
+        return 2
     old_digest, new_digest = _body_digest(old_body), _body_digest(new_body)
     if _normalized_body(old_body) == new_body:
         print(f"repair-body: issue #{a.issue} already has sha256={new_digest}; idempotent no-op.")
