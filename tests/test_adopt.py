@@ -12,6 +12,13 @@ ADOPT = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(ADOPT)
 
 
+def test_founding_template_declares_integration_ref():
+    import yaml
+    constitution = yaml.safe_load(
+        (REPO / "template" / "constitution.yaml").read_text(encoding="utf-8"))
+    assert constitution["enforcement"]["judges"]["integration_ref"] == "origin/main"
+
+
 def test_prepare_is_local_idempotent_and_preserves_existing_files(tmp_path):
     first = ADOPT.prepare(tmp_path, "en")
     assert "constitution.yaml" in first["created"]

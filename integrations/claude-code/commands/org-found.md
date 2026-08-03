@@ -105,6 +105,10 @@ keep the CEO's decisions minimal. Concretely:
    still carries, and would check O6/O6c/MV cross-references against the *template's* role names rather
    than the ones you just wrote.
 
+   Keep `enforcement.judges.integration_ref` in the adopted constitution (the template defaults to
+   `origin/main`). It is a governance declaration, not a branch-name convenience; removing it makes
+   the first `org_cycle begin` fail closed until an explicit `--base` is supplied.
+
    **`organization.yaml` を書いた後に、あなた自身が Bash で実行すること**（`!` の自動実行では
    まだ存在しないファイルを検査してしまう）:
 
