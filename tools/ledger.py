@@ -3317,7 +3317,7 @@ def cmd_view(a):
         #     candidate_id-carrying form (new ledgers) gives full protection;
         #   - the cycle_started itself voided by a correction — voided_seqs, the single
         #     effective-event projection derive-admission uses (OBS-042: no third semantics).
-        started, completed, latest = {}, set(), {}
+        started, completed, latest = {}, {}, {}
         integrated_exact, integrated_legacy = set(), []
         for e in events:
             pl = e["payload"]
@@ -3337,7 +3337,7 @@ def cmd_view(a):
                                 "started_seq": e["seq"], "started_ts": str(e.get("ts") or ""),
                                 "payload": pl}
             elif e["class"] == "cycle_completed":
-                completed.add(cid)
+                completed[cid] = (e["seq"], str(e.get("ts") or ""))
             elif e["class"] == "progress_recorded":
                 latest[cid] = {k: pl.get(k) for k in
                                ("fraction", "phase", "done_so_far", "next_step", "blocked_by", "artifacts")}
@@ -3347,20 +3347,24 @@ def cmd_view(a):
                         for iseq, its, p in integrated_legacy]
         _TS = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 
-        def _integration_after(iseq, its, sseq, sts):
+        def _event_after(eseq, ets, sseq, sts):
             # Writer-enforced UTC form makes lexicographic ts comparison a real temporal order;
             # seq decides only when ts is unusable on either side, or exactly tied.
-            if _TS.match(its) and _TS.match(sts) and its != sts:
-                return its > sts
-            return iseq > sseq
+            if _TS.match(ets) and _TS.match(sts) and ets != sts:
+                return ets > sts
+            return eseq > sseq
 
         wip = []
         for cid, row in started.items():
-            if cid in completed or row["started_seq"] in voided or cid in integrated_exact:
+            finished = completed.get(cid)
+            if (finished and _event_after(*finished, row["started_seq"], row["started_ts"])) \
+                    or row["started_seq"] in voided:
+                continue
+            if cid in integrated_exact:
                 continue
             row_roots = {find(x) for x in
                          (_correlation_ids(row["payload"]) | _alias_ids(row["payload"]))}
-            if any(_integration_after(iseq, its, row["started_seq"], row["started_ts"])
+            if any(_event_after(iseq, its, row["started_seq"], row["started_ts"])
                    and (roots & row_roots)
                    for iseq, its, roots in legacy_roots):
                 continue

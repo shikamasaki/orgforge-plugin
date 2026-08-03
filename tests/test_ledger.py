@@ -4083,6 +4083,20 @@ def test_wip_completed_still_disappears(tmp_path):
     assert _wip(tmp_path) == []
 
 
+def test_wip_restarted_candidate_is_not_hidden_by_older_completion(tmp_path):
+    """同じcandidateのrework開始後は、古いcycle_completedでWIPから消さない。"""
+    seed(tmp_path, "eng", "cycle_started",
+         {"role": "eng", "candidate_id": "cand-a", "pack_manifest_id": "issue-9"},
+         ts="2026-07-16T01:00:00Z")
+    seed(tmp_path, "eng", "cycle_completed",
+         {"role": "eng", "candidate_id": "cand-a", "outputs": []},
+         ts="2026-07-16T02:00:00Z")
+    seed(tmp_path, "eng", "cycle_started",
+         {"role": "eng", "candidate_id": "cand-a", "pack_manifest_id": "issue-9"},
+         ts="2026-07-16T03:00:00Z")
+    assert [row["candidate_id"] for row in _wip(tmp_path)] == ["cand-a"]
+
+
 def test_wip_rework_candidate_started_after_integration_stays_visible(tmp_path):
     # skeptic 反証（rework-after-integration）: 統合済み Issue が標準の rework 経路で再開され、
     # NEW cycle_started が integration_admitted: pass より「後」に来る。統合は自分より前の
