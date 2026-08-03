@@ -65,11 +65,11 @@ to reach you. Arm a Monitor that streams only the RED signal:
 
 ```
 # Never infer death from TaskList. This must print READY TO ARM before creating a Monitor:
-python3 <plugin>/scripts/redline_monitor.py rearm-check "$ORG_LEDGER_ROOT" \
+"<injected launcher>" redline-monitor rearm-check "$ORG_LEDGER_ROOT" \
   --role <role> --instance redline-<role>
 
 # redline_monitor retains the previous signal: first/changed RED only, quiet while unchanged or healthy
-Monitor: python3 <plugin>/scripts/redline_monitor.py "$ORG_LEDGER_ROOT" \
+Monitor: "<injected launcher>" redline-monitor "$ORG_LEDGER_ROOT" \
   --role <role> --instance redline-<role>   (persistent)
 ```
 
@@ -79,9 +79,9 @@ notifies again. `/org-tick` also sends a `PushNotification` on a genuine escalat
 Healthy ticks stay silent (fail-quiet); a notification you didn't need erodes trust.
 
 The monitor updates an atomic heartbeat with PID, plugin version, role and instance after every
-probe. `redline_monitor.py status "$ORG_LEDGER_ROOT"` distinguishes live, stale, dead, duplicate,
+probe. `"<injected launcher>" redline-monitor status "$ORG_LEDGER_ROOT"` distinguishes live, stale, dead, duplicate,
 orphaned and old-version records without Claude's task metadata. Stop one exact record with
-`redline_monitor.py stop <record-id> --root "$ORG_LEDGER_ROOT"`; the token-bound cooperative request
+`"<injected launcher>" redline-monitor stop <record-id> --root "$ORG_LEDGER_ROOT"`; the token-bound cooperative request
 does not signal a reused PID or kill another session. Run `rearm-check` again before replacing it.
 
 ### OS scheduler — genuinely unattended machine monitoring

@@ -230,9 +230,9 @@ Both plugin bundles ship the same host-independent redline monitor registry. Bef
 restarting a long-lived monitor, use its installed script to check the logical instance:
 
 ```bash
-python3 <plugin>/scripts/redline_monitor.py rearm-check "$ORG_LEDGER_ROOT" \
+"<injected launcher>" redline-monitor rearm-check "$ORG_LEDGER_ROOT" \
   --role supervisor --instance redline-supervisor
-python3 <plugin>/scripts/redline_monitor.py status "$ORG_LEDGER_ROOT"
+"<injected launcher>" redline-monitor status "$ORG_LEDGER_ROOT"
 ```
 
 Only `READY TO ARM` authorizes a replacement. A live/stale record returns `DO NOT REARM`; use
