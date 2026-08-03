@@ -2677,6 +2677,21 @@ def test_begin_worktree_base_comes_from_constitution(tmp_path, monkeypatch):
         f"begin が constitution の統合先を worktree base に渡していない: {branch_calls[0]}"
 
 
+def test_begin_mints_new_candidate_identity_after_rework(monkeypatch):
+    m = _cycle_mod("cycle")
+    monkeypatch.setattr(m, "_candidate_id", lambda _issue: "issue-7")
+    monkeypatch.setattr(m, "_events_for", lambda _issue: (
+        [{"class": "rework_requested", "payload": {"round": "2"}}], set()))
+    seen = {}
+    monkeypatch.setattr(m, "_steps_begin", lambda _a, _parent, cid: seen.setdefault("cid", cid) or [])
+    monkeypatch.setattr(m, "_execute", lambda _steps, _label: 0)
+    rc = m.cmd_begin(argparse.Namespace(
+        role="r", issue=7, agent=None, phase="implement", parent="9",
+        candidate_id=None, base=None, why=None, no_check=True, no_worktree=True))
+    assert rc == 0
+    assert seen["cid"] == "issue-7-rework-2"
+
+
 def test_show_attributes_nothing_when_clean_against_constitution_ref(tmp_path):
     """(a) OBS-054: origin/main 基準で差分ゼロなら、不可逆変更を誤帰属しない。"""
     org, g = _declared_org(tmp_path, integration_ref="origin/main", develop=False)

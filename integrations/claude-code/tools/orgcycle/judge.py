@@ -852,7 +852,8 @@ def cmd_rework(a):
     """
     payload = {"deliverable": str(a.issue), "issue": a.issue,
                "verdict": "rework", "reason": a.reason,
-               "from_verdict": a.after, "to_role": a.to or ""}
+               "from_verdict": a.after, "to_role": a.to or "",
+               "round": str(a.round)}
     # 死因の根の分類（Issue #104）。再発検出（learning.py repeats）は root の一致で数える —
     # 記録時に分類されなければ、この rework が同根の再発でも検出器は文字列一致でしか見えない。
     # 語彙は learning.DEATH_ROOTS が単一の情報源（schema の enum とはテストが突き合わせる）。
