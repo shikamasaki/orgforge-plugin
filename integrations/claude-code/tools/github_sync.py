@@ -134,6 +134,8 @@ def main(argv):
     q.add_argument("--issue", required=True, type=int)
     q.add_argument("--body", required=True, help="complete replacement Issue body")
     q.add_argument("--reason", required=True, help="why this rewrite is necessary")
+    q.add_argument("--confirm-drop-depends", action="store_true",
+                   help="explicitly confirm removing existing Depends on references")
     q = sub.add_parser("stage")
     q.add_argument("--repo", help="owner/name（省略時は git remote origin から自動発見）"); q.add_argument("--issue", required=True, type=int)
     q.add_argument("--stage", required=True)

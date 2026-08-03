@@ -249,6 +249,21 @@ def test_repair_body_same_valid_body_is_idempotent_without_write(monkeypatch):
     assert not fake.calls_matching("issue edit") and not fake.calls_matching("issue comment")
 
 
+def test_repair_body_requires_explicit_confirmation_when_dropping_dependencies(monkeypatch):
+    fake = FakeGh(replies={"issue view": (0, json.dumps({"body": "context\n\nDepends on: #9"})),
+                           "api user": (0, "octocat\n"), "issue edit": (0, ""),
+                           "issue comment": (0, "")})
+    monkeypatch.setattr(GS, "gh", fake)
+    rc = GS.cmd_repair_body(_ns(repo="o/r", issue=5, body="context", reason="repair"))
+    assert rc == 2
+    assert not fake.calls_matching("issue edit")
+
+    rc = GS.cmd_repair_body(_ns(repo="o/r", issue=5, body="context", reason="repair",
+                                confirm_drop_depends=True))
+    assert rc == 0
+    assert fake.calls_matching("issue edit")
+
+
 # ── work-log: idempotent per ledger event id ─────────────────────────────────
 def test_log_posts_a_comment_with_hidden_marker(monkeypatch):
     fake = FakeGh(replies={"issue view": (0, '{"comments": []}'), "issue comment": (0, "")})
