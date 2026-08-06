@@ -661,12 +661,13 @@ def _run_headless(role, issue, material, cfg, schema, stable_organ=None):
             cmd += ["-c", f"model_reasoning_effort={effort}"]
         cmd += ["--output-schema", schema, "-o", out_json, material]
     elif cli == "claude":
-        # claude -p は --output-schema を持たないので、スキーマを本文で要求し、
-        # 返ってきた JSON を intake の側で検査する。**構造の保証が一段弱いことを言う。**
-        cmd = [exe, "-p", material + "\n\n## 返す形\n"
-               "次のスキーマに厳密に一致する JSON **のみ** を返すこと（前後に散文を付けない）:\n"
-               + open(schema, encoding="utf-8").read(),
-               "--output-format", "json"]
+        # Claude Code 2.x also accepts a JSON Schema. Asking only in prose
+        # produced empty/non-machine-readable answers often enough that a
+        # cross-harness review could not be recorded. The CLI validates the
+        # return shape; intake remains the independent second validation.
+        cmd = [exe, "-p", material, "--output-format", "json",
+               "--json-schema", open(schema, encoding="utf-8").read(),
+               "--permission-mode", "plan"]
         if model:
             cmd += ["--model", str(model)]
     else:
@@ -708,7 +709,9 @@ def _run_headless(role, issue, material, cfg, schema, stable_organ=None):
         except Exception:
             raw = pr.stdout
     if not raw or not raw.strip():
-        print(f"[{role}] {cli} が空を返した。判定は得られていない。", file=sys.stderr)
+        print(f"[{role}] {cli} が空を返した。判定は得られていない。\n"
+              f"  command: {' '.join(cmd[:4])} …\n"
+              f"  stderr: {(pr.stderr or '(empty)')[-1200:]}", file=sys.stderr)
         return 7
 
     print(raw)                                  # 監督が読む・intake に渡せる形で stdout に出す
