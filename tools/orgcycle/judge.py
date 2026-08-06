@@ -726,7 +726,17 @@ def _run_headless(role, issue, material, cfg, schema, stable_organ=None):
             # terminal `result` is the only event that carries a completed verdict.
             # Ignore hook/tool chatter; accepting it would turn a partial review into
             # an admission.
-            events = [json.loads(line) for line in pr.stdout.splitlines() if line.strip()]
+            events = []
+            for line in pr.stdout.splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    events.append(json.loads(line))
+                except json.JSONDecodeError:
+                    # Keep looking for the terminal stream event.  A diagnostic line
+                    # must not turn a completed structured verdict into a false empty
+                    # result, and is never itself accepted as a verdict.
+                    continue
             terminal = next((event for event in reversed(events)
                              if event.get("type") == "result"), None)
             raw = (terminal or {}).get("result")

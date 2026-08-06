@@ -1680,6 +1680,39 @@ def test_headless_reports_missing_cli_instead_of_falling_back(tmp_path, monkeypa
     assert rc != 0
 
 
+def test_claude_headless_uses_only_the_terminal_stream_result(tmp_path, monkeypatch, capsys):
+    """Tool/hook stream events are not verdicts; the final result is.
+
+    Claude can emit many JSON events before StructuredOutput.  This pins the
+    transport contract so a partial tool message cannot be admitted, while a
+    harmless non-JSON diagnostic line does not discard a completed result.
+    """
+    sys.path.insert(0, str(TOOLS))
+    from orgcycle import judge
+
+    schema = tmp_path / "gate-verdict.json"
+    schema.write_text(json.dumps({"$schema": "https://json-schema.org/draft/2020-12/schema",
+                                  "type": "object"}), encoding="utf-8")
+    terminal = json.dumps({"type": "result", "result": json.dumps({
+        "verdict": "admit", "why": "terminal", "evidence": "checked",
+        "findings": [], "out_of_scope": [], "risk": "low"}, ensure_ascii=False)})
+    stream = "\n".join([
+        json.dumps({"type": "assistant", "message": {"content": "tool use"}}),
+        "non-json diagnostic",
+        terminal,
+    ])
+    monkeypatch.setattr(judge.shutil, "which", lambda _: "/fake/claude")
+    monkeypatch.setattr(judge.subprocess, "run", lambda *args, **kwargs:
+                        subprocess.CompletedProcess(args[0], 0, stdout=stream, stderr=""))
+
+    rc = judge._run_headless("gate", 991, "unique stream fixture", {"cli": "claude"},
+                              str(schema))
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert '"verdict": "admit"' in captured.out
+    assert "tool use" not in captured.out
+
+
 def test_decide_requires_both_lineages_for_admit(tmp_path, monkeypatch):
     """cross-harness の org では、片側だけの admit を記録できない。
 
