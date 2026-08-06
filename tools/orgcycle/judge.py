@@ -665,8 +665,23 @@ def _run_headless(role, issue, material, cfg, schema, stable_organ=None):
         # produced empty/non-machine-readable answers often enough that a
         # cross-harness review could not be recorded. The CLI validates the
         # return shape; intake remains the independent second validation.
+        #
+        # Claude's validator rejects the JSON Schema meta-schema declaration
+        # (`$schema: https://json-schema.org/draft/2020-12/schema`) even
+        # though the rest of the schema uses ordinary compatible keywords.
+        # Keep that declaration in the source artifact for validators and
+        # Codex, but remove only this transport-incompatible annotation for
+        # the Claude CLI argument.
+        try:
+            with open(schema, encoding="utf-8") as f:
+                claude_schema = json.load(f)
+            claude_schema.pop("$schema", None)
+            claude_schema_arg = json.dumps(claude_schema, ensure_ascii=False)
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"[{role}] Claude 用 verdict schema を読めない: {exc}", file=sys.stderr)
+            return 2
         cmd = [exe, "-p", material, "--output-format", "json",
-               "--json-schema", open(schema, encoding="utf-8").read(),
+               "--json-schema", claude_schema_arg,
                "--permission-mode", "plan"]
         if model:
             cmd += ["--model", str(model)]
