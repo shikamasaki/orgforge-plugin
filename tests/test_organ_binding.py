@@ -275,6 +275,7 @@ def test_judge_prompt_uses_stable_launcher_not_a_tools_checkout(
     output = captured.out + captured.err
     assert f'"{record["launcher"]}" github-sync decide' in output
     assert f'"{record["launcher"]}" org-cycle rework' in output
-    assert f'"{record["launcher"]}" repro-lint check' in output
+    assert "mechanical_bar: declared_only" in output
+    assert f'"{record["launcher"]}" repro-lint check' not in output
     assert str(TOOLS / "github_sync.py") not in output
     assert ".claude/plugins/cache" not in output

@@ -553,32 +553,42 @@ def cmd_provisional(a):
         return 2
 
     event = {"gate": "admission_decided", "skeptic": "refutation_attempted"}[a.role]
-    try:
-        findings = json.loads(a.findings or "[]")
-    except json.JSONDecodeError as e:
-        print(f"provisional: --findings は JSON 配列でなければならない: {e}", file=sys.stderr)
-        return 2
-    if not isinstance(findings, list):
-        print("provisional: --findings は JSON 配列でなければならない。", file=sys.stderr)
-        return 2
-    prefix = "GATE-" if a.role == "gate" else "SKEPTIC-"
-    required = {"id", "scope_item", "evidence", "required_action"}
-    for finding in findings:
-        if not isinstance(finding, dict) or set(finding) != required:
-            print("provisional: 各 finding は id/scope_item/evidence/required_action だけを持つ map が必要。",
+    # `--findings` is mandatory for the new structured judge route, but legacy
+    # callers must still reach their actual receipt/security validation.  Making
+    # an omitted optional CLI field look like an empty structured report masked
+    # those real failures and broke existing audited records.
+    findings = []
+    findings_json = None
+    if a.findings is not None:
+        try:
+            findings = json.loads(a.findings)
+        except json.JSONDecodeError as e:
+            print(f"provisional: --findings は JSON 配列でなければならない: {e}", file=sys.stderr)
+            return 2
+        if not isinstance(findings, list):
+            print("provisional: --findings は JSON 配列でなければならない。", file=sys.stderr)
+            return 2
+        prefix = "GATE-" if a.role == "gate" else "SKEPTIC-"
+        required = {"id", "scope_item", "evidence", "required_action"}
+        for finding in findings:
+            if not isinstance(finding, dict) or set(finding) != required:
+                print("provisional: 各 finding は id/scope_item/evidence/required_action だけを持つ map が必要。",
+                      file=sys.stderr)
+                return 2
+            if not str(finding["id"]).startswith(prefix) or any(
+                    not str(finding[key]).strip() for key in required):
+                print(f"provisional: finding id は {prefix} で始まり、全項目を具体的に記すこと。",
+                      file=sys.stderr)
+                return 2
+        if a.verdict not in (pass_v, "park") and not findings:
+            print("provisional: reject/refuted には少なくとも1件の追跡可能な finding が必要。",
                   file=sys.stderr)
             return 2
-        if not str(finding["id"]).startswith(prefix) or any(
-                not str(finding[key]).strip() for key in required):
-            print(f"provisional: finding id は {prefix} で始まり、全項目を具体的に記すこと。",
-                  file=sys.stderr)
-            return 2
-    if a.verdict not in (pass_v, "park") and not findings:
-        print("provisional: reject/refuted には少なくとも1件の追跡可能な finding が必要。",
-              file=sys.stderr)
-        return 2
-    findings_json = json.dumps(findings, ensure_ascii=False, sort_keys=True)
-    digest = _reasoning_digest(why, a.evidence, a.alternatives, a.standard, a.risk, findings_json)
+        findings_json = json.dumps(findings, ensure_ascii=False, sort_keys=True)
+    digest_fields = [why, a.evidence, a.alternatives, a.standard, a.risk]
+    if findings_json is not None:
+        digest_fields.append(findings_json)
+    digest = _reasoning_digest(*digest_fields)
 
     # ── identity（H1）─────────────────────────────────────────────────────
     # **`decision_by` は検証済み receipt からのみ設定する。** CLI で申告できるなら、誰の判断

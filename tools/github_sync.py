@@ -193,8 +193,8 @@ def main(argv):
     pv.add_argument("--alternatives", default="")
     pv.add_argument("--standard", default="")
     pv.add_argument("--risk", default="")
-    pv.add_argument("--findings", default="[]",
-                    help="judge の構造化 findings JSON。各指摘は安定ID・scope・証拠・必要な対応を持つ")
+    pv.add_argument("--findings", default=None,
+                    help="judge の構造化 findings JSON。指定時は各指摘に安定ID・scope・証拠・必要な対応を持たせる")
     pv.add_argument("--phase", default=None)
     pv.add_argument("--by", default=None, help="記録者（既定は --role）")
     # **judge の署名 receipt。** これがあるときだけ decision_by が確定する（H1）。
