@@ -680,7 +680,10 @@ def _run_headless(role, issue, material, cfg, schema, stable_organ=None):
         except (OSError, json.JSONDecodeError) as exc:
             print(f"[{role}] Claude 用 verdict schema を読めない: {exc}", file=sys.stderr)
             return 2
-        cmd = [exe, "-p", material, "--output-format", "json",
+        # A judge may use several read-only tools before StructuredOutput.  Claude's
+        # single JSON envelope can terminate at that tool boundary without its final
+        # result; stream-json carries every event and its terminal result.
+        cmd = [exe, "-p", material, "--output-format", "stream-json", "--verbose",
                "--json-schema", claude_schema_arg,
                "--permission-mode", "plan"]
         if model:
@@ -719,10 +722,16 @@ def _run_headless(role, issue, material, cfg, schema, stable_organ=None):
     if os.path.isfile(out_json):
         raw = open(out_json, encoding="utf-8").read()
     elif cli == "claude":
-        try:                                    # claude -p --output-format json の封筒を開ける
-            raw = (json.loads(pr.stdout) or {}).get("result") or pr.stdout
+        try:
+            # terminal `result` is the only event that carries a completed verdict.
+            # Ignore hook/tool chatter; accepting it would turn a partial review into
+            # an admission.
+            events = [json.loads(line) for line in pr.stdout.splitlines() if line.strip()]
+            terminal = next((event for event in reversed(events)
+                             if event.get("type") == "result"), None)
+            raw = (terminal or {}).get("result")
         except Exception:
-            raw = pr.stdout
+            raw = None
     if not raw or not raw.strip():
         print(f"[{role}] {cli} が空を返した。判定は得られていない。\n"
               f"  command: {' '.join(cmd[:4])} …\n"
