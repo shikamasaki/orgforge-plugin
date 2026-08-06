@@ -351,6 +351,17 @@ enforcement:
     # branches happen to exist. Strict mode uses this ref unless `verify --base <ref>` explicitly
     # selects a different target for that review.
     integration_ref: origin/main
+    # A task review is finite. The issue itself owns acceptance criteria; the gate additionally
+    # checks only the seam it changed and commands explicitly required by that Issue. Findings
+    # outside this list are risks/new backlog items, never a reason to keep reworking the task.
+    review_scope:
+      default:
+        items: [Issue の受入基準, 変更した seam contract, Issue が明示した検証コマンド]
+        mechanical_bar: declared_only       # declared_only | always
+    # GitHub Issue is the operational review log. Every finding, response, and
+    # independent re-check is posted there; the append-only ledger holds only a
+    # receipt/digest and is never used as a mutable current-status board.
+    review_record: github_issue
     # Voiding a judgment is itself an authority-bearing act. A gate/skeptic may not erase its own
     # or the other judge's verdict to manufacture room for a replacement. The role is declared here
     # instead of being hard-coded in the organ; installations may assign append-only record custody

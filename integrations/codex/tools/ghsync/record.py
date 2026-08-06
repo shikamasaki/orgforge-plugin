@@ -166,6 +166,51 @@ def cmd_log(a):
     return 0
 
 
+def cmd_review_response(a):
+    """Project one concrete response to a review finding onto its GitHub Issue.
+
+    Findings and their responses must be addressable across harnesses: a Claude
+    finding can be checked and accepted by Codex (and vice versa) without either
+    reviewer relying on an ephemeral chat transcript.  This command intentionally
+    writes the response to the Issue, the human-facing work log, rather than
+    creating a competing mutable local status file.
+    """
+    finding = (a.finding or "").strip()
+    response = (a.response or "").strip()
+    evidence = (a.evidence or "").strip()
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9._-]{0,63}", finding):
+        print("review-response: --finding は追跡可能なID（例: GATE-001）が必要。", file=sys.stderr)
+        return 2
+    if len(response) < 20 or len(evidence) < 20:
+        print("review-response: --response と --evidence には対応内容と実測を具体的に残すこと。",
+              file=sys.stderr)
+        return 2
+    marker = f"<!-- orgforge:review-response:{a.review}:{finding}:{a.status} -->"
+    code, existing = gh(["issue", "view", str(a.issue), "--repo", a.repo,
+                         "--json", "comments"])
+    if code != 0:
+        print(existing, file=sys.stderr)
+        return 3
+    if marker in existing:
+        print(f"review-response: {finding} は既に同じ内容で Issue #{a.issue} に記録済み（no-op）。")
+        return 0
+    body = "\n".join([
+        f"### ↪ Review response — `{finding}` ({a.status})",
+        f"**Review:** `{a.review}`",
+        f"**Responded by:** `{a.by}`",
+        "\n**Response:**\n" + response,
+        "\n**Evidence:**\n" + evidence,
+        "\n次の独立 reviewer は、この対応と証拠を確認して自分の verdict に明記する。",
+        marker,
+    ])
+    code, out = gh(["issue", "comment", str(a.issue), "--repo", a.repo, "--body", body])
+    if code != 0:
+        print(out, file=sys.stderr)
+        return 3
+    print(f"recorded review response for {finding} on #{a.issue}")
+    return 0
+
+
 # the judgment classes that must land on the Issue with their reasoning (docs/11 §4f)
 
 
@@ -508,7 +553,32 @@ def cmd_provisional(a):
         return 2
 
     event = {"gate": "admission_decided", "skeptic": "refutation_attempted"}[a.role]
-    digest = _reasoning_digest(why, a.evidence, a.alternatives, a.standard, a.risk)
+    try:
+        findings = json.loads(a.findings or "[]")
+    except json.JSONDecodeError as e:
+        print(f"provisional: --findings は JSON 配列でなければならない: {e}", file=sys.stderr)
+        return 2
+    if not isinstance(findings, list):
+        print("provisional: --findings は JSON 配列でなければならない。", file=sys.stderr)
+        return 2
+    prefix = "GATE-" if a.role == "gate" else "SKEPTIC-"
+    required = {"id", "scope_item", "evidence", "required_action"}
+    for finding in findings:
+        if not isinstance(finding, dict) or set(finding) != required:
+            print("provisional: 各 finding は id/scope_item/evidence/required_action だけを持つ map が必要。",
+                  file=sys.stderr)
+            return 2
+        if not str(finding["id"]).startswith(prefix) or any(
+                not str(finding[key]).strip() for key in required):
+            print(f"provisional: finding id は {prefix} で始まり、全項目を具体的に記すこと。",
+                  file=sys.stderr)
+            return 2
+    if a.verdict not in (pass_v, "park") and not findings:
+        print("provisional: reject/refuted には少なくとも1件の追跡可能な finding が必要。",
+              file=sys.stderr)
+        return 2
+    findings_json = json.dumps(findings, ensure_ascii=False, sort_keys=True)
+    digest = _reasoning_digest(why, a.evidence, a.alternatives, a.standard, a.risk, findings_json)
 
     # ── identity（H1）─────────────────────────────────────────────────────
     # **`decision_by` は検証済み receipt からのみ設定する。** CLI で申告できるなら、誰の判断
@@ -640,6 +710,9 @@ def cmd_provisional(a):
             parts.append(f"\n**Standard applied:** {a.standard}")
         if (a.risk or "").strip():
             parts.append(f"\n**Known risk accepted:** {a.risk}")
+        if findings:
+            parts.append("\n**Findings (respond with `github_sync review-response`):**\n```json\n"
+                         + json.dumps(findings, ensure_ascii=False, indent=2) + "\n```")
         parts.append(f"\n`reasoning_sha256: {digest}` — 台帳の receipt が同じ digest を持つ。"
                      f"再ハッシュが一致しなければ、この記録は書き換えられている。")
         parts.append(f"\n{marker}")

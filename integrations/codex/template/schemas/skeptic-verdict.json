@@ -6,6 +6,7 @@
   "additionalProperties": false,
   "required": [
     "evidence",
+    "findings",
     "mutations",
     "out_of_scope",
     "risk",
@@ -30,6 +31,21 @@
       "type": "string",
       "minLength": 20,
       "description": "実際に走らせた／読んだもの。コマンドと実出力"
+    },
+    "findings": {
+      "type": "array",
+      "description": "scope内の反証・指摘。各指摘は Issue の review-response で対応を追跡する。survives時は空配列。",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["evidence", "id", "required_action", "scope_item"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^SKEPTIC-[0-9]{3}$"},
+          "scope_item": {"type": "string"},
+          "evidence": {"type": "string", "minLength": 20},
+          "required_action": {"type": "string", "minLength": 20}
+        }
+      }
     },
     "mutations": {
       "type": "array",

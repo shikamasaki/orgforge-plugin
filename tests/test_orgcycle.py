@@ -286,11 +286,12 @@ def test_integrate_allows_when_both_recorded(tmp_path):
         os.environ.pop("ORG_LEDGER_ROOT", None)
 
 
-def test_verify_gate_uses_the_stable_organ_for_repro_lint():
-    """installed promptはcache pathでなくbinding launcher、source開発時だけHEREを使う。"""
+def test_verify_gate_can_make_repro_lint_an_explicit_scope_choice():
+    """全repo検査は既定で注入せず、constitution が always を宣言した時だけ要求する。"""
     src = _cycle_src()
     assert '_organ_command(stable_organ, "repro-lint")' in src
-    assert 'os.path.join(HERE, filename)' in src, "source checkout 用 fallback が無い"
+    assert 'review_scope["mechanical_bar"] == "always"' in src
+    assert "declared_only" in src
 
 
 def test_worktree_cleanup_keeps_dirty_tree(tmp_path):
@@ -470,11 +471,11 @@ def test_seam_guard_accepts_a_referenced_file(tmp_path):
 
 # ── 0.20.0: rework 履歴 / 統合の事前確認 / 本番資産 / 公開面 ─────────────
 def test_verify_passes_rework_history_to_gate():
-    """gate に過去の判定を渡す。渡さないと毎回「初回判定」として扱う。"""
+    """過去の判定は修正確認に使い、新しい無制限の探索根拠にはしない。"""
     src = _cycle_src()
     seg = src[src.index("def cmd_verify"):]
     assert "判定履歴" in seg and "回目の判定です" in seg
-    assert "再導出" in seg, "「前回の指摘が直ったか」だけを見る gate になってしまう"
+    assert "無制限に増やす根拠にしてはならない" in seg
 
 
 def test_integrate_plan_executes_nothing_and_warns_on_overlap(tmp_path):
@@ -1778,13 +1779,20 @@ def _xh_authority_receipt(org, target, reason, issue="7", kind="superseded"):
 
 def _prov(tmp_path, lineage, verdict, issue=7, role="gate", why=None, extra=(),
           subject="subject-A"):
-    return run("github_sync.py", "provisional",
-               "--issue", str(issue), "--role", role, "--lineage", lineage,
-               "--verdict", verdict, "--subject", subject,
-               "--why", why or f"{lineage} の {role} として実際に見て決めた。"
-                               f"再導出した範囲と、決め手になった箇所を書いている。",
-               "--evidence", "実行したコマンドと出力の要旨", *extra,
-               cwd=str(tmp_path))
+    args = ["github_sync.py", "provisional",
+            "--issue", str(issue), "--role", role, "--lineage", lineage,
+            "--verdict", verdict, "--subject", subject,
+            "--why", why or f"{lineage} の {role} として実際に見て決めた。"
+                            f"再導出した範囲と、決め手になった箇所を書いている。",
+            "--evidence", "実行したコマンドと出力の要旨"]
+    if verdict in ("reject", "refuted"):
+        prefix = "GATE" if role == "gate" else "SKEPTIC"
+        args += ["--findings", json.dumps([{
+            "id": f"{prefix}-001", "scope_item": "受入基準",
+            "evidence": "再現コマンドと実出力により基準未達を確認した。",
+            "required_action": "受入基準を満たす実装と再現可能な検証を追加する。",
+        }], ensure_ascii=False)]
+    return run(*args, *extra, cwd=str(tmp_path))
 
 
 def _events(tmp_path, cls):

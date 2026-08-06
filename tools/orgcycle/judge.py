@@ -53,6 +53,44 @@ def _role_charter(role):
     return body.strip(), path
 
 
+def _review_scope(constitution_path, role):
+    """Load the finite review boundary declared by the project.
+
+    This transports a scope contract into the judge prompt; it never selects a
+    verdict.  A malformed declaration fails closed rather than silently making
+    the review breadth depend on an installed charter version.
+    """
+    default = {
+        "items": ["Issue の受入基準", "変更した seam contract", "Issue が明示した検証コマンド"],
+        "mechanical_bar": "declared_only",
+    }
+    if not constitution_path or not os.path.isfile(constitution_path):
+        return default, None
+    try:
+        import yaml
+        with open(constitution_path, encoding="utf-8") as f:
+            document = yaml.safe_load(f) or {}
+    except Exception as e:
+        return None, f"review_scope を読めない: {e}"
+    try:
+        scope = (((document.get("enforcement") or {}).get("judges") or {})
+                 .get("review_scope") or {})
+        configured = scope.get(role) or scope.get("default") or {}
+    except AttributeError:
+        return None, "enforcement.judges.review_scope は map でなければならない"
+    if not isinstance(configured, dict):
+        return None, f"review_scope.{role} は map でなければならない"
+    items = configured.get("items", default["items"])
+    if not isinstance(items, list) or not items or not all(isinstance(item, str) and item.strip()
+                                                           for item in items):
+        return None, f"review_scope.{role}.items は空でない文字列配列でなければならない"
+    mechanical_bar = configured.get("mechanical_bar", default["mechanical_bar"])
+    if mechanical_bar not in {"declared_only", "always"}:
+        return None, (f"review_scope.{role}.mechanical_bar は declared_only または always "
+                      "でなければならない")
+    return {"items": items, "mechanical_bar": mechanical_bar}, None
+
+
 def _verdict_schema(role):
     """Return the bundled structured-output schema for a judge role.
 
@@ -180,6 +218,10 @@ def cmd_verify(a):
     if _policy_error:
         print(f"review freshness policy が不正: {_policy_error}", file=sys.stderr)
         return 2
+    review_scope, scope_error = _review_scope(_constitution_path, role)
+    if scope_error:
+        print(f"review scope policy が不正: {scope_error}", file=sys.stderr)
+        return 2
     _ref_declared, _configured_ref, _ref_error = integration_ref_policy(_constitution_path)
     if _ref_error and not getattr(a, "base", None):
         print(f"integration ref policy が不正: {_ref_error}", file=sys.stderr)
@@ -304,6 +346,13 @@ def cmd_verify(a):
         out.append("\n> これは宣言されたコマンドの測定結果であり、daemon名や実装を推測した結果ではない。")
     out.append("\n## あなたの憲章（agents/%s.md — 検証基準はここが唯一の出所）\n" % role)
     out.append(charter)
+    out.append("\n## この Issue に適用する review scope（constitution.yaml の宣言）\n")
+    out.extend(f"- {item}\n" for item in review_scope["items"])
+    out.append("\n**reject / refuted にしてよいのは、上の各項目に直接対応する反証を、"
+               "Issue本文の基準ID・変更seam・または明示コマンドと結び付けて示せる場合だけです。**\n"
+               "対応付けできない発見（未変更領域の改善案、設計の好み、将来の仮説、"
+               "Issueに無い追加テスト）は reject / refuted の根拠にせず、risk に短く記し"
+               "GitHub Issue化を推奨すること。\n")
     rounds = [h for h in history if h["class"] == "admission_decided"]
     # 台帳と Issue の**多い方**を採る。二重記録の片側が落ちるのが実地の失敗形なので、
     # 台帳だけを数えると「2回目」と言ってしまう（実際は3回目）。回数を過少に伝えると、
@@ -325,11 +374,8 @@ def cmd_verify(a):
             for b in bodies[-2:]:
                 out.append(b[:5000] + "\n\n---\n")
             out.append("</details>")
-        out.append("\n> **前回の指摘が直ったかだけを見るのでは足りない。** 直っていることの確認に加え、"
-                   "MUST を1つずつ**再導出**すること — 前回の rework で新しく壊れた箇所は、"
-                   "前回の指摘リストには載っていない。実地では、指摘を直す過程で別の穴"
-                   "（警報を切る / 新しい公開面を足す）が生まれている。\n"
-                   "> 判定にあたっては「前回見落とした点を今回どう確認したか」を --why に書くこと。")
+        out.append("\n> 前回の reject / refuted が直ったことと、今回変更した seam に直接接する"
+                   "受入基準だけを再確認すること。履歴を、新しい論点を無制限に増やす根拠にしてはならない。\n")
 
     out.append(f"\n## 検証対象の SPEC / MUST（Issue #{a.issue} 本文）\n")
     out.append(body or "(本文が空 — SPEC の無い Issue は、それ自体が reject 事由)")
@@ -345,7 +391,7 @@ def cmd_verify(a):
         out.append("\n## gate が既に見たこと\n(#%d に admission_decided の記録が無い。"
                    "gate の admit 前に skeptic を回そうとしていないか確認すること)" % a.issue)
 
-    if role == "gate":
+    if role == "gate" and review_scope["mechanical_bar"] == "always":
         # 6: ツールのパスが解決できず repro_lint が一度も走っていなかった。org_cycle は自分の
         # 位置を知っているので絶対パスを埋める。機械的拒否層は、誰も diff を読まない以上
         # 「走らなかった」が最も危ない失敗形。
@@ -355,6 +401,11 @@ def cmd_verify(a):
         out.append("```")
         out.append("HOLD（exit 10）なら reject。パスが通らない場合はそう報告すること — "
                    "「ツールが無いので未実行」は、機械バーが効いていないという最も重い所見。")
+    elif role == "gate":
+        out.append("\n## 機械バーの扱い\n")
+        out.append("この Issue は `mechanical_bar: declared_only` である。Issue の MUST または"
+                   "明示コマンドが要求する機械検査だけを実行すること。全リポジトリの repro_lint を"
+                   "自動で追加して、無関係な既存負債を今回の reject 根拠にしてはならない。\n")
     if role == "skeptic" and prior:
         # 5: gate は毎回 --risk に「今回撃っていない領域」を書く。実地では で gate が
         # 「1件も当てていない」と書いた領域から実バグが出た。人が手で転記していたので配管が運ぶ。
@@ -419,7 +470,8 @@ def cmd_verify(a):
               ("evidence", "実際に走らせたコマンドと、その**実出力**（失敗も含む）")]
     if role == "gate":
         fields += [("standard", "適用した基準（SPEC の MUST / seam contract / 機械バー）"),
-                   ("alternatives", "採らなかった選択肢と、その理由")]
+                   ("alternatives", "採らなかった選択肢と、その理由"),
+                   ("findings", "scope内の指摘。rejectなら GATE-001 形式のID・scope項目・証拠・必要な対応を必ず含める。admitなら空配列")]
     else:
         fields += [("mutations", "**適用後状態を実測できた**ミューテーションの一覧。各項目に "
                                  "`applied: true` と postcondition の実コマンド/実出力を含める。"
@@ -432,6 +484,7 @@ def cmd_verify(a):
                                     "Issue の仕事。無ければ「無し」と明示。\n"
                                     "    判断が難しいものは**あなたが決めず**、両方の読み方を"
                                     "書いて監督に返すこと（スコープの carve out は監督の判断）")]
+        fields += [("findings", "scope内の反証。refutedなら SKEPTIC-001 形式のID・scope項目・証拠・必要な対応を必ず含める。survivesなら空配列")]
     fields += [("risk", "承知の上で残す穴 / 排除しきれなかった失敗モード。無いなら「無い」と明示")]
 
     if role == "skeptic":

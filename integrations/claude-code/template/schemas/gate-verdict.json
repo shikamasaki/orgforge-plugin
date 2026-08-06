@@ -7,6 +7,7 @@
   "required": [
     "alternatives",
     "evidence",
+    "findings",
     "out_of_scope",
     "risk",
     "standard",
@@ -31,6 +32,21 @@
       "type": "string",
       "minLength": 20,
       "description": "実際に走らせたコマンドと、その実出力（失敗も含む）。admit には必須"
+    },
+    "findings": {
+      "type": "array",
+      "description": "scope内の指摘。各指摘には安定IDを付け、Issue の review-response で対応を追跡する。admit時は空配列。",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["evidence", "id", "required_action", "scope_item"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^GATE-[0-9]{3}$"},
+          "scope_item": {"type": "string"},
+          "evidence": {"type": "string", "minLength": 20},
+          "required_action": {"type": "string", "minLength": 20}
+        }
+      }
     },
     "standard": {
       "type": "string",
