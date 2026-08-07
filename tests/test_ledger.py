@@ -10,7 +10,7 @@ import pytest
 
 
 def _real_ids(org):
-    """その org の (org_id, ledger_id)。**書き込み先から決まる値**に receipt を合わせる。"""
+    """This org's (org_id, ledger_id). A receipt is bound to values the WRITE TARGET fixes."""
     sys.path.insert(0, str(REPO / "tools"))
     import importlib
     led = importlib.import_module("ledger")
@@ -277,7 +277,8 @@ def test_task_inherits_phase_admission_from_its_parent_objective(tmp_path):
 # gate が deliverable に "settle()"（関数名）を書き、complete の照合が "8"（Issue番号）で
 # 探して「admission がまだ」と出た。記録は seq 96 に存在していた。
 def test_admission_lookup_tolerates_identifier_drift(tmp_path):
-    """deliverable が関数名でも、payload の issue で拾える。無ければ near で原因を示す。"""
+    """Even when the deliverable is a function name, the payload's issue finds it — and when
+    nothing matches, `near` names why."""
     import importlib.util
     led = tmp_path / "ledger"; led.mkdir()
     rows = [
@@ -304,7 +305,7 @@ def test_admission_lookup_tolerates_identifier_drift(tmp_path):
 
 
 def test_refuted_is_not_treated_as_survives(tmp_path):
-    """refuted を survives と混同したら、反証されたものが統合される。"""
+    """Confusing refuted with survives would integrate the thing that was refuted."""
     led = _ledger_with(tmp_path, [
         {"seq": 1, "class": "admission_decided",
          "payload": {"issue": 9, "verdict": "admit"}},
@@ -318,7 +319,7 @@ def test_refuted_is_not_treated_as_survives(tmp_path):
 
 
 def test_status_flags_admit_without_refutation(tmp_path):
-    """board が「admit 済みだが skeptic の記録が無い」を RED で出す。"""
+    """The board shows RED for "admitted, but no skeptic record"."""
     led = _ledger_with(tmp_path, [
         {"seq": 1, "class": "admission_decided",
          "payload": {"issue": 8, "verdict": "admit"}},
@@ -332,7 +333,7 @@ def test_status_flags_admit_without_refutation(tmp_path):
 
 # ── 実地: log が Issue にだけ書き、台帳の progress_recorded が0件だった ──────
 def test_log_writes_progress_receipt_to_ledger(monkeypatch, tmp_path):
-    """Issue に7回書いたのに台帳は0件。/org-resume が復帰できない状態だった。"""
+    """Seven entries on the Issue and zero in the ledger — /org-resume could not recover."""
     src = _gh_src()
     assert "_append_progress_receipt" in src
     seg = src[src.index("def _append_progress_receipt"):]
@@ -340,7 +341,7 @@ def test_log_writes_progress_receipt_to_ledger(monkeypatch, tmp_path):
 
 
 def test_record_marks_backfilled():
-    """遡って記録したものは、実時点の記録と区別できること。"""
+    """A backfilled record must remain distinguishable from one written at the time."""
     src = _cycle_src()
     seg = src[src.index("def cmd_record"):]
     assert '"backfilled": True' in seg, "backfill 印が無いと、後から足した記録が実時点と混ざる"
@@ -350,7 +351,8 @@ def test_record_marks_backfilled():
 
 
 def test_judgment_without_correlation_key_is_rejected(tmp_path):
-    """相関キーの無い判定は拒否する。以前は素通りし、統制が効いていないことも見えなかった。"""
+    """A verdict with no correlation key is refused. It used to pass, and the control being
+    inert was itself invisible."""
     env = _led(tmp_path)
     p = _append(env, "maker1", "admission_decided", {"verdict": "admit"})
     assert p.returncode != 0, "対象を特定できない判定が通った"
@@ -395,7 +397,8 @@ def test_deploy_gate_correlates_across_key_names(tmp_path):
 
 
 def test_deploy_without_any_survives_still_blocked(tmp_path):
-    """緩めたのは相関の取り方だけ。反証を経ていない deploy は依然として止まる。"""
+    """Only how the correlation is found was relaxed. A deploy that skipped refutation still
+    stops."""
     env = _led(tmp_path)
     p = _append(env, "gate", "result_deployed", {"deliverable": "999", "issue": 999})
     assert p.returncode != 0, "反証されていない成果物が deploy できた"
@@ -416,7 +419,7 @@ def test_alias_bridges_candidate_id_and_issue(tmp_path):
 
 
 def test_alias_via_contract_ref(tmp_path):
-    """candidate_submitted の contract_ref も橋になる。"""
+    """candidate_submitted's contract_ref also bridges."""
     env = _led(tmp_path)
     _append(env, "m", "candidate_submitted",
             {"maker": "m", "candidate_id": "cand-y", "contract_ref": "issue-9", "source": "self"})
@@ -426,7 +429,7 @@ def test_alias_via_contract_ref(tmp_path):
 
 
 def test_unrelated_work_is_not_falsely_correlated(tmp_path):
-    """束ねすぎて無関係な仕事まで同一視したら、正当な admit が止まる。"""
+    """Bridging too eagerly would equate unrelated work and block a legitimate admit."""
     env = _led(tmp_path)
     _append(env, "m", "cycle_started",
             {"role": "m", "candidate_id": "cand-a", "pack_manifest_id": "issue-1"})
@@ -435,7 +438,7 @@ def test_unrelated_work_is_not_falsely_correlated(tmp_path):
 
 
 def test_skeptic_cannot_refute_own_work_via_alias(tmp_path):
-    """自己反証拒否も別名経由で効くこと（未検証だった層）。"""
+    """Self-refutation is refused through an alias too — a layer that was untested."""
     env = _led(tmp_path)
     _append(env, "maker1", "cycle_started",
             {"role": "maker1", "candidate_id": "cand-s", "pack_manifest_id": "issue-5"})
@@ -445,7 +448,7 @@ def test_skeptic_cannot_refute_own_work_via_alias(tmp_path):
 
 
 def test_correction_backfill_is_not_voided(tmp_path):
-    """backfill は「後から書いた実判定」であって無効ではない。"""
+    """A backfill is a real verdict written later; it is not void."""
     import importlib.util
     spec = importlib.util.spec_from_file_location("ledger_c", TOOLS / "ledger.py")
     m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
@@ -668,7 +671,7 @@ def test_judgment_backfill_does_not_void_or_require_authority(tmp_path):
 
 
 def test_show_lists_every_judgment_with_correction_marks():
-    """1つの Issue の判定履歴を一望できる（何周目のどの判定かが分かる）。"""
+    """One Issue's verdict history at a glance — which round, and which verdict."""
     src = _cycle_src()
     seg = src[src.index("def cmd_show"):]
     assert "訂正済み" in seg and "backfill" in seg
@@ -676,7 +679,7 @@ def test_show_lists_every_judgment_with_correction_marks():
 
 
 def test_round_count_uses_the_larger_of_ledger_and_issue():
-    """二重記録の片側が落ちていても回数を過少に言わない。"""
+    """When one side of the double record is missing, do not under-report the round count."""
     src = _cycle_src()
     seg = src[src.index("def cmd_verify"):]
     assert "max(len(rounds), len(issue_rounds))" in seg
@@ -713,7 +716,8 @@ def test_idempotent_key_cannot_bypass_controls(tmp_path):
 
 
 def test_decide_writes_ledger_before_issue():
-    """台帳を先に通す。拒否されるなら Issue に外向きの記録を作る前に止める。"""
+    """The ledger goes first. If it refuses, stop before creating an outward record on the
+    Issue."""
     src = _gh_src()
     seg = src[src.index("def cmd_decide"):]
     led = seg.index("ledger.py")
@@ -723,7 +727,7 @@ def test_decide_writes_ledger_before_issue():
 
 
 def test_decide_key_is_unique_per_judgment():
-    """`{event}-{issue}` だと2周目の判定が1周目と衝突して no-op になる。"""
+    """With `{event}-{issue}`, a second-round verdict collides with the first and no-ops."""
     src = _gh_src()
     seg = src[src.index("def cmd_decide"):]
     assert 'f"{a.event}-{a.issue}-{digest[:12]}"' in seg
@@ -753,7 +757,7 @@ def _evs(root):
 
 
 def test_writer_stamps_schema_version_and_timestamp(tmp_path):
-    """条件1+8: version と ts は writer が付ける。"UNSET" を書かない。"""
+    """Conditions 1+8: the writer stamps version and ts. Never write "UNSET"."""
     assert _app(tmp_path)[0] == 0
     ev = _evs(tmp_path)[0]
     assert ev["schema_id"] == "orgforge-ledger"
@@ -763,7 +767,7 @@ def test_writer_stamps_schema_version_and_timestamp(tmp_path):
 
 
 def test_client_cannot_name_the_schema_version(tmp_path):
-    """条件2: クライアント指定は downgrade 攻撃なので拒否する。"""
+    """Condition 2: a client-supplied version is a downgrade attack, so it is refused."""
     code, out = _app(tmp_path, payload={**_PR, "schema_version": 1})
     assert code == 2
     assert "writer が決める" in out
@@ -782,14 +786,14 @@ def test_schema_id_in_payload_is_allowed_for_boundary_events(tmp_path):
 
 
 def test_unknown_event_class_is_refused(tmp_path):
-    """条件3: schema に宣言の無いクラスは書けない。"""
+    """Condition 3: a class the schema does not declare cannot be written."""
     code, out = _app(tmp_path, cls="totally_unknown_class", payload={})
     assert code == 2
     assert "unknown event class" in out
 
 
 def test_unreadable_schema_fails_closed(tmp_path, monkeypatch):
-    """条件4: schema を読めないなら新規 append を拒否する（検証せずに書かない）。"""
+    """Condition 4: an unreadable schema refuses new appends — never write unvalidated."""
     monkeypatch.setenv("ORG_LEDGER_SCHEMA", str(tmp_path / "nope.yaml"))
     code, out = _app(tmp_path)
     assert code == 2
@@ -797,7 +801,8 @@ def test_unreadable_schema_fails_closed(tmp_path, monkeypatch):
 
 
 def test_concurrent_appends_do_not_collide(tmp_path):
-    """条件: append 全体が critical section。**12並列で全件 seq=1 になっていた。**"""
+    """The whole append is one critical section. **At 12-way concurrency every event came out
+    as seq=1.**"""
     import concurrent.futures as cf
     with cf.ThreadPoolExecutor(max_workers=12) as ex:
         futs = [ex.submit(_app, tmp_path, "progress_recorded",
@@ -810,7 +815,7 @@ def test_concurrent_appends_do_not_collide(tmp_path):
 
 
 def test_head_is_a_cache_rebuilt_from_the_log(tmp_path):
-    """条件: HEAD は権威ではない。壊れていても log から再構築して続ける。"""
+    """HEAD is not authoritative. If it is damaged, rebuild from the log and carry on."""
     assert _app(tmp_path)[0] == 0
     (tmp_path / "HEAD").write_text('{"seq": 99, "hash": "bogus"}', encoding="utf-8")
     code, out = _app(tmp_path, payload={**_PR, "candidate_id": "c2"})
@@ -820,7 +825,8 @@ def test_head_is_a_cache_rebuilt_from_the_log(tmp_path):
 
 
 def test_torn_line_is_not_auto_repaired(tmp_path):
-    """条件: 途中の破損は自動修復せず fail-closed。上に整合した HEAD を載せない。"""
+    """Interior damage fails closed rather than self-repairing: never lay a consistent HEAD
+    over a broken record."""
     assert _app(tmp_path)[0] == 0
     with open(tmp_path / "ledger.jsonl", "a", encoding="utf-8") as f:
         f.write('{"seq": 2, "class": "progress_recorded"')     # 改行なし
@@ -830,7 +836,7 @@ def test_torn_line_is_not_auto_repaired(tmp_path):
 
 
 def test_interior_tampering_blocks_further_appends(tmp_path):
-    """条件: 中間の書き換えも fail-closed。"""
+    """An interior rewrite fails closed as well."""
     for i in range(3):
         assert _app(tmp_path, payload={**_PR, "candidate_id": f"c{i}"})[0] == 0
     p = tmp_path / "ledger.jsonl"
@@ -844,7 +850,8 @@ def test_interior_tampering_blocks_further_appends(tmp_path):
 
 
 def test_same_natural_key_different_payload_is_refused(tmp_path):
-    """条件9: 同じキーで中身が違うのは再実行ではない。no-op で捨ててはいけない。"""
+    """Condition 9: the same key with different content is not a replay, so it must not be
+    discarded as a no-op."""
     assert _app(tmp_path, extra=("--natural-key", "k1"))[0] == 0
     assert _app(tmp_path, extra=("--natural-key", "k1"))[0] == 0        # 完全一致 → no-op
     assert len(_evs(tmp_path)) == 1
@@ -855,7 +862,7 @@ def test_same_natural_key_different_payload_is_refused(tmp_path):
 
 
 def test_verify_reports_both_assurances_separately(tmp_path):
-    """条件6: verify が version 別に検証し、legacy と validated を分けて報告する。"""
+    """Condition 6: verify checks per version and reports legacy and validated separately."""
     assert _app(tmp_path)[0] == 0
     code, out = run("ledger.py", "verify", str(tmp_path))
     assert code == 0, out
@@ -864,7 +871,8 @@ def test_verify_reports_both_assurances_separately(tmp_path):
 
 
 def test_legacy_events_remain_readable_but_unvalidated(tmp_path):
-    """条件5: version を持たない既存イベントは読める。遡って拒否しない。"""
+    """Condition 5: pre-existing events without a version stay readable — never refuse
+    retroactively."""
     # legacy を手で書く（0.32.3 以前の形）
     ev = {"id": "elegacy", "seq": 1, "ts": "UNSET", "actor": "w",
           "class": "progress_recorded", "payload": dict(_PR), "prev_hash": "GENESIS"}
@@ -920,7 +928,7 @@ def test_correlation_key_is_any_of_not_a_fixed_one(tmp_path):
 
 
 def test_enum_and_type_are_checked_when_present(tmp_path):
-    """軸2: 宣言済み field は **存在する場合に** enum / 型を検証する。"""
+    """Axis 2: a declared field is checked against its enum/type **when present**."""
     code, out = _app(tmp_path, "admission_decided",
                      {**_ADM, "verdict": "totally-bogus"}, actor="gate")
     assert code == 2
@@ -932,7 +940,8 @@ def test_enum_and_type_are_checked_when_present(tmp_path):
 
 
 def test_undeclared_fields_warn_but_pass_except_in_strict_classes(tmp_path):
-    """軸3: 未宣言 field は既定で許可し、警告する。厳格クラスだけ拒否。"""
+    """Axis 3: an undeclared field is allowed with a warning by default; only strict classes
+    refuse it."""
     code, out = _app(tmp_path, "admission_decided",
                      {**_ADM, "some_new_field": "x"}, actor="gate")
     assert code == 0, out
@@ -948,7 +957,7 @@ def test_undeclared_fields_warn_but_pass_except_in_strict_classes(tmp_path):
 
 
 def test_unset_timestamp_is_refused(tmp_path):
-    """`--ts UNSET` が通っていた。cap の時間窓を迂回できる。"""
+    """`--ts UNSET` used to pass, which sidesteps the cap's time window."""
     code, out = _app(tmp_path, "progress_recorded", {}, extra=("--ts", "UNSET"))
     assert code == 2
     assert "UNSET" in out
@@ -964,7 +973,7 @@ def test_unset_timestamp_is_refused(tmp_path):
 
 
 def test_schema_drift_is_reported_by_verify(tmp_path, monkeypatch):
-    """記録時の schema digest を照合する。形式が入れ替わったことを検出できる。"""
+    """Check the schema digest recorded at write time, so a swapped format is detectable."""
     assert _app(tmp_path, "progress_recorded", {})[0] == 0
     alt = tmp_path / "alt-schema.yaml"
     alt.write_text((TEMPLATE / "ledger-schema.yaml").read_text(encoding="utf-8")
@@ -1008,7 +1017,7 @@ def test_schema_skew_is_diagnosed_and_fixable(tmp_path):
 # 実測せずに達成と報告した。ロックの fail-closed は **故障注入で検査できなければ主張できない。**
 
 def test_lock_failure_refuses_the_append(tmp_path):
-    """故障注入でロックできないとき、必ず非ゼロで止まる。"""
+    """Under injected lock failure, it always stops non-zero."""
     env = dict(os.environ, ORG_LEDGER_FORCE_LOCK_FAIL="1")
     env.pop("ORG_LEDGER_ALLOW_UNLOCKED", None)
     r = subprocess.run([sys.executable, str(TOOLS / "ledger.py"), "append", str(tmp_path),
@@ -1020,7 +1029,8 @@ def test_lock_failure_refuses_the_append(tmp_path):
 
 
 def test_unlocked_escape_is_explicit_and_says_what_it_cannot_verify(tmp_path):
-    """逃げ道は明示の環境変数だけ。そして保証できないことを言う。"""
+    """The only escape hatch is an explicit environment variable — and it says what it can no
+    longer guarantee."""
     env = dict(os.environ, ORG_LEDGER_FORCE_LOCK_FAIL="1", ORG_LEDGER_ALLOW_UNLOCKED="1")
     r = subprocess.run([sys.executable, str(TOOLS / "ledger.py"), "append", str(tmp_path),
                         "--actor", "w", "--class", "progress_recorded", "--payload", "{}"],
@@ -1032,7 +1042,7 @@ def test_unlocked_escape_is_explicit_and_says_what_it_cannot_verify(tmp_path):
 
 
 def test_backfill_ts_must_be_a_real_moment(tmp_path):
-    """形が合っているだけでは足りない。`2026-99-99T99:99:99Z` が通っていた。"""
+    """Matching the shape is not enough: `2026-99-99T99:99:99Z` used to pass."""
     code, out = _app(tmp_path, "progress_recorded", {},
                      extra=("--backfill-ts", "2026-99-99T99:99:99Z"))
     assert code == 2
@@ -1040,7 +1050,7 @@ def test_backfill_ts_must_be_a_real_moment(tmp_path):
 
 
 def test_backfill_ts_refuses_future_and_distant_past(tmp_path):
-    """未来と遠すぎる過去を拒否する — どちらも cap の時間窓を迂回できる。"""
+    """Refuse the future and the distant past — both sidestep the cap's time window."""
     code, out = _app(tmp_path, "progress_recorded", {},
                      extra=("--backfill-ts", "2099-01-01T00:00:00Z"))
     assert code == 2 and "未来である" in out
@@ -1050,14 +1060,14 @@ def test_backfill_ts_refuses_future_and_distant_past(tmp_path):
 
 
 def test_normal_append_needs_no_timestamp(tmp_path):
-    """通常経路は時刻を渡さない（writer が付ける）。"""
+    """The normal path passes no timestamp; the writer stamps it."""
     assert _app(tmp_path, "progress_recorded", {})[0] == 0
     ev = _evs(tmp_path)[0]
     assert ev["ts"] != "UNSET" and ev["ts"].endswith("Z")
 
 
 def test_unknown_validator_type_fails_closed(tmp_path, monkeypatch):
-    """schema の型名の typo が「検査の無効化」になってはいけない。"""
+    """A typo in a schema type name must not silently disable the check."""
     alt = tmp_path / "typo-schema.yaml"
     alt.write_text((TEMPLATE / "ledger-schema.yaml").read_text(encoding="utf-8")
                    .replace("correction:          { corrects: list, target_classes: list, "
@@ -1107,7 +1117,7 @@ def _org_with_schema(tmp_path, mutate):
 
 
 def test_fix_preserves_org_own_stricter_rules(tmp_path):
-    """org 独自の厳格規則は --fix で消えない。"""
+    """An org's own stricter rule survives --fix."""
     def mut(t):
         t = t.replace("  required:\n",
                       "  required:\n    progress_recorded: [milestone]\n", 1)
@@ -1126,7 +1136,7 @@ def test_fix_preserves_org_own_stricter_rules(tmp_path):
 
 
 def test_fix_preserves_org_added_list_elements(tmp_path):
-    """org が list に足した要素も残す（集合として足す）。"""
+    """Entries an org added to a list are kept — the merge is a union."""
     org = _org_with_schema(tmp_path, lambda t: t.replace(
         "    admission_decided:    [verdict]",
         "    admission_decided:    [verdict, standard_ref]", 1).replace(
@@ -1193,7 +1203,7 @@ def _decisions(root):
 
 
 def test_reserve_accumulates_and_holds_at_the_cap(tmp_path):
-    """曝露は積み上がり、cap を超えると hold になる。"""
+    """Exposure accumulates, and crossing the cap becomes a hold."""
     for i in range(3):
         code, out = _reserve(tmp_path, 1, 3, f"t{i}")
         assert code == 0, out
