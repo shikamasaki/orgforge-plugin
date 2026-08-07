@@ -424,6 +424,7 @@ def cmd_ready(a):
     # 止まる — この Issue が潰しに来た machine-invisible-state と同じ類（#103 rework）。
     withheld_unverifiable = []
     withheld_prose = []
+    withheld_domain = []
     # 逃げ道は残すが、**既定は閉じる**。既存 org には散文 SPEC の在庫があり、いきなり全部が
     # ready から消えると仕事が止まる。移行中はこれで開けられるようにしておく。
     _READY_SKIP_EARS = os.environ.get("ORG_READY_SKIP_EARS") == "1"
@@ -498,10 +499,25 @@ def cmd_ready(a):
                       f"（緊急時は ORG_READY_SKIP_EARS=1 で一時的に無効化できる）。",
                       file=sys.stderr)
                 continue
+            # ドメインに触れる仕事は、人と AI が合意する面（ドメインモデル / ユースケース /
+            # 認可規則）を持ってから渡す。宣言が無い org では paths が空なので何も起きない。
+            _p, _r = ([], []) if os.environ.get("ORG_READY_SKIP_DOMAIN") == "1" \
+                else _domain_surface()
+            if _touches_domain_surface(it.get("body") or "", _p):
+                _miss = _missing_domain_sections(it.get("body") or "", _r)
+                if _miss:
+                    withheld_domain.append(it["number"])
+                    print(f"withheld: issue #{it['number']} — domain surface に触れるのに "
+                          f"{'/'.join(_miss)} が無い。人が見る面を先に書くこと"
+                          f"（ORG_READY_SKIP_DOMAIN=1 で一時的に無効化できる）。",
+                          file=sys.stderr)
+                    continue
         ready.append(it["number"])
     out_obj = {"ready": ready, "withheld_unverifiable": withheld_unverifiable}
     if withheld_prose:
         out_obj["withheld_non_ears"] = withheld_prose
+    if withheld_domain:
+        out_obj["withheld_no_domain_surface"] = withheld_domain
     print(json.dumps(out_obj))
     return 0
 
@@ -676,6 +692,85 @@ def _non_ears_acceptance(body):
     return bad
 
 
+def _domain_surface():
+    """`enforcement.domain_surface` を読む → (paths, require)。宣言が無ければ ([], [])。
+
+    **プラグインはパスを推測しない。** ドメイン層を `src/domain/` に置くか `app/models/` に
+    置くかはプロジェクトの選択で、当てにいくと別レイアウトの org で誤検知する（稼働中の org
+    だけでも src/domain/ · src/usecase/ · src/db/ · supabase/migrations/ が併存していた）。
+    宣言が無い org では検査が動かない — 黙って全 Issue を止めるより、そのほうが安全。
+    """
+    try:
+        sys.path.insert(0, HERE)
+        from discover import constitution
+        path = constitution()
+        if not path or not os.path.isfile(path):
+            return [], []
+        import yaml
+        with open(path, encoding="utf-8") as f:
+            doc = yaml.safe_load(f) or {}
+        ds = ((doc.get("enforcement") or {}).get("domain_surface") or {})
+        paths = [str(p) for p in (ds.get("paths") or []) if str(p).strip()]
+        require = [str(r) for r in (ds.get("require") or []) if str(r).strip()]
+        return paths, (require or ["domain_model", "use_case", "authorization"])
+    except Exception:
+        return [], []
+
+
+# 節の見出しをどう見分けるか。日英どちらの書き方でも拾う（SPEC.md は両方を併記している）。
+_SECTION_PATTERNS = {
+    "domain_model": r"ドメインモデル|domain\s*model|entities?\s*/\s*data-model",
+    "use_case": r"ユースケース|use[-\s]*case",
+    "authorization": r"認可|authoriz(?:ation|ed)|access\s*control",
+}
+
+
+def _touches_domain_surface(body, paths):
+    """SPEC の owns / seam に、宣言された domain surface の prefix が現れるか。"""
+    if not body or not paths:
+        return False
+    quoted = re.findall(r"`([^`]+)`", body)
+    return any(q.strip().startswith(p) or p.startswith(q.strip())
+               for q in quoted for p in paths if q.strip())
+
+
+def _missing_domain_sections(body, require):
+    """要求された節のうち、**中身のあるものが無い** ものを返す。
+
+    見出しがあるだけでは通さない — テンプレを貼っただけの SPEC が一番危ない（書いた気に
+    なるが、人と AI が合意した実体が無い）。箇条書きが1つ以上あり、それがプレースホルダ
+    （`<...>`）でないことまで見る。**内容の当否は見ない** — それは人と judge の仕事。
+    """
+    if not body:
+        return list(require)
+    lines = body.split("\n")
+    missing = []
+    for key in require:
+        pat = _SECTION_PATTERNS.get(key)
+        if not pat:
+            continue
+        filled, inside = False, False
+        for line in lines:
+            s = line.strip()
+            if s.startswith("#"):
+                inside = bool(re.search(pat, s, re.I))
+                continue
+            if not inside or not s or s.startswith(">"):
+                continue
+            if re.match(r"^(?:[-*+]|\d+[.)])\s+", s):
+                item = re.sub(r"^(?:[-*+]|\d+[.)])\s+", "", s)
+                # `**ラベル:** `<...>`` はテンプレのまま。実体として数えない。
+                vals = re.findall(r"`([^`]*)`", item)
+                if vals and all(v.strip().startswith("<") for v in vals):
+                    continue
+                if item.strip():
+                    filled = True
+                    break
+        if not filled:
+            missing.append(key)
+    return missing
+
+
 def _has_dod_command(body):
     """SPEC に「走らせられる DoD command」があるか。
 
@@ -770,6 +865,24 @@ def cmd_split_check(a):
     # ほうを選ぶ — DoD command の無い SPEC は gate に的を与えておらず、それが周回の原因
     # だった（#170 は 12周）。狼少年になるのは「警告が読み捨てられるとき」であって、
     # 「直すべきものを直せと言っているとき」ではない。降ろしたい org は ORG_REQUIRE_DOD=0。
+    # (c3) ドメインに触れる仕事は、**人と AI が合意する面**を持っていること。
+    # diff レビューは見落としが黙って通るが、ドメインモデル / ユースケース / 認可規則の
+    # 照合は「両者が同じものを述べているか」なので不一致が見える。宣言された domain surface
+    # に触れる Issue にだけ効かせる（プラグインはパスを推測しない）。
+    _ds_paths, _ds_require = _domain_surface()
+    if _touches_domain_surface(body, _ds_paths):
+        _missing = _missing_domain_sections(body, _ds_require)
+        if _missing:
+            _label = {"domain_model": "ドメインモデル", "use_case": "ユースケースシナリオ",
+                      "authorization": "認可規則"}
+            warnings.append(
+                "domain surface に触れるのに "
+                + " / ".join(_label.get(m, m) for m in _missing)
+                + " が無い（見出しだけ・テンプレのままも「無い」と数える）。"
+                "**人が見るのはここ** — 実装してから何を作るはずだったか思い出す順序にすると、"
+                "MUST は満たすのに求めていたものと違う成果物が通る。"
+                "認可は技術的セキュリティではなくドメインの一部として書くこと"
+                "（守る資産・規則・守らないもの）。")
     if os.environ.get("ORG_REQUIRE_DOD") != "0" and not _has_dod_command(body):
         warnings.append(
             "SPEC に DoD command（これを走らせて緑なら完了、と言える具体的なコマンド）が無い。"
