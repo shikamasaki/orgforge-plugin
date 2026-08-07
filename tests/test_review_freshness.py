@@ -152,7 +152,7 @@ def test_strict_verify_requires_declared_ref_but_cli_can_override(tmp_path):
                    "--phase", "implement", "--print-subject",
                   "--subject-root", ".")
     assert missing.returncode == 11
-    assert "統合先を推測しない" in missing.stderr
+    assert "does not guess the integration target" in missing.stderr
 
     explicit = _run(org, "org_cycle.py", "verify", "--issue", "7", "--role", "gate",
                     "--phase", "implement", "--base", "main", "--print-subject",
