@@ -38,7 +38,7 @@ ROOTS = ("tools", "tests", "integrations/common")
 # A file that is not listed here must contain no Japanese at all.
 BUDGET = {
     "tools/ledger.py": 793,
-    "tests/test_ledger.py": 790,
+    "tests/test_ledger.py": 758,
     "tests/test_orgcycle.py": 590,
     "tests/test_hook.py": 459,
     "integrations/common/org_hook.py": 425,

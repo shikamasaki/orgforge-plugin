@@ -1213,14 +1213,16 @@ def test_reserve_accumulates_and_holds_at_the_cap(tmp_path):
 
 
 def test_hold_is_recorded_not_just_denied(tmp_path):
-    """**hold も台帳に残る。** 従来は deny して終わり、止めたことが記録されなかった。"""
+    """**A hold is recorded too.** It used to deny and stop there, leaving no record that
+    anything was held."""
     _reserve(tmp_path, 5, 3, "t0")
     d = _decisions(tmp_path)
     assert len(d) == 1 and d[0][1] == "hold"
 
 
 def test_concurrent_reservations_never_exceed_the_cap(tmp_path):
-    """**16並列で合計が cap を超えない。** 従来は両方が同じ committed を読めた。"""
+    """**At 16-way concurrency the total never crosses the cap.** Both sides used to read the
+    same committed value."""
     import concurrent.futures as cf
     with cf.ThreadPoolExecutor(max_workers=16) as ex:
         futs = [ex.submit(_reserve, tmp_path, 1, 5, f"t{i}") for i in range(16)]
@@ -1233,7 +1235,7 @@ def test_concurrent_reservations_never_exceed_the_cap(tmp_path):
 
 
 def test_replay_of_the_same_tool_use_is_idempotent(tmp_path):
-    """hook の再実行を二重計上しない。"""
+    """A re-fired hook is not double-counted."""
     assert _reserve(tmp_path, 1, 3, "same")[0] == 0
     code, out = _reserve(tmp_path, 1, 3, "same")
     assert code == 0
@@ -1242,7 +1244,7 @@ def test_replay_of_the_same_tool_use_is_idempotent(tmp_path):
 
 
 def test_idempotency_key_spans_session_rule_and_class(tmp_path):
-    """`tool_use_id` 単独では別 session・別 rule の衝突を防げない。"""
+    """`tool_use_id` alone cannot separate a different session or a different rule."""
     assert _reserve(tmp_path, 1, 9, "tu", sess="s1", rule="r1")[0] == 0
     assert _reserve(tmp_path, 1, 9, "tu", sess="s2", rule="r1")[0] == 0   # 別 session
     assert _reserve(tmp_path, 1, 9, "tu", sess="s1", rule="r2")[0] == 0   # 別 rule
@@ -1251,7 +1253,7 @@ def test_idempotency_key_spans_session_rule_and_class(tmp_path):
 
 @pytest.mark.parametrize("missing", ["session_id", "tool_use_id", "rule"])
 def test_missing_idempotency_key_denies_the_action(tmp_path, missing):
-    """欠落していれば metered action を deny する（同一性を確かめられない）。"""
+    """If it is missing, a metered action is denied — identity cannot be established."""
     kw = {"sess": "s1", "tu": "t1", "rule": "r1"}
     kw["tu" if missing == "tool_use_id" else
        "sess" if missing == "session_id" else "rule"] = ""
@@ -1263,7 +1265,8 @@ def test_missing_idempotency_key_denies_the_action(tmp_path, missing):
 
 
 def test_reserve_denies_when_the_ledger_is_unhealthy(tmp_path):
-    """壊れた台帳の上に予約を書かない。**書けないなら allow を返さない。**"""
+    """Never write a reservation onto a damaged ledger. **If it cannot be written, do not
+    return allow.**"""
     assert _reserve(tmp_path, 1, 9, "t0")[0] == 0
     with open(tmp_path / "ledger.jsonl", "a", encoding="utf-8") as f:
         f.write('{"seq": 2, "class": "x"')        # torn line
@@ -1273,7 +1276,7 @@ def test_reserve_denies_when_the_ledger_is_unhealthy(tmp_path):
 
 
 def test_reserve_denies_when_the_lock_fails(tmp_path):
-    """ロックできないなら予約しない — cap の原子性はロックに依存している。"""
+    """No lock, no reservation — the cap's atomicity depends on it."""
     env = dict(os.environ, ORG_LEDGER_FORCE_LOCK_FAIL="1")
     env.pop("ORG_LEDGER_ALLOW_UNLOCKED", None)
     r = subprocess.run([sys.executable, str(TOOLS / "ledger.py"), "reserve-exposure",
@@ -1286,7 +1289,7 @@ def test_reserve_denies_when_the_lock_fails(tmp_path):
 
 
 def test_reserve_defines_no_timestamp_argument(tmp_path):
-    """**cap 予約に backfill を持ち込まない。** 引数自体を定義しない。"""
+    """**No backfill into a cap reservation.** The argument is not even defined."""
     code, out = run("ledger.py", "reserve-exposure", "--help")
     assert "--backfill-ts" not in out
     assert not re.search(r"(?m)^\s+--ts\b", out)
@@ -1297,7 +1300,7 @@ def test_reserve_defines_no_timestamp_argument(tmp_path):
 
 
 def test_reserve_does_not_take_committed_from_the_caller(tmp_path):
-    """`committed_so_far` は writer が数える。caller が申告できてはいけない。"""
+    """The writer counts `committed_so_far`; a caller must never be able to declare it."""
     code, out = run("ledger.py", "reserve-exposure", "--help")
     assert "committed" not in out.lower()
     _reserve(tmp_path, 2, 9, "t0")
@@ -1307,7 +1310,8 @@ def test_reserve_does_not_take_committed_from_the_caller(tmp_path):
 
 
 def test_malformed_prior_exposure_denies(tmp_path):
-    """壊れた曝露記録を 0 として数えない — 合計が実際より小さく見える。"""
+    """A damaged exposure record is not counted as 0 — that would make the total look
+    smaller than it is."""
     assert _reserve(tmp_path, 1, 9, "t0")[0] == 0
     p = tmp_path / "ledger.jsonl"
     lines = p.read_text(encoding="utf-8").splitlines()
@@ -1344,14 +1348,15 @@ def test_exposure_events_cannot_be_forged_by_generic_append(tmp_path):
 
 
 def test_caller_cannot_supply_the_idempotency_marker(tmp_path):
-    """`_nk` は道具が付ける印。caller が名指しできると no-op を作れる。"""
+    """`_nk` is stamped by the tool. A caller who could name it could manufacture a no-op."""
     code, out = _app(tmp_path, "progress_recorded", {"_nk": "forged"})
     assert code == 2
     assert "_nk" in out
 
 
 def test_same_key_with_a_different_request_is_refused(tmp_path):
-    """**exact retry だけが再実行。** delta=1 の allow を根拠に delta=100 が通っていた。"""
+    """**Only an exact retry is a replay.** delta=100 used to pass on the strength of an
+    allow for delta=1."""
     assert _reserve(tmp_path, 1, 5, "t1")[0] == 0
     code, out = _reserve(tmp_path, 100, 5, "t1")
     assert code == 3, out
@@ -1366,7 +1371,8 @@ def test_same_key_with_a_different_request_is_refused(tmp_path):
 
 @pytest.mark.parametrize("delta,cap", [(-5, 5), (0, 5), ("nan", 5), ("inf", 5), (1, -1)])
 def test_invalid_magnitudes_are_refused(tmp_path, delta, cap):
-    """delta は有限かつ正、cap は有限かつ非負。負や NaN は合計と比較を壊す。"""
+    """delta is finite and positive, cap finite and non-negative. A negative or NaN breaks
+    both the sum and the comparison."""
     code, out = _reserve(tmp_path, delta, cap, f"t{delta}{cap}")
     assert code == 3, out
     assert json.loads(out.splitlines()[0])["reason"] == "invalid_request"
@@ -1374,7 +1380,7 @@ def test_invalid_magnitudes_are_refused(tmp_path, delta, cap):
 
 
 def test_negative_prior_exposure_denies_rather_than_reducing_the_total(tmp_path):
-    """過去の負の曝露を数えない（数えると合計を減らせる）。"""
+    """Past negative exposure is not counted — counting it would let the total be reduced."""
     assert _reserve(tmp_path, 1, 9, "t0")[0] == 0
     p = tmp_path / "ledger.jsonl"
     ev = json.loads(p.read_text(encoding="utf-8").splitlines()[0])
@@ -1392,7 +1398,7 @@ def test_negative_prior_exposure_denies_rather_than_reducing_the_total(tmp_path)
 
 @pytest.mark.parametrize("var", ["ORG_LEDGER_FORCE_APPEND_FAIL", "ORG_LEDGER_FORCE_FSYNC_FAIL"])
 def test_persistence_failure_never_becomes_an_allow(tmp_path, var):
-    """**書けなかったら allow にならない。** 書きかけは切り戻す。"""
+    """**A failed write is not an allow.** A partial write is rolled back."""
     assert _reserve(tmp_path, 1, 9, "ok")[0] == 0
     before = (tmp_path / "ledger.jsonl").read_text(encoding="utf-8")
     env = dict(os.environ, **{var: "1"})
@@ -1421,7 +1427,7 @@ def test_verify_accepts_legitimately_written_reservations(tmp_path):
 
 
 def test_idempotency_key_is_a_hash_not_a_delimited_join(tmp_path):
-    """区切り連結だと、値に区切り文字が入ったときに別のキーと衝突する。"""
+    """Delimiter-joined keys collide once a value contains the delimiter."""
     assert _reserve(tmp_path, 1, 9, "b", sess="a", rule="c")[0] == 0
     # "a|b|c" と同じ連結になる組み合わせが、別のキーとして扱われること
     assert _reserve(tmp_path, 1, 9, "c", sess="a|b", rule="")[0] == 3    # rule 空 → deny
@@ -1442,7 +1448,8 @@ def _trip(root, reason="検査のため", by="registrar", trigger="test", env=No
 
 
 def test_halt_is_writer_only(tmp_path):
-    """halt は generic append では書けない — 検査に使う記録は検査する側だけが書ける。"""
+    """A halt cannot be written by a generic append — only the checking side writes the record
+    the check reads."""
     code, out = _app(tmp_path, "halt_tripped",
                      {"trigger": "t", "scope": "global", "reason": "r", "tripped_by": "x"},
                      actor="attacker")
@@ -1452,7 +1459,8 @@ def test_halt_is_writer_only(tmp_path):
 
 
 def test_trip_halt_writes_the_ledger_and_the_latch(tmp_path):
-    """台帳とラッチの両方に書く（ラッチは台帳が読めないときの第二経路）。"""
+    """Write to both the ledger and the latch; the latch is the second path when the ledger
+    cannot be read."""
     code, out = _trip(tmp_path)
     assert code == 0, out
     d = json.loads(out.splitlines()[0])
@@ -1462,7 +1470,7 @@ def test_trip_halt_writes_the_ledger_and_the_latch(tmp_path):
 
 
 def test_trip_halt_requires_a_reason(tmp_path):
-    """なぜ止めたのかが無い halt は、解除の判断ができない。"""
+    """A halt with no reason leaves nobody able to decide whether to release it."""
     code, out = run("ledger.py", "trip-halt", str(tmp_path), "--trigger", "t",
                     "--reason", "  ", "--tripped-by", "x")
     assert code == 2
@@ -1489,7 +1497,8 @@ def test_halt_persistence_failure_returns_nonzero_and_still_latches(tmp_path):
 
 
 def test_halt_status_is_readable_while_halted(tmp_path):
-    """観測は halt 中でも通る（止まった org を診断できないと復旧できない）。"""
+    """Observation passes during a halt — a halted org that cannot be diagnosed cannot
+    recover."""
     assert _trip(tmp_path)[0] == 0
     code, out = run("ledger.py", "halt-status", str(tmp_path))
     assert code == 10
@@ -1499,7 +1508,8 @@ def test_halt_status_is_readable_while_halted(tmp_path):
 
 
 def test_deleting_the_latch_does_not_clear_the_halt(tmp_path):
-    """ラッチは台帳の代わりではない — 手で消しても台帳の halt が残る。"""
+    """The latch does not stand in for the ledger: deleting it by hand leaves the ledger's
+    halt in place."""
     assert _trip(tmp_path)[0] == 0
     (tmp_path / "HALT").unlink()
     code, out = run("ledger.py", "halt-status", str(tmp_path))
@@ -1508,7 +1518,8 @@ def test_deleting_the_latch_does_not_clear_the_halt(tmp_path):
 
 
 def test_unreadable_ledger_counts_as_halted(tmp_path):
-    """止まっているか分からないなら止める（いちばん危ない fail-open を避ける）。"""
+    """If it cannot be determined whether a halt is in force, halt — this is the most
+    dangerous place to fail open."""
     assert _trip(tmp_path)[0] == 0
     with open(tmp_path / "ledger.jsonl", "a", encoding="utf-8") as f:
         f.write('{"seq": 9, "torn"')
@@ -1596,7 +1607,8 @@ def _am_tool(org, script, *args, env=None):
 
 
 def test_trust_store_holds_public_keys_only(tmp_path):
-    """**writer は公開鍵だけを持つ。** 秘密鍵を持つ側は判定を偽造できる。"""
+    """**The writer holds only public keys.** Whoever holds the private key can forge a
+    verdict."""
     org, _ = _am_org(tmp_path)
     r = _am_tool(org, "identity.py", "keygen", "--key-id", "k1", "--signer-id", "s1",
                  "--private-out", "keys/k1.pem")
@@ -1610,7 +1622,7 @@ def test_trust_store_holds_public_keys_only(tmp_path):
 
 
 def test_a_private_key_in_the_trust_store_is_refused(tmp_path):
-    """store に秘密鍵が入っていたら読み込み自体を拒否する。"""
+    """A store containing a private key is refused at load time."""
     org, _ = _am_org(tmp_path)
     (org / ".orgforge" / "trust" / "keys.json").write_text(json.dumps(
         {"keys": {"k1": {"signer_id": "s1", "private_pem": "-----BEGIN..."}}}), encoding="utf-8")
@@ -1626,7 +1638,8 @@ def test_a_private_key_in_the_trust_store_is_refused(tmp_path):
 
 
 def test_public_key_cannot_produce_a_signature(tmp_path):
-    """公開鍵では署名を作れない — これが共有鍵との決定的な差である。"""
+    """A public key cannot produce a signature — the decisive difference from a shared
+    secret."""
     sys.path.insert(0, str(TOOLS))
     import importlib
     ident = importlib.import_module("identity")
@@ -1675,7 +1688,7 @@ def _am_release(org, led, receipt, evidence="ledger verify → chain intact", en
 
 
 def test_the_principal_that_tripped_cannot_release(tmp_path):
-    """**止めた主体が自分で解除できてはいけない。**"""
+    """**Whoever halted it must not be able to release it.**"""
     org, led = _am_setup_halt(tmp_path)
     rc = _am_receipt(org, "k-reg", "keys/k-reg.pem")
     code, d = _am_release(org, led, rc)
@@ -1685,7 +1698,8 @@ def test_the_principal_that_tripped_cannot_release(tmp_path):
 
 
 def test_a_shared_secret_cannot_release(tmp_path):
-    """共有鍵は「鍵が違う」ことしか示さない — 独立した承認を証明しない。"""
+    """A shared secret shows only that the key differs; it does not prove independent
+    approval."""
     org, led = _am_setup_halt(tmp_path)
     rc = _am_receipt(org, "k-shared")
     code, d = _am_release(org, led, rc)
@@ -1694,7 +1708,7 @@ def test_a_shared_secret_cannot_release(tmp_path):
 
 
 def test_release_requires_explicit_authorization(tmp_path):
-    """`may_release_halt` を認可されていない鍵では解除できない。"""
+    """A key not authorized for `may_release_halt` cannot release one."""
     org, led = _am_setup_halt(tmp_path)
     rc = _am_receipt(org, "k-noauth", "keys/k-noauth.pem")
     code, d = _am_release(org, led, rc)
@@ -1702,7 +1716,7 @@ def test_release_requires_explicit_authorization(tmp_path):
 
 
 def test_a_release_receipt_is_bound_to_the_halt(tmp_path):
-    """別の halt の解除 receipt を再利用できない。"""
+    """A release receipt for one halt cannot be replayed against another."""
     org, led = _am_setup_halt(tmp_path)
     rc = _am_receipt(org, "k-appr", "keys/k-appr.pem", subject="halt:999")
     code, d = _am_release(org, led, rc)
@@ -1710,7 +1724,7 @@ def test_a_release_receipt_is_bound_to_the_halt(tmp_path):
 
 
 def test_release_requires_recovery_evidence(tmp_path):
-    """何を確かめて復旧したのかが無い解除は、後から検証できない。"""
+    """A release that does not say what was verified cannot be audited afterwards."""
     org, led = _am_setup_halt(tmp_path)
     rc = _am_receipt(org, "k-appr", "keys/k-appr.pem")
     code, d = _am_release(org, led, rc, evidence="   ")
@@ -1718,7 +1732,7 @@ def test_release_requires_recovery_evidence(tmp_path):
 
 
 def test_an_independent_authorized_approver_can_release(tmp_path):
-    """独立した approver（非対称・認可あり・証拠あり）なら解除できる。"""
+    """An independent approver — asymmetric key, authorized, with evidence — can release."""
     org, led = _am_setup_halt(tmp_path)
     rc = _am_receipt(org, "k-appr", "keys/k-appr.pem")
     code, d = _am_release(org, led, rc)
@@ -1751,7 +1765,7 @@ def test_a_release_that_cannot_be_recorded_keeps_the_halt(tmp_path):
 
 
 def test_releasing_when_nothing_is_halted_is_a_noop(tmp_path):
-    """active halt が無ければ何もしない（再実行が安全）。"""
+    """With no active halt it does nothing, so re-running is safe."""
     org, led = _am_setup_halt(tmp_path)
     rc = _am_receipt(org, "k-appr", "keys/k-appr.pem")
     assert _am_release(org, led, rc)[0] == 0
