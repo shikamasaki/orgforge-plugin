@@ -1713,6 +1713,32 @@ def test_headless_reports_missing_cli_instead_of_falling_back(tmp_path, monkeypa
     assert rc != 0
 
 
+def test_headless_empty_output_is_fail_closed_and_diagnosable(tmp_path, monkeypatch, capsys):
+    """空返しは fail-closed のまま、**切り分けられる材料**を残す（Issue #166）。
+
+    実地では `claude -p` が exit 0・stdout も stderr も空で返り、CLI が落ちたのか、認証が
+    切れたのか、tool-use の途中で黙って終わったのかを区別できなかった。判定は得られて
+    いないので admission は生成しない（そこは変えない）が、次に何を試すかは言えるはず。
+    材料そのもの（判定対象）は出さないこと — 長さだけを言う。
+    """
+    sys.path.insert(0, str(TOOLS))
+    from orgcycle import judge as J
+
+    class _Empty:
+        returncode, stdout, stderr = 0, "", ""
+    monkeypatch.setattr(J.shutil, "which", lambda c: "/usr/bin/true")
+    monkeypatch.setattr(J.subprocess, "run", lambda *a, **k: _Empty())
+    schema = TEMPLATE / "schemas" / "gate-verdict.json"
+    material = "SECRET-MATERIAL-" + "x" * 200
+    rc = J._run_headless("gate", 1, material, {"cli": "claude"}, str(schema))
+    err = capsys.readouterr().err
+    assert rc == 7, "判定が無いのに 0 を返してはいけない"
+    assert "exit=0" in err and "stdout=0B" in err          # 切り分けの材料
+    assert "material=" in err
+    assert "SECRET-MATERIAL" not in err, "判定対象そのものを診断に漏らさない"
+    assert "Reply with exactly: OK" in err                 # 次に試すことを言う
+
+
 def test_decide_requires_both_lineages_for_admit(tmp_path, monkeypatch):
     """cross-harness の org では、片側だけの admit を記録できない。
 

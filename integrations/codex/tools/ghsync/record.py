@@ -166,7 +166,59 @@ def cmd_log(a):
     return 0
 
 
-# the judgment classes that must land on the Issue with their reasoning (docs/11 §4f)
+def cmd_review_response(a):
+    """Project one concrete response to a review finding onto its GitHub Issue.
+
+    Findings and their responses must be addressable ACROSS harnesses: a finding raised by the
+    Claude-lineage judge has to be checkable — and acceptable — by the Codex-lineage one without
+    either relying on a chat transcript that no longer exists. The Issue is the durable, shared
+    surface both can read, so the response goes there rather than into a local status file that
+    only one session can see.
+
+    This is also what makes a review rally terminate. `agents/gate.md` already says a finding may
+    only become a blocker again if the reviewed head, the cited evidence, or the stated risk
+    changed — but that rule is unenforceable when nobody can point at the previous finding by id.
+    An addressable id plus a recorded response is the material that lets the next reviewer say
+    "this was answered, and here is what changed" instead of raising it fresh (tatekae #170 ran
+    12 rounds partly on re-raised findings).
+
+    Plumbing only: it records that a response was given, never whether the response is adequate.
+    That judgment stays with the next independent reviewer (docs/03 §6.5).
+    """
+    finding = (a.finding or "").strip()
+    response = (a.response or "").strip()
+    evidence = (a.evidence or "").strip()
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9._-]{0,63}", finding):
+        print("review-response: --finding は追跡可能なID（例: GATE-001）が必要。", file=sys.stderr)
+        return 2
+    if len(response) < 20 or len(evidence) < 20:
+        print("review-response: --response と --evidence には対応内容と実測を具体的に残すこと。",
+              file=sys.stderr)
+        return 2
+    marker = f"<!-- orgforge:review-response:{a.review}:{finding}:{a.status} -->"
+    code, existing = gh(["issue", "view", str(a.issue), "--repo", a.repo,
+                         "--json", "comments"])
+    if code != 0:
+        print(existing, file=sys.stderr)
+        return 3
+    if marker in existing:
+        print(f"review-response: {finding} は既に同じ内容で Issue #{a.issue} に記録済み（no-op）。")
+        return 0
+    body = "\n".join([
+        f"### ↪ Review response — `{finding}` ({a.status})",
+        f"**Review:** `{a.review}`",
+        f"**Responded by:** `{a.by}`",
+        "\n**Response:**\n" + response,
+        "\n**Evidence:**\n" + evidence,
+        "\n次の独立 reviewer は、この対応と証拠を確認して自分の verdict に明記する。",
+        marker,
+    ])
+    code, out = gh(["issue", "comment", str(a.issue), "--repo", a.repo, "--body", body])
+    if code != 0:
+        print(out, file=sys.stderr)
+        return 3
+    print(f"recorded review response for {finding} on #{a.issue}")
+    return 0
 
 
 # the judgment classes that must land on the Issue with their reasoning (docs/11 §4f)

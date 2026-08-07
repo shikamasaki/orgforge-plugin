@@ -6,6 +6,7 @@ gate / skeptic が決める。ツールが verdict を決めた瞬間に gate �
 import hashlib
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -283,6 +284,21 @@ def cmd_verify(a):
               "  別checkoutを代用せず、host sessionを再起動してから verify をやり直すこと。",
               file=sys.stderr)
         return 9
+    # **judge を起動する前に**、read-only judge が再導出できない MUST を静的に指摘する。
+    # read_only の judge は「実際に走らせて緑を確かめる」類の MUST を構造的に再導出できず
+    # park を返すしかないが、それが分かるのは起動して数分〜30分待った後だった（実測 #34）。
+    # 空振りの park は判定を1つも生まないので、待つ前に言う。**判定はしない** — 満たして
+    # いるかには触れず、「read-only の能力の外にある」ことだけを助言する（docs/03 §6.5）。
+    if _judges_read_only():
+        from .rederivability import advisory, unmeasurable_musts
+        _unmeasurable = unmeasurable_musts(body)
+        _advice = advisory(_unmeasurable, role)
+        if _advice:
+            print(_advice, file=sys.stderr)
+            if getattr(a, "strict_rederivability", False):
+                print("  --strict-rederivability が指定されているので judge は起動していない。",
+                      file=sys.stderr)
+                return 13
     seam = _seam(role, a.issue, title)
     prior = _prior_gate(a.issue) if role == "skeptic" else None
     history = _judgment_history(a.issue)
@@ -667,7 +683,35 @@ def _run_headless(role, issue, material, cfg, schema, stable_organ=None):
         except Exception:
             raw = pr.stdout
     if not raw or not raw.strip():
-        print(f"[{role}] {cli} が空を返した。判定は得られていない。", file=sys.stderr)
+        # **fail-closed は変えない** — 判定が得られていないなら admission は生成されない。
+        # 変えるのは「何も分からないまま終わる」ことのほう（Issue #166）。実地では
+        # `claude -p` が exit 0 のまま stdout も stderr も空で返り、CLI が落ちたのか、
+        # 認証が切れたのか、tool-use の途中で黙って終わったのかを切り分ける材料が無かった。
+        #
+        # 材料だけを出す。**判定はしない** — park にするか再試行するかは監督が決める。
+        # material は出さない（判定対象そのものが漏れる）。長さと出力先だけを言う。
+        _diag = [f"[{role}] {cli} が空を返した。判定は得られていない（admission は生成されない）。",
+                 f"  exit={pr.returncode}  stdout={len(pr.stdout or '')}B  "
+                 f"stderr={len(pr.stderr or '')}B  material={len(material)}B",
+                 # 引数は **フラグだけ** を出す。`cmd[:3]` のような位置での切り出しは、
+                 # claude 経路（`-p <material>`）で判定対象そのものを診断に漏らす
+                 # （このテストが実際にそれを捕まえた）。長い値は名前も中身も出さない。
+                 f"  invocation: {shlex.quote(os.path.basename(cmd[0]))} "
+                 + " ".join(shlex.quote(c) for c in cmd[1:]
+                            if c.startswith("-") and len(c) < 40)
+                 + f" …（引数 {len(cmd)} 個。本文と長い値は伏せる）"]
+        if cli == "codex" and not os.path.isfile(out_json):
+            _diag.append(f"  --output-schema の出力先が作られていない: {out_json}")
+        _err = (pr.stderr or "").strip()
+        if _err:
+            _diag.append("  stderr の末尾:\n    " + "\n    ".join(_err.splitlines()[-5:]))
+        else:
+            _diag.append("  stderr も空。CLI の認証・モデル名・サンドボックス設定を確認する:")
+            _diag.append(f"    {cli} " + ("exec --sandbox read-only " if cli == "codex" else "-p ")
+                         + "'Reply with exactly: OK' </dev/null")
+        _diag.append("  同じ材料での再試行は `--print-subject` で subject を確認してから行う"
+                     "（別の revision を見た判定は、一致とみなされない）。")
+        print("\n".join(_diag), file=sys.stderr)
         return 7
 
     print(raw)                                  # 監督が読む・intake に渡せる形で stdout に出す
@@ -679,6 +723,31 @@ def _run_headless(role, issue, material, cfg, schema, stable_organ=None):
           f"  検査を通ったら記録する（verdict / why は判定した側のもの。監督が書き換えない）。",
           file=sys.stderr)
     return 0
+
+
+def _judges_read_only():
+    """`enforcement.judges.read_only` を読む（既定 True — template の宣言と揃える）。
+
+    ここは **助言を出すかどうか** の分岐にしか使わない。判定にも起動可否にも効かないので、
+    読めないときは「read-only とみなす」= 助言を出す側に倒す。助言は起動を妨げないから、
+    倒しても失うものが無い（fail-closed が要るのは `_judge_lineage` の側）。
+    """
+    env = os.environ.get("ORG_JUDGE_READ_ONLY")
+    if env is not None:
+        return env.strip().lower() not in ("0", "false", "no")
+    try:
+        sys.path.insert(0, HERE)
+        from discover import constitution
+        path = constitution()
+        if not path or not os.path.isfile(path):
+            return True
+        import yaml
+        with open(path, encoding="utf-8") as f:
+            c = yaml.safe_load(f) or {}
+        j = ((c.get("enforcement") or {}).get("judges") or {})
+        return bool(j.get("read_only", True))
+    except Exception:
+        return True
 
 
 def _judge_lineage(role):

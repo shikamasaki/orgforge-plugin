@@ -164,6 +164,40 @@ in for your own org.
 
 ## How to use it
 
+### Requirements
+
+- **Python 3.12+** with **PyYAML** — the organs read `constitution.yaml` / `organization.yaml`,
+  and the enforcement they perform is declared there. Install it into the interpreter the plugin
+  actually runs (`python3` on PATH), not a virtualenv you activate by hand:
+
+  ```
+  python3 -m pip install pyyaml
+  ```
+
+  Without it, the org's own lint (`org_lint.py`) exits on an unhandled `ModuleNotFoundError`, and
+  `judges.lineage` cannot be read — a cross-harness declaration would otherwise be silently lost.
+- **git**, and **`gh`** authenticated against the repository if you use the GitHub backlog.
+- Optional: the **`codex`** or **`claude`** CLI, only if `enforcement.judges.lineage` is set to
+  `cross-harness` so judges run on a second model lineage.
+
+### Install
+
+```
+/plugin marketplace add <owner>/orgforge-plugin
+/plugin install orgforge-plugin@orgforge-plugin
+/reload-plugins
+```
+
+Choose the **user** scope so the org is available in every project. Reference the plugin by its
+GitHub repository rather than a local path: a local path runs whatever is uncommitted on that one
+machine, whereas a GitHub reference records the exact commit in `installed_plugins.json`.
+Restart the host session after an update so `SessionStart` rebinds to the new organs.
+
+For the Codex projection, and for local-path development installs, see
+[`QUICKSTART.md`](QUICKSTART.md) §1.
+
+### Adopt or found
+
 For an existing repository:
 
 ```

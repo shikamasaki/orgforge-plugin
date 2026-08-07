@@ -51,7 +51,11 @@ jobs:
       - name: Run the complete test suite
         env:
           DR_V0ALPHA2_ROOT: ${{ github.workspace }}/.delegation-resilience
-        run: python -m pytest tests --quiet
+        # The suite is subprocess-heavy (each organ runs as a real process), so it is bound by
+        # process startup rather than CPU: 638s serial vs 91s on 8 workers, same 1078 passing.
+        # `-n auto` sizes to the runner. Tests must stay independent for this to hold — one that
+        # depends on another's leftover state will fail here rather than pass by accident.
+        run: python -m pytest tests --quiet -n auto
 
       - name: Verify Claude Code projection is synchronized
         run: bash integrations/claude-code/build.sh --check

@@ -168,6 +168,12 @@ def _record_bypass(what, tool_input):
     return None
 
 
+# Organ exit codes that are a VERDICT ON THE INPUT rather than a transient fault. The organs use
+# exit 2 for a deliberate ValueError/OSError (usage error, unreadable/absent constitution, bad root);
+# `argparse` also exits 2 on a malformed argv. None of those are re-runnable, so they must not sleep.
+_DETERMINATE_ORGAN_CODES = frozenset({2})
+
+
 def _run_organ(argv):
     """Run an organ command; return (exit_code, combined_output). Never raises.
 
@@ -178,6 +184,14 @@ def _run_organ(argv):
     the fail-safe block still applies (the caller blocks on the non-clean code). Retries: ORG_ORGAN_RETRIES
     (default 2); backoff: ORG_ORGAN_BACKOFF seconds (default 0.5), skipped entirely when ORG_NOW_TS is set
     (tests pin a clock and must not sleep).
+
+    A DETERMINATE failure never retries either (perf fix, measured): the organs return exit 2 for a
+    deliberate ValueError/OSError — bad usage, an unreadable constitution, a missing root. That verdict
+    is a PROPERTY OF THE INPUT, so a second and third identical run cannot change it; retrying only
+    bought 1.5s of pure `time.sleep` on EVERY PreToolUse. Measured on a benign Read with an org whose
+    constitution.yaml was absent: 1.90s/call with the retry, 0.24s without (~8x). Retry is reserved for
+    what is genuinely re-runnable — a crash/timeout (no exit code, code 99 here) or a signal death
+    (negative returncode) — so a real flake still gets its bounded second chance.
 
     UTF-8 pin (cp932 fix): the child pipe is read as UTF-8 with errors=replace, so an organ status
     message containing a non-ASCII char (an em-dash) never crashes the guardrail on a non-UTF-8 console
@@ -194,6 +208,10 @@ def _run_organ(argv):
             if p.returncode in (0, 10):
                 return p.returncode, (p.stdout + p.stderr)
             last = (p.returncode, (p.stdout + p.stderr))
+            # a DETERMINATE failure is equally authoritative: the organ ran to completion and judged
+            # the input unusable (exit 2 = its ValueError/OSError path). Re-running cannot change it.
+            if p.returncode in _DETERMINATE_ORGAN_CODES:
+                return last
         except Exception as e:  # organ missing / crashed / timed out — transient, retry
             last = (99, f"organ {argv[0]} failed to run (attempt {attempt + 1}): {e}")
         if attempt < retries and not os.environ.get("ORG_NOW_TS"):
