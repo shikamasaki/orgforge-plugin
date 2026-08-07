@@ -355,17 +355,17 @@ def _judgment_correction_violation(ev, judgments):
 
     policy, error = _judgment_correction_policy()
     if error:
-        return (f"judgment correction authority を判定できない — {error}。\n"
+        return (f"cannot determine the judgment correction authority — {error}.\n"
                 "  constitution.yaml に次を宣言し、org_lint を通すこと:\n"
                 "    enforcement.judges.judgment_corrections.authority_roles: [supervisor]\n"
                 "  **判定できないなら judgment を無効化しない。**")
     actor = str(ev.get("actor") or "")
     authority_role = str(payload.get("authority_role") or actor)
     if payload.get("authority_role") and authority_role != actor:
-        return (f"authority_role={authority_role!r} と envelope actor={actor!r} が一致しない。"
+        return (f"authority_role={authority_role!r} does not match envelope actor={actor!r}. "
                 "代理の権限名を payload に書いてはいけない")
     if authority_role not in policy["authority_roles"]:
-        return (f"actor {actor!r} には judgment を {kind} にする権限が無い。\n"
+        return (f"actor {actor!r} is not authorized to make a judgment {kind}.\n"
                 f"  constitution が宣言する第三者 authority: "
                 f"{', '.join(policy['authority_roles'])}\n"
                 f"  対象 seq={payload.get('corrects')} / class={payload.get('target_classes')}。"
@@ -375,7 +375,7 @@ def _judgment_correction_violation(ev, judgments):
     assurance = payload.get("identity_assurance")
     authority_principal = payload.get("decision_by")
     if assurance not in {"attested", "authenticated"} or not authority_principal:
-        return (f"judgment correction authority {authority_role!r} の署名receiptが無い。\n"
+        return (f"no signed receipt for judgment correction authority {authority_role!r}.\n"
                 f"  expected subject: {payload.get('authority_receipt_subject')}\n"
                 "  --actor の役割名だけでは第三者性を証明しない。authorityの鍵で署名し、"
                 "--receipt を渡すこと。")
@@ -386,12 +386,12 @@ def _judgment_correction_violation(ev, judgments):
 
     target_principals = sorted({principal(target) for target in judgments})
     if actor in target_principals or str(authority_principal) in target_principals:
-        return (f"judgment の decision principal {authority_principal!r} は自分の判定を "
+        return (f"the judgment's decision principal {authority_principal!r} cannot correct "
                 f"{kind} にできない。\n  対象 seq={payload.get('corrects')}。"
                 "宣言済みの別 authority が訂正すること。")
     supplied = payload.get("corrected_by")
     if supplied is not None and str(supplied) != actor:
-        return (f"corrected_by={supplied!r} は envelope actor={actor!r} と一致しない。"
+        return (f"corrected_by={supplied!r} does not match envelope actor={actor!r}. "
                 "訂正主体は writer が確定する")
     payload["corrected_by"] = actor
     payload["authority_role"] = authority_role
@@ -1025,7 +1025,7 @@ def _distinct_actor_violation(ev, hist):
         # 自分の成果物を admit できた。相関できない判定は、検証できない判定であって、
         # 「検証を通った判定」ではない。無言で通すのが最悪で、統制が効いていないことが誰にも
         # 見えないまま、ハッシュ連鎖が偽造にお墨付きを与える。
-        return (f"{ev['class']} rejected — 判定の対象を特定できない: payload に "
+        return (f"{ev['class']} rejected — the judged subject cannot be identified: payload "
                 f"{' / '.join(_CORRELATION_KEYS)} のいずれも無い。\n"
                 f"  相関キーが無いと maker と gate が同一 actor かを照合できず、この統制は"
                 f"無言で無効になる（{why}）\n"
@@ -1290,7 +1290,7 @@ def validate_event(cls, payload, snap, writer_op=None):
     """
     if cls not in snap["classes"]:
         near = sorted(k for k in snap["classes"] if k[:4] == cls[:4])
-        return (f"未知のイベントクラス {cls!r}（ledger-schema.yaml の event_classes に無い）。"
+        return (f"unknown event class {cls!r} (not in event_classes of ledger-schema.yaml). "
                 + (f"\n  近いもの: {', '.join(near)}" if near else "")
                 + "\n  クラスを増やすなら schema に宣言してから書くこと — 宣言の無いクラスは"
                   "projection にも sensor にも乗らず、書いても読まれない。"), []
@@ -1312,7 +1312,7 @@ def validate_event(cls, payload, snap, writer_op=None):
     req = snap["required"].get(cls) or []
     missing = [k for k in req if k not in payload or payload[k] in (None, "")]
     if missing:
-        return (f"{cls} に必須 field が無い: {', '.join(missing)}\n"
+        return (f"{cls} is missing required fields: {', '.join(missing)}\n"
                 f"  （ledger-schema.yaml validation.required.{cls}）\n"
                 f"  統制イベントは中身が無ければ検査に使えない — 空の記録は"
                 f"「記録されている」という見た目だけを作る。"), []
@@ -1321,20 +1321,21 @@ def validate_event(cls, payload, snap, writer_op=None):
     #    1つも無い判定は「何についての判定か分からない」ので、検査に使えない。
     anyof = snap["require_any"].get(cls) or []
     if anyof and not any(payload.get(k) not in (None, "") for k in anyof):
-        return (f"{cls} に相関キーが無い: {' / '.join(anyof)} のどれか1つが必要。\n"
+        return (f"{cls} has no correlation key: exactly one of {' / '.join(anyof)} is "
+                f"required.\n"
                 f"  何についての判定か分からない記録は、検査にも projection にも使えない。"), []
 
     # ② enum / 型（**存在する場合に**検証する）
     for f, allowed in (snap["enums"].get(cls) or {}).items():
         if f in payload and payload[f] not in allowed:
-            return (f"{cls}.{f} = {payload[f]!r} は許された値ではない: "
+            return (f"{cls}.{f} = {payload[f]!r} is not an allowed value: "
                     f"{'|'.join(map(str, allowed))}"), []
     for f, tname in (snap["types"].get(cls) or {}).items():
         if f not in payload:
             continue
         r = _check_type(tname, payload[f])
         if r is None:
-            return (f"ledger-schema.yaml の validation.types.{cls}.{f} が未知の型名 "
+            return (f"validation.types.{cls}.{f} in ledger-schema.yaml names an unknown type "
                     f"{tname!r} を指している（list | int | str | map | int_or_str）。\n"
                     f"  **schema の書き間違いを黙って通さない** — 通すと、その検査は消えたまま"
                     f"になり、消えたことに気づく経路が無い。"), []
