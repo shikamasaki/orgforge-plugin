@@ -1,6 +1,6 @@
 {
   "name": "orgforge-plugin",
-  "version": "2.4.0",
+  "version": "2.5.0",
   "description": "Resilience engineering for coding-agent teams. OrgForge is a portable governance plane that helps teams sustain acceptable outcomes under variability, degrade and recover safely, and adapt from evidence without losing human control.",
   "author": {
     "name": "shikamasaki"

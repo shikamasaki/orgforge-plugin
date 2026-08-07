@@ -113,6 +113,20 @@
   pass — the SAME command the gate uses — e.g. `cd app && npm test`. "19 tests pass" is not runnable; a
   command is.>`
 - `<the concrete test/evidence that proves each MUST — e.g. "an 11th join is rejected at the cap">`
+- **placebo（MUST の文言は満たすが、意図を裏切る実装の例）:** `<例: remainder_recipients を
+  常に空配列で返す — 型も MUST の文言も満たすが、余りの行方が記録されない>`
+- **null（本物の利用者なら拒否する出力の例）:** `<例: 余りが2円出たのに受領者が1件しか
+  記録されない — 金額は合うが、誰が多く負担したか分からない>`
+
+> **意図は言語化しきれないが、「これは違う」の例は書ける。** 反例を SPEC に置くのは、
+> 意図のうち機械が確かめられる部分を最大にするため。gate は「その placebo を入れたら
+> あなたのテストは赤くなるか」を実際に試せる — 判定者の想像に頼らず、Issue に書かれた
+> 事実に対して検査できる。
+>
+> 反例が無いと、gate は placebo を毎回自分で発明することになり、周回ごとに厳しさが変わる。
+> WAI/WAD の乖離（MUST は全部満たしているのに求めていたものと違う）が一番痛いのはここで、
+> **仕様に書かれていない意図は、どれだけ賢いモデルでも復元できない。**
+
 - **完了の判定:** 上の MUST が RED→GREEN になった時点で完了とする。**着手後に見つかった
   範囲外の欠陥は、この Issue で直さず別 Issue にする。** 直すべきものが増え続ける Issue は、
   gate が毎回「どこを見るか」から始めることになり、収束しない — 実地では8周 rework した Issue の

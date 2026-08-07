@@ -22,7 +22,8 @@ import sys
 from conftest import TOOLS
 
 sys.path.insert(0, str(TOOLS))
-from ghsync.backlog import (_missing_domain_sections,  # noqa: E402
+from ghsync.backlog import (_missing_counterexamples,  # noqa: E402
+                            _missing_domain_sections,
                             _touches_domain_surface)
 
 PATHS = ["src/domain/", "src/usecase/", "src/db/", "supabase/migrations/"]
@@ -89,3 +90,43 @@ def test_english_headings_are_recognized_too():
 def test_empty_body_reports_everything_required():
     assert _missing_domain_sections("", REQUIRE) == REQUIRE
     assert _missing_domain_sections(None, REQUIRE) == REQUIRE
+
+
+# ── 反例（placebo / null）──────────────────────────────────────────────────
+# 意図そのものは言語化しきれないが、「これは違う」の例は書ける。反例があれば gate は
+# 「その placebo を入れたらテストは赤くなるか」を実際に試せる。
+#
+# これが load-bearing になったのは 2.3.1 以降。role charter の全文注入をやめた結果、judge に
+# 渡る材料から placebo/null の指示が消えた（_focused_review_contract にその語は無い）。
+# 判定者の記憶に頼れないぶん、仕様側に事実として置く必要がある。
+def test_both_counterexamples_present_passes():
+    body = ("- **placebo（意図を裏切る実装）:** `remainder_recipients を常に空配列で返す`\n"
+            "- **null（利用者が拒否する出力）:** `余りが2円出たのに受領者が1件`\n")
+    assert _missing_counterexamples(body) == []
+
+
+def test_prose_counterexamples_count_too():
+    """バッククォートで囲まなくても、実体が書かれていれば通す。"""
+    body = ("- **placebo:** 常に空配列を返す実装\n"
+            "- **null:** 余りの行方が記録されない出力\n")
+    assert _missing_counterexamples(body) == []
+
+
+def test_template_counterexamples_do_not_count():
+    body = "- **placebo:** `<例: ...>`\n- **null:** `<例: ...>`\n"
+    assert _missing_counterexamples(body) == ["placebo", "null"]
+
+
+def test_one_sided_counterexample_reports_the_other():
+    assert _missing_counterexamples("- **placebo:** `常に空配列を返す`\n") == ["null"]
+
+
+def test_explanatory_quote_block_is_not_an_instance():
+    """テンプレ自身の解説（`> - **placebo:** …`）を実体と数えない。"""
+    assert _missing_counterexamples("> - **placebo:** これは説明であって実体ではない\n") == [
+        "placebo", "null"]
+
+
+def test_missing_counterexamples_on_empty_body():
+    assert sorted(_missing_counterexamples("")) == ["null", "placebo"]
+    assert sorted(_missing_counterexamples(None)) == ["null", "placebo"]
