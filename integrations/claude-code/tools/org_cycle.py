@@ -83,6 +83,14 @@ def main(argv):
     # headless judge を回すので、subject を知るのに数分待つのは筋が悪い（実測）。
     q.add_argument("--print-subject", action="store_true",
                    help="review_subject_id だけを出して終わる（judge は起動しない）")
+    # What a re-review may turn on besides the revision (#193). The subject id digests the tree,
+    # not the evidence a maker cited or the risk a judge recorded, so those are passed here and
+    # compared against the recorded round.
+    q.add_argument("--evidence", default=None,
+                   help="the evidence being submitted this round (compared with the recorded "
+                        "round; a difference earns a fresh review)")
+    q.add_argument("--risk", default=None,
+                   help="the residual risk stated this round (same comparison as --evidence)")
     # Dispatch a judge for a subject that already has a recorded verdict. Suppressed by default:
     # the subject id encodes the revision, so re-deriving an unchanged one cannot change the
     # verdict — it only spends a judge run and a CI round (#182).
