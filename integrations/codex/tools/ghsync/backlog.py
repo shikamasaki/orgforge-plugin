@@ -724,6 +724,52 @@ _SECTION_PATTERNS = {
     "authorization": r"認可|authoriz(?:ation|ed)|access\s*control",
 }
 
+# 反例（placebo / null）は見出しではなく **Verification 節の中のラベル行** として書かれる。
+# 節ではなくラベルを探すのはそのため。
+_COUNTEREXAMPLE_LABELS = {
+    "placebo": r"\*{0,2}placebo\*{0,2}\s*[（(:：]",
+    "null": r"\*{0,2}null\*{0,2}\s*[（(:：]",
+}
+
+
+def _missing_counterexamples(body):
+    """placebo / null の反例のうち、**中身のあるものが無い** ものを返す。
+
+    意図そのものは言語化しきれないが、「これは違う」の例は書ける。反例があれば gate は
+    「その placebo を入れたらテストは赤くなるか」を実際に試せる — 判定者の想像ではなく、
+    Issue に書かれた事実に対して検査できる。
+
+    反例が無いと gate は placebo を毎回自分で発明し、周回ごとに厳しさが変わる。しかも
+    2.3.1 で role charter の全文注入をやめて以降、judge へ渡る材料に placebo/null の指示は
+    **一切含まれていない**（`_focused_review_contract` にその語は無い）。判定者側の記憶に
+    頼れなくなった分、仕様側に置く必要がある。
+
+    **内容の当否は見ない** — その反例が良いかは人と gate の仕事。
+    """
+    if not body:
+        return list(_COUNTEREXAMPLE_LABELS)
+    missing = []
+    for key, pat in _COUNTEREXAMPLE_LABELS.items():
+        found = False
+        for line in body.split("\n"):
+            s = line.strip()
+            if s.startswith(">") or not re.match(r"^(?:[-*+]|\d+[.)])\s+", s):
+                continue
+            if not re.search(pat, s, re.I):
+                continue
+            vals = re.findall(r"`([^`]*)`", s)
+            # テンプレのまま（`<...>`）は実体として数えない。
+            if vals and all(v.strip().startswith("<") for v in vals):
+                continue
+            # ラベルの後ろに実体があるか（バッククォート無しの散文も許す）
+            rest = re.split(pat, s, maxsplit=1, flags=re.I)[-1].strip(" ：:）)")
+            if rest:
+                found = True
+                break
+        if not found:
+            missing.append(key)
+    return missing
+
 
 def _touches_domain_surface(body, paths):
     """SPEC の owns / seam に、宣言された domain surface の prefix が現れるか。"""
@@ -883,6 +929,18 @@ def cmd_split_check(a):
                 "MUST は満たすのに求めていたものと違う成果物が通る。"
                 "認可は技術的セキュリティではなくドメインの一部として書くこと"
                 "（守る資産・規則・守らないもの）。")
+        # 反例（placebo / null）。MUST を満たすのに求めていたものと違う、を捕まえる唯一の材料。
+        # 2.3.1 で role charter の全文注入をやめて以降、judge に placebo/null の指示は届いて
+        # いないので、判定者の記憶ではなく **Issue に書かれた事実** として置く必要がある。
+        _ce = _missing_counterexamples(body)
+        if _ce:
+            warnings.append(
+                "反例が無い（" + " / ".join(_ce) + "）。"
+                "**意図は言語化しきれないが「これは違う」の例は書ける。** "
+                "placebo（MUST の文言は満たすが意図を裏切る実装）と null（本物の利用者なら"
+                "拒否する出力）を1つずつ書くこと。あれば gate は「その placebo を入れたら"
+                "テストが赤くなるか」を実際に試せる — 無いと毎回 placebo を発明し直すので、"
+                "周回ごとに厳しさが変わる。")
     if os.environ.get("ORG_REQUIRE_DOD") != "0" and not _has_dod_command(body):
         warnings.append(
             "SPEC に DoD command（これを走らせて緑なら完了、と言える具体的なコマンド）が無い。"

@@ -6,6 +6,34 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 2.5.0 — write down what "wrong" looks like, since intent cannot be written down whole
+
+The hardest failure is the one where every MUST is satisfied and the result is still not what was
+wanted. No amount of model capability closes it: intent that never reached the specification cannot
+be recovered from it, and a more capable model fills the gap more plausibly, not more correctly.
+
+Intent cannot be stated exhaustively — but a **counterexample** can. "Returning an empty array
+always" is easy to write down even when the full purpose is not, and unlike the purpose it is
+something the gate can *run*.
+
+### Added
+
+- **`SPEC.md` asks for a placebo and a null** — an implementation that satisfies the wording while
+  betraying the intent, and an output a real user would reject. `split-check` reports either one
+  missing on work that touches the declared domain surface.
+- With them recorded, the gate has an executable question — *does this placebo turn the tests red?*
+  — instead of inventing a new one each round, which is what made the bar drift between rounds.
+
+### Why this became load-bearing in 2.3.1
+
+2.3.1 replaced the full role charter with a compact review contract. The charter carried the
+placebo/null instruction; the compact contract does not, so **no dispatched judge currently receives
+it** (`_focused_review_contract` contains neither word). The defense now has to live in the Issue,
+where it is a recorded fact rather than something the judge is trusted to remember.
+
+Explanatory prose in a blockquote — including this template's own — is not counted as an instance,
+and neither is an unfilled `<placeholder>`.
+
 ## 2.4.0 — put the human/AI agreement where a mismatch is visible
 
 Reviewing a diff means hunting for mistakes: a miss passes silently, and the cost grows with the
