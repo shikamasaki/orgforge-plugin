@@ -95,6 +95,7 @@ BUDGET = {
     "tools/ghsync/coverage.py": 1,
     "tools/sensors.py": 1,
     "tools/tick.py": 1,
+    "tests/test_proxy_recorded_verdict.py": 1,
     "tests/test_resilience_exercise.py": 1,
     "tests/test_source_language.py": 1,
     "tests/test_supersede_recovery.py": 1,

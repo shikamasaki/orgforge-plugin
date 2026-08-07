@@ -385,6 +385,19 @@ enforcement:
     # to another non-judge control role. A voiding correction also requires that role's signed
     # receipt bound to the ledger, target seqs, and kind; changing only `--actor` is never enough.
     judgment_corrections:
+      # Who may supersede or void a recorded judgment. A judge can never correct its own, so at
+      # least one role here must be someone other than whoever decided the judgment being fixed.
+      #
+      # **Declare a second role once a proxy recorder exists.** When a judge is unavailable and
+      # the supervisor records the outcome on its behalf, that verdict's decision principal used
+      # to become the supervisor (fixed in 2.8.2 — new verdicts attribute to the judging role).
+      # For verdicts already on a ledger written before that fix, a single-authority org has
+      # nobody left who may correct them: the sole authority is the recorded principal, and
+      # self-correction stays refused. Adding a second role is the migration.
+      #
+      #   authority_roles: [supervisor, registrar]
+      #
+      # The second role does not have to act often — it has to exist before it is needed.
       authority_roles: [supervisor]
     # judge を発注する前の組織固有 environment preflight。空なら何も実行しない。
     # command は shell 文字列ではなく argv list、timeout_seconds は必須。実行結果は exit code・
