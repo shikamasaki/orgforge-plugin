@@ -151,6 +151,28 @@ def _judgment_history(issue, cls=None):
     return out
 
 
+def _round_fingerprint(evidence, risk):
+    """What a re-review is allowed to turn on, beyond the revision itself.
+
+    `review_subject_id` digests the revision (tree, head, integration ref). It deliberately does
+    NOT cover the evidence a maker cited or the residual risk a judge recorded — those are payload
+    fields, not properties of the tree. So matching on the subject alone suppresses the legitimate
+    case: the tree is unchanged because the fix was already committed, and what changed is that the
+    claim is now evidenced by a DoD command that was actually run.
+
+    Normalised to a digest so that whitespace and ordering do not manufacture a difference, and so
+    a long evidence blob does not have to be held in memory to compare.
+    """
+    def _norm(value):
+        if value is None:
+            return ""
+        if isinstance(value, (list, tuple)):
+            return "\n".join(sorted(" ".join(str(v).split()) for v in value))
+        return " ".join(str(value).split())
+    return hashlib.sha256(
+        (_norm(evidence) + "\x00" + _norm(risk)).encode("utf-8")).hexdigest()
+
+
 def _prior_verdict_for_subject(issue, role, subject_id):
     """A recorded verdict for this exact review subject, or None.
 
@@ -178,7 +200,8 @@ def _prior_verdict_for_subject(issue, role, subject_id):
             continue
         return {"seq": e.get("seq"), "verdict": pl.get("verdict"), "actor": e.get("actor"),
                 "why": pl.get("why") or "", "evidence": pl.get("evidence"),
-                "risk": pl.get("risk") or ""}
+                "risk": pl.get("risk") or "",
+                "fingerprint": _round_fingerprint(pl.get("evidence"), pl.get("risk"))}
     return None
 
 
@@ -315,7 +338,14 @@ def cmd_verify(a):
     # different role, or a first-ever review all still dispatch. `--force` overrides deliberately.
     if not getattr(a, "force", False):
         _prior = _prior_verdict_for_subject(a.issue, role, _sid)
-        if _prior:
+        # The message has always promised that new evidence or a changed residual risk earns
+        # another review. Until #193 only the revision was actually compared, so re-submitting
+        # with real DoD output against an unchanged tree was silently skipped — the tool gave
+        # instructions that did not work, which is worse than not offering them.
+        #
+        # A missing fingerprint on either side dispatches: an unknown is never a skip.
+        _now_fp = _round_fingerprint(getattr(a, "evidence", None), getattr(a, "risk", None))
+        if _prior and _prior.get("fingerprint") == _now_fp:
             print(f"[{role}] already judged this exact subject — not dispatching again.\n"
                   f"  subject : {_sid}\n"
                   f"  verdict : {_prior['verdict']} (ledger seq {_prior['seq']}, "

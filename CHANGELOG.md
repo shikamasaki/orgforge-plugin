@@ -6,6 +6,31 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 2.8.1 — re-review when the evidence changed, as the message already promised
+
+2.7.0's refusal told the caller that changing the reviewed head, the cited evidence, or the stated
+residual risk would earn another review. Only the first was true: `review_subject_id` digests the
+revision (tree, head, integration ref) and carries neither evidence nor risk, so re-submitting with
+real DoD output against an unchanged tree was silently skipped.
+
+That is worse than a missing feature — the tool gave instructions that did not work, the same shape
+as #186. The case it blocked is ordinary: the fix was already committed, so the tree is unchanged,
+and what changed is that the claim is now evidenced by a command that was actually run. The earlier
+verdict was reached without that evidence and must not stand in for a review of it.
+
+### Fixed
+
+- **The skip now compares a round fingerprint** — a digest of the cited evidence and the stated
+  residual risk — alongside `review_subject_id`. A difference in either dispatches; all three
+  identical still skips, which is the case 2.7.0 was built for.
+- Normalised for whitespace and ordering, so a reformatted paste does not masquerade as new
+  evidence and cost a judge run.
+- `verify` accepts `--evidence` and `--risk` to carry this round's values.
+
+An absent fingerprint on either side dispatches: an unknown is never a skip.
+
+Closes #193.
+
 ## 2.8.0 — print the way out, not just the rule
 
 A rebase moves `review_subject_id`, so `github_sync provisional` correctly refuses to let the same
