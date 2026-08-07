@@ -1580,6 +1580,14 @@ def test_verify_offers_the_headless_route():
     assert "別の血統" in seg or "別ハーネス" in seg
 
 
+def test_claude_judge_receives_the_declared_effort():
+    """Claude Codeもconstitutionのmodel/effortを実行引数へ投影する。"""
+    src = _cycle_src("judge")
+    branch = src[src.index('elif cli == "claude":'):src.index('else:', src.index('elif cli == "claude":'))]
+    assert '["--model", str(model)]' in branch
+    assert '["--effort", str(effort)]' in branch
+
+
 # ── judges.lineage（スイスチーズ層）─────────────────────────────────────
 # **既定が変わらないことを、まず固定する。** 別ハーネスの契約・CLI・認証を前提にすると、
 # 持っていない環境で org が回らなくなる。層を増やすのは選択であって前提ではない。
@@ -1596,11 +1604,11 @@ def test_judge_lineage_defaults_to_same_harness(tmp_path, monkeypatch):
 
 _HARNESS_CFG = (
     "      claude:\n"
-    "        gate: { cli: claude }\n"
-    "        skeptic: { cli: claude }\n"
+    "        gate: { cli: claude, model: sonnet, effort: medium }\n"
+    "        skeptic: { cli: claude, model: sonnet, effort: medium }\n"
     "      codex:\n"
-    "        gate: { cli: codex, effort: high }\n"
-    "        skeptic: { cli: codex, effort: high }"
+    "        gate: { cli: codex, model: gpt-5.6-terra, effort: medium }\n"
+    "        skeptic: { cli: codex, model: gpt-5.6-terra, effort: medium }"
 )
 
 
@@ -1622,6 +1630,12 @@ def test_judge_lineage_selects_the_opposite_harness(tmp_path, monkeypatch, prima
     lineage, cfg = _judge_lineage("skeptic")
     assert lineage == "cross-harness"
     assert cfg["cli"] == secondary
+    if secondary == "codex":
+        assert cfg["model"] == "gpt-5.6-terra"
+        assert cfg["effort"] == "medium"
+    else:
+        assert cfg["model"] == "sonnet"
+        assert cfg["effort"] == "medium"
     assert _judge_lineage("gate")[1]["cli"] == secondary
 
 

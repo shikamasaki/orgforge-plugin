@@ -626,6 +626,8 @@ def _run_headless(role, issue, material, cfg, schema, stable_organ=None):
                "--output-format", "json"]
         if model:
             cmd += ["--model", str(model)]
+        if effort:
+            cmd += ["--effort", str(effort)]
     else:
         print(f"judges.harness.{role}.cli = {cli!r} は未対応（codex | claude）。", file=sys.stderr)
         return 2

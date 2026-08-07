@@ -321,15 +321,21 @@ enforcement:
                             #   cross-harness: 下の harness 指定に従って別ハーネスで回す。
                             #   adaptive: 実行中の製品を検出し、反対側が利用可能なら cross、
                             #     無ければ同じ製品内の pseudo same-harness へ明示的に縮退する。
-    # cross-harness で使う secondary 側の設定。両方向を必ず宣言する。model を省略すれば
-    # 各ハーネスで検証済みの現行既定を使う。
+    # cross-harness で使う secondary 側の設定。両方向を必ず宣言する。`model` と
+    # `effort` はここが唯一の実行時設定面で、org-cycle verify が headless judge に
+    # そのまま渡す。未指定なら各ハーネスの既定を使う。
+    #
+    # 標準は gpt-5.6-terra / medium: 高速寄りだが、judge の品質は構造化 verdict、
+    # 独立血統、機械的 preflight にも支えられる。より深い検討が必要な組織だけ
+    # role ごとに `model` / `effort` を上げる。
     harness:
       claude:
-        gate: { cli: claude }
-        skeptic: { cli: claude }
+        # Claude Code の高速寄り標準。CLI alias を使うため、利用可能な最新Sonnetへ追随する。
+        gate: { cli: claude, model: sonnet, effort: medium }
+        skeptic: { cli: claude, model: sonnet, effort: medium }
       codex:
-        gate: { cli: codex, effort: high }
-        skeptic: { cli: codex, effort: high }
+        gate: { cli: codex, model: gpt-5.6-terra, effort: medium }
+        skeptic: { cli: codex, model: gpt-5.6-terra, effort: medium }
     # judge は書き込みを持たない。別ハーネスで回す場合も read-only で走らせる —
     # そのハーネスのガードレールが未検証でも、書けないなら安全側に倒れる。
     read_only: true
