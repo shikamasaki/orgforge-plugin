@@ -639,17 +639,47 @@ def cmd_provisional(a):
             what.append("why/evidence が違う")
         authorities = _judgment_correction_authorities()
         handback = ", ".join(authorities) if authorities else "(未宣言 — constitution を修復)"
-        print(f"provisional: #{a.issue} の {a.lineage} には既に判定がある"
-              f"（seq={prior['seq']}）。変わっているのは: {', '.join(what)}\n"
-              f"  **同じ血統が判定を積み替えて一致を作れてはいけない。**\n"
-              f"  judge 自身では先の判定を無効化できない。次を第三者authorityへ handback:\n"
-              f"    target seq: {prior['seq']}\n"
-              f"    requested kind: superseded\n"
-              f"    receipt subject: correction:superseded:{prior['seq']}\n"
-              f"    authority roles: {handback}\n"
-              f"  authority は理由と対象を確認し、上のsubject・Issue・role・kind・理由digestへ"
-              f"束縛した署名receiptとともにappend-only correctionを記録する。 "
-              f"probe/mistakeもjudgmentを無効化する場合は同じ権限とreceiptを要求する。",
+        # **State the recovery as commands, not as a requirement.** The rule this enforces is
+        # right — a lineage must not restack verdicts until they agree — but a refusal that only
+        # names the rule leaves the caller stuck: the authority, the receipt and the correction
+        # all exist, yet reaching them took five failed attempts to rediscover (issue #186, hit
+        # in the field when a rebase moved review_subject_id). What cannot be skipped must still
+        # be reachable.
+        _sig = ("correction:superseded:%s" % prior["seq"])
+        _auth = authorities[0] if authorities else "<authority-role>"
+        print(f"provisional: #{a.issue} already has a {a.lineage} verdict "
+              f"(seq={prior['seq']}). What differs: {', '.join(what)}\n"
+              f"  **A lineage must not restack its verdicts until they agree.** A judge cannot "
+              f"void its own prior verdict; a declared third-party authority must supersede it.\n"
+              f"\n"
+              f"  Authority roles declared by the constitution: {handback}\n"
+              f"\n"
+              f"  To supersede seq={prior['seq']}, the authority runs (not the judge):\n"
+              f"\n"
+              f"    # 1. once per authority — register a signing key, keep the private key off the writer\n"
+              f"    python3 tools/identity.py keygen --key-id <key> --signer-id {_auth} \\\n"
+              f"        --authorized-roles {_auth} --store <ledger>/../trust/keys.json \\\n"
+              f"        --private-out <key>.pem\n"
+              f"\n"
+              f"    # 2. sign the correction — the subject binds it to this exact target\n"
+              f"    python3 tools/identity.py receipt --org-id <org> --ledger-id <ledger-id> \\\n"
+              f"        --subject {_sig} --role {_auth} \\\n"
+              f"        --lineage {a.lineage} --verdict superseded \\\n"
+              f"        --reasoning-sha256 <sha256 of the reason> --issued-at <ts> \\\n"
+              f"        --key-id <key> --issue {a.issue} --event-class correction \\\n"
+              f"        --private-key <key>.pem > correction-receipt.json\n"
+              f"\n"
+              f"    # 3. append it — the ledger verifies the receipt before recording\n"
+              f"    python3 tools/ledger.py append <ledger> --actor {_auth} --class correction \\\n"
+              f"        --payload '{{\"corrects\":[{prior['seq']}],\"kind\":\"superseded\",\"reason\":\"<why>\"}}' \\\n"
+              f"        --receipt correction-receipt.json\n"
+              f"\n"
+              f"  Requires in constitution.yaml:\n"
+              f"    enforcement.judges.judgment_corrections.authority_roles: [{_auth}]\n"
+              f"\n"
+              f"  The old verdict is not erased — the ledger is append-only, and the correction is "
+              f"recorded beside it with its reason. `probe` and `mistake` void a judgment the same "
+              f"way and demand the same authority and receipt.",
               file=sys.stderr)
         return 4
 

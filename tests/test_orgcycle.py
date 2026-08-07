@@ -2019,7 +2019,7 @@ def test_xh_rejudge_hands_back_to_declared_authority_and_that_path_works(tmp_pat
     assert _prov(org, "same-harness", "reject")[0] == 0
     c, o = _prov(org, "same-harness", "admit")     # 差し替えを試みる → 拒否
     assert c == 4
-    assert "authority roles: supervisor" in o
+    assert "Authority roles declared by the constitution: supervisor" in o
     assert "--actor <あなたの役割>" not in o
     prior = _events(org, "verdict_provisional")[0]
     reason = "base更新後に第三者authorityが再検証を要求した"

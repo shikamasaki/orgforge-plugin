@@ -44,7 +44,7 @@ BUDGET = {
     "integrations/common/org_hook.py": 425,
     "tools/orgcycle/judge.py": 373,
     "tools/writerd.py": 286,
-    "tools/ghsync/record.py": 275,
+    "tools/ghsync/record.py": 268,
     "tools/ghsync/backlog.py": 225,
     "tests/test_github_sync.py": 176,
     "tools/orgcycle/_core.py": 159,
@@ -59,7 +59,7 @@ BUDGET = {
     "tools/drift.py": 69,
     "tools/orgcycle/rederivability.py": 67,
     "tools/learning.py": 66,
-    "tests/test_learning.py": 64,
+    "tests/test_learning.py": 63,
     "tests/test_req_lint.py": 61,
     "tools/orgcycle/mcp_judge.py": 55,
     "tests/test_organs.py": 54,
@@ -97,6 +97,7 @@ BUDGET = {
     "tools/tick.py": 1,
     "tests/test_resilience_exercise.py": 1,
     "tests/test_source_language.py": 1,
+    "tests/test_supersede_recovery.py": 1,
 }
 
 
