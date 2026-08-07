@@ -151,6 +151,37 @@ def _judgment_history(issue, cls=None):
     return out
 
 
+def _prior_verdict_for_subject(issue, role, subject_id):
+    """A recorded verdict for this exact review subject, or None.
+
+    `review_subject_id` is a digest of (issue, role, phase, integration_ref, tree) — so an equal
+    id means the judge would be looking at the same revision it already judged. Re-dispatching
+    then spends a judge run (~100s) and, on the maker side, a CI run to reach a verdict that is
+    already recorded. Issue #170 ran 12 CI rounds at a ~5.7 min median; not every round changed
+    something a verdict could depend on.
+
+    Only the ledger is consulted. A verdict that never landed there did not happen as far as the
+    org is concerned, so it must not suppress a review.
+    """
+    event = {"gate": "admission_decided", "skeptic": "refutation_attempted"}.get(role)
+    if not event or not subject_id:
+        return None
+    try:
+        evs, voided = _events_for(issue)
+    except Exception:
+        return None                     # unreadable history must not suppress a review
+    for e in reversed(evs):
+        if e.get("seq") in voided or e.get("class") != event:
+            continue
+        pl = e.get("payload") or {}
+        if pl.get("review_subject_id") != subject_id:
+            continue
+        return {"seq": e.get("seq"), "verdict": pl.get("verdict"), "actor": e.get("actor"),
+                "why": pl.get("why") or "", "evidence": pl.get("evidence"),
+                "risk": pl.get("risk") or ""}
+    return None
+
+
 def _issue_decision_comments(issue, event):
     """Issue に書かれた判定の理由（台帳は digest だけを持つので、本文はこちらにある）。"""
     args = ["gh", "issue", "view", str(issue), "--json", "comments"]
@@ -275,6 +306,29 @@ def cmd_verify(a):
             print(f"  {k:20}= {v or '(なし)'}", file=sys.stderr)
         print(f"  {'descriptor':20}= {_subject_path}", file=sys.stderr)
         return 0
+    # **Do not re-judge an unchanged subject.** The subject id already encodes the revision under
+    # review, so an existing verdict for the same id means nothing a verdict depends on has moved.
+    # Report the recorded one and say what would have to change; do not spend a judge run and a CI
+    # round to re-derive it (Issue #182).
+    #
+    # This suppresses REPETITION, never the independent review itself: a different revision, a
+    # different role, or a first-ever review all still dispatch. `--force` overrides deliberately.
+    if not getattr(a, "force", False):
+        _prior = _prior_verdict_for_subject(a.issue, role, _sid)
+        if _prior:
+            print(f"[{role}] already judged this exact subject — not dispatching again.\n"
+                  f"  subject : {_sid}\n"
+                  f"  verdict : {_prior['verdict']} (ledger seq {_prior['seq']}, "
+                  f"by {_prior['actor']})\n"
+                  f"  why     : {' '.join(str(_prior['why']).split())[:300]}\n"
+                  f"  To warrant another review, one of these must change: the reviewed head "
+                  f"(commit something), the cited evidence, or the stated residual risk. "
+                  f"Pass --force to dispatch anyway.", file=sys.stderr)
+            print(json.dumps({"skipped": "unchanged_subject", "review_subject_id": _sid,
+                              "prior_verdict": _prior["verdict"], "prior_seq": _prior["seq"]},
+                             ensure_ascii=False))
+            return 0
+
     charter, cpath = _role_charter(role)
     if charter is None:
         print(f"agents/{role}.md not found (searched: {cpath}).\n"
