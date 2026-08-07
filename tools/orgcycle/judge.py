@@ -167,6 +167,28 @@ def _issue_decision_comments(issue, event):
     return [c.get("body", "") for c in cs if event in (c.get("body") or "")]
 
 
+def _focused_review_contract(role):
+    """The non-negotiable, bounded contract for an Issue-scoped review.
+
+    The Issue already supplies the acceptance criteria, seam, and executable DoD.  Copying the
+    complete role charter and generic mutation playbook into every dispatch turns a focused
+    review into an unbounded research prompt, and made the configured fast judge time out before
+    it could return a verdict.  Keep the invariant here, while leaving the concrete bar in the
+    Issue that owns it.
+    """
+    verdict = "admit/reject/park" if role == "gate" else "survives/refuted"
+    return (
+        "## Fixed review contract\n"
+        "Review only this Issue's acceptance criteria, changed seam contract, and declared DoD. "
+        "Do not add unrelated review criteria or redesign the verification method. "
+        "A finding outside that boundary is `out_of_scope`, unless it concretely proves an "
+        "immediate safety, integrity, security, or release-blocking failure.\n\n"
+        f"Return exactly one verdict: `{verdict}`. Cite the concrete command output or file "
+        "evidence that decided it; if required evidence is unavailable, return `park` rather "
+        "than infer success."
+    )
+
+
 def cmd_verify(a):
     """gate / skeptic を起動するための材料を組み立てて印字する。判定はしない。"""
     role = a.role
@@ -318,8 +340,13 @@ def cmd_verify(a):
         out.append("\n## judge dispatch 前の environment preflight（監督が実測）\n")
         out.extend(preflight_evidence)
         out.append("\n> これは宣言されたコマンドの測定結果であり、daemon名や実装を推測した結果ではない。")
-    out.append("\n## あなたの憲章（agents/%s.md — 検証基準はここが唯一の出所）\n" % role)
-    out.append(charter)
+    # The complete role charter is an organization-wide doctrine, not the per-Issue standard.
+    # The latter is fixed in the Issue body below; dispatch only the compact contract by default.
+    # ORG_JUDGE_FULL_CHARTER remains an explicit diagnostic escape hatch, never the default.
+    out.append("\n" + _focused_review_contract(role))
+    if os.environ.get("ORG_JUDGE_FULL_CHARTER") == "1":
+        out.append("\n\n## Full role charter (diagnostic override)\n")
+        out.append(charter)
     rounds = [h for h in history if h["class"] == "admission_decided"]
     # 台帳と Issue の**多い方**を採る。二重記録の片側が落ちるのが実地の失敗形なので、
     # 台帳だけを数えると「2回目」と言ってしまう（実際は3回目）。回数を過少に伝えると、
@@ -410,31 +437,11 @@ def cmd_verify(a):
                        "skeptic の仕事。潰せたなら refuted、潰せず承知の範囲だと確認できたなら "
                        "その旨を --risk に書いて survives。")
 
-    if role == "gate":
-        code, pend = _run([os.path.join(HERE, "doctrine.py"), "show", _sub("doctrine")])
-        if code == 0 and "pending" in (pend or "").lower():
-            out.append("\n## 未 admit の doctrine（maker が差し出した学び）\n")
-            out.append(pend.strip()[:2000])
-            out.append("\n> 次のサイクルに渡す価値があるものだけ admit すること:\n"
-                       f"> `{_organ_command(stable_organ, 'doctrine')} admit "
-                       f"{_sub('doctrine')} <role> <claim-id> --by gate`\n"
-                       "> admit しなければ、この学びは次の Issue に渡らない。"
-                       "実地では同じ失敗を3回繰り返した。")
-
-    out.append("\n## 変異検査の証拠規律（**空振りした変異の GREEN は証拠ではない**）\n")
-    out.append(
-        "変異検査を使う場合は、必ず **baseline → mutate → postcondition → test → restore → "
-        "restore postcondition** の順で実行する。変異コマンドが exit 0 でも、対象状態を読み返して"
-        "変化を確認するまでは `applied` ではない。コマンドが無い・接続できない・対象が違う・"
-        "変化しなかった場合、その後の GREEN を『変異を生き延びた』証拠に数えてはいけない。\n\n"
-        "- mutate と postcondition 確認と test は、前段の失敗を隠さない形（例: `&&`）で繋ぐ。\n"
-        "- postcondition には、変更後の状態を読んだ**実コマンドと実出力**を残す。\n"
-        "- 復元後も状態を読み返す。復元を確認できない変異を残したまま判定を終えない。\n"
-        "- 適用できなかった試行は `detected=false` と推測せず、未測定として evidence / risk に"
-        "失敗出力を残す。構造化出力の `mutations` には、適用と postcondition を確認できたものだけ"
-        "を入れる。\n"
-        "- 環境固有の入口（Docker上のDB等）は、repoの設定・実行中サービス・既存テストから"
-        "導出して接続を実測する。ホストに同名CLIがあると仮定しない。")
+    if role == "skeptic":
+        out.append("\n## Mutation evidence rule\n")
+        out.append("If you mutate, prove baseline → mutate → postcondition → test → restore → "
+                   "restore postcondition. 空振りした変異の GREEN は証拠ではない。"
+                   "適用後状態と復元後状態を実測し、未測定の変異を証拠に数えない。")
 
     # subagent に渡すのは「返すもの」の指定。**記録するコマンドは載せない** —
     # subagent には ORG_GITHUB_REPO も台帳のパスも渡っておらず、載せると指示と権限が
@@ -667,8 +674,9 @@ def _run_headless(role, issue, material, cfg, schema, stable_organ=None):
           + " — 応答まで数分かかることがある …", file=sys.stderr)
     try:
         # stdin を閉じる。codex exec は stdin を読もうとして、端末が無いと止まる（実測）。
+        timeout = int(cfg.get("timeout_seconds") or os.environ.get("ORG_JUDGE_TIMEOUT", "120"))
         pr = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True,
-                            text=True, timeout=int(os.environ.get("ORG_JUDGE_TIMEOUT", "1800")))
+                            text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
         print(f"[{role}] {cli} がタイムアウトした（ORG_JUDGE_TIMEOUT で延ばせる）。",
               file=sys.stderr)

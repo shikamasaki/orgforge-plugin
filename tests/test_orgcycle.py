@@ -157,8 +157,8 @@ def test_worktree_isolates_parallel_makers(tmp_path):
 # 検証手順を人が毎回書き下ろすと、書くたびに gate の厳しさが変わる（18 Issue で18通り）。
 # 基準の出所は agents/gate.md 1つにする。ただし verdict を埋めた瞬間に gate が形骸化するので、
 # そこは越えない — この境界をテストで固定する。
-def test_verify_injects_charter_and_leaves_verdict_unfilled():
-    """憲章と decide 雛形は出すが、verdict は placeholder のまま（判定を先取りしない）。"""
+def test_verify_injects_focused_contract_and_leaves_verdict_unfilled():
+    """Issue-scoped contract と decide 雛形は出すが、verdict は先取りしない。"""
     import subprocess, os
     env = dict(os.environ, ORG_GITHUB_REPO="")
     # #101 以降、subject は Issue の worktree から mint する。この開発リポジトリに
@@ -169,7 +169,8 @@ def test_verify_injects_charter_and_leaves_verdict_unfilled():
     out = p.stdout + p.stderr
     # gh が無い/認証が無い環境では Issue を読めず 3 で落ちるのが正しい挙動
     if p.returncode == 0:
-        assert "admission control" in out, "agents/gate.md の憲章が注入されていない"
+        assert "Fixed review contract" in out, "Issue-scoped review contract が注入されていない"
+        assert "Do not add unrelated review criteria" in out
         # 0.25.2: subagent 向けは「返すもの」の指定、監督向けは値を入れる欄。
         # どちらも **verdict を決めない** — ツールが verdict を決めた瞬間に gate は形骸化する。
         assert "admit|reject|park" in out, "verdict の選択肢が示されていない"
