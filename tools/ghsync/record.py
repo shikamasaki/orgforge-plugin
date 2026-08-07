@@ -36,21 +36,24 @@ def _log_defect(a):
     if a.event not in _LOG_MILESTONES:
         return None
     if not getattr(a, "command", None):
-        return ("--command が要る（マイルストーンの log）。実際に走らせたコマンドを verbatim で。\n"
-                "  「テストを流した」ではなく `npm test` のように、他人が再実行できる形で書くこと。")
+        return ("--command is required for a milestone log. Give the command you actually ran, "
+                "verbatim.\n"
+                "  Not \"ran the tests\" but `npm test` — a form a stranger can re-run.")
     if not getattr(a, "result", None):
-        return ("--result が要る（マイルストーンの log）。そのコマンドが返した**実出力**を、\n"
-                "  失敗も含めて。成功だけの記録は作り話であり、失敗した試行こそ最も情報量が高い。")
+        return ("--result is required for a milestone log. Paste what that command actually "
+                "returned,\n"
+                "  failures included. A record of successes only is fiction, and the failed "
+                "attempt carries the most information.")
     res = str(a.result)
     if len(res.encode("utf-8")) < 24:
-        return ("--result が短すぎて実出力とは言えない。"
-                "「通った」ではなく、返ってきたものを貼ること。")
+        return ("--result is too short to be real output. Paste what came back, "
+                "not \"it passed\".")
     words = re.findall(r"[^\W\d_]+", res.lower(), flags=re.UNICODE)
     filler = {"ok", "okay", "done", "fine", "good", "green", "pass", "passed", "passes",
               "success", "succeeded", "yes", "worked", "works", "完了", "成功"}
     if words and not [w for w in words if w not in filler]:
-        return ("--result が「通った」の言い換えでしかない。実出力（テスト件数、エラー、"
-                "差分など）を貼ること。")
+        return ("--result is only a paraphrase of \"it passed\". Paste the real output — test "
+                "counts, errors, the diff.")
     return None
 
 
@@ -158,11 +161,12 @@ def cmd_log(a):
         return 2
     ok, msg = _append_progress_receipt(a)
     if ok:
-        print(f"logged {a.event} to issue #{a.issue}（台帳にも progress_recorded を記録）。")
+        print(f"logged {a.event} to issue #{a.issue} (progress_recorded also written to the ledger).")
     else:
         print(f"logged {a.event} to issue #{a.issue}.")
-        print(f"注意: 台帳の受領証を書けなかった（{msg.strip()[:120]}）。"
-              f"Issue には残っているが、`/org-resume` はこの進捗を見られない。", file=sys.stderr)
+        print(f"note: could not write the ledger receipt ({msg.strip()[:120]}). "
+              f"The Issue keeps the entry, but `/org-resume` cannot see this progress.",
+              file=sys.stderr)
     return 0
 
 
@@ -189,11 +193,11 @@ def cmd_review_response(a):
     response = (a.response or "").strip()
     evidence = (a.evidence or "").strip()
     if not re.fullmatch(r"[A-Za-z][A-Za-z0-9._-]{0,63}", finding):
-        print("review-response: --finding は追跡可能なID（例: GATE-001）が必要。", file=sys.stderr)
+        print("review-response: --finding needs a traceable id (e.g. GATE-001).", file=sys.stderr)
         return 2
     if len(response) < 20 or len(evidence) < 20:
-        print("review-response: --response と --evidence には対応内容と実測を具体的に残すこと。",
-              file=sys.stderr)
+        print("review-response: --response and --evidence must record concretely what was done "
+              "and what was measured.", file=sys.stderr)
         return 2
     marker = f"<!-- orgforge:review-response:{a.review}:{finding}:{a.status} -->"
     code, existing = gh(["issue", "view", str(a.issue), "--repo", a.repo,
@@ -202,7 +206,8 @@ def cmd_review_response(a):
         print(existing, file=sys.stderr)
         return 3
     if marker in existing:
-        print(f"review-response: {finding} は既に同じ内容で Issue #{a.issue} に記録済み（no-op）。")
+        print(f"review-response: {finding} is already recorded on Issue #{a.issue} with the same "
+              f"content (no-op).")
         return 0
     body = "\n".join([
         f"### ↪ Review response — `{finding}` ({a.status})",
@@ -392,7 +397,7 @@ def _org_lineage():
         from discover import constitution
         path = constitution()
     except Exception as e:
-        raise SystemExit(f"constitution の場所を解決できない: {e}\n"
+        raise SystemExit(f"cannot resolve the constitution's location: {e}\n"
                          "  judges.lineage を読めない状態で判定を記録すると、cross-harness を"
                          "宣言した org が黙って同一血統で通る。\n"
                          "  org のルートで実行しているか確認すること。")
@@ -401,7 +406,7 @@ def _org_lineage():
     try:
         import yaml
     except Exception:
-        raise SystemExit("PyYAML が無いので constitution を読めない。\n"
+        raise SystemExit("PyYAML is missing, so the constitution cannot be read.\n"
                          "  judges.lineage が読めないまま判定を記録することは許さない — "
                          "cross-harness の宣言が黙って消える。\n"
                          "    python3 -m pip install pyyaml")
@@ -409,12 +414,12 @@ def _org_lineage():
         with open(path, encoding="utf-8") as f:
             c = yaml.safe_load(f) or {}
     except Exception as e:
-        raise SystemExit(f"constitution.yaml を解析できない: {e}\n"
+        raise SystemExit(f"cannot parse constitution.yaml: {e}\n"
                          f"  ファイル: {path}\n"
                          "  **設定を読めないなら止める。** 読めない理由が judges.lineage の行に"
                          "あるかどうかは、読めない時点では分からない。")
     if not isinstance(c, dict):
-        raise SystemExit(f"constitution.yaml が map ではない（{type(c).__name__}）: {path}")
+        raise SystemExit(f"constitution.yaml is not a map ({type(c).__name__}): {path}")
     j = ((c.get("enforcement") or {}).get("judges") or {})
     declared = str(j.get("lineage") or "same-harness").strip()
     sys.path.insert(0, HERE)

@@ -976,7 +976,7 @@ def test_integrate_passes_its_own_test_output_to_the_log():
 def test_show_reports_what_the_rounds_are_about():
     """周回の回数だけでなく、直近が何を問題にしているかを出す。"""
     src = _cycle_src("inspect")
-    assert "周回:" in src and "直近3回" in src
+    assert "rounds:" in src and "last 3" in src
     # 周回ごとに違う理由を見ること（1件だけ引くと全部同じに見える）
     assert "_issue_reasons" in src
     assert "判断材料であって判断ではない" in src, "board が「切れ」と判定してはいけない"
@@ -1076,7 +1076,7 @@ def test_spec_template_states_when_done():
 def test_show_warns_on_repeated_rework_but_not_on_many_rounds():
     """rework の回数で見る。判定を重ねること自体は悪くない（#7 は7周・rework 2回で収束）。"""
     src = _cycle_src("inspect")
-    seg = src[src.index("周回:"):]
+    seg = src[src.index("rounds:"):]
     assert "len(reworks) > 3" in seg, "rework の回数で判定していない"
     assert "len(rounds) > 5" not in seg, "判定回数で警告すると、丁寧に見た Issue まで警告される"
 
@@ -2775,11 +2775,11 @@ def test_show_without_declared_base_prints_status_warns_and_skips_attribution(tm
     org, _ = _declared_org(tmp_path, integration_ref=None, develop=True)
     code, out = run("org_cycle.py", "show", "--issue", "7", cwd=str(org))
     assert code == 0, f"基準が無いだけで orientation 全体を閉め出した:\n{out}"
-    assert "判定" in out and "次:" in out, f"台帳由来の状態が出ていない:\n{out}"
+    assert "verdicts" in out and "次:" in out, f"台帳由来の状態が出ていない:\n{out}"
     assert "--base" in out and "integration_ref" in out, f"警告が両方の選択肢を名指ししていない:\n{out}"
     # 帰属ブロックの行ラベルは「不可逆:」。警告文（不可逆な変更の帰属は表示しない）とは区別する。
     assert "不可逆:" not in out, f"基準が無いのに帰属ブロックを出した:\n{out}"
-    assert "帰属は表示しない" in out, f"帰属を省いたことを言っていない:\n{out}"
+    assert "not attributing irreversible changes" in out, f"帰属を省いたことを言っていない:\n{out}"
 
 
 def test_show_attribution_block_fires_when_base_is_declared(tmp_path):
