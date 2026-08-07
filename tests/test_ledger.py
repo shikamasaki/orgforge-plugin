@@ -357,7 +357,7 @@ def test_judgment_without_correlation_key_is_rejected(tmp_path):
     # 0.33.1 で schema 検証（require_any）が同じことを、より具体的に言うようになった —
     # どのキーが要るかを挙げる。台帳側の相関キー検査も残っているので、どちらが先に拾っても
     # 拒否される（二重の防御）。
-    assert "相関キーが無い" in p.stderr or "特定できない" in p.stderr
+    assert "has no correlation key" in p.stderr or "cannot be identified" in p.stderr
 
 
 def test_self_admission_is_caught_when_written_as_deliverable(tmp_path):
@@ -576,7 +576,7 @@ def test_judge_cannot_void_its_own_judgment(tmp_path):
     target = _provisional_target(org, ledger, actor="gate")
     result = _correction_append(org, ledger, "gate", target["seq"])
     assert result.returncode == 3
-    assert "権限が無い" in result.stderr or "自分の判定" in result.stderr
+    assert "is not authorized" in result.stderr or "自分の判定" in result.stderr
     assert len((ledger / "ledger.jsonl").read_text().splitlines()) == 1
 
 
@@ -614,7 +614,7 @@ def test_declared_authority_actor_name_without_receipt_cannot_void_judgment(tmp_
     target = _provisional_target(org, ledger, actor="gate")
     result = _correction_append(org, ledger, "supervisor", target["seq"])
     assert result.returncode == 3
-    assert "署名receiptが無い" in result.stderr
+    assert "no signed receipt" in result.stderr
     assert "--actor の役割名だけ" in result.stderr
 
 
@@ -785,7 +785,7 @@ def test_unknown_event_class_is_refused(tmp_path):
     """条件3: schema に宣言の無いクラスは書けない。"""
     code, out = _app(tmp_path, cls="totally_unknown_class", payload={})
     assert code == 2
-    assert "未知のイベントクラス" in out
+    assert "unknown event class" in out
 
 
 def test_unreadable_schema_fails_closed(tmp_path, monkeypatch):
@@ -901,7 +901,7 @@ def test_required_only_applies_to_declared_classes(tmp_path):
     # 統制イベントは必須欠落で拒否
     code, out = _app(tmp_path, "admission_decided", {}, actor="gate")
     assert code == 2
-    assert "必須 field が無い" in out
+    assert "missing required fields" in out
 
 
 def test_correlation_key_is_any_of_not_a_fixed_one(tmp_path):
@@ -916,7 +916,7 @@ def test_correlation_key_is_any_of_not_a_fixed_one(tmp_path):
     # 1つも無ければ拒否
     code, out = _app(tmp_path, "admission_decided", {"verdict": "admit"}, actor="gate-none")
     assert code != 0
-    assert "相関キーが無い" in out or "特定できない" in out
+    assert "has no correlation key" in out or "cannot be identified" in out
 
 
 def test_enum_and_type_are_checked_when_present(tmp_path):
@@ -924,7 +924,7 @@ def test_enum_and_type_are_checked_when_present(tmp_path):
     code, out = _app(tmp_path, "admission_decided",
                      {**_ADM, "verdict": "totally-bogus"}, actor="gate")
     assert code == 2
-    assert "許された値ではない" in out
+    assert "is not an allowed value" in out
     code, out = _app(tmp_path, "correction",
                      {"corrects": 5, "kind": "probe"}, actor="sup")     # list であるべき
     assert code == 2
@@ -1067,7 +1067,7 @@ def test_unknown_validator_type_fails_closed(tmp_path, monkeypatch):
     monkeypatch.setenv("ORG_LEDGER_SCHEMA", str(alt))
     code, out = _app(tmp_path, "correction", {"corrects": [1], "kind": "probe"}, actor="sup")
     assert code == 2
-    assert "未知の型名" in out
+    assert "unknown type" in out
 
 
 def test_schema_diagnoses_nested_validation_gaps(tmp_path):

@@ -83,7 +83,7 @@ def test_invalid_root_rejected_at_record_time(tmp_path):
                     "--payload", json.dumps({"candidate_id": "A", "cause": "x",
                                              "root": "test_flaky"}))
     assert code != 0, "不正な root が記録できてしまった"
-    assert "root" in out and "許された値ではない" in out, out
+    assert "root" in out and "is not an allowed value" in out, out
 
 
 def test_valid_root_accepted_and_stored(tmp_path):
