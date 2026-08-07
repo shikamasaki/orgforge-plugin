@@ -199,20 +199,31 @@ def test_verify_finds_charter_in_every_layout():
     """
     m = _cycle_mod("judge")
     bundled = TOOLS.parent / "integrations" / "claude-code"
+    codex_bundled = TOOLS.parent / "integrations" / "codex"
     saved = os.environ.pop("CLAUDE_PLUGIN_ROOT", None)
     try:
         # (1) env なし — repo を直接使う形。実地で壊れたのはこちら
         for role in ("gate", "skeptic"):
             charter, path = m._role_charter(role)
             assert charter, f"env 無しで {role} の憲章を見失った（探した先: {path}）"
-        # (2) env あり — プラグインとして入った形
-        if (bundled / "agents").is_dir():
-            os.environ["CLAUDE_PLUGIN_ROOT"] = str(bundled)
-            for role in ("gate", "skeptic"):
-                charter, path = m._role_charter(role)
-                assert charter, f"バンドル配置で {role} の憲章を見失った（探した先: {path}）"
+        # (2) env あり — Claude plugin として入った形
+        assert (bundled / "agents").is_dir(), "Claude projection に review charter が無い"
+        os.environ["CLAUDE_PLUGIN_ROOT"] = str(bundled)
+        for role in ("gate", "skeptic"):
+            charter, path = m._role_charter(role)
+            assert charter, f"Claude bundle で {role} の憲章を見失った（探した先: {path}）"
+
+        # (3) env あり — Codex plugin として入った形。Codex が注入する
+        # PLUGIN_ROOT そのものを使う。互換変数だけを試すと実際の host 契約から外れる。
+        assert (codex_bundled / "agents").is_dir(), "Codex projection に review charter が無い"
+        os.environ.pop("CLAUDE_PLUGIN_ROOT", None)
+        os.environ["PLUGIN_ROOT"] = str(codex_bundled)
+        for role in ("gate", "skeptic"):
+            charter, path = m._role_charter(role)
+            assert charter, f"Codex bundle で {role} の憲章を見失った（探した先: {path}）"
     finally:
         os.environ.pop("CLAUDE_PLUGIN_ROOT", None)
+        os.environ.pop("PLUGIN_ROOT", None)
         if saved is not None:
             os.environ["CLAUDE_PLUGIN_ROOT"] = saved
 
@@ -1045,6 +1056,15 @@ def test_verify_asks_skeptic_for_out_of_scope_separately():
     assert "verdict` には数えず" in src or "verdict には数えず" in src
 
 
+def test_verify_scopes_blockers_and_repeated_findings():
+    """gate の実行時材料が、変更契約外の無限ラリーを明示的に防ぐ。"""
+    src = _cycle_src("judge")
+    assert "判定範囲とレビューラリーの規律" in src
+    assert "handoff の seam contract" in src
+    assert "reviewed head・根拠・残余リスク" in src
+    assert "follow-up Issue 化" in src
+
+
 def test_spec_template_states_when_done():
     """完了の判定を spec 側に書く — maker / gate / skeptic の3者が同じ条件を見る。"""
     body = (TOOLS.parent / "template" / "SPEC.md").read_text(encoding="utf-8")
@@ -1560,6 +1580,14 @@ def test_verify_offers_the_headless_route():
     assert "別の血統" in seg or "別ハーネス" in seg
 
 
+def test_claude_judge_receives_the_declared_effort():
+    """Claude Codeもconstitutionのmodel/effortを実行引数へ投影する。"""
+    src = _cycle_src("judge")
+    branch = src[src.index('elif cli == "claude":'):src.index('else:', src.index('elif cli == "claude":'))]
+    assert '["--model", str(model)]' in branch
+    assert '["--effort", str(effort)]' in branch
+
+
 # ── judges.lineage（スイスチーズ層）─────────────────────────────────────
 # **既定が変わらないことを、まず固定する。** 別ハーネスの契約・CLI・認証を前提にすると、
 # 持っていない環境で org が回らなくなる。層を増やすのは選択であって前提ではない。
@@ -1576,11 +1604,11 @@ def test_judge_lineage_defaults_to_same_harness(tmp_path, monkeypatch):
 
 _HARNESS_CFG = (
     "      claude:\n"
-    "        gate: { cli: claude }\n"
-    "        skeptic: { cli: claude }\n"
+    "        gate: { cli: claude, model: sonnet, effort: medium }\n"
+    "        skeptic: { cli: claude, model: sonnet, effort: medium }\n"
     "      codex:\n"
-    "        gate: { cli: codex, effort: high }\n"
-    "        skeptic: { cli: codex, effort: high }"
+    "        gate: { cli: codex, model: gpt-5.6-terra, effort: medium }\n"
+    "        skeptic: { cli: codex, model: gpt-5.6-terra, effort: medium }"
 )
 
 
@@ -1602,6 +1630,12 @@ def test_judge_lineage_selects_the_opposite_harness(tmp_path, monkeypatch, prima
     lineage, cfg = _judge_lineage("skeptic")
     assert lineage == "cross-harness"
     assert cfg["cli"] == secondary
+    if secondary == "codex":
+        assert cfg["model"] == "gpt-5.6-terra"
+        assert cfg["effort"] == "medium"
+    else:
+        assert cfg["model"] == "sonnet"
+        assert cfg["effort"] == "medium"
     assert _judge_lineage("gate")[1]["cli"] == secondary
 
 

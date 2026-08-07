@@ -5,14 +5,15 @@
 # org's SCHEDULE (template/schedule.yaml) is still driven by an external cron/CI (R0 — no built-in
 # scheduler, same as Claude Code); this file only sets model/sandbox/approval/MCP per project.
 
-# neutral model_tier -> a concrete Codex model (adopter fills in the real names).
-# 検証時点（0.146.0 / ChatGPT アカウント）で `gpt-5-codex` は
-#   "The 'gpt-5-codex' model is not supported when using Codex with a ChatGPT account."
-# で拒否された。API キーではなく ChatGPT の契約で使う場合、使えるモデルは限られる —
-# **モデル名は必ず1回 `codex exec -m <m> "Reply OK"` で確かめてから書くこと。**
-model = "gpt-5.5"
-model_reasoning_effort = "high"          # neutral effort -> minimal|low|medium|high|xhigh
-                                         # judge tier（gate/skeptic）は high。worker は medium
+# OrgForge の既定モデル。高速と判断品質の釣り合いから `gpt-5.6-terra` / `medium` を
+# 採る。headless cross-harness judge は各リポジトリの
+# `constitution.yaml: enforcement.judges.harness.<harness>.<role>.model` と `effort`
+# が優先するため、役割ごとにここより深いモデルへ上げられる。
+#
+# 使用可能なモデル名は契約・アカウントに依存するため、採用前に
+# `codex exec -m <m> "Reply OK" </dev/null` で確認すること。
+model = "gpt-5.6-terra"
+model_reasoning_effort = "medium"        # minimal|low|medium|high|xhigh
 
 # Trusted developer mode: no approval prompts and no filesystem/network sandbox. Use this only on
 # a development machine/repository that contains no production credentials. The org's policy and

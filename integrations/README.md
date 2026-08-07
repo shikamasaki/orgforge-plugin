@@ -168,7 +168,8 @@ had no effect. Running the judge on **another harness** is what makes the lineag
 python3 tools/org_cycle.py verify --issue 11 --role skeptic > /tmp/sk11.md
 
 # 2. run it headless, with the verdict shape enforced by the schema
-codex exec --sandbox read-only -m gpt-5.5   --output-schema template/schemas/skeptic-verdict.json   -o /tmp/sk11.json "$(cat /tmp/sk11.md)" </dev/null
+codex exec --sandbox read-only -m gpt-5.6-terra -c model_reasoning_effort=medium \
+  --output-schema template/schemas/skeptic-verdict.json -o /tmp/sk11.json "$(cat /tmp/sk11.md)" </dev/null
 
 # 3. check the report has the shape its role owes before reading it as a judgment
 python3 tools/org_cycle.py intake --issue 11 --role skeptic --report - < /tmp/sk11.json

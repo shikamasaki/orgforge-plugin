@@ -63,6 +63,12 @@ done
 for f in "$REPO"/template/schemas/*.json; do
   sync_one "$f" "$HERE/template/schemas/$(basename "$f")" || rc=1
 done
+# Review charters are host-neutral policy.  The Codex projection needs the same
+# pair as the Claude projection because org-cycle injects them at dispatch time.
+# Omitting them makes `verify` stop before an independent reviewer can run.
+for f in gate.md skeptic.md; do
+  sync_one "$REPO/integrations/claude-code/agents/$f" "$HERE/agents/$f" || rc=1
+done
 for f in "$REPO"/template/exercises/*.yaml; do
   sync_one "$f" "$HERE/template/exercises/$(basename "$f")" || rc=1
 done
@@ -71,4 +77,4 @@ if [ "$CHECK" = "--check" ]; then
   [ "$rc" = 0 ] && echo "codex plugin bundle is in sync with the neutral source"
   exit "$rc"
 fi
-echo "codex plugin bundle regenerated from tools/, integrations/common/, template/"
+echo "codex plugin bundle regenerated from tools/, integrations/common/, template/, review charters"
