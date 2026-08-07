@@ -65,7 +65,7 @@ def cmd_show(a):
     # 帰属ブロックだけを省き、警告して続行する（cmd_plan と同じ warn-don't-stop の形）。
     attribution_base, base_err = resolve_integration_base(getattr(a, "base", None))
     if base_err:
-        print(f"  ⚠ 不可逆な変更の帰属は表示しない — 基準が決まらない（#{a.issue}）:\n{base_err}",
+        print(f"  ! not attributing irreversible changes — no baseline (#{a.issue}):\n{base_err}",
               file=sys.stderr)
         attribution_base = None
     title, _ = _issue_body(a.issue)
@@ -84,7 +84,7 @@ def cmd_show(a):
 
     print(f"#{a.issue} {title or ''} — {state}")
     if provisional and not (av or rv):
-        print("  ⚠ 暫定判定は台帳に記録済みだが、最終判定ではない。"
+        print("  ! the provisional verdict is recorded in the ledger, but it is not final."
               "cross-harness の一致を専用 derive-admission で確定すること。")
 
     br = _branch_for(a.issue)
@@ -100,7 +100,7 @@ def cmd_show(a):
               ("admission_decided", "refutation_attempted", "rework_requested",
                "integration_admitted", "result_deployed", "correction")]
     if judged:
-        print("  判定:")
+        print("  verdicts:")
         for e in judged:
             pl = e.get("payload", {}) or {}
             if e["class"] == "correction":
@@ -118,7 +118,7 @@ def cmd_show(a):
                   f" by {e.get('actor')}{note}{bf}"
                   + (f"\n        {why}" if why else ""))
     else:
-        print("  判定:     まだ無い")
+        print("  verdicts: none yet")
 
     # 4: 周回が何を意味しているか。が9周、が10周した。統制は毎回実害のある欠陥を
     # 見つけており機能しているが、**いつ収束するかの見通しが立たない**。回数だけでなく
@@ -141,7 +141,7 @@ def cmd_show(a):
             k = ("テストの欠陥" if re.search(r"テスト|警報|検出できな|placebo|ミューテーション", txt)
                  else "実装の欠陥" if txt else "不明")
             kinds.append(k)
-        print(f"  周回:     {len(rounds)} 周 — 直近3回: {' / '.join(kinds)}")
+        print(f"  rounds:   {len(rounds)} — last 3: {' / '.join(kinds)}")
         # ③ rework が積み増している = 「直すべきものが増え続けている」signal。
         # 運用では8回 rework し、**4回目以降の発見はすべて spec の MUST に無いもの**だった。
         # 「不可逆 N 件」と同じ扱い — **止めない。材料を出す。**

@@ -314,16 +314,16 @@ def cmd_begin(a):
     if not getattr(a, "no_worktree", False):
         base, base_err = resolve_integration_base(getattr(a, "base", None))
         if base_err:
-            print(f"begin の worktree base が決まらない（#{a.issue}）:\n{base_err}",
+            print(f"cannot determine the worktree base for begin (#{a.issue}):\n{base_err}",
                   file=sys.stderr)
             return 2
         a.base = base
     warns = [] if getattr(a, "no_check", False) else _readiness(a.issue)
     if warns:
-        print(f"着手前の確認（#{a.issue}）:", file=sys.stderr)
+        print(f"pre-start checks (#{a.issue}):", file=sys.stderr)
         for w in warns:
             print(f"  ⚠ {w}", file=sys.stderr)
-        print("  — これらは**止めない**。承知のうえで進めるなら、そのまま実行される。\n"
+        print("  — these do NOT stop you. Proceed knowingly and it runs as-is.\n"
               "     前提が崩れたまま作ったものは、後で gate が拒否する側に回る。\n",
               file=sys.stderr)
     parent = a.parent or resolve_parent(a.issue)
@@ -341,14 +341,15 @@ def cmd_begin(a):
         if rounds:
             cid = f"{cid}-rework-{max(rounds)}"
     if parent is None:
-        print(f"注意: #{a.issue} の親 objective が解決できなかった。phase 連鎖は自分の admit だけを "
-              f"見る（親から継承しない）。意図した親があるなら --parent で渡すこと。", file=sys.stderr)
+        print(f"note: could not resolve the parent objective of #{a.issue}. The phase chain will look "
+              f"only at its own admission (no inheritance from a parent). If there is an "
+              f"intended parent, pass it with --parent.", file=sys.stderr)
     return _execute(_steps_begin(a, parent, cid), f"begin #{a.issue} ({a.role})")
 
 
 def cmd_complete(a):
     if not (a.domain_model_updated or a.domain_model_none):
-        print("--domain-model-updated か --domain-model-none のどちらかが必要。\n"
+        print("either --domain-model-updated or --domain-model-none is required.\n"
               "docs/11 §4d: cycle_completed は「このサイクルがドメインモデルに何をしたか」を"
               "述べない限り台帳が拒否する。何も確立しなかったなら、その理由を書くこと"
               "（skeptic が反証できる主張になる）。", file=sys.stderr)

@@ -268,12 +268,12 @@ def _plan_integrate(a, branch, subject_sha, base):
     print(f"  gate: {av or '記録なし'}" + (f"（seq {aseq}）" if aseq else "")
           + f" · skeptic: {rv or '記録なし'}" + (f"（seq {rseq}）" if rseq else ""))
     if not (av == "admit" and rv == "survives"):
-        print("  → 前提が揃っていないので、このまま integrate しても止まる。")
+        print("  -> the preconditions are not met; integrating now would be stopped anyway.")
     elif overlaps:
-        print("  → 統合できるが、上の重複は先に見ておくこと"
+        print("  -> integrable, but look at the overlap above first"
               "（衝突は統合後に分かるより前に分かるほうが安い）。")
     else:
-        print("  → 統合できる。")
+        print("  -> integrable.")
     return 0
 
 
@@ -289,12 +289,12 @@ def cmd_handback(a):
     """
     branch, subject_sha, branch_error = _resolve_integration_branch(a.issue, a.branch)
     if branch_error:
-        print(f"handback branch を解決できない（#{a.issue}）: {branch_error}", file=sys.stderr)
+        print(f"cannot resolve the handback branch (#{a.issue}): {branch_error}", file=sys.stderr)
         return 3
     local_code, _ = _raw(["git", "show-ref", "--verify", f"refs/heads/{branch}"])
     if local_code != 0:
-        print(f"handback は push できる local branch が必要だが、{branch} は local branch "
-              "ではない。branch を checkout してから再実行すること。", file=sys.stderr)
+        print(f"handback needs a pushable local branch, but {branch} is not one.\n"
+              "  Check the branch out, then re-run.", file=sys.stderr)
         return 3
     # PR の統合先は constitution の integration_ref から解決する（#106）。
     # gh pr create の --base は branch 名なので、origin/main 形の宣言は main に写す。
