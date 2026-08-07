@@ -235,14 +235,16 @@ def _tokenize(cmd):
     once and test token membership instead. shlex is used for correctness; if the command is not
     valid shell (unbalanced quotes, etc.) we fall back to a whitespace split so we still gate it
     rather than silently passing an unparseable — and thus opaque — command."""
-    # **shlex だけが遅い。** 100万文字で 11秒かかり、hook が返らなくなる（実測）。
-    # トークン化は語境界の判定に使うだけなので、先頭 N 文字で十分
-    # （危険な語は行の先頭側に現れる）。**正規表現による照合は全体に効かせる** —
-    # そちらは 100万文字でも 10ms で、切ると真ん中に隠されてしまう。
-    # **長すぎるときは shlex を諦め、正規表現で語に割る。**
-    # 切り詰めると、切った先に置かれた語が見えなくなる — 実測で
-    # `echo <7万文字>; <破壊的コマンド>; echo <7万文字>` の真ん中が素通しした。
-    # 語境界での分割は正規表現でも十分で、100万文字でも実測 10ms 程度である。
+    # **shlex alone is the slow part.** Measured: 11s on a million characters, long enough
+    # that the hook stops returning. Tokenising is only used to find word boundaries, so the
+    # first N characters suffice — a dangerous word appears near the start of a line.
+    # **Regex matching still runs over the whole string**: that costs ~10ms even at a
+    # million characters, and truncating it would let anything hide in the middle.
+    # **When it is too long, drop shlex and split on word boundaries with a regex.**
+    # Truncating hides whatever sits past the cut: measured, the middle of
+    # `echo <70k chars>; <destructive command>; echo <70k chars>` passed straight through.
+    # A regex split is good enough for word boundaries and stays ~10ms at a million
+    # characters.
     if len(cmd) > _MAX_TOKENIZE_CHARS:
         return re.findall(r"[^\s;&|()`'\"]+", cmd)
     try:
@@ -343,7 +345,7 @@ def _redirects_to_system_path(cmd):
     return False
 
 
-# 再生成できる作業成果物 — 消しても情報は失われない（作り直せる）。
+# Regenerable build output — deleting it loses no information, it can be rebuilt.
 _REGENERABLE = (
     ".orgforge/wt/",          # Issue ごとの worktree（begin が作り直せる）
     "node_modules",           # 依存（install で戻る）
@@ -360,7 +362,7 @@ def _is_regenerable_target(cmd):
     """
     if not any(m in cmd for m in _REGENERABLE):
         return False
-    # ルート/ホーム直下や親への遡上が混ざっていたら緩めない
+    # Do not relax when the path sits directly under root or home, or climbs to a parent.
     if re.search(r"(^|\s)(/|~|\$HOME)(\s|$)", cmd) or "/.." in cmd or " .. " in cmd:
         return False
     return True
@@ -418,8 +420,8 @@ def _asset_dimension(tool_name, ti):
     # or a flag like `grep -f` never masquerades as `rm`/`-f`. Operators (`|`, `>`) and dotted calls
     # (`shutil.rmtree`) don't tokenize as clean words, so those few are matched on the raw string
     # with tight anchors. See _tokenize/_has_token/_has_seq above and the tests that pin this.
-    # **入れ物の中身も見る。** `psql -c 'DROP TABLE users'` は shlex ではクォート全体が
-    # 1トークンになるため、`DROP` として一致しない。つまり **SQL の破壊操作は、実際に
+    # **Look inside the container too.** shlex turns `psql -c 'DROP TABLE users'` into a
+    # single quoted token, so it never matches as `DROP`. In other words, **a destructive SQL
     # 使われる形（-c / -e にクォートで渡す形）では cap に一度も計上されていなかった**
     # （実測: 素の `DROP TABLE users` だけが計上され、`psql -c '…'` は素通し）。
     # 数えられないものは上限で止められない。
