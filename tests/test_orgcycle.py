@@ -1045,6 +1045,15 @@ def test_verify_asks_skeptic_for_out_of_scope_separately():
     assert "verdict` には数えず" in src or "verdict には数えず" in src
 
 
+def test_verify_scopes_blockers_and_repeated_findings():
+    """gate の実行時材料が、変更契約外の無限ラリーを明示的に防ぐ。"""
+    src = _cycle_src("judge")
+    assert "判定範囲とレビューラリーの規律" in src
+    assert "handoff の seam contract" in src
+    assert "reviewed head・根拠・残余リスク" in src
+    assert "follow-up Issue 化" in src
+
+
 def test_spec_template_states_when_done():
     """完了の判定を spec 側に書く — maker / gate / skeptic の3者が同じ条件を見る。"""
     body = (TOOLS.parent / "template" / "SPEC.md").read_text(encoding="utf-8")

@@ -333,6 +333,16 @@ def cmd_verify(a):
 
     out.append(f"\n## 検証対象の SPEC / MUST（Issue #{a.issue} 本文）\n")
     out.append(body or "(本文が空 — SPEC の無い Issue は、それ自体が reject 事由)")
+    out.append("\n## 判定範囲とレビューラリーの規律\n")
+    out.append(
+        "この Issue の SPEC / MUST と handoff の seam contract に、具体的な証拠で結び付く"
+        "所見だけを `reject` / `refuted` の根拠にしてよい。安全性、データ完全性、"
+        "セキュリティ、またはリリース不能を具体的に示す場合を除き、変更範囲外の所見は"
+        "判定を止めず `out_of_scope` として follow-up Issue 化を勧めること。\n\n"
+        "前回と同じ finding を再び blocker にするには、reviewed head・根拠・残余リスクの"
+        "少なくとも一つが変化していることを明記する。変化が無い再提示は新しい review round"
+        "を要求しない。これは見落としを無視する規則ではなく、同じ証拠で無限に往復しない"
+        "ための規則である。")
     # `prior`（gate の最新判定の全文）は、上の判定履歴が既に同じものを出している。
     # **両方出すと同じ本文が2回並ぶ** — 実測で skeptic のプロンプト457行のうち、
     # 「0013 の一手隣」26行と「maker の自己申告」20行超が重複していた。プロンプトの長さは
