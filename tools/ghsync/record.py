@@ -601,7 +601,18 @@ def cmd_provisional(a):
                "review_subject_id": a.subject, "reasoning_sha256": digest,
                # **3つの主体を分ける（H1）。** decision_by は receipt からのみ。
                # recorded_by は観測（代理記録を許す）。committed_by は writer が付ける。
-               "decision_by": decision_by or (a.by or a.role),
+               #
+               # Falling back to the RECORDER here made a supervisor who proxy-recorded an
+               # unavailable judge's result the decision principal of that verdict. The ledger then
+               # refused that same supervisor's correction of it as self-correction, and in a
+               # single-authority org there was nobody else to ask — the recovery path documented
+               # in #186 existed and could not complete. Measured on tatekae seq 3706.
+               #
+               # The judging ROLE is the right fallback: `gate` judged it, the supervisor only
+               # wrote it down. That keeps the separation the self-correction check depends on,
+               # and `recorded_by` still carries who actually typed the command. An unreceipted
+               # verdict stays `identity_assurance: claimed`, so nothing is being upgraded here.
+               "decision_by": decision_by or a.role,
                "recorded_by": recorded_by,
                "identity_assurance": ident.get("identity_assurance", "claimed"),
                "recorder_assurance": rec_assurance,

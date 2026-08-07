@@ -6,6 +6,40 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 2.8.2 — a proxy recorder is not the decision principal
+
+When a judge is unavailable, a supervisor records the outcome on its behalf. `decision_by` fell
+back to the RECORDER, so that supervisor became the decision principal of a verdict it had not
+made. The ledger then refused the same supervisor's correction of it as self-correction — correct
+in itself — and in an org whose constitution declares a single correction authority there was
+nobody else to ask. The recovery path 2.8.0 documented existed and could not complete.
+
+Reproduced on a live ledger: `verdict_provisional` seq 3706, `decision_by: supervisor`, correction
+refused with "the judgment's decision principal 'supervisor' cannot correct".
+
+### Fixed
+
+- **`decision_by` falls back to the judging role, not the recorder.** `gate` judged it; the
+  supervisor only wrote it down. `recorded_by` still carries who typed the command, and an
+  unreceipted verdict stays `identity_assurance: claimed` — nothing is upgraded by this.
+
+### Migration for existing ledgers
+
+Verdicts already recorded with `decision_by: supervisor` keep that principal; the fix applies to
+new records. A single-authority org therefore still cannot correct those, because the sole
+authority is the recorded principal. **Declare a second correction authority** — the constitution
+now says so where the value is set:
+
+```yaml
+judgment_corrections:
+  authority_roles: [supervisor, registrar]
+```
+
+The second role does not have to act often; it has to exist before it is needed. Self-correction
+stays refused in every configuration.
+
+Closes #186 (post-release follow-up).
+
 ## 2.8.1 — re-review when the evidence changed, as the message already promised
 
 2.7.0's refusal told the caller that changing the reviewed head, the cited evidence, or the stated
