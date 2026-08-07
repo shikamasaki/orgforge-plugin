@@ -15,6 +15,21 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 TOOLS = REPO / "tools"
 
 
+# ── organ binding: このチェックアウトからテストを回せるようにする ─────────────
+# organ-binding ガードは「SessionStart が束縛した installed plugin 以外の organ が台帳へ
+# 書くこと」を拒否する。正しい振る舞いだが、そのホスト session の中で開発チェックアウトの
+# テストを回すと、ledger へ書くテストが軒並み exit 12 で落ちる（実測: 184 failed）。CI が
+# 緑なのは binding が存在しないからで、ガードが壊れているわけではない。
+#
+# ここで **プロセス全体に** 明示する: このテスト実行は意図的な開発チェックアウトである、と。
+# os.environ に置くので、`dict(os.environ, ...)` で env を組み立てるヘルパも、env を渡さず
+# 継承する `run()` も、等しく効く。
+#
+# binding ガード自身を検証するテストは、この既定を自分で上書きして「明示が無い」状態を
+# 作ること（ORG_ALLOW_FOREIGN_ORGAN を消した env を組んで組織へ書かせる）。
+os.environ.setdefault("ORG_ALLOW_FOREIGN_ORGAN", "1")
+
+
 # ── org_cycle は tools/orgcycle/ に分割された（0.22.0）─────────────────────
 # ソースを文字列で検査するテストは分割に弱い。**どのモジュールに居るかではなく、
 # 何が書かれているか**を見たいので、全モジュールを連結したものを対象にする。

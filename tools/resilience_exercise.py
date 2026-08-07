@@ -21,7 +21,12 @@ import subprocess
 import sys
 import tempfile
 
-import yaml
+try:
+    import yaml
+except ModuleNotFoundError:                                        # pragma: no cover - env guard
+    sys.exit("resilience_exercise: PyYAML が無いので exercise 定義を読めない。\n"
+             "  プラグインが使う interpreter へ入れること:\n"
+             "    python3 -m pip install pyyaml")
 
 HERE = Path(__file__).resolve().parent
 BUNDLE = HERE.parent

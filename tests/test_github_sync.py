@@ -391,7 +391,10 @@ def test_split_check_flags_owns_spanning_territories(monkeypatch):
 
 
 def test_split_check_clean_on_single_territory(monkeypatch):
-    body = "## Seam\\n- **owns:** `app/packages/auth/`\\n"
+    # DoD command は既定で必須（無い SPEC は gate に的が無く、周回が収束しない）。
+    # このテストが見たいのは territory の単一性なので、DoD は満たした上で確認する。
+    body = ("## Seam\\n- **owns:** `app/packages/auth/`\\n"
+            "- **DoD command:** `npm test -- auth`\\n")
     fake = FakeGh(replies={"issue view": (0, '{"body": "' + body + '", "title": "ok"}')})
     monkeypatch.setattr(GS, "gh", fake)
     import io, contextlib
@@ -413,9 +416,27 @@ def test_split_check_flags_prose_must_not_in_ears(monkeypatch):
     assert rc == 10 and "EARS" in buf.getvalue(), buf.getvalue()
 
 
-def test_split_check_clean_when_must_is_ears(monkeypatch):
+def test_split_check_requires_a_dod_command_by_default(monkeypatch):
+    """A SPEC with no runnable DoD command gives the gate no target.
+
+    The gate is told to re-derive rather than trust the maker, so without a command to run it
+    designs the verification itself — differently on every round. That is what makes a review
+    rally diverge instead of converge (issue #170 ran 12 rounds). On by default; ORG_REQUIRE_DOD=0
+    stands it down.
+    """
+    monkeypatch.delenv("ORG_REQUIRE_DOD", raising=False)
     body = json.dumps({"body": "## MUST\n- [ ] WHEN login THE system SHALL validate\n"
                                "- **owns:** `app/auth/`\n", "title": "t"})
+    fake = FakeGh(replies={"issue view": (0, body)})
+    monkeypatch.setattr(GS, "gh", fake)
+    rc, out = _quiet(GS.cmd_split_check, _ns(repo="o/r", issue=9))
+    assert rc == 10 and "DoD command" in out, out
+
+
+def test_split_check_clean_when_must_is_ears(monkeypatch):
+    body = json.dumps({"body": "## MUST\n- [ ] WHEN login THE system SHALL validate\n"
+                               "- **owns:** `app/auth/`\n"
+                               "- **DoD command:** `npm test -- auth`\n", "title": "t"})
     fake = FakeGh(replies={"issue view": (0, body)})
     monkeypatch.setattr(GS, "gh", fake)
     import io, contextlib
@@ -917,6 +938,7 @@ def test_split_check_ignores_digits_in_prose(monkeypatch):
     （実地で判明）。#N の形だけを依存とみなす。"""
     body = json.dumps({"body": "## MUST\n- [ ] WHEN x THE system SHALL y\n"
                                "- **owns:** `app/a/`\n"
+                               "- **DoD command:** `npm test -- a`\n"
                                "- **depends_on:** なし。実装コードは1行も入らない\n", "title": "t"})
     fake = FakeGh(replies={"issue view": (0, body)})
     monkeypatch.setattr(GS, "gh", fake)

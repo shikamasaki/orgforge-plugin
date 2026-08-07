@@ -10,6 +10,7 @@ import subprocess
 import sys
 
 from ._core import (
+    HERE,
     CLAIM_PREFIX,
     _ensure_labels,
     _find_open_issue,
@@ -422,6 +423,10 @@ def cmd_ready(a):
     # 死んでいて確認できない」を同じ {"ready": []} にすると、org は原因の観測手段なく黙って
     # 止まる — この Issue が潰しに来た machine-invisible-state と同じ類（#103 rework）。
     withheld_unverifiable = []
+    withheld_prose = []
+    # 逃げ道は残すが、**既定は閉じる**。既存 org には散文 SPEC の在庫があり、いきなり全部が
+    # ready から消えると仕事が止まる。移行中はこれで開けられるようにしておく。
+    _READY_SKIP_EARS = os.environ.get("ORG_READY_SKIP_EARS") == "1"
     for it in issues:
         names = [l["name"] for l in it.get("labels", [])]
         if any(n.startswith(CLAIM_PREFIX) for n in names):
@@ -471,9 +476,33 @@ def cmd_ready(a):
                       f"proof of startability; if gh is degraded, ready is UNDERREPORTING, not "
                       f"empty (Issue #103).", file=sys.stderr)
             break
-        if not blocked:
-            ready.append(it["number"])
-    print(json.dumps({"ready": ready, "withheld_unverifiable": withheld_unverifiable}))
+        if blocked:
+            continue
+        # **散文 acceptance の Issue を maker に渡さない。**
+        #
+        # split-check は起票時に同じ検査をするが、`/org-decompose` の案内は「このコマンドを
+        # 打て」であって強制ではなく、打たなければ素通りした。実地の #170 は acceptance
+        # 10件中9件が散文のまま maker に渡り、gate が毎回「どう確かめるか」の設計から始めて
+        # 基準が周回ごとにブレ、**12周**した（CI 12回・判定12回）。
+        #
+        # 「検査を呼ぶかどうかを、検査される側が決める」構造をここで閉じる。的の無い SPEC は
+        # ready に載らない — gate を速くするのではなく、**gate に的を与える**のが収束の条件。
+        # 直し方は SPEC を EARS に書き直すこと。緩めることではない。
+        if not _READY_SKIP_EARS:
+            prose = _non_ears_acceptance(it.get("body") or "")
+            if prose:
+                withheld_prose.append(it["number"])
+                print(f"withheld: issue #{it['number']} — acceptance {len(prose)} 件が EARS でない"
+                      f"（例: “{prose[0][:60]}”）。的の無い SPEC を maker に渡すと gate が毎回"
+                      f"基準を作り直し、周回が収束しない。EARS に書き直してから ready にすること"
+                      f"（緊急時は ORG_READY_SKIP_EARS=1 で一時的に無効化できる）。",
+                      file=sys.stderr)
+                continue
+        ready.append(it["number"])
+    out_obj = {"ready": ready, "withheld_unverifiable": withheld_unverifiable}
+    if withheld_prose:
+        out_obj["withheld_non_ears"] = withheld_prose
+    print(json.dumps(out_obj))
     return 0
 
 
@@ -598,6 +627,76 @@ def cmd_needs_human(a):
     return 0
 
 
+def _non_ears_acceptance(body):
+    """acceptance / MUST の行のうち、EARS で書かれていないものを返す。
+
+    **判定基準は req_lint に一本化する。** EARS の定義を2箇所に持つと必ずずれ、「起票時は
+    通ったのに gate では散文扱い」のような食い違いが出る。req_lint を import できない環境
+    （organ 単体実行など）では検査を **見送る** — 誤って全部を違反と言うより、黙るほうが安全。
+
+    見るのは acceptance セクションの箇条書きだけ。本文全体を見ると、別の節の "IF ANY" や
+    コードブロックの `if` / SQL の `WHERE` に当たって素通りする（旧実装の実害）。
+    """
+    if not body:
+        return []
+    try:
+        # 基点は _core.HERE に集約する（tools/ を指す）。`__file__` をここで解決し直すと、
+        # パッケージの階層が変わったときに直し漏れる — 実際に 0.22.0 の分割でそれが起きた。
+        sys.path.insert(0, HERE)
+        from req_lint import EARS_PATTERNS, _strip_noise
+    except Exception:
+        return []                       # 基準を読めないなら検査しない（黙る）
+
+    text = _strip_noise(body)           # 引用・コードブロック・付録を落とす
+    heading = re.compile(
+        r"^#{1,6}\s*.*(?:acceptance|MUST|受け入れ|required\s+outcome|required\s+change"
+        r"|proposed\s+acceptance)", re.I)
+    bad, inside = [], False
+    for line in text.split("\n"):
+        s = line.strip()
+        if s.startswith("#"):
+            inside = bool(heading.match(s))
+            continue
+        if not inside or not s:
+            continue
+        if not re.match(r"^(?:[-*+]|\d+[.)])\s+", s):
+            continue
+        item = re.sub(r"^(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s*)?", "", s)
+        if not item:
+            continue
+        # seam contract のメタ行は acceptance ではない。SPEC.md では `provides` / `owns` /
+        # `depends_on` / `boundary` / `tools` / `example` / `DoD` が MUST 節と同じ箇条書きで
+        # 並ぶので、これを要求文と数えると **正しく書かれた SPEC ほど違反が多くなる**
+        # （実際に既存テスト3件がそれで落ちた）。ラベル行は検査対象から外す。
+        if re.match(r"^\*{0,2}(?:provides|owns|depends_on|boundary|tools?/?sources?|example|"
+                    r"DoD[^:]*|完了の判定|検証|verification)\b\*{0,2}\s*[:：(]", item, re.I):
+            continue
+        if not any(re.search(p, item, re.I) for p, _ in EARS_PATTERNS):
+            bad.append(item)
+    return bad
+
+
+def _has_dod_command(body):
+    """SPEC に「走らせられる DoD command」があるか。
+
+    見るのは *コマンドらしさ* であって、正しさではない（正しいかは走らせた gate が知る）。
+    テンプレのプレースホルダ（`<the exact command …>`）を実物と数えないことだけ気をつける。
+    """
+    if not body:
+        return False
+    for line in body.split("\n"):
+        if not re.search(r"DoD|完了の判定|Definition of Done", line, re.I):
+            continue
+        for code in re.findall(r"`([^`]+)`", line):
+            code = code.strip()
+            if code.startswith("<") or not code:
+                continue            # テンプレの穴が埋まっていない
+            if re.search(r"\b(npm|pnpm|yarn|make|pytest|python3?|go|cargo|bash|sh|npx|"
+                         r"docker|supabase|deno|bun)\b", code):
+                return True
+    return False
+
+
 def cmd_split_check(a):
     """SHAPE check on a task Issue's granularity (docs/11 §4b): warn (do not block) if the Issue looks
     too COARSE for a no-context maker — its `owns:` spans multiple disjoint territories (should be one
@@ -641,14 +740,42 @@ def cmd_split_check(a):
                         warnings.append(f"depends_on #{num} is still OPEN — a fresh maker can't take this "
                                         f"green until it lands (single-unit assertion fails, docs/11 §4b).")
     # (c) MUST written in EARS? A body with a MUST/acceptance section but no EARS keyword is prose
-    # ("auth works") the gate can't test (docs/11 §4b). Shape check: does an acceptance line use one
-    # of WHEN/WHILE/IF/WHERE/SHALL? Only checked if the Issue actually has a MUST/acceptance section.
-    low_body = body.lower()
-    if ("must" in low_body or "acceptance" in low_body) and "shall" not in low_body \
-            and not any(kw in body for kw in ("WHEN ", "WHILE ", "IF ", "WHERE ")):
-        warnings.append("the MUST/acceptance criteria are not in EARS (no WHEN/WHILE/IF/WHERE/SHALL) — "
-                        "prose like \"auth works\" isn't testable; rewrite each as an EARS pattern "
-                        "(docs/11 §4b), so the gate has a checkable bar.")
+    # ("auth works") the gate can't test (docs/11 §4b).
+    #
+    # **本文のどこかに keyword があれば通す、という見方をしてはいけない。** 旧実装は
+    # `any(kw in body for kw in ("WHEN ","WHILE ","IF ","WHERE "))` で本文全体を見ており、
+    # acceptance が全部散文でも、別の節の "IF ANY" や コードブロックの `if x:` / SQL の
+    # `WHERE id = 1` に当たって **素通り** した（実測で再現）。実地の #170 は acceptance
+    # 10件中9件が散文のまま起票され、gate が毎回「どう確かめるか」の設計から始める羽目に
+    # なり、12周した。**検査を素通りさせることが、収束しないループの入口だった。**
+    #
+    # 正しくは **acceptance の各行だけ**を、req_lint と同じ EARS 判定にかける。判定基準は
+    # 1箇所（req_lint.EARS_PATTERNS）に置く — 2箇所に別の EARS 定義があると必ずずれる。
+    bad_lines = _non_ears_acceptance(body)
+    if bad_lines:
+        shown = "; ".join(f"“{l[:60]}”" for l in bad_lines[:3])
+        more = f"（他 {len(bad_lines) - 3} 件）" if len(bad_lines) > 3 else ""
+        warnings.append(
+            f"acceptance のうち {len(bad_lines)} 件が EARS でない: {shown}{more} — "
+            "散文（「auth works」）は gate がテストできない。WHEN/WHILE/IF/WHERE…SHALL "
+            "（日本語なら「〜のとき…すること」）に書き直すこと（docs/11 §4b）。"
+            "**ここを緩めると gate に的が無くなり、周回ごとに基準がブレて収束しなくなる。**")
+    # (c2) DoD command — 「これを走らせて緑なら完了」が無い SPEC は、gate に的を与えていない。
+    # gate.md は「maker の『verified it』を信じず自分で再導出せよ」と命じるので、走らせる
+    # コマンドが SPEC に無いと gate は **確認方法の設計から** 始める。それが判定 1回あたり
+    # 約100秒（実測）の主因であり、周回ごとに違う設計をするので基準がブレる。
+    # ここは warn に留める（ready は止めない）— 探索的な Issue で DoD を先に確定できない
+    # ことは実際にあり、EARS 違反ほど機械的に黒ではない。
+    # 既定は **オン**。在庫の Issue が一斉に警告を出すのは承知の上で、そちらを書き直させる
+    # ほうを選ぶ — DoD command の無い SPEC は gate に的を与えておらず、それが周回の原因
+    # だった（#170 は 12周）。狼少年になるのは「警告が読み捨てられるとき」であって、
+    # 「直すべきものを直せと言っているとき」ではない。降ろしたい org は ORG_REQUIRE_DOD=0。
+    if os.environ.get("ORG_REQUIRE_DOD") != "0" and not _has_dod_command(body):
+        warnings.append(
+            "SPEC に DoD command（これを走らせて緑なら完了、と言える具体的なコマンド）が無い。"
+            "gate は同じコマンドを走らせて再導出するので、無いと **確認方法の設計から始める** "
+            "— 判定が遅くなるだけでなく、周回ごとに基準が変わって収束しなくなる。"
+            "`cd app && npm test -- expense` のように、実際に打てる形で書くこと。")
     # (d) 守る対象の偏り — 認可を扱う deliverable なのに、**何が守られているか**が偏っていないか。
     #
     # 運用で見つかった形: 12件の MUST のうち認可を定めているのは2件だけで、その1件は「あだ名」

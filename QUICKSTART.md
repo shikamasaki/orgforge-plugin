@@ -25,6 +25,16 @@ that the company builds and ships something reproducibly through that mold.
 
 ## 1. Install the plugin
 
+**先に PyYAML を入れること。** organ は `constitution.yaml` / `organization.yaml` を読んで
+enforcement を決めるので、これが無いと `org_lint.py` が `ModuleNotFoundError` で落ち、
+`judges.lineage` も読めない（cross-harness の宣言が黙って消える側の失敗になる）。
+プラグインが実際に使う interpreter（PATH 上の `python3`）へ入れる:
+
+```
+python3 -m pip install pyyaml
+python3 -c "import yaml; print(yaml.__version__)"   # 確認
+```
+
 ```
 /plugin marketplace add <owner>/orgforge-plugin      # GitHub リポジトリを参照する
 /plugin install orgforge-plugin@orgforge-plugin      # scope は user を選ぶ（全プロジェクトで有効）

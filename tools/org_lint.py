@@ -69,7 +69,14 @@ import os
 import re
 import sys
 
-import yaml
+try:
+    import yaml
+except ModuleNotFoundError:                                        # pragma: no cover - env guard
+    # 裸の ImportError の traceback を見せない。組織の lint が動かない理由が
+    # 「依存が入っていない」ことなら、そう言えば直せる。
+    sys.exit("org_lint: PyYAML が無いので organization.yaml を読めない。\n"
+             "  プラグインが使う interpreter へ入れること:\n"
+             "    python3 -m pip install pyyaml")
 
 VALID_REGIMES = {"organic", "mechanistic"}
 VALID_TIERS = {"delegated", "charter", "irreversible"}

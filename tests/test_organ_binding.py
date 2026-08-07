@@ -170,10 +170,15 @@ def test_foreign_checkout_is_rejected_before_ledger_write(tmp_path):
     ledger = org / ".orgforge" / "ledger"
     payload = json.dumps({"maker": "miner", "candidate_id": "c1",
                           "contract_ref": "goal", "source": "self", "evidence": ["x"]})
+    # このテストだけは「明示が無い」状態を作る。conftest がテスト実行全体に
+    # ORG_ALLOW_FOREIGN_ORGAN=1 を敷いている（開発チェックアウトから回せるように）が、
+    # ここで検証したいのは *その明示が無いときに guard が実際に止めるか* なので、
+    # 継承ではなく明示的に取り除いた env で organ を起動する。
+    env = {k: v for k, v in os.environ.items() if k != "ORG_ALLOW_FOREIGN_ORGAN"}
     run = subprocess.run([
         sys.executable, str(TOOLS / "ledger.py"), "append", str(ledger),
         "--actor", "miner", "--class", "candidate_submitted", "--payload", payload,
-    ], capture_output=True, text=True, cwd=org)
+    ], capture_output=True, text=True, cwd=org, env=env)
     assert run.returncode == 12
     assert "expected tools_root" in run.stderr
     assert "observed tools_root" in run.stderr

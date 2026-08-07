@@ -6,6 +6,63 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 2.3.0 — give the gate a target so review rallies converge
+
+A review rally that ran 12 rounds on a single issue (tatekae #170) was traced to its cause: the
+acceptance criteria were prose, so the gate designed its own verification on every round and the
+bar moved each time. Nothing converges against a moving bar. This release closes the hole where
+the shape check could be skipped, and cuts the wasted judge time that made each round expensive.
+
+### Fixed
+
+- **An empty headless judge response is now diagnosable** (issue #166). `claude -p` was observed
+  exiting 0 with no stdout and no stderr, leaving no way to tell a crashed CLI from expired auth
+  from a silently terminated tool-use turn. The empty result is still fail-closed — no verdict, no
+  admission — but it now reports exit status, stream sizes, the flags used, and the one-line probe
+  to run next. Flags only: rendering the argv by position leaked the material itself on the
+  `claude -p <material>` route, which is why the test asserts the material never appears.
+- **The test suite runs on 8 workers instead of serially** — 638 s → 61 s for the same 1079 tests.
+  It is bound by process startup (every organ is a real subprocess), not CPU, so `-n auto` in CI is
+  nearly free. Tests must stay independent for this to hold; one that leans on another's leftover
+  state now fails instead of passing by accident.
+- **`split-check` no longer passes prose acceptance.** The EARS check tested the *whole issue body*
+  for `WHEN `/`WHILE `/`IF `/`WHERE `, so acceptance written entirely as prose slipped through on an
+  unrelated "IF ANY" or a SQL `WHERE` in a fenced block (reproduced). It now checks the acceptance
+  bullets themselves, reusing `req_lint`'s EARS patterns so the definition lives in one place, and
+  reports which lines failed. Seam-contract metadata (`owns:`, `depends_on:`, …) is no longer
+  miscounted as a requirement.
+- **The PreToolUse hook no longer sleeps on a permanent failure.** `_run_organ` retried any exit
+  code outside `{0, 10}` with exponential backoff, including exit 2 — the organs' deliberate
+  "bad input" verdict (unreadable constitution, missing root). Re-running cannot change that, so
+  every tool call paid 1.5 s of `time.sleep`. Measured on a benign `Read` against an org with no
+  `constitution.yaml`: **1.90 s → 0.24 s per call**. Genuine crashes and timeouts still retry.
+
+### Added
+
+- **`ready` withholds issues whose acceptance is not in EARS.** `split-check` ran only when a human
+  chose to run it; an issue that skipped it reached a maker with no checkable bar. The backlog now
+  declines to hand those out, listing them under `withheld_non_ears`. Set `ORG_READY_SKIP_EARS=1`
+  while migrating an existing backlog.
+- **`split-check` requires a runnable DoD command (on by default).** Without a command the gate is
+  told to re-derive but given nothing to run, so it designs the check itself — the main cost in a
+  ~100 s judgment and the reason the bar drifts between rounds. `ORG_REQUIRE_DOD=0` stands it down.
+- **`org_cycle verify` warns before dispatching a judge that can only park.** A read-only judge
+  cannot re-derive a MUST that requires execution (repeated runs, a real database, latency), so it
+  returns `park` after minutes of work. `tools/orgcycle/rederivability.py` detects those statically
+  and says so before the judge starts; `--strict-rederivability` stops instead of warning. Advisory
+  by design — it reports what is measurable, never a verdict.
+- **`github_sync review-response`** records a maker's answer to a specific review finding on the
+  Issue, keyed by finding id. `agents/gate.md` already forbids re-blocking on a finding unless the
+  head, evidence, or risk changed — but that is unenforceable when nobody can address the previous
+  finding by name. Written to the Issue rather than a local status file, so the *other* lineage's
+  judge can read it (carried over from PR #165, which is otherwise superseded by #167).
+- **MCP transport for cross-harness judges** (`tools/orgcycle/mcp_judge.py`). `codex mcp-server` and
+  `claude mcp serve` are the official interfaces; passing the material as a JSON value removes the
+  argv-misparse failure where material beginning with `-` killed `codex exec` outright. One
+  judgment per session, deliberately: continuing a session would let the skeptic read the gate's
+  reasoning, and that lineage decorrelation is the point (docs/03 §3). Not faster — measured 4.1 s
+  vs 4.7 s — so it is opt-in via `judges.harness.<h>.<role>.transport: mcp`.
+
 ## 2.1.1 — restore the reviewed Graph adapter
 
 ### Fixed

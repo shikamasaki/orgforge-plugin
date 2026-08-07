@@ -101,7 +101,8 @@ from ghsync.backlog import (STAGES, cmd_claim, cmd_release, cmd_create, cmd_repa
                             cmd_ready, cmd_needs_human, cmd_split_check, cmd_candidate_id,
                             cmd_park, cmd_unpark)
 from ghsync._core import banner
-from ghsync.record import cmd_log, cmd_decide, cmd_provisional, DECISIONS
+from ghsync.record import (cmd_log, cmd_decide, cmd_provisional, cmd_review_response,
+                           DECISIONS)
 from ghsync.branch import cmd_branch
 from ghsync.coverage import cmd_coverage_check
 
@@ -162,6 +163,21 @@ def main(argv):
     q.add_argument("--result", help="what that command returned — the real output, not 'it worked'")
     q.add_argument("--files", help="the files created/changed at this step")
     q.add_argument("--next-step", dest="next_step", help="what happens next (what a fresh session resumes from)")
+    # A finding and its response must be addressable across harnesses, and durable: that is what
+    # lets the next reviewer say "this was answered, here is what changed" instead of raising it
+    # fresh. Without it, agents/gate.md's "a finding may only block again if head/evidence/risk
+    # changed" is a rule nobody can check (tatekae #170 ran 12 rounds partly on re-raised findings).
+    q = sub.add_parser("review-response",
+                       help="review finding への対応を Issue に追記し、別harnessが再確認できる形にする")
+    q.add_argument("--repo", help="owner/name（省略時は git remote origin から自動発見）")
+    q.add_argument("--issue", required=True, type=int)
+    q.add_argument("--review", required=True,
+                   help="元レビューの review_subject_id または Issue comment marker")
+    q.add_argument("--finding", required=True, help="元レビューが付けた finding ID（例: GATE-001）")
+    q.add_argument("--status", required=True, choices=("addressed", "not_reproducible", "deferred"))
+    q.add_argument("--response", required=True, help="何をどう対応したか、または反証したか")
+    q.add_argument("--evidence", required=True, help="対応を裏付けるコマンドと実出力")
+    q.add_argument("--by", required=True, help="対応者（maker / reviewer / supervisor）")
     q.add_argument("--blocked-by", dest="blocked_by", help="what is blocking, if anything")
     # 各血統の judge の判定を **暫定** として記録する。2血統が一致したときにだけ
     # admission_decided / refutation_attempted が生成される（受け入れ条件1〜4）。
@@ -286,6 +302,7 @@ def main(argv):
             "coverage-check": cmd_coverage_check,
             "candidate-id": cmd_candidate_id, "decide": cmd_decide,
             "provisional": cmd_provisional,
+            "review-response": cmd_review_response,
             "needs-human": cmd_needs_human}[a.cmd](a)
 
 

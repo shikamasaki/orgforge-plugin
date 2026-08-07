@@ -83,6 +83,12 @@ def main(argv):
     # headless judge を回すので、subject を知るのに数分待つのは筋が悪い（実測）。
     q.add_argument("--print-subject", action="store_true",
                    help="review_subject_id だけを出して終わる（judge は起動しない）")
+    # read-only judge が再導出できない MUST は park にしかならない。既定は助言だけ出して
+    # 起動は妨げない（判定は gate のもの）が、空振りに数分〜30分を払いたくないなら止められる。
+    q.add_argument("--strict-rederivability", dest="strict_rederivability",
+                   action="store_true",
+                   help="read-only judge が再導出できない MUST があるとき、judge を起動せずに"
+                        "止める（既定は助言のみ）。空振りの park に時間を払いたくないとき用")
 
     q = sub.add_parser("touched", help="本番資産への変更を台帳に残す（DDL・権限・インフラ）")
     q.add_argument("--target", required=True, help='何に対してか（例 supabase:<project>）')
