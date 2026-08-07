@@ -99,26 +99,27 @@ def load_manifest(path=None):
     """
     path = path or os.environ.get("ORG_WRITER_MANIFEST")
     if not path:
-        return None, None                       # manifest 無し（段階A）
+        return None, None                       # no manifest (stage A)
     if not os.path.isfile(path):
-        return None, f"manifest が無い: {path}"
+        return None, f"the manifest is missing: {path}"
     try:
         st = os.stat(path)
     except OSError as e:
-        return None, f"manifest を stat できない: {e}"
+        return None, f"cannot stat the manifest: {e}"
     if st.st_uid != 0 and st.st_uid != os.getuid():
-        return None, (f"manifest の所有者が root でも自分でもない（uid={st.st_uid}）: {path}\n"
-                      f"  **書ける主体が daemon の設定を差し替えられる。**")
+        return None, (f"the manifest is owned by neither root nor you (uid={st.st_uid}): {path}\n"
+                      f"  **whoever can write it can swap out the daemon's configuration.**")
     if st.st_mode & 0o022:
-        return None, (f"manifest が他者から書き込み可能（mode {oct(st.st_mode & 0o777)}）: {path}")
+        return None, (f"the manifest is group/world-writable "
+                      f"(mode {oct(st.st_mode & 0o777)}): {path}")
     try:
         import yaml
         with open(path, encoding="utf-8") as f:
             doc = yaml.safe_load(f) or {}
     except Exception as e:
-        return None, f"manifest を読めない: {e}"
+        return None, f"cannot read the manifest: {e}"
     if not isinstance(doc, dict) or not isinstance(doc.get("orgs"), dict):
-        return None, f"manifest に orgs が無い（または map でない）: {path}"
+        return None, f"the manifest has no orgs (or it is not a map): {path}"
     return doc, None
 
 
@@ -298,7 +299,7 @@ class _NonceStore:
                     os.replace(tmp, self._path)
                 except Exception as e:
                     del self._seen[nonce]
-                    raise OSError(f"nonce を永続化できない: {e}")
+                    raise OSError(f"cannot persist the nonce: {e}")
             return True
 
 
@@ -576,14 +577,14 @@ def serve(a):
     manifest, merr = load_manifest(getattr(a, "manifest", None))
     if merr:
         print(f"writerd: {merr}\n"
-              f"  **設定を読めないなら起動しない。**", file=sys.stderr)
+              f"  **if the configuration cannot be read, do not start.**", file=sys.stderr)
         return 4
     roots = {}
     if manifest:
         # **manifest が最終。** caller の --org / --schema では上書きできない。
         for name, spec in manifest["orgs"].items():
             if not isinstance(spec, dict) or not spec.get("ledger"):
-                print(f"writerd: manifest の orgs.{name} に ledger が無い", file=sys.stderr)
+                print(f"writerd: orgs.{name} in the manifest has no ledger", file=sys.stderr)
                 return 4
             roots[name] = os.path.abspath(spec["ledger"])
         a.schema = (manifest["orgs"].get(list(roots)[0], {}) or {}).get("schema") or a.schema
@@ -595,19 +596,19 @@ def serve(a):
             a.allow_uid = [str(u) for u in manifest["allow_uids"]]
     for spec in (a.org or []):
         if "=" not in spec:
-            print(f"--org は name=path の形で渡すこと: {spec!r}", file=sys.stderr)
+            print(f"--org takes name=path: {spec!r}", file=sys.stderr)
             return 2
         name, path = spec.split("=", 1)
         roots[name] = os.path.abspath(path)
         if not os.path.isdir(roots[name]):
-            print(f"台帳のルートが無い: {roots[name]}", file=sys.stderr)
+            print(f"the ledger root does not exist: {roots[name]}", file=sys.stderr)
             return 2
     if not roots:
-        print("writerd: 書き込み先が決まらない（--manifest か --org）", file=sys.stderr)
+        print("writerd: no write target resolved (pass --manifest or --org)", file=sys.stderr)
         return 2
     sock = (manifest or {}).get("socket") or a.socket or socket_path(list(roots.values())[0])
     if not sock:
-        print("socket のパスが決まらない（--socket か ORG_WRITER_SOCKET）", file=sys.stderr)
+        print("no socket path resolved (pass --socket or set ORG_WRITER_SOCKET)", file=sys.stderr)
         return 2
     for err in (check_socket_length(sock),
                 check_socket_parent(sock, require_root_owned=a.require_root_owned)):

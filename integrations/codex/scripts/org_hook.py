@@ -161,9 +161,9 @@ def _record_bypass(what, tool_input):
                             "--payload", json.dumps(payload, ensure_ascii=False)],
                            capture_output=True, encoding="utf-8", errors="replace", timeout=30)
     except Exception as e:
-        return f"台帳に追記できなかった: {e}"
+        return f"could not append to the ledger: {e}"
     if r.returncode != 0:
-        return (f"台帳が bypass_declared を受け付けなかった（exit {r.returncode}）: "
+        return (f"the ledger refused bypass_declared (exit {r.returncode}): "
                 f"{((r.stdout or '') + (r.stderr or '')).strip()[:300]}")
     return None
 
@@ -846,16 +846,18 @@ def _integration_bypass(tool_name, ti):
 
     tools_dir = os.environ.get("ORG_TOOLS_DIR") or ""
     oc = os.path.join(tools_dir, "org_cycle.py") if tools_dir else "org_cycle.py"
-    return (f"{cur} への直接の統合。**統合は `org_cycle integrate` を通すこと** — "
-            f"gate の admit と skeptic の survives が台帳にあるかを確認する:\n"
-            f"    python3 \"{oc}\" integrate --issue <N> --plan   # まず何を統合するか見る\n"
-            f"    python3 \"{oc}\" integrate --issue <N>          # 前提を確認して統合する\n"
-            f"  `integrate` は前提が無ければ exit 4 で止まり、マージ手順に入らない。"
-            f"統合後のテスト・`integration_admitted` の記録・Issue への log もまとめて行う。\n"
-            f"  準備・統合・確認は別々の Bash/exec call に分ける（例: 準備だけ → "
-            f"`org_cycle integrate` だけ → `git status`/CI確認だけ）。\n"
-            f"  **意図的に手で統合する場合**は `ORG_ALLOW_MANUAL_MERGE=1` を付けること。"
-            f"その宣言は台帳に `bypass_declared` として残る — 塞げないことを記録する形にしてある。")
+    return (f"a direct integration into {cur}. **Integrate through `org_cycle integrate`** — it "
+            f"checks the ledger for the gate\'s admit and the skeptic\'s survives:\n"
+            f"    python3 \"{oc}\" integrate --issue <N> --plan   # see what would be integrated\n"
+            f"    python3 \"{oc}\" integrate --issue <N>          # check the preconditions, then integrate\n"
+            f"  Without those preconditions `integrate` stops at exit 4 and never reaches the "
+            f"merge. It also runs the post-integration tests, records `integration_admitted`, and "
+            f"logs to the Issue in one go.\n"
+            f"  Split preparation, integration and verification into separate Bash/exec calls "
+            f"(e.g. prepare only -> `org_cycle integrate` only -> `git status`/CI check only).\n"
+            f"  **To integrate by hand deliberately**, pass `ORG_ALLOW_MANUAL_MERGE=1`. That "
+            f"declaration is recorded in the ledger as `bypass_declared` — what cannot be blocked "
+            f"is at least written down.")
 
 
 
