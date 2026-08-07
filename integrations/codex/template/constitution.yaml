@@ -306,6 +306,28 @@ mandate_precedence:
 # only as a DEV OVERRIDE (a developer's laptop may loosen a cap locally, but the shipped org's gate
 # regime is what is written here and ledgered). no_agent_writes_this_file covers this block too.
 enforcement:
+  # ── ドメインに触れる仕事の territory（人が見る面を決める）───────────────
+  #
+  # 人と AI の接触面を **ドメインモデル / ユースケース / 認可規則** に置くための宣言。
+  # そこに触れる Issue は、起票の時点でこの3つを書いていないと maker に渡らない
+  # （github_sync split-check / ready）。実装してから「何を作るはずだったか」を思い出す
+  # 順序を禁じる — SSoT は code + ドメインモデルであって、後付けの申告ではない。
+  #
+  # **プラグインはパスを推測しない。** `src/domain/` に置くか `app/models/` に置くかは
+  # プロジェクトの選択で、当てにいくと別レイアウトの org で誤検知する（実測: 稼働中の org
+  # だけでも src/domain/ · src/usecase/ · src/db/ · supabase/migrations/ が併存していた）。
+  # ここに書かれた prefix にだけ効く。**空なら検査は動かない**（宣言しない自由は残す）。
+  #
+  # 認可規則をここに含めるのは、それが技術的セキュリティではなく **ドメインの一部**
+  # だから。「誰が誰の支出を見てよいか」はライブラリでは決まらない。実地では、12件の
+  # MUST のうち認可を定めたのが2件で、その1件が「あだ名」（装飾的なテキスト列）だった —
+  # 金額・支払者・債務の向き・グループ所有権は無防備のまま通っていた。
+  domain_surface:
+    # ここに触れる Issue は SPEC にドメインモデル / ユースケース / 認可規則が要る。
+    paths: []            # 例: ["src/domain/", "src/usecase/", "src/db/", "supabase/migrations/"]
+    # 宣言を求める節。org が減らしてよい（増やすのは SPEC.md の節を足してから）。
+    require: [domain_model, use_case, authorization]
+
   # ── judge の血統（スイスチーズ層）─────────────────────────────────────
   # 「1つの銀の弾丸を求めるより、複数のモデルを組み合わせた方がうまくいく」— 同じ base model の
   # checker は maker と同じ盲点を共有する（docs/03 §3）。role-settings.yaml は skeptic に

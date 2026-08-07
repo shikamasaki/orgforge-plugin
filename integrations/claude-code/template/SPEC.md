@@ -61,6 +61,36 @@
 <Entity(field: type, …) — the shape downstream depends on>
 ```
 
+> The three sections below are where **a human and an AI agree on what is being built**. They are
+> required for work that touches the domain surface declared in `constitution.yaml`
+> (`enforcement.domain_surface.paths`); `github_sync split-check` reports them missing and `ready`
+> withholds the Issue until they are filled. Elsewhere they are optional.
+>
+> Reviewing a diff means hunting for mistakes, and a miss passes silently. Reviewing these means
+> checking whether two parties describe the same thing — a mismatch is *visible*, and the reading
+> cost tracks the domain, not the volume of generated code. That is the only review that survives an
+> agent writing ten times more code.
+
+## ドメインモデル / Domain model (the vocabulary and invariants this deliverable touches)
+- **Entity:** `<Expense(id, payer: UserId, amount: Money, shares: Share[])>`
+- **不変条件 / invariant:** `<sum(shares.amount) == amount — 例外なし>`
+- **この Issue で変わるもの / what this Issue changes:** `<Expense に remainder_recipients: UserId[] を追加>`
+- **変えないもの / what it must not change:** `<既存の money/split 不変条件>`
+
+## ユースケースシナリオ / Use-case scenarios (who does what, and what results)
+- **主 / main:** `<支出者が3人グループに¥100を均等割りする → 34/33/33 に分かれ、余り1円の受領者が記録される>`
+- **代替 / alternate:** `<余りが出ない → 受領者は空>`
+- **失敗 / failure:** `<グループ外の利用者が登録を試みる → 拒否され、理由が伝わる>`
+
+## 認可規則 / Authorization (who is protected from whom)
+> **ドメインの一部であって、技術的セキュリティではない。** 「誰が誰の支出を見てよいか」は
+> ライブラリでは決まらない。ここが薄いと、守られるのは装飾的な項目だけになる — 実地では
+> 12件の MUST のうち認可を定めたのは2件で、その1件が「あだ名」だった。金額・支払者・
+> 債務の向き・グループ所有権は無防備のまま通っていた。
+- **守る資産 / assets protected:** `<金額 / 支払者 / 債務の向き / グループ所有権>`
+- **規則 / rules (EARS):** `<IF 非メンバーが支出を登録する THEN THE system SHALL 拒否する>`
+- **守らないもの / deliberately unprotected:** `<あだ名 — 装飾的で、漏れても損害が無い>`
+
 ## Seam contract (what this deliverable OUTPUTS that other deliverables integrate to)
 > The four things a delegated task needs so parallel makers don't duplicate or collide (Anthropic
 > multi-agent research; docs/sources): a clear **objective**, an **output format**, **tool/source

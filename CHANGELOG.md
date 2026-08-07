@@ -6,6 +6,39 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 2.4.0 — put the human/AI agreement where a mismatch is visible
+
+Reviewing a diff means hunting for mistakes: a miss passes silently, and the cost grows with the
+volume of generated code — exactly the wrong shape when an agent writes ten times more of it.
+Reviewing a domain model, a use-case scenario, or an authorization rule is a different act: two
+parties describe the same thing, and a mismatch is *visible*. The reading cost tracks the domain,
+not the output. This release makes that surface a precondition for the work rather than a habit.
+
+It also fixes an ordering problem. `cycle_completed` asks for a domain model *after* the work, so
+the implementation decides the model. Requiring it at decomposition puts the model first, which is
+what "SSoT is the code and the domain model" already implied.
+
+### Added
+
+- **`SPEC.md` gains three sections** — domain model (vocabulary and invariants), use-case scenarios
+  (who does what, what results), and authorization (who is protected from whom). Authorization sits
+  here because it is *domain*, not library-level security: "who may see whose expense" is not
+  decidable by a dependency. In the field, 12 MUSTs contained 2 authorization rules and one of those
+  covered a nickname — amount, payer, direction of debt, and group ownership were left unguarded.
+- **`split-check` reports those sections missing, and `ready` withholds the Issue** — but only for
+  work touching the domain surface the org itself declares in `constitution.yaml`
+  (`enforcement.domain_surface.paths`). A CI fix is not asked for a domain model.
+  `ORG_READY_SKIP_DOMAIN=1` stands the withholding down during migration.
+- **A heading with nothing under it, or an unfilled `<placeholder>`, counts as missing.** Pasting
+  the template is the dangerous failure: it looks like agreement was reached and records none.
+
+### Notes
+
+The plugin does not guess where your domain lives. Whether it is `src/domain/`, `app/models/`, or
+`supabase/migrations/` is a project's choice — one live org already mixed four such prefixes — so
+the check runs against declared paths only, and does nothing until an org declares them. Content is
+never judged here: whether the model is *right* stays with the human and the gate (docs/03 §6.5).
+
 ## 2.3.0 — give the gate a target so review rallies converge
 
 A review rally that ran 12 rounds on a single issue (tatekae #170) was traced to its cause: the
