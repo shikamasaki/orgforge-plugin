@@ -618,12 +618,12 @@ def _run_headless(role, issue, material, cfg, schema, stable_organ=None):
             cmd += ["-c", f"model_reasoning_effort={effort}"]
         cmd += ["--output-schema", schema, "-o", out_json, material]
     elif cli == "claude":
-        # claude -p は --output-schema を持たないので、スキーマを本文で要求し、
-        # 返ってきた JSON を intake の側で検査する。**構造の保証が一段弱いことを言う。**
+        # Claude Code は --json-schema を備える。本文だけで JSON を要求すると散文を返して
+        # intake 不能になるため、Codex と同じく CLI 側で構造を強制する。
         cmd = [exe, "-p", material + "\n\n## 返す形\n"
                "次のスキーマに厳密に一致する JSON **のみ** を返すこと（前後に散文を付けない）:\n"
                + open(schema, encoding="utf-8").read(),
-               "--output-format", "json"]
+               "--output-format", "json", "--json-schema", open(schema, encoding="utf-8").read()]
         if model:
             cmd += ["--model", str(model)]
         if effort:
