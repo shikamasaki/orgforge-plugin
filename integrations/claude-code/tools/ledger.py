@@ -3075,7 +3075,8 @@ def cmd_derive_admission(a):
                                       "detail": f"{lineage} の descriptor が subject と一致しない"},
                                      ensure_ascii=False))
                     return 7
-                freshness = descriptor_status(descriptor, os.getcwd())
+                subject_cwd = descriptor.get("subject_root") or os.getcwd()
+                freshness = descriptor_status(descriptor, subject_cwd)
                 if not freshness["ok"]:
                     print(json.dumps({"ok": False, "reason": freshness["reason"],
                                       "detail": (f"{lineage}: {freshness['detail']}。"

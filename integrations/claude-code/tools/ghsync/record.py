@@ -482,7 +482,11 @@ def cmd_provisional(a):
               file=sys.stderr)
         return 7
     if subject_descriptor is not None:
-        freshness = descriptor_status(subject_descriptor, os.getcwd())
+        # The descriptor was minted against the subject worktree.  Rechecking from the
+        # supervisor's primary checkout compares an unrelated HEAD and falsely rejects a
+        # current review whenever the primary branch is intentionally divergent.
+        subject_cwd = subject_descriptor.get("subject_root") or os.getcwd()
+        freshness = descriptor_status(subject_descriptor, subject_cwd)
         if strict_freshness and not freshness["ok"]:
             print(f"provisional: stale review subject を記録しない — "
                   f"{freshness['reason']}: {freshness['detail']}\n"
