@@ -2426,7 +2426,7 @@ def test_judge_workload_is_covered_by_the_signature(tmp_path):
         assert ident.verify_receipt(rc, {})[0] == "s1"
         forged = dict(rc); forged["judge_workload"] = "separate_host"
         who, _a, err = ident.verify_receipt(forged, {})
-        assert who is None and "署名が一致しない" in err
+        assert who is None and "does not match" in err
     finally:
         os.environ.pop("ORG_TRUST_STORE", None)
 
@@ -2723,7 +2723,7 @@ def test_B_refuse_a_world_writable_manifest(tmp_path):
     import importlib
     wd = importlib.import_module("writerd")
     doc, err = wd.load_manifest(str(mf))
-    assert doc is None and err and "他者から書き込み可能" in err
+    assert doc is None and err and "group/world-writable" in err
 
 
 def test_B_fault_unreadable_manifest_refuses_to_start(tmp_path):
@@ -2733,7 +2733,7 @@ def test_B_fault_unreadable_manifest_refuses_to_start(tmp_path):
     r = subprocess.run([sys.executable, str(TOOLS / "writerd.py"), "serve",
                         "--manifest", str(mf)], capture_output=True, text=True, timeout=30)
     assert r.returncode == 4
-    assert "設定を読めないなら起動しない" in (r.stdout + r.stderr)
+    assert "do not start" in (r.stdout + r.stderr)
 
 
 def test_B_rpc_reservation_needs_exit0_and_allow():

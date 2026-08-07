@@ -83,7 +83,8 @@ def _crypto_backend():
     import shutil
     if shutil.which("openssl"):
         return "openssl", None
-    return None, ("非対称署名の手段が無い（cryptography も openssl も見つからない）。\n"
+    return None, ("no asymmetric signing available (neither cryptography nor openssl "
+                      "was found).\n"
                   "  Authenticated Mode は非対称鍵を要求する — 共有鍵に落とすと、"
                   "検証できる側が署名も作れるので `authenticated` ではなくなる。")
 
@@ -111,11 +112,11 @@ def generate_keypair():
         r = subprocess.run(["openssl", "genpkey", "-algorithm", "ed25519", "-out", pk],
                            capture_output=True, text=True)
         if r.returncode != 0:
-            return None, None, f"openssl genpkey が失敗: {r.stderr[:200]}"
+            return None, None, f"openssl genpkey failed: {r.stderr[:200]}"
         r = subprocess.run(["openssl", "pkey", "-in", pk, "-pubout", "-out", pubk],
                            capture_output=True, text=True)
         if r.returncode != 0:
-            return None, None, f"openssl pkey が失敗: {r.stderr[:200]}"
+            return None, None, f"openssl pkey failed: {r.stderr[:200]}"
         return open(pk).read(), open(pubk).read(), None
     finally:
         import shutil as _sh
@@ -133,7 +134,7 @@ def sign_bytes(message, private_pem):
             k = serialization.load_pem_private_key(private_pem.encode(), password=None)
             return _SIG_ED25519 + k.sign(message).hex(), None
         except Exception as e:
-            return None, f"署名できない: {e}"
+            return None, f"cannot sign: {e}"
     import subprocess, tempfile
     d = tempfile.mkdtemp()
     try:
@@ -143,7 +144,7 @@ def sign_bytes(message, private_pem):
         r = subprocess.run(["openssl", "pkeyutl", "-sign", "-inkey", pk,
                             "-rawin", "-in", mp, "-out", sp], capture_output=True, text=True)
         if r.returncode != 0:
-            return None, f"openssl の署名が失敗: {r.stderr[:200]}"
+            return None, f"the openssl signature failed: {r.stderr[:200]}"
         return _SIG_ED25519 + open(sp, "rb").read().hex(), None
     finally:
         import shutil as _sh
@@ -153,7 +154,7 @@ def sign_bytes(message, private_pem):
 def verify_bytes(message, signature, public_pem):
     """(ok, error)。**writer はこれしかできない** — 公開鍵では署名を作れない。"""
     if not isinstance(signature, str) or not signature.startswith(_SIG_ED25519):
-        return False, (f"署名の形式が {signature[:20] if signature else '(空)'!r} で、"
+        return False, (f"the signature format is {signature[:20] if signature else '(empty)'!r}, "
                        f"Authenticated Mode が要求する {_SIG_ED25519}… ではない。\n"
                        f"  共有鍵（hmac-）の receipt は authenticated として受け付けない — "
                        f"検証できる側が署名も作れるので、別主体を証明しない。")
@@ -167,7 +168,7 @@ def verify_bytes(message, signature, public_pem):
             serialization.load_pem_public_key(public_pem.encode()).verify(raw, message)
             return True, None
         except Exception as e:
-            return False, f"署名が一致しない: {type(e).__name__}"
+            return False, f"the signature does not match: {type(e).__name__}"
     import subprocess, tempfile
     d = tempfile.mkdtemp()
     try:
@@ -177,7 +178,7 @@ def verify_bytes(message, signature, public_pem):
         open(sp, "wb").write(raw)
         r = subprocess.run(["openssl", "pkeyutl", "-verify", "-pubin", "-inkey", pubk,
                             "-rawin", "-in", mp, "-sigfile", sp], capture_output=True, text=True)
-        return r.returncode == 0, (None if r.returncode == 0 else "署名が一致しない")
+        return r.returncode == 0, (None if r.returncode == 0 else "the signature does not match")
     finally:
         import shutil as _sh
         _sh.rmtree(d, ignore_errors=True)
@@ -216,21 +217,21 @@ def load_trust_store():
     """
     path = _trust_store_path()
     if not path or not os.path.isfile(path):
-        return None, (f"trust store が無い（探した先: {path}）。receipt を検証できないので、"
+        return None, (f"no trust store (searched: {path}). A receipt cannot be verified, so "
                       f"判断の主体は `claimed` のままになる。")
     try:
         with open(path, encoding="utf-8") as f:
             doc = json.load(f)
     except Exception as e:
-        return None, f"trust store を読めない: {e}"
+        return None, f"cannot read the trust store: {e}"
     keys = doc.get("keys")
     if not isinstance(keys, dict):
-        return None, "trust store に keys がない（または map でない）。"
+        return None, "the trust store has no keys (or it is not a map)."
     # **秘密鍵が store に入っていたら拒否する。** writer が judge の判定を作れる状態である。
     leaked = sorted(k for k, v in keys.items()
                     if isinstance(v, dict) and "private_pem" in v)
     if leaked:
-        return None, (f"trust store に秘密鍵が入っている: {', '.join(leaked)}。\n"
+        return None, (f"the trust store contains private keys: {', '.join(leaked)}.\n"
                       f"  **writer は公開鍵だけを持つ。** 秘密鍵を持つ側は judge の判定を"
                       f"偽造できるので、これは authenticated ではない。")
     return {"keys": keys, "path": path,
@@ -247,15 +248,15 @@ def authorize(key, role, lineage, want_release=False):
     """
     roles = key.get("authorized_roles")
     if roles is not None and role not in roles:
-        return False, (f"signer {key.get('signer_id')!r} は role={role!r} の判定を出す認可が"
-                       f"無い（許可: {roles}）。")
+        return False, (f"signer {key.get('signer_id')!r} is not authorized to issue a verdict "
+                       f"for role={role!r} (allowed: {roles}).")
     lins = key.get("authorized_lineages")
     if lins is not None and lineage not in lins:
-        return False, (f"signer {key.get('signer_id')!r} は lineage={lineage!r} の判定を出す"
-                       f"認可が無い（許可: {lins}）。")
+        return False, (f"signer {key.get('signer_id')!r} is not authorized to issue a verdict "
+                       f"for lineage={lineage!r} (allowed: {lins}).")
     if want_release and not key.get("may_release_halt"):
-        return False, (f"signer {key.get('signer_id')!r} には halt を解除する認可が無い"
-                       f"（may_release_halt が真でない）。\n"
+        return False, (f"signer {key.get('signer_id')!r} is not authorized to release a halt "
+                       f"(may_release_halt is not true).\n"
                        f"  **止めた主体が自分で解除できてはいけない。** 解除は独立した"
                        f"principal の仕事である。")
     return True, None
