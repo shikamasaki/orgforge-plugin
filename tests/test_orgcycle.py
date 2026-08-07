@@ -199,20 +199,31 @@ def test_verify_finds_charter_in_every_layout():
     """
     m = _cycle_mod("judge")
     bundled = TOOLS.parent / "integrations" / "claude-code"
+    codex_bundled = TOOLS.parent / "integrations" / "codex"
     saved = os.environ.pop("CLAUDE_PLUGIN_ROOT", None)
     try:
         # (1) env なし — repo を直接使う形。実地で壊れたのはこちら
         for role in ("gate", "skeptic"):
             charter, path = m._role_charter(role)
             assert charter, f"env 無しで {role} の憲章を見失った（探した先: {path}）"
-        # (2) env あり — プラグインとして入った形
-        if (bundled / "agents").is_dir():
-            os.environ["CLAUDE_PLUGIN_ROOT"] = str(bundled)
-            for role in ("gate", "skeptic"):
-                charter, path = m._role_charter(role)
-                assert charter, f"バンドル配置で {role} の憲章を見失った（探した先: {path}）"
+        # (2) env あり — Claude plugin として入った形
+        assert (bundled / "agents").is_dir(), "Claude projection に review charter が無い"
+        os.environ["CLAUDE_PLUGIN_ROOT"] = str(bundled)
+        for role in ("gate", "skeptic"):
+            charter, path = m._role_charter(role)
+            assert charter, f"Claude bundle で {role} の憲章を見失った（探した先: {path}）"
+
+        # (3) env あり — Codex plugin として入った形。Codex が注入する
+        # PLUGIN_ROOT そのものを使う。互換変数だけを試すと実際の host 契約から外れる。
+        assert (codex_bundled / "agents").is_dir(), "Codex projection に review charter が無い"
+        os.environ.pop("CLAUDE_PLUGIN_ROOT", None)
+        os.environ["PLUGIN_ROOT"] = str(codex_bundled)
+        for role in ("gate", "skeptic"):
+            charter, path = m._role_charter(role)
+            assert charter, f"Codex bundle で {role} の憲章を見失った（探した先: {path}）"
     finally:
         os.environ.pop("CLAUDE_PLUGIN_ROOT", None)
+        os.environ.pop("PLUGIN_ROOT", None)
         if saved is not None:
             os.environ["CLAUDE_PLUGIN_ROOT"] = saved
 
