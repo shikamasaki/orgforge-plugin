@@ -42,7 +42,7 @@ BUDGET = {
     "tests/test_orgcycle.py": 590,
     "tests/test_hook.py": 459,
     "integrations/common/org_hook.py": 437,
-    "tools/orgcycle/judge.py": 374,
+    "tools/orgcycle/judge.py": 373,
     "tools/writerd.py": 301,
     "tools/ghsync/record.py": 275,
     "tools/ghsync/backlog.py": 225,
