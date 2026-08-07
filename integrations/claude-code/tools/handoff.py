@@ -45,6 +45,11 @@ import os
 import sys
 
 
+# The checking roles. They judge one candidate against one Issue's contract, so they are handed
+# that contract and nothing else — see the brain/bar split below.
+JUDGE_ROLES = frozenset({"gate", "skeptic"})
+
+
 def _load(root, role):
     path = os.path.join(root, f"{role}.json")
     if os.path.exists(path):
@@ -123,19 +128,40 @@ def main(argv):
     for inv in a.invariant:
         L.append(f"- Shared invariant: {inv}")
     L.append("")
-    L.append("## Your brain (doctrine scoped to your slice)")
-    if claims:
-        for c in claims:
-            exp = ""
-            if a.now and c["review_by"] != "UNSET" and c["review_by"] < a.now:
-                exp = "  ⟨REVIEW OVERDUE⟩"
-            prov = c["provenance"]
-            L.append(f"- {c['claim']}{exp}")
-            L.append(f"    (source: {prov['source']}; confidence: {prov['confidence']}; "
-                     f"review by {c['review_by']})")
+    # A JUDGE gets no brain. Doctrine is organization-wide standing knowledge; a judge's bar is
+    # the Issue in front of it — its acceptance criteria, changed seam, declared DoD, submitted
+    # evidence, recorded risk. Handing a judge the org's accumulated lessons turns a bounded
+    # admission check into open-ended research: the bar moves between rounds, and findings
+    # accumulate that no MUST in the Issue asked for.
+    #
+    # This is about the judge's INPUT, never its judgment (docs/03 §6.5). It still decides the
+    # verdict; it just decides against the contract it was handed rather than against everything
+    # the org has ever learned.
+    #
+    # Makers keep their brain: a maker BUILDS, and prior lessons are what stop it rebuilding a
+    # known mistake. Only the checking roles are scoped down.
+    if a.child_role in JUDGE_ROLES:
+        L.append("## Your bar (this Issue only — you get no org-wide doctrine)")
+        L.append("- Judge against the Issue's acceptance criteria, the changed seam contract, the "
+                 "declared DoD, the submitted evidence, and the recorded residual risk.")
+        L.append("- A finding outside that boundary is `out_of_scope` with a follow-up "
+                 "recommendation — not a blocker — unless it concretely demonstrates an immediate "
+                 "safety, data-integrity, security, or release-blocking failure.")
+        L.append("")
     else:
-        L.append("- (no admitted doctrine scoped to this role yet)")
-    L.append("")
+        L.append("## Your brain (doctrine scoped to your slice)")
+        if claims:
+            for c in claims:
+                exp = ""
+                if a.now and c["review_by"] != "UNSET" and c["review_by"] < a.now:
+                    exp = "  ⟨REVIEW OVERDUE⟩"
+                prov = c["provenance"]
+                L.append(f"- {c['claim']}{exp}")
+                L.append(f"    (source: {prov['source']}; confidence: {prov['confidence']}; "
+                         f"review by {c['review_by']})")
+        else:
+            L.append("- (no admitted doctrine scoped to this role yet)")
+        L.append("")
     L.append("## If you split your slice further")
     if a.axis:
         L.append(f"- Suggested cut for THIS slice (local advice, your call): {a.axis}")
