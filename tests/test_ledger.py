@@ -2608,7 +2608,7 @@ _A_PL = {"issue": 7, "deliverable": "7", "role": "gate", "lineage": "same-harnes
 
 
 def test_A_success_a_bound_receipt_records(tmp_path):
-    """成功系: 完全に束縛された receipt なら記録できる。"""
+    """Happy path: a fully bound receipt can be recorded."""
     org, led = _A_org(tmp_path)
     _A_key(org, "k1", "gate-signer")
     rc = _A_receipt(org, "k1")
@@ -2630,7 +2630,7 @@ def test_A_success_a_bound_receipt_records(tmp_path):
     ("digest", "different-digest", "別の理由"),
 ])
 def test_A_refuse_receipt_reuse(tmp_path, field, value, why):
-    """拒否系: **束縛したどの項目が違っても再利用できない。**"""
+    """Refusal: **if any bound field differs, the receipt cannot be replayed.**"""
     org, led = _A_org(tmp_path)
     _A_key(org, "k1", "gate-signer")
     rc = _A_receipt(org, "k1", **{field: value})
@@ -2667,7 +2667,7 @@ def test_A_joint_does_not_deadlock_without_a_receipt(tmp_path):
 
 
 def test_A_joint_refuses_unattested_verdicts(tmp_path):
-    """拒否系: **claimed の判定から joint を作らない。**"""
+    """Refusal: **a joint admission is never built out of claimed verdicts.**"""
     org, led = _A_org(tmp_path, attested="false")
     for lin in ("same-harness", "cross-harness"):
         r = _A_append(org, led, None, {**_A_PL, "lineage": lin})
@@ -2681,7 +2681,7 @@ def test_A_joint_refuses_unattested_verdicts(tmp_path):
 
 
 def test_A_joint_refuses_disagreement_and_mismatched_subjects(tmp_path):
-    """拒否系: 不一致・別の対象からは生成しない。"""
+    """Refusal: nothing is generated from disagreeing verdicts or a different subject."""
     org, led = _A_org(tmp_path, attested="false")
     assert _A_append(org, led, None, {**_A_PL, "lineage": "same-harness"}).returncode == 0
     assert _A_append(org, led, None, {**_A_PL, "lineage": "cross-harness",
@@ -2694,7 +2694,8 @@ def test_A_joint_refuses_disagreement_and_mismatched_subjects(tmp_path):
 
 
 def test_A_fault_joint_not_persisted_leaves_nothing(tmp_path):
-    """故障注入: 生成を記録できなければ、書きかけを残さない。"""
+    """Fault injection: if the generated event cannot be recorded, no partial write is left
+    behind."""
     org, led = _A_org(tmp_path, attested="false")
     for lin in ("same-harness", "cross-harness"):
         assert _A_append(org, led, None, {**_A_PL, "lineage": lin}).returncode == 0
@@ -2709,7 +2710,8 @@ def test_A_fault_joint_not_persisted_leaves_nothing(tmp_path):
 
 
 def test_A_control_without_enforcement_a_plain_append_works(tmp_path):
-    """control: 強制を切れば同じ append が通る（= 強制が止めていた証拠）。"""
+    """Control: with enforcement off the same append passes — evidence that enforcement was
+    what stopped it."""
     org, led = _A_org(tmp_path, attested="false")
     r = _A_append(org, led, None, dict(_A_PL))
     assert r.returncode == 0, r.stdout + r.stderr
@@ -2721,7 +2723,8 @@ def test_A_control_without_enforcement_a_plain_append_works(tmp_path):
 # ══ 0.39.5 束B — runtime trust boundary ══════════════════════════════════════
 
 def test_B_hook_never_relaxes_trust():
-    """**hook は信頼を緩めない。** ORG_WRITER_TRUST_SELF を統制側が立てない。"""
+    """**The hook does not relax trust.** The control side never sets
+    ORG_WRITER_TRUST_SELF."""
     src = (REPO / "integrations" / "common" / "org_hook.py").read_text(encoding="utf-8")
     for pat in ('os.environ.setdefault("ORG_WRITER_TRUST_SELF"',
                 'os.environ["ORG_WRITER_TRUST_SELF"]'):
@@ -2730,7 +2733,7 @@ def test_B_hook_never_relaxes_trust():
 
 
 def test_B_manifest_pins_the_daemon(tmp_path):
-    """成功系: root 所有 manifest から org / schema / policy / trust / allow_uids を固定する。"""
+    """Happy path: a root-owned manifest fixes org / schema / policy / trust / allow_uids."""
     led = tmp_path / "led"; led.mkdir()
     import shutil as _sh
     _sh.copy(TEMPLATE / "ledger-schema.yaml", tmp_path / "schema.yaml")
@@ -2750,7 +2753,7 @@ def test_B_manifest_pins_the_daemon(tmp_path):
 
 
 def test_B_refuse_a_world_writable_manifest(tmp_path):
-    """拒否系: 誰でも書ける manifest は daemon の設定を差し替えられる。"""
+    """Refusal: a world-writable manifest lets anyone swap the daemon's configuration."""
     mf = tmp_path / "m.yaml"
     mf.write_text("orgs:\n  default:\n    ledger: /tmp/x\n", encoding="utf-8")
     os.chmod(mf, 0o666)
@@ -2762,7 +2765,7 @@ def test_B_refuse_a_world_writable_manifest(tmp_path):
 
 
 def test_B_fault_unreadable_manifest_refuses_to_start(tmp_path):
-    """故障注入: manifest を読めないなら起動しない。"""
+    """Fault injection: an unreadable manifest means the daemon does not start."""
     mf = tmp_path / "m.yaml"
     mf.write_text("orgs: [not a map\n", encoding="utf-8")
     r = subprocess.run([sys.executable, str(TOOLS / "writerd.py"), "serve",
@@ -2772,7 +2775,7 @@ def test_B_fault_unreadable_manifest_refuses_to_start(tmp_path):
 
 
 def test_B_rpc_reservation_needs_exit0_and_allow():
-    """**RPC 経由の予約も decision を読む。** 終了コードだけを信じない。"""
+    """**A reservation over RPC reads the decision too.** Never trust the exit code alone."""
     src = (REPO / "integrations" / "common" / "org_hook.py").read_text(encoding="utf-8")
     assert 'is_reservation = argv[:2] in (["ledger.py", "reserve-exposure"],' in src
     assert '["writer_client.py", "reserve-exposure"])' in src
@@ -2782,7 +2785,7 @@ def test_B_rpc_reservation_needs_exit0_and_allow():
 
 
 def test_B_control_ghsync_writes_through_rpc():
-    """control: writerd がいる org では ghsync も RPC を使う（直接呼びは exit 4 になる）。"""
+    """Control: where writerd runs, ghsync goes over RPC as well — a direct call exits 4."""
     src = (TOOLS / "ghsync" / "record.py").read_text(encoding="utf-8")
     assert src.count("writer_client.py") >= 3, "統制の書き込みが RPC に統一されていない"
     assert 'os.environ.get("ORG_WRITER_SOCKET")' in src
@@ -2791,7 +2794,7 @@ def test_B_control_ghsync_writes_through_rpc():
 # ══ 0.39.5 束C — stage B lifecycle ═══════════════════════════════════════════
 
 def test_C_namespace_contract_is_shared():
-    """installer / verifier が **同じ規則** で namespace を決めること。"""
+    """The installer and the verifier must derive the namespace by **the same rule**."""
     isrc = (TOOLS / "writer-install.sh").read_text(encoding="utf-8")
     vsrc = (TOOLS / "writer-verify.sh").read_text(encoding="utf-8")
     rule = 'shasum -a 256 | cut -c1-12'
@@ -2828,7 +2831,7 @@ def test_C_uninstall_order_is_explicit():
 
 
 def test_C_uninstall_keeps_shared_things_while_other_orgs_remain():
-    """**他 org が残る間は共有コードと service UID を消さない。**"""
+    """**While another org remains, the shared code and the service UID are not removed.**"""
     src = (TOOLS / "writer-install.sh").read_text(encoding="utf-8")
     assert "REMAINING=" in src
     assert '他の org が ${REMAINING} 件残っているので、共有コードとサービス UID は消さない' in src
@@ -2838,7 +2841,8 @@ def test_C_uninstall_keeps_shared_things_while_other_orgs_remain():
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="writer-install.sh is macOS-only")
 def test_C_uninstall_requires_an_org(tmp_path):
-    """拒否系: どの org を外すのか決まらなければ止まる（他 org を巻き込まない）。"""
+    """Refusal: if it cannot be determined which org is being removed, stop — never take
+    another org with it."""
     r = subprocess.run(["bash", str(TOOLS / "writer-install.sh"), "--uninstall", "--dry-run"],
                        capture_output=True, text=True)
     assert r.returncode != 0
@@ -2847,7 +2851,7 @@ def test_C_uninstall_requires_an_org(tmp_path):
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="writer-install.sh is macOS-only")
 def test_C_dry_run_changes_nothing_and_states_the_boundary(tmp_path):
-    """control: --dry-run は何も変えず、境界を明示する。"""
+    """Control: --dry-run changes nothing and states the boundary."""
     (tmp_path / ".orgforge" / "ledger").mkdir(parents=True)
     before = sorted(str(p.relative_to(tmp_path)) for p in tmp_path.rglob("*"))
     r = subprocess.run(["bash", str(TOOLS / "writer-install.sh"), "--org-root", str(tmp_path),
@@ -3477,7 +3481,7 @@ def test_A_refutation_joint_is_not_created_twice(tmp_path):
 
 
 def test_A_refutation_joint_allows_a_new_review_subject(tmp_path):
-    """同じIssueでも別subjectの反証結果は新しいjointとして記録できる。"""
+    """On the same Issue, a refutation of a different subject records as a new joint."""
     org, led = _A_org(tmp_path)
     _A_key(org, "k1", "gate-signer"); _A_key(org, "k2", "skeptic-signer")
     for subject in ("rev-A", "rev-B"):
@@ -3500,7 +3504,8 @@ def test_A_refutation_joint_allows_a_new_review_subject(tmp_path):
 
 
 def test_A_joint_needs_only_one_provisional_to_hold(tmp_path):
-    """**1件だけでは joint を作らない。** 片方の判定だけで通れば、独立性は無い。"""
+    """**One verdict never makes a joint.** If a single side could pass it, there is no
+    independence."""
     org, led = _A_org(tmp_path)
     _A_key(org, "k1", "gate-signer")
     rc = _A_receipt(org, "k1", lineage="same-harness", out="k1.json")
@@ -3692,7 +3697,7 @@ def test_corrected_admission_does_not_block_forever(tmp_path):
 
 
 def test_corrected_refutation_joint_does_not_block_forever(tmp_path):
-    """void済みのskeptic jointは既存扱いせず、同じpairから再派生できる。"""
+    """A voided skeptic joint is not treated as existing, so the same pair can derive again."""
     org, led = _AA_org(tmp_path)
     for lin in ("same-harness", "cross-harness"):
         assert _AA_prov(org, led, "7", lin, event="refutation_attempted",
@@ -3834,7 +3839,7 @@ def test_B1_caller_flag_cannot_disable_attestation(tmp_path):
 
 
 def test_B1_control_unattested_org_still_works(tmp_path):
-    """**control: 宣言していない org は従来どおり動く。**（止めすぎない）"""
+    """**Control: an org that declared nothing keeps working as before** — do not over-block."""
     org, led = _B1_org(tmp_path, attested="false")
     for lin in ("same-harness", "cross-harness"):
         r = _B1_append(org, led, lin)
@@ -3973,7 +3978,8 @@ def test_B4_cross_harness_refuses_single_signer_direct_admission(tmp_path):
 
 
 def test_B4_cross_harness_refuses_single_signer_survives(tmp_path):
-    """`refutation_attempted: survives` も positive な判断なので同じ扱い。"""
+    """`refutation_attempted: survives` is a positive judgment too, so it is treated the
+    same."""
     org, led, secret = _B4_org(tmp_path)
     rc = _B4_receipt(org, led, secret, "refutation_attempted", "survives")
     r = _B4_direct(org, led, secret, rc, "refutation_attempted", "survives")
@@ -3995,7 +4001,7 @@ def test_B4_negative_verdicts_still_recordable(tmp_path):
 
 
 def test_B4_same_harness_org_unaffected(tmp_path):
-    """**control: same-harness org の互換経路を壊さない。**"""
+    """**Control: the compatibility path for a same-harness org is not broken.**"""
     org, led, secret = _B4_org(tmp_path, lineage="same-harness", name="b4same")
     rc = _B4_receipt(org, led, secret, "admission_decided", "admit", lineage="same-harness")
     r = _B4_direct(org, led, secret, rc, "admission_decided", "admit", lineage="same-harness")
@@ -4119,7 +4125,8 @@ def test_wip_completed_still_disappears(tmp_path):
 
 
 def test_wip_restarted_candidate_is_not_hidden_by_older_completion(tmp_path):
-    """同じcandidateのrework開始後は、古いcycle_completedでWIPから消さない。"""
+    """Once a rework starts on the same candidate, a stale cycle_completed does not drop it
+    from WIP."""
     seed(tmp_path, "eng", "cycle_started",
          {"role": "eng", "candidate_id": "cand-a", "pack_manifest_id": "issue-9"},
          ts="2026-07-16T01:00:00Z")
