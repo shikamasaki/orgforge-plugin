@@ -6,6 +6,29 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 2.6.0 — a judge is handed the Issue's contract, not the org's memory
+
+A gate review kept expanding past the Issue it was judging: organization-wide doctrine reached the
+dispatch and became review criteria, so the bar moved between rounds and findings accumulated that
+no MUST in the Issue had asked for. 2.3.1 removed the role charter from the prompt, but doctrine
+was still arriving by another route — `handoff.py` builds the seam contract every dispatch carries,
+and it attached the role's scoped doctrine unconditionally.
+
+### Changed
+
+- **`handoff.py` gives `gate` and `skeptic` a bar instead of a brain.** Their section now states
+  the boundary — acceptance criteria, changed seam, declared DoD, submitted evidence, recorded
+  residual risk — and that anything outside it is `out_of_scope` rather than a blocker, unless it
+  concretely demonstrates an immediate safety, data-integrity, security, or release-blocking
+  failure.
+- **Every other role keeps its doctrine.** A maker builds, and prior lessons are what stop it
+  rebuilding a known mistake. Only the checking roles are scoped down.
+
+This bounds a judge's **input**, never its judgment (docs/03 §6.5). It still decides the verdict; it
+decides against the contract it was handed rather than against everything the org has ever learned.
+
+Closes #181.
+
 ## 2.5.1 — collect the judge's verdict from where it actually is
 
 ### Fixed
