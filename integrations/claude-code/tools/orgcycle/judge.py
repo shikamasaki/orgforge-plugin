@@ -620,10 +620,14 @@ def _run_headless(role, issue, material, cfg, schema, stable_organ=None):
     elif cli == "claude":
         # Claude Code は --json-schema を備える。本文だけで JSON を要求すると散文を返して
         # intake 不能になるため、Codex と同じく CLI 側で構造を強制する。
+        # Claude Code の validator は Draft 2020-12 の meta-schema URI を解決しない。
+        # 同じ object schema から宣言だけ除いた互換表現を CLI に渡す。
+        _claude_schema = json.dumps({k: v for k, v in json.load(open(schema, encoding="utf-8")).items()
+                                     if k != "$schema"}, ensure_ascii=False)
         cmd = [exe, "-p", material + "\n\n## 返す形\n"
                "次のスキーマに厳密に一致する JSON **のみ** を返すこと（前後に散文を付けない）:\n"
-               + open(schema, encoding="utf-8").read(),
-               "--output-format", "json", "--json-schema", open(schema, encoding="utf-8").read()]
+               + _claude_schema,
+               "--output-format", "json", "--json-schema", _claude_schema]
         if model:
             cmd += ["--model", str(model)]
         if effort:
