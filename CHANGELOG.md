@@ -6,6 +6,30 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 2.8.0 — print the way out, not just the rule
+
+A rebase moves `review_subject_id`, so `github_sync provisional` correctly refuses to let the same
+lineage restack its verdict — a judge may not void its own. The refusal named that requirement and
+stopped there. Everything needed to comply already existed (`identity keygen`, `identity receipt
+--event-class correction`, `ledger append --class correction --receipt`), and a test has been
+exercising that exact path since before this release. Reaching it from the message did not work:
+the field report concluded the correction command was missing, and rediscovering it took five
+failed attempts over argument shapes, the trust-store path, and the constitution key.
+
+### Changed
+
+- **The refusal now prints the recovery as three runnable commands** — register the authority's
+  key, sign a receipt bound to `correction:superseded:<seq>`, append the correction — plus the
+  `enforcement.judges.judgment_corrections.authority_roles` key the ledger requires. The authority
+  role is read from the constitution rather than hardcoded, and the message states that the old
+  verdict is preserved rather than erased.
+
+The control is unchanged: a judge still cannot void its own verdict, the authority must still be a
+declared third party, and the receipt must still bind to the target. What cannot be skipped is now
+reachable.
+
+Closes #186.
+
 ## 2.7.0 — do not judge the same revision twice
 
 `review_subject_id` is a digest of (issue, role, phase, integration_ref, tree), so an equal id
