@@ -690,9 +690,38 @@ def _run_headless(role, issue, material, cfg, schema, stable_organ=None):
     if os.path.isfile(out_json):
         raw = open(out_json, encoding="utf-8").read()
     elif cli == "claude":
-        try:                                    # claude -p --output-format json の封筒を開ける
-            raw = (json.loads(pr.stdout) or {}).get("result") or pr.stdout
+        # Open the `claude -p --output-format json` envelope. It carries the answer twice:
+        #
+        #   structured_output : dict — the schema-validated object that --json-schema produced
+        #   result            : str  — the same content, rendered for display
+        #
+        # Take structured_output. Reading `result` and re-parsing it threw away a validated
+        # object in order to recover it from a string, which fails the moment the model wraps
+        # the JSON in any prose: the verdict was produced but never collected, so a review that
+        # really ran looked like it returned nothing. Measured on the installed CLI —
+        # structured_output is a dict, result is its stringification.
+        try:
+            env = json.loads(pr.stdout) or {}
         except Exception:
+            env = None
+        if isinstance(env, dict):
+            structured = env.get("structured_output")
+            if isinstance(structured, (dict, list)):
+                raw = json.dumps(structured, ensure_ascii=False)
+            else:
+                # An older CLI has no structured_output. Fall back to `result`, but do NOT fall
+                # back to the raw envelope: `{"result": ""}` would otherwise be handed on as if
+                # the envelope itself were the verdict, and an empty answer would read as success.
+                raw = env.get("result") or ""
+            # An envelope can report an error while still carrying text. Say so rather than
+            # letting a degraded answer look like a clean verdict.
+            if env.get("is_error") or env.get("api_error_status"):
+                print(f"[{role}] the {cli} envelope reports an error "
+                      f"(is_error={env.get('is_error')!r}, "
+                      f"api_error_status={env.get('api_error_status')!r}, "
+                      f"stop_reason={env.get('stop_reason')!r}). Treat any verdict below as "
+                      f"unreliable.", file=sys.stderr)
+        else:
             raw = pr.stdout
     if not raw or not raw.strip():
         # **fail-closed は変えない** — 判定が得られていないなら admission は生成されない。

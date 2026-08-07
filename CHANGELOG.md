@@ -6,6 +6,24 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 2.5.1 — collect the judge's verdict from where it actually is
+
+### Fixed
+
+- **A Claude headless judge's verdict was produced and then dropped.**
+  `claude -p --output-format json --json-schema ...` returns the answer twice in one envelope:
+  `structured_output` (the schema-validated object the flag produced) and `result` (the same
+  content rendered for display). The collector read `result` and re-parsed it — throwing away a
+  validated object to recover it from a string. That holds only while the model emits bare JSON;
+  the moment it wraps the JSON in prose the parse fails, and a review that genuinely ran looks
+  like it returned nothing. Observed in the field as the gate "not responding" across two runs
+  while the CLI itself answered normally (~6s plain, ~13.5s with a schema).
+- **An empty `result` was reported as success.** `env.get("result") or pr.stdout` fell back to the
+  whole envelope, so `{"result": ""}` was handed on as if the envelope were the verdict. Found by
+  the test written for the fix above; no verdict now fails closed, as it always should have.
+- An envelope carrying `is_error` / `api_error_status` is now announced on stderr instead of
+  passing a degraded answer off as a clean verdict.
+
 ## 2.5.0 — write down what "wrong" looks like, since intent cannot be written down whole
 
 The hardest failure is the one where every MUST is satisfied and the result is still not what was
