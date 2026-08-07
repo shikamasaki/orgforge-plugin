@@ -1782,7 +1782,7 @@ import socket as _socket
 
 
 def _wd_start(tmp_path):
-    """writerd を起動して (led, sock, proc) を返す。"""
+    """Start writerd and return (led, sock, proc)."""
     led = tmp_path / ".orgforge" / "ledger"; led.mkdir(parents=True)
     import shutil as _sh
     _sh.copy(TEMPLATE / "ledger-schema.yaml", tmp_path / "ledger-schema.yaml")
@@ -1830,7 +1830,7 @@ _WD_PAYLOAD = '{"role":"maker","candidate_id":"c1","phase":"implement"}'
 
 
 def test_writerd_accepts_a_request_and_direct_write_is_refused(tmp_path):
-    """**経路を1つにする。** writerd 経由なら書け、直接の append は拒否される。"""
+    """**One path only.** A write through writerd succeeds; a direct append is refused."""
     led, sock, proc = _wd_start(tmp_path)
     try:
         code, d = _wd_client(sock, "--actor", "w", "--class", "progress_recorded",
@@ -1852,7 +1852,8 @@ def test_writerd_accepts_a_request_and_direct_write_is_refused(tmp_path):
 
 
 def test_a_stopped_daemon_fails_closed(tmp_path):
-    """**daemon が居ないことを「書けた」と読み替えない。** 直接書き込みも拒否のまま。"""
+    """**An absent daemon is not read as permission to write.** A direct write stays
+    refused."""
     led, sock, proc = _wd_start(tmp_path)
     proc.terminate(); proc.wait(timeout=10)
     code, d = _wd_client(sock, "--actor", "w", "--class", "progress_recorded",
@@ -1896,7 +1897,7 @@ def _wd_req(**kw):
 
 
 def test_a_tampered_request_is_refused(tmp_path):
-    """digest は本文全体を覆う — 途中で書き換えた要求は通らない。"""
+    """The digest covers the whole body, so a request altered in transit does not pass."""
     led, sock, proc = _wd_start(tmp_path)
     try:
         req = _wd_req()
@@ -1909,7 +1910,7 @@ def test_a_tampered_request_is_refused(tmp_path):
 
 
 def test_a_replayed_request_is_refused(tmp_path):
-    """同じ nonce の再送は通さない。"""
+    """A replayed nonce does not pass."""
     led, sock, proc = _wd_start(tmp_path)
     try:
         req = _wd_req(nonce="r" * 32)
@@ -1923,7 +1924,7 @@ def test_a_replayed_request_is_refused(tmp_path):
 
 
 def test_a_caller_cannot_choose_the_ledger_path(tmp_path):
-    """**書き込み先は writerd が決める。** caller は org 名でしか選べない。"""
+    """**writerd decides the write target.** A caller can only choose an org name."""
     led, sock, proc = _wd_start(tmp_path)
     try:
         req = _wd_req(nonce="p" * 32)
@@ -1938,7 +1939,7 @@ def test_a_caller_cannot_choose_the_ledger_path(tmp_path):
 
 
 def test_only_write_operations_are_accepted(tmp_path):
-    """writerd 経由で任意のサブコマンドを実行できてはいけない。"""
+    """writerd must not be a way to run an arbitrary subcommand."""
     led, sock, proc = _wd_start(tmp_path)
     try:
         assert _wd_raw(sock, _wd_req(nonce="v" * 32, op="verify"))["reason"] == "unsupported_op"
@@ -1967,7 +1968,8 @@ def test_peer_credential_is_reported_for_the_recorder_only(tmp_path):
 
 @pytest.mark.parametrize("mode,expect", [(0o777, False), (0o755, True)])
 def test_socket_parent_must_not_be_world_writable(tmp_path, mode, expect):
-    """**親を書ける主体は socket を差し替えられる** — 偽 writer に繋がされる。"""
+    """**Whoever can write the parent can swap the socket** and route callers to a forged
+    writer."""
     sys.path.insert(0, str(TOOLS))
     import importlib
     wd = importlib.import_module("writerd")
@@ -1983,7 +1985,7 @@ def test_socket_parent_must_not_be_world_writable(tmp_path, mode, expect):
 
 
 def test_socket_parent_may_not_be_a_symlink(tmp_path):
-    """リンクを張り替えれば socket ごと差し替えられる。"""
+    """Re-pointing the link swaps the socket wholesale."""
     sys.path.insert(0, str(TOOLS))
     import importlib
     wd = importlib.import_module("writerd")
@@ -1994,7 +1996,7 @@ def test_socket_parent_may_not_be_a_symlink(tmp_path):
 
 
 def test_same_uid_cannot_claim_separate_uid(tmp_path):
-    """**同一 UID では `separate_uid` を主張できない。** 道具が自分でそう言う。"""
+    """**The same UID cannot claim `separate_uid`.** The tool says so about itself."""
     sys.path.insert(0, str(TOOLS))
     import importlib
     wd = importlib.import_module("writerd")
@@ -2005,7 +2007,8 @@ def test_same_uid_cannot_claim_separate_uid(tmp_path):
 
 
 def test_writer_owned_assets_are_audited(tmp_path):
-    """ラッチ・鍵 registry・schema も書き込み経路と同じ強さで守る必要がある。"""
+    """The latch, the key registry and the schema need the same protection as the write
+    path."""
     sys.path.insert(0, str(TOOLS))
     import importlib
     wd = importlib.import_module("writerd")
@@ -2020,7 +2023,8 @@ def test_writer_owned_assets_are_audited(tmp_path):
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="writer-install.sh is macOS-only")
 def test_install_script_dry_run_changes_nothing(tmp_path):
-    """段階B の install は `--dry-run` で何も変えない（root 不要で監査できる）。"""
+    """A stage-B install changes nothing under `--dry-run`, so it can be audited without
+    root."""
     led = tmp_path / ".orgforge" / "ledger"; led.mkdir(parents=True)
     before = sorted(str(p.relative_to(tmp_path)) for p in tmp_path.rglob("*"))
     r = subprocess.run(["bash", str(TOOLS / "writer-install.sh"),
@@ -2042,7 +2046,7 @@ def test_install_script_dry_run_changes_nothing(tmp_path):
 
 
 def test_verify_script_refuses_to_run_as_root():
-    """検証を root で走らせたら意味が無い（全部できてしまう）。"""
+    """Running the verification as root proves nothing — root can do everything."""
     src = (TOOLS / "writer-verify.sh").read_text(encoding="utf-8")
     assert 'if [ "$(id -u)" = "0" ]' in src
     assert "root では全部できてしまい" in src
@@ -2100,7 +2104,8 @@ def test_installer_uses_permissions_the_daemon_accepts():
 
 
 def test_socket_is_connectable_by_a_caller(tmp_path):
-    """**接続できることと、書けることは別。** 0600 だと別 UID の caller は接続すらできない。"""
+    """**Connecting and writing are different things.** At 0600 a caller with a different UID
+    cannot even connect."""
     led, sock, proc = _wd_start(tmp_path)
     try:
         mode = os.stat(sock).st_mode & 0o777
@@ -2110,7 +2115,7 @@ def test_socket_is_connectable_by_a_caller(tmp_path):
 
 
 def test_isolation_is_measured_not_flagged(tmp_path):
-    """`separate_uid` は **実測で** 決める。フラグを渡したかどうかで決めない。"""
+    """`separate_uid` is decided **by measurement**, not by whether a flag was passed."""
     sys.path.insert(0, str(TOOLS))
     import importlib
     wd = importlib.import_module("writerd")
@@ -2120,7 +2125,8 @@ def test_isolation_is_measured_not_flagged(tmp_path):
 
 
 def test_peer_uid_reaches_the_recorder(tmp_path, monkeypatch):
-    """peer credential が `recorded_by` に **届く**こと（環境に置くだけでは足りない）。"""
+    """The peer credential must **reach** `recorded_by` — putting it in the environment is
+    not enough."""
     sys.path.insert(0, str(TOOLS))
     import importlib
     ident = importlib.import_module("identity")
@@ -2135,7 +2141,7 @@ def test_peer_uid_reaches_the_recorder(tmp_path, monkeypatch):
 
 
 def test_installer_stops_on_the_first_failure():
-    """`set -e` が無いと、chown が半端な状態で「install 完了」と表示される。"""
+    """Without `set -e`, a half-applied chown still prints "install complete"."""
     src = (TOOLS / "writer-install.sh").read_text(encoding="utf-8")
     assert "set -euo pipefail" in src
     assert "半端な状態で続けない" in src
@@ -2156,14 +2162,15 @@ def test_installer_checks_the_daemon_python_for_pyyaml():
 
 
 def test_installer_copy_is_idempotent():
-    """`cp -R src dst/src` は再実行で tools/tools を作る。"""
+    """`cp -R src dst/src` creates tools/tools when re-run."""
     src = (TOOLS / "writer-install.sh").read_text(encoding="utf-8")
     assert "rm -rf '${INSTALL_DIR}/tools'" in src
     assert "cp -R '$PLUGIN_DIR/tools/.'" in src, "末尾の /. が無いと入れ子になる"
 
 
 def test_verifier_does_not_damage_the_target():
-    """**検証が検証対象を壊さない。** 書き込みを試すのではなく、開けるかだけを見る。"""
+    """**Verification does not damage what it verifies.** It checks that the socket opens,
+    rather than attempting a write."""
     src = (TOOLS / "writer-verify.sh").read_text(encoding="utf-8")
     for forbidden, why in (
             ('{"forged":true}', "本番の台帳に行が残る"),
@@ -2178,7 +2185,8 @@ def test_verifier_does_not_damage_the_target():
 
 
 def test_verifier_checks_the_ledger_stays_readable():
-    """**書けないことと、見えないことは別。** 読めない台帳は監査のための台帳ではない。"""
+    """**Unwritable and unreadable are different.** A ledger nobody can read is not an audit
+    record."""
     src = (TOOLS / "writer-verify.sh").read_text(encoding="utf-8")
     assert "caller から台帳を **読める**" in src
     assert "verify / board / projection が動かない" in src
@@ -2218,7 +2226,8 @@ def test_actor_alias_cannot_bypass_separation_of_duties(tmp_path):
 
 
 def test_attested_enforcement_defaults_off(tmp_path):
-    """**既定は偽。** 真にすると receipt を持たない既存の運用が全部止まる。"""
+    """**The default is false.** Turning it on stops every existing operation that has no
+    receipt."""
     org = tmp_path / "org"; led = org / ".orgforge" / "ledger"; led.mkdir(parents=True)
     import shutil as _sh
     _sh.copy(TEMPLATE / "ledger-schema.yaml", org / "ledger-schema.yaml")
@@ -2258,7 +2267,7 @@ def test_stage_b_socket_parent_must_be_bindable(tmp_path):
 
 
 def test_writerd_pins_the_schema(tmp_path):
-    """schema を明示しないと cwd 依存でテンプレートに fallback する。"""
+    """Without an explicit schema it falls back to the template, depending on cwd."""
     src = (TOOLS / "writerd.py").read_text(encoding="utf-8")
     assert 'env["ORG_LEDGER_SCHEMA"] = self.schema' in src
     assert '"--schema"' in src
@@ -2268,7 +2277,7 @@ def test_writerd_pins_the_schema(tmp_path):
 
 
 def test_isolation_compares_the_peer_uid(tmp_path):
-    """**caller と同じ UID なら隔離ではない。** 要求ごとに peer UID と比べる。"""
+    """**The caller's own UID is not isolation.** Compare against the peer UID per request."""
     sys.path.insert(0, str(TOOLS))
     import importlib
     wd = importlib.import_module("writerd")
@@ -2290,21 +2299,22 @@ def test_writer_isolation_does_not_become_judge_isolation():
 
 
 def test_verifier_counts_rpc_failures():
-    """✗ を印字するだけでは、検査が落ちても最終 exit が 0 になる。"""
+    """Printing ✗ alone leaves the final exit at 0 even when a check failed."""
     src = (TOOLS / "writer-verify.sh").read_text(encoding="utf-8")
     assert "FAIL + RPC_BAD" in src
     assert 'bad "writerd check が落ちた"' in src
 
 
 def test_verifier_no_write_writes_nothing():
-    """`--no-write` では ⑨ の正常系 append も出さない。"""
+    """Under `--no-write`, even step 9's happy-path append is not emitted."""
     src = (TOOLS / "writer-verify.sh").read_text(encoding="utf-8")
     assert "no_write = sys.argv[3]" in src
     assert "再送: --no-write なので飛ばす" in src
 
 
 def test_installer_does_not_overwrite_the_original_owner():
-    """再 install で「元の所有者」を writer に書き換えない（uninstall が壊れる）。"""
+    """A re-install does not rewrite the original owner to the writer — that would break
+    uninstall."""
     src = (TOOLS / "writer-install.sh").read_text(encoding="utf-8")
     assert "再 install では上書きしない" in src
     assert "元の所有者は既に記録されている" in src
@@ -2348,7 +2358,7 @@ def test_payload_cannot_forge_identity_fields(tmp_path):
 
 
 def test_generic_append_cannot_record_a_judgment(tmp_path):
-    """judgment class は generic append では書けない（強制が有効なとき）。"""
+    """A judgment class cannot be written by a generic append while enforcement is on."""
     org, led = _att_org(tmp_path)
     r = _att_append(org, led, "gate-alias", {"deliverable": "7", "verdict": "admit"})
     assert r.returncode == 3, r.stdout + r.stderr
@@ -2456,7 +2466,8 @@ def test_judge_workload_is_covered_by_the_signature(tmp_path):
 
 
 def test_nonces_survive_a_daemon_restart(tmp_path):
-    """**再送を防げない状態で通さない。** プロセス内だけの nonce は再起動で消える。"""
+    """**Do not accept while replay cannot be prevented.** An in-process nonce is lost on
+    restart."""
     sys.path.insert(0, str(TOOLS))
     import importlib
     wd = importlib.import_module("writerd")
@@ -2495,14 +2506,14 @@ def test_client_accepts_a_writer_owned_leaf(tmp_path):
 
 
 def test_peer_uid_allowlist_is_available():
-    """socket が 0666 なので、**繋げることと書けることを分ける**認可が要る。"""
+    """The socket is 0666, so authorization has to **separate connecting from writing**."""
     src = (TOOLS / "writerd.py").read_text(encoding="utf-8")
     assert '"--allow-uid"' in src
     assert "peer_not_authorized" in src
 
 
 def test_authoritative_data_lives_outside_the_org_tree():
-    """**中身の権限を絞っても、入れ物を差し替えられるなら意味が無い。**"""
+    """**Tight permissions on the contents mean nothing if the container can be swapped.**"""
     src = (TOOLS / "writer-install.sh").read_text(encoding="utf-8")
     assert "AUTHORITATIVE=" in src
     assert "org tree の外" in src
@@ -2512,7 +2523,7 @@ def test_authoritative_data_lives_outside_the_org_tree():
 
 
 def test_installer_and_verifier_agree_on_the_socket():
-    """パスが食い違えば、verifier は存在しない socket を検査する。"""
+    """If the paths disagree, the verifier inspects a socket that does not exist."""
     isrc = (TOOLS / "writer-install.sh").read_text(encoding="utf-8")
     vsrc = (TOOLS / "writer-verify.sh").read_text(encoding="utf-8")
     # 0.39.5 で org ごとの namespace になった（固定パスを共有すると 2 org 目で壊れる）。
@@ -2523,7 +2534,7 @@ def test_installer_and_verifier_agree_on_the_socket():
 
 
 def test_pyyaml_guidance_prefers_a_root_owned_venv():
-    """システム python を書き換える案内を第一候補にしない。"""
+    """Do not lead with advice that rewrites the system python."""
     src = (TOOLS / "writer-install.sh").read_text(encoding="utf-8")
     assert "1. root 所有の専用 venv（推奨）" in src
     assert "勧めない" in src
