@@ -201,17 +201,17 @@ def cmd_verify(a):
         _constitution_path = None
     _declared, _strict_freshness, _policy_error = freshness_policy(_constitution_path)
     if _policy_error:
-        print(f"review freshness policy が不正: {_policy_error}", file=sys.stderr)
+        print(f"the review freshness policy is malformed: {_policy_error}", file=sys.stderr)
         return 2
     _ref_declared, _configured_ref, _ref_error = integration_ref_policy(_constitution_path)
     if _ref_error and not getattr(a, "base", None):
-        print(f"integration ref policy が不正: {_ref_error}", file=sys.stderr)
+        print(f"the integration ref policy is malformed: {_ref_error}", file=sys.stderr)
         return 2
     if _strict_freshness and not getattr(a, "base", None) and not _configured_ref:
-        print("strict review freshness では統合先を推測しない。\n"
-              "  constitution.yaml に "
-              "`enforcement.judges.integration_ref: origin/main` のように宣言するか、"
-              "今回だけ `verify --base <ref>` を明示すること。", file=sys.stderr)
+        print("strict review freshness does not guess the integration target.\n"
+              "  Declare it in constitution.yaml as "
+              "`enforcement.judges.integration_ref: origin/main`, or state "
+              "`verify --base <ref>` for this run only.", file=sys.stderr)
         return 11
     _integration_ref = getattr(a, "base", None) or _configured_ref
     # 判定対象は **Issue の worktree** の tree（#101）。cwd の tree を黙って記述すると、
@@ -221,7 +221,7 @@ def cmd_verify(a):
     if _subject_override:
         _subject_cwd = os.path.abspath(_subject_override)
         if not os.path.isdir(_subject_cwd):
-            print(f"--subject-root が存在しない: {_subject_cwd}", file=sys.stderr)
+            print(f"--subject-root does not exist: {_subject_cwd}", file=sys.stderr)
             return 2
     else:
         _subject_cwd = issue_worktree(a.issue)
@@ -277,13 +277,13 @@ def cmd_verify(a):
         return 0
     charter, cpath = _role_charter(role)
     if charter is None:
-        print(f"agents/{role}.md が見つからない（探した先: {cpath}）。\n"
-              f"charter を注入できないなら verify は成り立たない — 検証基準が毎回人の書き方に"
-              f"依存してしまう。プラグインの導入状態を確認すること。", file=sys.stderr)
+        print(f"agents/{role}.md not found (searched: {cpath}).\n"
+              f"verify cannot stand without injecting the charter — the bar would depend on "
+              f"how each person happens to write it. Check the plugin installation.", file=sys.stderr)
         return 2
     title, body = _issue_body(a.issue)
     if title is None:
-        print(f"Issue #{a.issue} を読めなかった（gh の認証 / repo 解決を確認）。", file=sys.stderr)
+        print(f"could not read Issue #{a.issue} (check gh auth and repo resolution).", file=sys.stderr)
         return 3
     # judge を起動する前に、**この Issue / phase / role にだけ適用される**環境probeを走らせる。
     # プロセス名から Docker 等を推測せず、org が宣言した argv の実測結果だけを証拠にする。
@@ -292,18 +292,18 @@ def cmd_verify(a):
         preflight_ok, preflight_evidence = run_declared_preflights(
             a.issue, role, phase, cwd=os.getcwd())
     except PreflightConfigError as exc:
-        print(f"judge preflight の宣言が不正: {exc}\n"
-              "  **設定を読めない・boundedでないなら judge を起動しない。**", file=sys.stderr)
+        print(f"the judge preflight declaration is malformed: {exc}\n"
+              "  **if the config cannot be read, or is unbounded, the judge is not started.**", file=sys.stderr)
         return 2
     if not preflight_ok:
-        print("judge preflight が失敗したため、judge は起動していない。\n"
-              "  上の measured result を直し、同じ verify を再実行すること。", file=sys.stderr)
+        print("the judge was not started: its preflight failed.\n"
+              "  Fix the measured result above and re-run the same verify.", file=sys.stderr)
         return 8
     try:
         stable_organ = _stable_organ_invocation()
     except BindingError as exc:
-        print(f"installed-organ binding がREADYでない: {exc}\n"
-              "  別checkoutを代用せず、host sessionを再起動してから verify をやり直すこと。",
+        print(f"the installed-organ binding is not READY: {exc}\n"
+              "  Do not substitute another checkout — restart the host session, then verify again.",
               file=sys.stderr)
         return 9
     # **judge を起動する前に**、read-only judge が再導出できない MUST を静的に指摘する。
@@ -318,7 +318,7 @@ def cmd_verify(a):
         if _advice:
             print(_advice, file=sys.stderr)
             if getattr(a, "strict_rederivability", False):
-                print("  --strict-rederivability が指定されているので judge は起動していない。",
+                print("  --strict-rederivability was given, so the judge was not started.",
                       file=sys.stderr)
                 return 13
     seam = _seam(role, a.issue, title)
@@ -619,9 +619,9 @@ def _run_headless(role, issue, material, cfg, schema, stable_organ=None):
     model, effort = cfg.get("model"), cfg.get("effort")
     exe = shutil.which(cli)
     if not exe:
-        print(f"judges.harness.{role}.cli = {cli!r} が PATH に無い。"
-              f"インストールと認証を済ませるか、constitution の judges.lineage を "
-              f"same-harness に戻すこと。", file=sys.stderr)
+        print(f"judges.harness.{role}.cli = {cli!r} is not on PATH.\n"
+              f"  Install and authenticate it, or set judges.lineage back to "
+              f"same-harness in the constitution.", file=sys.stderr)
         return 4
 
     # **固定パスにしない。** /tmp/orgforge-{role}-{issue}.json だと、並行実行が同じファイルを
@@ -656,7 +656,7 @@ def _run_headless(role, issue, material, cfg, schema, stable_organ=None):
         if effort:
             cmd += ["--effort", str(effort)]
     else:
-        print(f"judges.harness.{role}.cli = {cli!r} は未対応（codex | claude）。", file=sys.stderr)
+        print(f"judges.harness.{role}.cli = {cli!r} is unsupported (codex | claude).", file=sys.stderr)
         return 2
 
     # **read-only の judge は、実行して緑を確かめる MUST を構造的に admit できない。**
@@ -678,11 +678,11 @@ def _run_headless(role, issue, material, cfg, schema, stable_organ=None):
         pr = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True,
                             text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
-        print(f"[{role}] {cli} がタイムアウトした（ORG_JUDGE_TIMEOUT で延ばせる）。",
+        print(f"[{role}] {cli} timed out (raise it with ORG_JUDGE_TIMEOUT).",
               file=sys.stderr)
         return 5
     if pr.returncode != 0:
-        print(f"[{role}] {cli} が exit={pr.returncode} で終了した:\n"
+        print(f"[{role}] {cli} exited with {pr.returncode}:\n"
               f"{(pr.stderr or pr.stdout or '')[-1200:]}", file=sys.stderr)
         return 6
 

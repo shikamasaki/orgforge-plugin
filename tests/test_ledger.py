@@ -840,7 +840,7 @@ def test_interior_tampering_blocks_further_appends(tmp_path):
     p.write_text("\n".join(lines) + "\n", encoding="utf-8")
     code, out = _app(tmp_path)
     assert code == 4
-    assert "hash 不一致" in out
+    assert "hash mismatch" in out
 
 
 def test_same_natural_key_different_payload_is_refused(tmp_path):

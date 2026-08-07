@@ -256,17 +256,17 @@ def _judgment_correction_policy():
         from discover import constitution as _constitution, org_root as _org_root
         path = _constitution()
     except Exception as exc:
-        return None, f"constitution の場所を解決できない: {exc}"
+        return None, f"cannot resolve the constitution's location: {exc}"
     if not path or not os.path.isfile(path):
-        return None, "constitution.yaml が無い"
+        return None, "constitution.yaml is missing"
     try:
         import yaml
         with open(path, encoding="utf-8") as handle:
             doc = yaml.safe_load(handle) or {}
     except Exception as exc:
-        return None, f"constitution.yaml を読めない: {exc}"
+        return None, f"cannot read constitution.yaml: {exc}"
     if not isinstance(doc, dict):
-        return None, "constitution.yaml が map ではない"
+        return None, "constitution.yaml is not a map"
     enforcement = doc.get("enforcement") or {}
     judges = enforcement.get("judges") if isinstance(enforcement, dict) else None
     policy = judges.get("judgment_corrections") if isinstance(judges, dict) else None
@@ -275,7 +275,7 @@ def _judgment_correction_policy():
     roles = policy.get("authority_roles")
     if (not isinstance(roles, list) or not roles
             or any(not isinstance(role, str) or not role.strip() for role in roles)):
-        return None, "judgment_corrections.authority_roles が空または不正"
+        return None, "judgment_corrections.authority_roles is empty or malformed"
     roles = tuple(dict.fromkeys(role.strip() for role in roles))
     judges_forbidden = sorted(set(roles) & {"gate", "skeptic"})
     if judges_forbidden:
@@ -284,22 +284,22 @@ def _judgment_correction_policy():
     root = _org_root()
     organization_path = os.path.join(root, "organization.yaml") if root else None
     if not organization_path or not os.path.isfile(organization_path):
-        return None, "organization.yaml が無く、authority roleの職務を検証できない"
+        return None, "organization.yaml is missing, so the authority role's remit cannot be verified"
     try:
         with open(organization_path, encoding="utf-8") as handle:
             organization = yaml.safe_load(handle) or {}
     except Exception as exc:
-        return None, f"organization.yaml を読めない: {exc}"
+        return None, f"cannot read organization.yaml: {exc}"
     if not isinstance(organization, dict) or not isinstance(organization.get("roles"), list):
-        return None, "organization.yaml の roles がlistでなく、authority roleを検証できない"
+        return None, "organization.yaml roles is not a list, so the authority role cannot be verified"
     declared = {role.get("id"): role for role in organization["roles"]
                 if isinstance(role, dict) and role.get("id")}
     for role_id in roles:
         role = declared.get(role_id)
         if role is None:
-            return None, f"judgment correction authority {role_id!r} はorganizationに無い"
+            return None, f"judgment correction authority {role_id!r} is not in the organization"
         if role.get("active") is False:
-            return None, f"judgment correction authority {role_id!r} はdormant"
+            return None, f"judgment correction authority {role_id!r} is dormant"
         functions = set(role.get("functions") or [])
         if functions & {"judge", "review"}:
             return None, (f"judgment correction authority {role_id!r} はjudge/review職務を持つ — "
@@ -314,11 +314,11 @@ def _annotate_correction(payload, hist):
         try:
             wanted.append(int(raw))
         except (TypeError, ValueError):
-            return None, "correction.corrects に整数でない seq がある"
+            return None, "correction.corrects contains a non-integer seq"
     by_seq = {int(item.get("seq")): item for item in hist if item.get("seq") is not None}
     missing = sorted(set(wanted) - set(by_seq))
     if missing:
-        return None, f"correction target seq が台帳に無い: {missing}"
+        return None, f"correction target seq is not in the ledger: {missing}"
     targets = [by_seq[seq] for seq in wanted]
     classes = sorted({str(target.get("class") or "") for target in targets})
     payload["target_classes"] = classes
@@ -793,27 +793,27 @@ def _enforce_attested():
         try:
             st = os.stat(pol)
         except OSError as e:
-            raise SystemExit(f"policy を stat できない: {e}\n  ファイル: {pol}")
+            raise SystemExit(f"cannot stat the policy: {e}\n  file: {pol}")
         if st.st_uid != 0 and st.st_uid != os.getuid():
-            raise SystemExit(f"policy の所有者が root でも自分でもない（uid={st.st_uid}）: {pol}")
+            raise SystemExit(f"the policy is owned by neither root nor you (uid={st.st_uid}): {pol}")
         if st.st_mode & 0o022:
-            raise SystemExit(f"policy が他者から書き込み可能（mode "
-                             f"{oct(st.st_mode & 0o777)}）: {pol}\n"
-                             f"  **書ける主体は強制を外せる。**")
+            raise SystemExit(f"the policy is group/world-writable (mode "
+                             f"{oct(st.st_mode & 0o777)}): {pol}\n"
+                             f"  **whoever can write it can switch enforcement off.**")
         try:
             import yaml
             with open(pol, encoding="utf-8") as f:
                 doc = yaml.safe_load(f) or {}
         except Exception as e:
-            raise SystemExit(f"policy を読めないので強制の有無を判定できない: {e}\n"
-                             f"  ファイル: {pol}\n  **判定できないなら止める。**")
+            raise SystemExit(f"the policy cannot be read, so enforcement cannot be determined: {e}\n"
+                             f"  file: {pol}\n  **if it cannot be determined, stop.**")
         if not isinstance(doc, dict):
-            raise SystemExit(f"policy が map ではない: {pol}")
+            raise SystemExit(f"the policy is not a map: {pol}")
         v = doc.get("require_attested_identity")
         if v is not None:
             if not isinstance(v, bool):
-                raise SystemExit(f"policy の require_attested_identity が真偽値でない"
-                                 f"（{v!r}）: {pol}")
+                raise SystemExit(f"the policy's require_attested_identity is not a boolean"
+                                 f" ({v!r}): {pol}")
             return v            # **これが最終。** env も constitution も上書きできない
 
     # ② env は policy が無いときの開発用。**黙って効かせない。**
@@ -821,14 +821,14 @@ def _enforce_attested():
     if env is not None:
         if os.environ.get("ORG_ALLOW_POLICY_ENV") != "1":
             raise SystemExit(
-                "ORG_REQUIRE_ATTESTED_IDENTITY が設定されているが、環境変数で強制を切り替える"
-                "ことは許していない。\n"
-                "  **caller が消せる設定を根拠にしない** — 実測で、この変数を足すだけで強制が"
-                "消えた。\n"
-                "  開発で使うなら ORG_ALLOW_POLICY_ENV=1 も明示すること"
-                "（本番では root 所有の policy を使う）。")
+                "ORG_REQUIRE_ATTESTED_IDENTITY is set, but switching enforcement through an "
+                "environment variable is not permitted.\n"
+                "  **enforcement must not rest on something the caller can unset** — measured: "
+                "adding this variable alone made it disappear.\n"
+                "  To use it in development, state ORG_ALLOW_POLICY_ENV=1 as well "
+                "(production uses a root-owned policy).")
         if env not in ("0", "1"):
-            raise SystemExit(f"ORG_REQUIRE_ATTESTED_IDENTITY が 0/1 でない（{env!r}）。")
+            raise SystemExit(f"ORG_REQUIRE_ATTESTED_IDENTITY is not 0/1 ({env!r}).")
         return env == "1"
 
     # ③ org の constitution
@@ -837,32 +837,33 @@ def _enforce_attested():
         from discover import constitution, ledger_root
         path = constitution()
     except Exception as e:
-        raise SystemExit(f"constitution の場所を解決できないので、強制の有無を判定できない: {e}")
+        raise SystemExit(f"the constitution's location cannot be resolved, so enforcement cannot be determined: {e}")
     declared = None
     if path and os.path.isfile(path):
         try:
             import yaml
         except Exception:
-            raise SystemExit("PyYAML が無いので constitution を読めず、強制の有無を判定できない。")
+            raise SystemExit("PyYAML is missing, so the constitution cannot be read and enforcement "
+                         "cannot be determined.")
         try:
             with open(path, encoding="utf-8") as f:
                 c = yaml.safe_load(f)
         except Exception as e:
-            raise SystemExit(f"constitution.yaml を解析できないので判定できない: {e}\n"
+            raise SystemExit(f"constitution.yaml cannot be parsed, so this cannot be determined: {e}\n"
                              f"  ファイル: {path}\n  **破損を「強制なし」と読み替えない。**")
         if c is not None:
             if not isinstance(c, dict):
-                raise SystemExit(f"constitution.yaml が map ではない: {path}")
+                raise SystemExit(f"constitution.yaml is not a map: {path}")
             enf = c.get("enforcement")
             if enf is not None and not isinstance(enf, dict):
-                raise SystemExit(f"enforcement が map ではない: {path}")
+                raise SystemExit(f"enforcement is not a map: {path}")
             j = ((enf or {}).get("judges") or {})
             if not isinstance(j, dict):
-                raise SystemExit(f"enforcement.judges が map ではない: {path}")
+                raise SystemExit(f"enforcement.judges is not a map: {path}")
             v = j.get("require_attested_identity")
             if v is not None:
                 if not isinstance(v, bool):
-                    raise SystemExit(f"require_attested_identity が真偽値でない（{v!r}）: {path}")
+                    raise SystemExit(f"require_attested_identity is not a boolean ({v!r}): {path}")
                 declared = v
 
     # ④ **sticky。** 一度でも有効だった org で、宣言が消えたなら止める。
@@ -1229,15 +1230,15 @@ def load_schema_snapshot():
         with open(path, "rb") as f:
             raw = f.read()
     except Exception as e:
-        return None, f"ledger-schema.yaml を読めない: {e}"
+        return None, f"cannot read ledger-schema.yaml: {e}"
     try:
         import yaml
         doc = yaml.safe_load(raw.decode("utf-8")) or {}
     except Exception as e:
-        return None, f"ledger-schema.yaml を解析できない: {e}"
+        return None, f"cannot parse ledger-schema.yaml: {e}"
     ec = doc.get("event_classes")
     if not isinstance(ec, dict):
-        return None, "ledger-schema.yaml に event_classes が無い（または map でない）。"
+        return None, "ledger-schema.yaml has no event_classes (or it is not a map)."
     v = doc.get("validation") or {}
     return {
         "path": path,
@@ -1446,7 +1447,7 @@ class _LedgerLock:
         # 検査できなければ、「fail-closed である」と言えない。
         try:
             if os.environ.get("ORG_LEDGER_FORCE_LOCK_FAIL") == "1":
-                raise OSError("ORG_LEDGER_FORCE_LOCK_FAIL=1（故障注入）")
+                raise OSError("ORG_LEDGER_FORCE_LOCK_FAIL=1 (fault injection)")
             import fcntl
             fcntl.flock(self.fh.fileno(), fcntl.LOCK_EX)
             self.locked = True
@@ -1525,14 +1526,14 @@ def _head_from_log(root):
             try:
                 ev = json.loads(line)
             except Exception as e:
-                return None, f"log の {lineno} 行目が JSON として読めない: {e}"
+                return None, f"line {lineno} of the log is not readable as JSON: {e}"
             if ev.get("seq") != expect:
                 return None, (f"seq の飛び／順序違反: {lineno} 行目で {expect} を期待したが "
                               f"{ev.get('seq')} だった。")
             if ev.get("prev_hash") != prev:
-                return None, f"prev_hash 不一致（seq={ev.get('seq')}）— 鎖が切られている。"
+                return None, f"prev_hash mismatch (seq={ev.get('seq')}) — the chain has been cut."
             if _hash(prev, ev) != ev.get("hash"):
-                return None, f"hash 不一致（seq={ev.get('seq')}）— 書き換えの痕跡。"
+                return None, f"hash mismatch (seq={ev.get('seq')}) — evidence of rewriting."
             prev, last, expect = ev["hash"], ev, expect + 1
     if last is None:
         return {"seq": 0, "hash": "GENESIS"}, None
@@ -1644,12 +1645,12 @@ def _verify_receipt_for(a, payload, cls, receipt_expect=None):
         rc = json.loads(open(rc_arg, encoding="utf-8").read()) \
             if os.path.isfile(rc_arg) else json.loads(rc_arg)
     except Exception as e:
-        return None, f"--receipt を読めない: {e}"
+        return None, f"cannot read --receipt: {e}"
     try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         from identity import verify_receipt, observed_recorder
     except Exception as e:
-        return None, f"identity モジュールを読めない: {e}"
+        return None, f"cannot load the identity module: {e}"
     # **判定の中身と receipt が一致することを確かめる。** 一致を見ないと、別の判定の receipt を
     # 持ち込んで identity だけ借りられる。
     # **receipt を、この判定に完全に束縛する。** 一部だけ見ると、見ていない項目が違う receipt を

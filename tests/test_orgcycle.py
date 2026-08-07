@@ -2253,7 +2253,7 @@ def test_verify_stops_before_any_judge_work_when_preflight_fails(monkeypatch, ca
                               subject_root=os.getcwd())
     assert judge.cmd_verify(args) == 8
     err = capsys.readouterr().err
-    assert "judge は起動していない" in err
+    assert "the judge was not started" in err
 
 
 def test_preflight_contract_is_bundled_identically_for_both_harnesses():
