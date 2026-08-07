@@ -6,6 +6,29 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 2.7.0 — do not judge the same revision twice
+
+`review_subject_id` is a digest of (issue, role, phase, integration_ref, tree), so an equal id
+means a judge would be looking at the revision it already judged. Re-dispatching then spends a
+judge run — measured at ~100s on real material — plus, on the maker's side, a CI round, to
+re-derive a verdict the ledger already holds. Issue #170 ran 12 CI rounds at a ~5.7 min median,
+roughly 68 minutes on a single Issue.
+
+### Changed
+
+- **`org_cycle verify` reports the recorded verdict instead of dispatching**, when the ledger
+  already holds one for this exact subject and role. It names what would have to change to
+  warrant another review: the reviewed head, the cited evidence, or the stated residual risk.
+- **`--force` dispatches anyway**, for a deliberate re-review.
+
+### What is deliberately *not* suppressed
+
+A different revision, the other role, a first-ever review, a voided (corrected) judgment, and an
+unreadable ledger all still dispatch. This suppresses **repetition**, never the independent
+cross-harness review itself — and an unknown is never treated as a skip.
+
+Closes #182.
+
 ## 2.6.0 — a judge is handed the Issue's contract, not the org's memory
 
 A gate review kept expanding past the Issue it was judging: organization-wide doctrine reached the

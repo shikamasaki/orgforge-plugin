@@ -83,6 +83,11 @@ def main(argv):
     # headless judge を回すので、subject を知るのに数分待つのは筋が悪い（実測）。
     q.add_argument("--print-subject", action="store_true",
                    help="review_subject_id だけを出して終わる（judge は起動しない）")
+    # Dispatch a judge for a subject that already has a recorded verdict. Suppressed by default:
+    # the subject id encodes the revision, so re-deriving an unchanged one cannot change the
+    # verdict — it only spends a judge run and a CI round (#182).
+    q.add_argument("--force", action="store_true",
+                   help="dispatch even when this review subject already has a recorded verdict")
     # read-only judge が再導出できない MUST は park にしかならない。既定は助言だけ出して
     # 起動は妨げない（判定は gate のもの）が、空振りに数分〜30分を払いたくないなら止められる。
     q.add_argument("--strict-rederivability", dest="strict_rederivability",
