@@ -1664,7 +1664,7 @@ def test_a_private_key_in_the_trust_store_is_refused(tmp_path):
     os.environ["ORG_TRUST_STORE"] = str(org / ".orgforge" / "trust" / "keys.json")
     try:
         store, err = ident.load_trust_store()
-        assert store is None and err and "秘密鍵" in err
+        assert store is None and err and "private key" in err
     finally:
         os.environ.pop("ORG_TRUST_STORE", None)
 
@@ -1736,7 +1736,7 @@ def test_a_shared_secret_cannot_release(tmp_path):
     rc = _am_receipt(org, "k-shared")
     code, d = _am_release(org, led, rc)
     assert code == 4 and d["released"] is False
-    assert "共有鍵" in (d.get("detail") or "")
+    assert "shared-key receipt" in (d.get("detail") or "")
 
 
 def test_release_requires_explicit_authorization(tmp_path):
@@ -1752,7 +1752,7 @@ def test_a_release_receipt_is_bound_to_the_halt(tmp_path):
     org, led = _am_setup_halt(tmp_path)
     rc = _am_receipt(org, "k-appr", "keys/k-appr.pem", subject="halt:999")
     code, d = _am_release(org, led, rc)
-    assert code == 4 and "一致しない" in (d.get("detail") or "")
+    assert code == 4 and "does not match" in (d.get("detail") or "")
 
 
 def test_release_requires_recovery_evidence(tmp_path):

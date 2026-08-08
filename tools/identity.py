@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""identity — 判断した主体・記録した主体・確定した主体を分ける（H1）。
+"""identity — separate who judged, who recorded it, and who settled it (H1).
 
-**このモジュールが提供するのは Compatibility Mode である。** `decision_by` は検証済みの
-receipt からのみ設定され、CLI の自己申告では設定できない。しかし鍵は同じ利用者が読める場所に
-あり、writer も差し替えられるので、**`authenticated` は名乗らない** — 得られるのは
-`attested` までである。
+**What this module provides is Compatibility Mode.** `decision_by` is set only from a verified
+receipt and can never be set by a CLI's own say-so. But the keys sit where the same user can read
+them and the writer can be swapped out, so **it does not claim `authenticated`** — the most it
+reaches is `attested`.
 
-Authenticated Mode（隔離 writer・限定された経路・鍵の保護・principal ごとの認可）は別の変更。
+Authenticated Mode (an isolated writer, a restricted path, protected keys, per-principal
+authorisation) is a separate change.
 """
 
 import hashlib
@@ -15,65 +16,73 @@ import os
 import sys
 
 
-# ══ Identity: 3つの主体と4つの保証軸（H1）════════════════════════════════════
+# ══ Identity: three principals and four axes of assurance (H1) ══════════════
 #
-# **`actor` は3つの概念を混ぜていた。** 判断した主体・記録した主体・確定した主体は別物である。
-# 監督が judge の判定を代理で記録する運用では、観測される actor は常に監督なので、
-# `actor` 同士を比べる職務分離は「監督が監督を承認していない」しか言えない。
+# **`actor` was conflating three concepts.** Who judged, who recorded it, and who settled it are
+# different things. Where a supervisor records a judge's verdict by proxy, the observed actor is
+# always the supervisor — so a separation of duties that compares `actor` against `actor` can only
+# say "the supervisor did not approve the supervisor".
 #
-# **重要な限界。** ここで実装するのは Compatibility Mode である:
+# **An important limitation.** What is implemented here is Compatibility Mode:
 #
-#   - `decision_by` は **検証済み receipt からのみ** 設定される（CLI では設定できない）
-#   - しかし鍵は同じ利用者が読める場所にあり、writer も差し替えられる
-#   - したがって `identity_assurance` は最良でも `attested` で、**`authenticated` ではない**
-#   - **別プロセスで問い合わせることは信頼境界ではない。** 隔離 writer・限定経路・鍵の保護・
-#     principal ごとの認可が揃って初めて `authenticated` と呼べる
+#   - `decision_by` is set **only from a verified receipt** (never by the CLI)
+#   - but the keys sit where the same user can read them, and the writer can be swapped out
+#   - so `identity_assurance` is at best `attested`, and **not `authenticated`**
+#   - **asking a separate process is not a trust boundary.** Only once an isolated writer, a
+#     restricted path, protected keys and per-principal authorisation are all in place may it be
+#     called `authenticated`
 #
-# 「署名されているから独立している」は誤りである。**同じ signer が両方の血統に署名できるなら、
-# それは独立レビューではない** — だから `reviewer_independence` を別軸として持つ。
+# "It is signed, therefore it is independent" is wrong. **If one signer could sign both lineages,
+# it is not an independent review** — which is why `reviewer_independence` is a separate axis.
 
-PROTOCOL_VERSION = 4                 # receipt の形式。ledger の schema_version とは別に動く
-# v4: adaptive-envelope の恒久化判断を envelope / human decision / microexperiment に束縛。
-# v3: `event_class` を束縛に加えた。どのクラスの判定かを署名が覆わないと、
-#     admission_decided 用の receipt を refutation_attempted に流用できる。
-# v2: `judge_workload` を署名対象に加えた。v1 では署名の外にあり、**署名後に
-#     `separate_host` を足しても検証が通った**（実測）— 独立性の評価に使う値が
-#     署名されていないなら、その評価は根拠を持たない。
+PROTOCOL_VERSION = 4                 # the receipt format; it moves independently of the ledger's
+                                     # schema_version
+# v4: bind an adaptive-envelope permanence decision to the envelope / human decision /
+#     microexperiment.
+# v3: added `event_class` to the binding. Unless the signature covers WHICH class of judgment it
+#     is, a receipt meant for admission_decided can be reused for refutation_attempted.
+# v2: added `judge_workload` to what is signed. In v1 it sat outside the signature, so **adding
+#     `separate_host` AFTER signing still verified** (measured) — if the value an independence
+#     assessment rests on is not signed, that assessment has no basis.
 _RECEIPT_BOUND = ("receipt_id", "org_id", "ledger_id", "review_subject_id", "issue", "role",
                   "phase", "lineage", "verdict", "requirements_digest", "reasoning_sha256",
                   "signer_id", "key_id", "issued_at", "schema_version", "protocol_version",
-                  # **独立性の評価に使う値は、署名が覆わなければならない。**
+                  # **The values an independence assessment rests on must be covered by the
+                  # signature.**
                   "judge_workload",
-                  # **どのクラスの判定か。** 覆わないと、admission 用の receipt を
-                  # refutation に流用できる。
+                  # **Which class of judgment this is.** Leave it uncovered and a receipt meant
+                  # for an admission can be reused for a refutation.
                   "event_class")
 _OPTIONAL_RECEIPT_BOUND = ("envelope_id", "human_decision_ref", "microexperiment_ref",
                            "practice_change_ref")
 
 
-# ══ Authenticated Mode: 非対称署名（judge は秘密鍵、writer は公開鍵だけ）══════
+# ══ Authenticated Mode: asymmetric signing (the judge holds the private key, ══
+# ══ the writer only the public one)                                          ══
 #
-# **共有鍵では「別主体」を証明できない。** 検証できる側が署名も作れるので、writer が judge の
-# 判定を偽造できる。非対称に変えると:
+# **A shared key cannot prove "a different principal".** Whoever can verify can also sign, so the
+# writer could forge the judge's verdicts. Made asymmetric:
 #
-#   judge  — 秘密鍵を持ち、自分の判断に署名する
-#   writer — **公開鍵だけ**を持ち、検証しかできない。judge の判定を作れない
+#   the judge  — holds the private key and signs its own judgments
+#   the writer — holds **only the public key** and can merely verify; it cannot produce the
+#                 judge's verdicts
 #
-# これが `attested` と `authenticated` を分ける最初の条件である。残りは:
-#   writer の隔離（別 UID / 別サービス）・台帳への書き込みを writer に限る・
-#   signer → role / lineage / release 権限の認可
+# This is the first of the conditions separating `attested` from `authenticated`. The rest:
+#   isolating the writer (a separate UID / a separate service), restricting ledger writes to the
+#   writer, and authorising signer → role / lineage / release permissions
 #
-# **脅威モデルから明示的に除外するもの:** ホストの管理者。daemon も hook も無効化できるので、
-# その主体に対する強制力は原理的に持てない。持てないことを書く。
+# **Explicitly outside the threat model:** the host's administrator. They can disable the daemon
+# and the hook alike, so no enforcement against that principal is possible in principle. We write
+# down what we cannot do.
 
 _SIG_ED25519 = "ed25519:"
 
 
 def _crypto_backend():
-    """(backend, error)。`cryptography` → `openssl` の順。**両方無ければ error。**
+    """(backend, error). `cryptography` first, then `openssl`. **An error if neither is present.**
 
-    導入先に何があるかは環境差なので、両方を使える形にする。無いことを黙って
-    「共有鍵で代替する」と読み替えてはいけない — それは authenticated を名乗れなくする。
+    What is installed differs by environment, so both are usable. Absence must never be silently
+    reinterpreted as "fall back to a shared key" — that would forfeit the claim to authenticated.
     """
     try:
         from cryptography.hazmat.primitives.asymmetric import ed25519  # noqa: F401
@@ -85,12 +94,13 @@ def _crypto_backend():
         return "openssl", None
     return None, ("no asymmetric signing available (neither cryptography nor openssl "
                       "was found).\n"
-                  "  Authenticated Mode は非対称鍵を要求する — 共有鍵に落とすと、"
-                  "検証できる側が署名も作れるので `authenticated` ではなくなる。")
+                  "  Authenticated Mode requires an asymmetric key — drop to a shared one and "
+                  "whoever can verify can also sign, so it is no longer `authenticated`.")
 
 
 def generate_keypair():
-    """(private_pem, public_pem, error)。judge が秘密鍵を持ち、writer には公開鍵だけ渡す。"""
+    """(private_pem, public_pem, error). The judge keeps the private key; the writer is given only
+    the public one."""
     backend, err = _crypto_backend()
     if err:
         return None, None, err
@@ -124,7 +134,7 @@ def generate_keypair():
 
 
 def sign_bytes(message, private_pem):
-    """(signature, error)。**秘密鍵を持つ側だけができる。**"""
+    """(signature, error). **Only the holder of the private key can do this.**"""
     backend, err = _crypto_backend()
     if err:
         return None, err
@@ -152,12 +162,13 @@ def sign_bytes(message, private_pem):
 
 
 def verify_bytes(message, signature, public_pem):
-    """(ok, error)。**writer はこれしかできない** — 公開鍵では署名を作れない。"""
+    """(ok, error). **This is all the writer can do** — a public key cannot produce a signature."""
     if not isinstance(signature, str) or not signature.startswith(_SIG_ED25519):
         return False, (f"the signature format is {signature[:20] if signature else '(empty)'!r}, "
-                       f"Authenticated Mode が要求する {_SIG_ED25519}… ではない。\n"
-                       f"  共有鍵（hmac-）の receipt は authenticated として受け付けない — "
-                       f"検証できる側が署名も作れるので、別主体を証明しない。")
+                       f"not the {_SIG_ED25519}… that Authenticated Mode requires.\n"
+                       f"  A shared-key (hmac-) receipt is not accepted as authenticated — whoever "
+                       f"can verify can also sign, so it proves nothing about a different "
+                       f"principal.")
     raw = bytes.fromhex(signature[len(_SIG_ED25519):])
     backend, err = _crypto_backend()
     if err:
@@ -185,7 +196,8 @@ def verify_bytes(message, signature, public_pem):
 
 
 def _trust_store_path():
-    """信頼する signer の鍵。`ORG_TRUST_STORE` → org の `.orgforge/trust/keys.json`。"""
+    """The keys of the signers we trust. `ORG_TRUST_STORE`, then the org's
+    `.orgforge/trust/keys.json`."""
     env = os.environ.get("ORG_TRUST_STORE")
     if env:
         return env
@@ -199,9 +211,9 @@ def _trust_store_path():
 
 
 def load_trust_store():
-    """(store, error)。**読めなければ error** — 読めないことを「信頼できる」と読まない。
+    """(store, error). **An error if it cannot be read** — unreadable is never read as trusted.
 
-    Authenticated Mode（推奨）:
+    Authenticated Mode (recommended):
 
         {"mode": "authenticated",
          "keys": {"<key_id>": {"signer_id": …, "public_pem": …, "revoked": false,
@@ -209,16 +221,18 @@ def load_trust_store():
                                "authorized_lineages": ["cross-harness"],
                                "may_release_halt": false}}}
 
-    **writer は公開鍵だけを持つ。** 秘密鍵は judge の側にあり、この store には入らない。
-    `secret`（共有鍵）を持つ鍵は Compatibility Mode の遺物として **`attested` に落とす** —
-    検証できる側が署名も作れるので、別主体を証明しない。
+    **The writer holds only public keys.** A private key belongs on the judge's side and never
+    enters this store. A key carrying a `secret` (a shared key) is a relic of Compatibility Mode and
+    is **dropped to `attested`** — whoever can verify can also sign, so it proves nothing about a
+    different principal.
 
-    認可はここで宣言する。**署名が正しいことと、その主体がその判定を出してよいことは別**である。
+    Authorisation is declared here. **That a signature is valid and that this principal may issue
+    this judgment are two different things.**
     """
     path = _trust_store_path()
     if not path or not os.path.isfile(path):
         return None, (f"no trust store (searched: {path}). A receipt cannot be verified, so "
-                      f"判断の主体は `claimed` のままになる。")
+                      f"the deciding principal stays `claimed`.")
     try:
         with open(path, encoding="utf-8") as f:
             doc = json.load(f)
@@ -227,13 +241,14 @@ def load_trust_store():
     keys = doc.get("keys")
     if not isinstance(keys, dict):
         return None, "the trust store has no keys (or it is not a map)."
-    # **秘密鍵が store に入っていたら拒否する。** writer が judge の判定を作れる状態である。
+    # **Refuse if a private key is in the store.** That is a state in which the writer could
+    # produce the judge's verdicts.
     leaked = sorted(k for k, v in keys.items()
                     if isinstance(v, dict) and "private_pem" in v)
     if leaked:
         return None, (f"the trust store contains private keys: {', '.join(leaked)}.\n"
-                      f"  **writer は公開鍵だけを持つ。** 秘密鍵を持つ側は judge の判定を"
-                      f"偽造できるので、これは authenticated ではない。")
+                      f"  **The writer holds only public keys.** Whoever holds a private key can "
+                      f"forge the judge's verdicts, so this is not authenticated.")
     return {"keys": keys, "path": path,
             "mode": doc.get("mode") or ("authenticated"
                                         if all(v.get("public_pem") for v in keys.values()
@@ -242,9 +257,11 @@ def load_trust_store():
 
 
 def authorize(key, role, lineage, want_release=False):
-    """署名が正しいことと、その主体がその判定を出してよいことは **別である**。
+    """That a signature is valid and that this principal may issue this judgment are **two
+    different things.**
 
-    (ok, error)。宣言が無い項目は「許可されていない」と読む — 認可の既定は拒否である。
+    (ok, error). An undeclared item reads as "not permitted" — the default for authorisation is to
+    refuse.
     """
     roles = key.get("authorized_roles")
     if roles is not None and role not in roles:
@@ -257,13 +274,14 @@ def authorize(key, role, lineage, want_release=False):
     if want_release and not key.get("may_release_halt"):
         return False, (f"signer {key.get('signer_id')!r} is not authorized to release a halt "
                        f"(may_release_halt is not true).\n"
-                       f"  **止めた主体が自分で解除できてはいけない。** 解除は独立した"
-                       f"principal の仕事である。")
+                       f"  **The principal that stopped it must not be able to release it "
+                       f"itself.** A release is the work of an independent principal.")
     return True, None
 
 
 def receipt_signing_bytes(receipt):
-    """署名が覆うバイト列。**束縛する値を1つでも外すと、そこは差し替え可能になる。**"""
+    """The bytes the signature covers. **Leave one bound value out and that value becomes
+    swappable.**"""
     core = {k: receipt.get(k) for k in _RECEIPT_BOUND + _OPTIONAL_RECEIPT_BOUND}
     return json.dumps(core, sort_keys=True, separators=(",", ":"),
                       ensure_ascii=False).encode("utf-8")
@@ -276,53 +294,57 @@ def sign_receipt(receipt, secret):
 
 
 def verify_receipt(receipt, expect, store=None, expect_release=False):
-    """receipt を検証する。(decision_by, assurance, error) を返す。
+    """Verify a receipt. Returns (decision_by, assurance, error).
 
-    `expect` は **この判定が何についてのものか**（org_id / ledger_id / review_subject_id /
-    issue / role / lineage / verdict）。**receipt がそれと一致しなければ拒否する** — 一致を
-    確かめないと、別の org・別の対象・別の血統の receipt を持ち込んで通せる（再利用）。
+    `expect` is **what this judgment is about** (org_id / ledger_id / review_subject_id / issue /
+    role / lineage / verdict). **If the receipt does not match it, refuse** — without checking the
+    match, a receipt from another org, another subject or another lineage could be brought in and
+    accepted (reuse).
     """
     import hmac
     if not isinstance(receipt, dict):
-        return None, None, "receipt が map でない。"
+        return None, None, "the receipt is not a map."
     for k in _RECEIPT_BOUND:
         if receipt.get(k) in (None, ""):
-            return None, None, f"receipt に {k} が無い。束縛していない値は差し替えられる。"
+            return None, None, (f"the receipt has no {k}. A value that is not bound can be "
+                                f"swapped.")
     if receipt.get("judge_workload") not in ("none", "separate_process", "separate_uid",
                                              "separate_host"):
-        return None, None, (f"receipt の judge_workload が不正: "
+        return None, None, (f"the receipt's judge_workload is invalid: "
                             f"{receipt.get('judge_workload')!r}\n"
                             f"  none | separate_process | separate_uid | separate_host")
     if receipt.get("protocol_version") != PROTOCOL_VERSION:
-        return None, None, (f"receipt の protocol_version が {receipt.get('protocol_version')!r}"
-                            f"（この検証器は v{PROTOCOL_VERSION}）。未知の版は検証できない。")
+        return None, None, (f"the receipt's protocol_version is "
+                            f"{receipt.get('protocol_version')!r} (this verifier is "
+                            f"v{PROTOCOL_VERSION}). An unknown version cannot be verified.")
     for k, v in (expect or {}).items():
         if str(receipt.get(k)) != str(v):
-            return None, None, (f"receipt の {k} が一致しない: receipt={receipt.get(k)!r} / "
-                                f"この判定={v!r}。\n"
-                                f"  **別の org / 対象 / 血統の receipt を再利用できてはいけない。**")
+            return None, None, (f"the receipt's {k} does not match: receipt={receipt.get(k)!r} / "
+                                f"this judgment={v!r}.\n"
+                                f"  **A receipt from another org / subject / lineage must never be "
+                                f"reusable.**")
     if store is None:
         store, serr = load_trust_store()
         if serr:
             return None, None, serr
     key = (store["keys"] or {}).get(receipt["key_id"])
     if not key:
-        return None, None, f"key_id {receipt['key_id']!r} は trust store に無い。"
+        return None, None, f"key_id {receipt['key_id']!r} is not in the trust store."
     if key.get("revoked"):
-        return None, None, (f"key_id {receipt['key_id']!r} は失効している"
-                            f"（{key.get('revoked_reason') or '理由の記録なし'}）。"
-                            f"失効した鍵の receipt は受け付けない。")
+        return None, None, (f"key_id {receipt['key_id']!r} has been revoked "
+                            f"({key.get('revoked_reason') or 'no reason recorded'}). A receipt "
+                            f"signed with a revoked key is not accepted.")
     if key.get("signer_id") and key["signer_id"] != receipt["signer_id"]:
-        return None, None, (f"signer_id が鍵の登録と一致しない: receipt="
+        return None, None, (f"signer_id does not match the key's registration: receipt="
                             f"{receipt['signer_id']!r} / store={key['signer_id']!r}")
 
     msg = receipt_signing_bytes(receipt)
     sig = str(receipt.get("signature") or "")
     if key.get("public_pem"):
-        # ── Authenticated Mode: 公開鍵で検証する。**writer は署名を作れない。**
+        # ── Authenticated Mode: verify with the public key. **The writer cannot sign.**
         ok, verr = verify_bytes(msg, sig, key["public_pem"])
         if not ok:
-            return None, None, (verr or "署名が一致しない")
+            return None, None, (verr or "the signature does not match")
         ok, aerr = authorize(key, receipt.get("role"), receipt.get("lineage"),
                              want_release=bool(expect_release))
         if not ok:
@@ -330,36 +352,39 @@ def verify_receipt(receipt, expect, store=None, expect_release=False):
         assurance = {
             "identity_assurance": "authenticated" if store.get("mode") == "authenticated"
                                   else "attested",
-            # **writer の隔離は judge の隔離ではない。** 実測（監査）: writer の隔離値が
-            # judge の workload_isolation に入り、別 signer なら distinct_workload へ昇格して
-            # いた。**同じ writer UID は judge 同士が別ワークロードである証拠にならない** —
-            # judge は writer とは別のプロセス（別のマシンかもしれない）で動く。
+            # **Isolating the writer is not isolating the judge.** Measured (audit): the writer's
+            # isolation value was being written into the judge's workload_isolation, and with a
+            # different signer it was promoted to distinct_workload. **The same writer UID is no
+            # evidence that two judges are separate workloads** — a judge runs in a different
+            # process from the writer, possibly on a different machine.
             #
-            # judge のワークロードは、judge 自身が receipt で申告する（`judge_workload`）か、
-            # 分からなければ `none` である。writer の値を借りてはいけない。
+            # A judge's workload is what the judge itself states in the receipt
+            # (`judge_workload`), or `none` when it is unknown. Never borrow the writer's value.
             "workload_isolation": (receipt.get("judge_workload")
                                    if receipt.get("judge_workload") in
                                    ("separate_process", "separate_uid", "separate_host")
                                    else "none"),
-            # writer 側の隔離は **別の欄**に置く。混ぜると「writer を隔離したから judge も
-            # 独立している」という誤読を生む。
+            # The writer's own isolation goes in **a separate field**. Mixing them invites the
+            # misreading that "the writer is isolated, therefore the judges are independent".
             "writer_isolation": os.environ.get("ORG_WRITER_ISOLATION") or "none",
             "signer_id": receipt["signer_id"], "key_id": receipt["key_id"],
             "may_release_halt": bool(key.get("may_release_halt")),
         }
         return receipt["signer_id"], assurance, None
 
-    # ── Compatibility Mode: 共有鍵。**attested まで。** 検証できる側が署名も作れる。
+    # ── Compatibility Mode: a shared key. **`attested` at most** — whoever can verify can sign.
     import hmac
     secret = key.get("secret")
     if not secret:
-        return None, None, (f"key_id {receipt['key_id']!r} に public_pem も secret も無い。")
+        return None, None, (f"key_id {receipt['key_id']!r} has neither a public_pem nor a "
+                            f"secret.")
     if not hmac.compare_digest(sign_receipt(receipt, secret), sig):
-        return None, None, "receipt の署名が一致しない（内容が書き換えられているか、鍵が違う）。"
+        return None, None, ("the receipt's signature does not match (either the contents were "
+                            "altered, or the key differs).")
     if expect_release:
-        return None, None, ("共有鍵の receipt で halt の解除は認めない。\n"
-                            "  検証できる側が署名も作れるので、**独立した承認を証明しない**。"
-                            "Authenticated Mode（非対称鍵）が必要である。")
+        return None, None, ("a shared-key receipt is not accepted for releasing a halt.\n"
+                            "  Whoever can verify can also sign, so it **proves no independent "
+                            "approval**. Authenticated Mode (an asymmetric key) is required.")
     ok, aerr = authorize(key, receipt.get("role"), receipt.get("lineage"))
     if not ok:
         return None, None, aerr
