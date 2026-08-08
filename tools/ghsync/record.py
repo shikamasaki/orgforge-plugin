@@ -1105,7 +1105,8 @@ def cmd_decide(a):
         led_out, led_ok = str(e), False
 
     if not led_ok:
-        print(f"台帳が受け付けなかったので、Issue にも記録していない:\n  {led_out[:500]}",
+        print(f"the ledger did not accept it, so nothing was recorded on the Issue "
+              f"either:\n  {led_out[:500]}",
               file=sys.stderr)
         if "rejected" in led_out:
             print("\n  これは統制が働いた結果である（自己承認・順序違反など）。"

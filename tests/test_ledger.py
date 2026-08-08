@@ -387,23 +387,23 @@ def test_self_admission_is_caught_when_written_as_deliverable(tmp_path):
             {"role": "maker1", "candidate_id": "cand-abc", "pack_manifest_id": "issue-7"})
     p = _append(env, "maker1", "admission_decided",
                 {"verdict": "admit", "deliverable": "7", "issue": 7})
-    assert p.returncode != 0, ("maker が自分の成果物を admit できた — cycle_started は "
-                               "candidate_id、判定は deliverable で書かれるので、直接比較では"
-                               "永久に相関しない")
+    assert p.returncode != 0, ("a maker was able to admit its own deliverable — cycle_started is "
+                               "written with candidate_id and the judgment with deliverable, so a "
+                               "direct comparison never correlates them")
     assert "already acted as" in p.stderr
 
 
 def test_deploy_gate_correlates_across_key_names(tmp_path):
-    """skeptic が deliverable で survives を書いても deploy が通る（正常系）。
+    """A deploy passes even when the skeptic wrote survives with deliverable (the happy path).
 
-    `claim_id == candidate_id` だけを見ていたため、実地の refutation 2件と相関できず、
-    null == null が一致して deploy ゲートが丸ごと無効だった。
+    Comparing only `claim_id == candidate_id` failed to correlate two real refutations, and
+    null == null compared equal — which disabled the deploy gate entirely.
     """
     env = _led(tmp_path)
     _append(env, "skeptic", "refutation_attempted",
             {"verdict": "survives", "deliverable": "7", "issue": 7})
     p = _append(env, "deployer", "result_deployed", {"deliverable": "7", "issue": 7})
-    assert p.returncode == 0, f"survives 済みの deploy が通らない: {p.stderr}"
+    assert p.returncode == 0, f"a deploy that already survives does not pass: {p.stderr}"
 
 
 def test_deploy_without_any_survives_still_blocked(tmp_path):
@@ -411,20 +411,20 @@ def test_deploy_without_any_survives_still_blocked(tmp_path):
     stops."""
     env = _led(tmp_path)
     p = _append(env, "gate", "result_deployed", {"deliverable": "999", "issue": 999})
-    assert p.returncode != 0, "反証されていない成果物が deploy できた"
+    assert p.returncode != 0, "a deliverable that has not faced refutation could be deployed"
 
 
-# ── 0.17.0: 識別子の別名を台帳から推移的に解決する ──────────────────────
+# ── 0.17.0: resolve identifier aliases transitively from the ledger ─────────────────────
 def test_alias_bridges_candidate_id_and_issue(tmp_path):
-    """pack_manifest_id: "issue-7" が candidate_id と Issue 番号を繋ぐ唯一の橋。
+    """pack_manifest_id: "issue-7" is the only bridge between a candidate_id and an Issue number.
 
-    人に同じキーで書かせるのではなく、台帳に既にある対応関係を辿る。
+    Rather than making people write the same key, follow the correspondence already in the ledger.
     """
     env = _led(tmp_path)
     _append(env, "m", "cycle_started",
             {"role": "m", "candidate_id": "cand-x", "pack_manifest_id": "issue-42"})
     p = _append(env, "m", "admission_decided", {"verdict": "admit", "deliverable": "42"})
-    assert p.returncode != 0, "別名経由の自己 admit が通った"
+    assert p.returncode != 0, "a self-admission via an alias was allowed"
     assert "the same work" in p.stderr, "does not show how they were connected"
 
 
@@ -435,7 +435,7 @@ def test_alias_via_contract_ref(tmp_path):
             {"maker": "m", "candidate_id": "cand-y", "contract_ref": "issue-9", "source": "self"})
     _append(env, "m", "cycle_started", {"role": "m", "candidate_id": "cand-y"})
     p = _append(env, "m", "admission_decided", {"verdict": "admit", "issue": 9})
-    assert p.returncode != 0, "contract_ref 経由の相関が効いていない"
+    assert p.returncode != 0, "correlation via contract_ref is not working"
 
 
 def test_unrelated_work_is_not_falsely_correlated(tmp_path):
@@ -444,7 +444,7 @@ def test_unrelated_work_is_not_falsely_correlated(tmp_path):
     _append(env, "m", "cycle_started",
             {"role": "m", "candidate_id": "cand-a", "pack_manifest_id": "issue-1"})
     p = _append(env, "m", "admission_decided", {"verdict": "admit", "deliverable": "2", "issue": 2})
-    assert p.returncode == 0, f"別 Issue の admit まで止めた: {p.stderr}"
+    assert p.returncode == 0, f"it even stopped an admit for a different Issue: {p.stderr}"
 
 
 def test_skeptic_cannot_refute_own_work_via_alias(tmp_path):
@@ -454,7 +454,7 @@ def test_skeptic_cannot_refute_own_work_via_alias(tmp_path):
             {"role": "maker1", "candidate_id": "cand-s", "pack_manifest_id": "issue-5"})
     p = _append(env, "maker1", "refutation_attempted",
                 {"verdict": "survives", "deliverable": "5", "issue": 5})
-    assert p.returncode != 0, "maker が自分の仕事を refute できた"
+    assert p.returncode != 0, "a maker was able to refute its own work"
 
 
 def test_correction_backfill_is_not_voided(tmp_path):
@@ -463,10 +463,10 @@ def test_correction_backfill_is_not_voided(tmp_path):
     spec = importlib.util.spec_from_file_location("ledger_c", TOOLS / "ledger.py")
     m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
     evs = [{"seq": 9, "class": "correction",
-            "payload": {"corrects": [1], "kind": "backfill", "reason": "遡及記録"}},
+            "payload": {"corrects": [1], "kind": "backfill", "reason": "retroactive record"}},
            {"seq": 10, "class": "correction",
-            "payload": {"corrects": [2], "kind": "probe", "reason": "検証"}}]
-    assert m.corrected_seqs(evs) == {2}, "backfill まで無効化した"
+            "payload": {"corrects": [2], "kind": "probe", "reason": "verification"}}]
+    assert m.corrected_seqs(evs) == {2}, "it voided the backfill as well"
 
 
 def test_effective_voided_seqs_unifies_current_and_legacy_correction_semantics(tmp_path):
@@ -527,7 +527,7 @@ def _correction_org(tmp_path, policy=True):
     return org, ledger
 
 
-_CORRECTION_REASON = "独立したauthorityが対象と理由を確認した訂正"
+_CORRECTION_REASON = "a correction whose target and reason an independent authority confirmed"
 
 
 def _correction_receipt(org, ledger, role, target, kind="superseded", issue="64",
@@ -695,18 +695,19 @@ def test_round_count_uses_the_larger_of_ledger_and_issue():
     assert "max(len(rounds), len(issue_rounds))" in seg
 
 
-# ── 0.21.0: 二重管理をやめる / 冪等キーによる統制の迂回 ────────────────
+# ── 0.21.0: stop keeping two records / evading control through the idempotency key ───────
 def test_idempotent_key_cannot_bypass_controls(tmp_path):
-    """冪等 no-op は「同じ actor の再実行」に限る。
+    """An idempotent no-op is limited to "a re-run by the same actor".
 
-    (class, natural_key) だけを見ていたため、キーさえ一致すれば actor が違っても no-op に
-    なり、統制が評価すらされなかった。実地では gate と同じキーを maker が使うことで
-    自己承認が exit 0 で通った。冪等性は再実行を守る仕組みであって、統制の裏口ではない。
+    Looking only at (class, natural_key) meant a matching key was a no-op even for a different
+    actor, and control was never even evaluated. In practice a maker used the same key as the gate
+    and its self-approval passed with exit 0. Idempotency exists to make a re-run safe; it is not a
+    back door around control.
     """
     env = _led(tmp_path)
     a = _append(env, "gate", "admission_decided", {"verdict": "reject", "issue": 5, "_x": 1})
     assert a.returncode == 0
-    # 同じ actor の再実行 → no-op
+    # a re-run by the same actor → no-op
     b = subprocess.run([sys.executable, str(TOOLS / "ledger.py"), "append", "--actor", "gate",
                         "--class", "admission_decided", "--natural-key", "k1",
                         "--payload", json.dumps({"verdict": "reject", "issue": 5})],
@@ -716,12 +717,13 @@ def test_idempotent_key_cannot_bypass_controls(tmp_path):
                         "--payload", json.dumps({"verdict": "reject", "issue": 5})],
                        capture_output=True, text=True, env=env, timeout=60)
     assert c.returncode == 0 and "no-op" in c.stdout, c.stdout + c.stderr
-    # 別 actor が同じキー → 拒否
+    # a different actor under the same key → refused
     d = subprocess.run([sys.executable, str(TOOLS / "ledger.py"), "append", "--actor", "maker",
                         "--class", "admission_decided", "--natural-key", "k1",
                         "--payload", json.dumps({"verdict": "admit", "issue": 5})],
                        capture_output=True, text=True, env=env, timeout=60)
-    assert d.returncode != 0, "別 actor が冪等キーで統制を迂回できた"
+    assert d.returncode != 0, \
+        "a different actor was able to evade control through the idempotency key"
     assert "is not a re-run" in d.stderr
 
 
@@ -732,8 +734,9 @@ def test_decide_writes_ledger_before_issue():
     seg = src[src.index("def cmd_decide"):]
     led = seg.index("ledger.py")
     comment = seg.index('gh(["issue", "comment"')
-    assert led < comment, "Issue に書いてから台帳を叩いている（食い違いが外に残る）"
-    assert "台帳が受け付けなかったので、Issue にも記録していない" in seg
+    assert led < comment, \
+        "it writes to the Issue before the ledger (the discrepancy is left visible outside)"
+    assert "the ledger did not accept it, so nothing was recorded on the Issue" in seg
 
 
 def test_decide_key_is_unique_per_judgment():
@@ -743,12 +746,13 @@ def test_decide_key_is_unique_per_judgment():
     assert 'f"{a.event}-{a.issue}-{digest[:12]}"' in seg
 
 
-# ── 0.22.0: 分割で持ち込んだ穴を塞ぐ ────────────────────────────────────
+# ── 0.22.0: close the holes introduced by the split ─────────────────────────────────────
 
 
-# ══ Writer Phase 0 — lock / fsync / HEAD 回復 / schema 境界 ═══════════════════
-# **actor には触らない。** ここで固定するのは「書き込みが壊れないこと」と「新規イベントが
-# 検証済みであること」だけ。identity_assurance（誰が書いたか）は独立した軸として後で扱う。
+# ══ Writer Phase 0 — lock / fsync / HEAD recovery / schema boundary ══════════
+# **Do not touch actor here.** What is pinned in this phase is only "the write does not get
+# corrupted" and "a new event has been validated". identity_assurance (who wrote it) is a separate
+# axis handled later.
 
 _PR = {"role": "maker", "candidate_id": "c1", "fraction": 0.5, "phase": "implement",
        "done_so_far": "x", "next_step": "y"}
