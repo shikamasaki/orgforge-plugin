@@ -54,6 +54,13 @@ def _role_charter(role):
     return body.strip(), path
 
 
+# Seconds before a headless judge is treated as hung. Measured, not guessed: a realistic subject
+# runs median ~46s / max ~87s, with a ~3x spread across identical prompts. This is deliberately
+# well above that maximum — the value exists to catch a hang, and cutting a slow-but-working
+# judgment costs a whole review round (#203).
+JUDGE_TIMEOUT_DEFAULT = 300
+
+
 def _verdict_schema(role):
     """Return the bundled structured-output schema for a judge role.
 
@@ -769,11 +776,28 @@ def _run_headless(role, issue, material, cfg, schema, stable_organ=None):
           + " — 応答まで数分かかることがある …", file=sys.stderr)
     try:
         # stdin を閉じる。codex exec は stdin を読もうとして、端末が無いと止まる（実測）。
-        timeout = int(cfg.get("timeout_seconds") or os.environ.get("ORG_JUDGE_TIMEOUT", "120"))
+        # A timeout catches a HUNG child; it is not a budget for normal work. Measured on a
+        # realistic subject (compact contract + ~6k of target code, gpt-5.6-terra/medium):
+        #
+        #     median 46.4s, max 86.9s, spread 32–87s across four runs of the SAME prompt
+        #
+        # 120s was 1.4x that maximum — thin, because the run-to-run spread is nearly 3x on its own,
+        # so a larger subject or a slower moment lands on the cutoff. Since 2.9.1 a timed-out
+        # dispatch exits non-zero, so a cutoff is visible rather than silently passing as success;
+        # but a killed judgment still costs the round, the tokens, and reads to the caller exactly
+        # like a judge that produced nothing (#201, #203).
+        #
+        # Trimming the material does NOT buy headroom here: cutting it 68% (2.6.0) changed the
+        # median by nothing measurable. Runtime is dominated by reading the subject and deciding.
+        timeout = int(cfg.get("timeout_seconds") or os.environ.get("ORG_JUDGE_TIMEOUT",
+                                                                   str(JUDGE_TIMEOUT_DEFAULT)))
         pr = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True,
                             text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
-        print(f"[{role}] {cli} timed out (raise it with ORG_JUDGE_TIMEOUT).",
+        print(f"[{role}] {cli} timed out after {timeout}s. Measured normal range on a realistic "
+              f"subject: median ~46s, max ~87s — so this is either a genuinely hung child or a "
+              f"subject larger than what was measured. Raise it with ORG_JUDGE_TIMEOUT before "
+              f"concluding the judge is broken.",
               file=sys.stderr)
         return 5
     if pr.returncode != 0:
