@@ -842,7 +842,8 @@ def _run_headless(role, issue, material, cfg, schema, stable_organ=None):
           + (f"（model={model}" + (f", effort={effort}" if effort else "") + "）" if model else "")
           + " — a response can take several minutes …", file=sys.stderr)
     try:
-        # stdin を閉じる。codex exec は stdin を読もうとして、端末が無いと止まる（実測）。
+        # Close stdin. codex exec tries to read from it and hangs when there is no terminal
+        # (measured).
         # A timeout catches a HUNG child; it is not a budget for normal work. Measured on a
         # realistic subject (compact contract + ~6k of target code, gpt-5.6-terra/medium):
         #
@@ -910,54 +911,64 @@ def _run_headless(role, issue, material, cfg, schema, stable_organ=None):
         else:
             raw = pr.stdout
     if not raw or not raw.strip():
-        # **fail-closed は変えない** — 判定が得られていないなら admission は生成されない。
-        # 変えるのは「何も分からないまま終わる」ことのほう（Issue #166）。実地では
-        # `claude -p` が exit 0 のまま stdout も stderr も空で返り、CLI が落ちたのか、
-        # 認証が切れたのか、tool-use の途中で黙って終わったのかを切り分ける材料が無かった。
+        # **fail-closed does not change** — with no judgment obtained, no admission is generated.
+        # What changes is ending up none the wiser (Issue #166). In the field, `claude -p` returned
+        # exit 0 with both stdout and stderr empty, leaving nothing to distinguish the CLI having
+        # crashed, authentication having expired, or it having quietly ended midway through
+        # tool-use.
         #
-        # 材料だけを出す。**判定はしない** — park にするか再試行するかは監督が決める。
-        # material は出さない（判定対象そのものが漏れる）。長さと出力先だけを言う。
-        _diag = [f"[{role}] {cli} が空を返した。判定は得られていない（admission は生成されない）。",
+        # Emit the material only. **It does not judge** — whether to park or retry is the
+        # supervisor's decision.
+        # The material itself is not printed (that would leak the very thing under judgment); only
+        # its length and where the output should have gone.
+        _diag = [f"[{role}] {cli} returned nothing. No judgment was obtained (so no admission is "
+                 f"generated).",
                  f"  exit={pr.returncode}  stdout={len(pr.stdout or '')}B  "
                  f"stderr={len(pr.stderr or '')}B  material={len(material)}B",
-                 # 引数は **フラグだけ** を出す。`cmd[:3]` のような位置での切り出しは、
-                 # claude 経路（`-p <material>`）で判定対象そのものを診断に漏らす
-                 # （このテストが実際にそれを捕まえた）。長い値は名前も中身も出さない。
+                 # Print **the flags only**. Slicing by position, as in `cmd[:3]`, leaks the very
+                 # thing under judgment into the diagnostic on the claude path (`-p <material>`) —
+                 # a test caught exactly that. For a long value, neither its name nor its contents
+                 # is printed.
                  f"  invocation: {shlex.quote(os.path.basename(cmd[0]))} "
                  + " ".join(shlex.quote(c) for c in cmd[1:]
                             if c.startswith("-") and len(c) < 40)
-                 + f" …（引数 {len(cmd)} 個。本文と長い値は伏せる）"]
+                 + f" …({len(cmd)} arguments; the body and any long values are withheld)"]
         if cli == "codex" and not os.path.isfile(out_json):
-            _diag.append(f"  --output-schema の出力先が作られていない: {out_json}")
+            _diag.append(f"  the --output-schema destination was never created: {out_json}")
         _err = (pr.stderr or "").strip()
         if _err:
-            _diag.append("  stderr の末尾:\n    " + "\n    ".join(_err.splitlines()[-5:]))
+            _diag.append("  the tail of stderr:\n    " + "\n    ".join(_err.splitlines()[-5:]))
         else:
-            _diag.append("  stderr も空。CLI の認証・モデル名・サンドボックス設定を確認する:")
+            _diag.append("  stderr is empty too. Check the CLI's authentication, model name and "
+                         "sandbox settings:")
             _diag.append(f"    {cli} " + ("exec --sandbox read-only " if cli == "codex" else "-p ")
                          + "'Reply with exactly: OK' </dev/null")
-        _diag.append("  同じ材料での再試行は `--print-subject` で subject を確認してから行う"
-                     "（別の revision を見た判定は、一致とみなされない）。")
+        _diag.append("  Before retrying on the same material, confirm the subject with "
+                     "`--print-subject` (a judgment that looked at a different revision does not "
+                     "count as agreement).")
         print("\n".join(_diag), file=sys.stderr)
         return 7
 
-    print(raw)                                  # 監督が読む・intake に渡せる形で stdout に出す
-    print(f"\n[{role}] 別ハーネス（{cli}"
-          + (f" / {model}" if model else "") + f"）の判定を持ち帰った。**まだ記録していない。**\n"
-          f"  内容の側から検査する:\n"
+    print(raw)                                  # to stdout, for the supervisor to read and for
+                                                # intake to consume as-is
+    print(f"\n[{role}] brought back the judgment from the other harness ({cli}"
+          + (f" / {model}" if model else "") + f"). **It has not been recorded yet.**\n"
+          f"  Check it on its contents:\n"
           f'    {_organ_command(stable_organ, "org-cycle")} intake --issue {issue} '
           f"--role {role} --report {out_json if os.path.isfile(out_json) else '-'}\n"
-          f"  検査を通ったら記録する（verdict / why は判定した側のもの。監督が書き換えない）。",
+          f"  Record it once it passes (the verdict / why belong to whoever judged; the "
+          f"supervisor does not rewrite them).",
           file=sys.stderr)
     return 0
 
 
 def _judges_read_only():
-    """`enforcement.judges.read_only` を読む（既定 True — template の宣言と揃える）。
+    """Read `enforcement.judges.read_only` (default True — matching the template's declaration).
 
-    ここは **助言を出すかどうか** の分岐にしか使わない。判定にも起動可否にも効かないので、
-    読めないときは「read-only とみなす」= 助言を出す側に倒す。助言は起動を妨げないから、
-    倒しても失うものが無い（fail-closed が要るのは `_judge_lineage` の側）。
+    This only ever branches **whether the advice is printed**. It affects neither the judgment nor
+    whether anything launches, so when it cannot be read we treat it as read-only, i.e. fall to the
+    side that prints the advice. Advice does not obstruct a launch, so nothing is lost by falling
+    that way (fail-closed is needed on the `_judge_lineage` side).
     """
     env = os.environ.get("ORG_JUDGE_READ_ONLY")
     if env is not None:
@@ -978,11 +989,11 @@ def _judges_read_only():
 
 
 def _judge_lineage(role):
-    """constitution の `enforcement.judges` を読む。(lineage, harness-cfg) を返す。
+    """Read `enforcement.judges` from the constitution. Returns (lineage, harness-cfg).
 
-    **既定は `same-harness`。** 別ハーネスを前提にすると、その契約・CLI・認証を持っていない
-    環境で org が回らなくなる。複数の血統を並べるのは「スイスチーズ」の層を増やす選択であって、
-    org が成立する前提ではない。
+    **The default is `same-harness`.** Presuppose another harness and the org stops working in any
+    environment that lacks its contract, CLI or authentication. Lining up several lineages is a
+    choice to add another slice of the Swiss cheese — not a premise for the org to exist at all.
 
     **ただし読めないときは止める（fail-closed）。** 0.32.0 は例外を握りつぶして
     `same-harness` を返していた — cross-harness を宣言した org で YAML が壊れていると、
