@@ -1612,48 +1612,52 @@ RULES = [rule_blast_radius, rule_iteration_cap]
 
 
 
-# ── HALT: 止まっている状態は、警告ではない（H4a）─────────────────────────────
-# **復旧のために通すもの。** すべてを deny すると、止まった org を診断も修復もできない。
-# 観測（読み取り）・検証・安全な修復に限り、**通常の作業は止める**。
+# ── HALT: being stopped is not a warning (H4a) ───────────────────────────────
+# **What is allowed through, for recovery.** Deny everything and a halted org can neither be
+# diagnosed nor repaired. Observation (reads), verification and safe repair only — **ordinary
+# work stays stopped**.
 _RECOVERY_READONLY = re.compile(
     r"^\s*(?:"
     r"git\s+(?:status|log|diff|show|branch\s*$|rev-parse|remote\s+-v|fsck)\b"
     r"|(?:cat|head|tail|less|wc|grep|rg|ls|stat|file|du|df)\b"
-    # **`find` は「読む」だけのコマンドではない。** `-exec` / `-execdir` / `-delete` /
-    # `-ok` を持つので、**任意のコマンドの入口**であり、消せる（実測: HALT 中に
-    # `find . -maxdepth 0 -exec python3 -c '...' {} +` が通り、中身が実行された）。
-    # `env` を外したのと同じ理由。読むだけなら `ls` と `grep` で足りる。
-    # 引数の形で判定しない — **危険な綴りを1つずつ潰すのは、この監査で3回失敗した。**
+    # **`find` is not a read-only command.** It carries `-exec` / `-execdir` / `-delete` / `-ok`,
+    # which makes it **an entry point for any command** — and it can delete (measured: during a
+    # HALT, `find . -maxdepth 0 -exec python3 -c '...' {} +` was allowed and its contents ran).
+    # Same reason `env` was removed. For reading alone, `ls` and `grep` suffice.
+    # Do not judge by the shape of the arguments — **stamping out dangerous spellings one at a
+    # time failed three times during this audit.**
     r"|find\s+(?![^|;&\n]*-(?:exec|execdir|delete|ok|fprint|fls))[^|;&\n]*$"
     r"|python3?\s+\S*(?:ledger|status|guardrails|org_lint|repro_lint)\.py\s+"
     r"(?:verify|halt-status|schema|census|digest|view|status|check|cat)\b"
     r"|gh\s+(?:issue|pr)\s+(?:view|list)\b"
-    # **`env` は外した。** `env FOO=1 <破壊的コマンド>` の形で
-    # **任意のコマンドの入口**になる（Codex の指摘、実測で HALT 中に通った）。
-    # 環境変数を見たいだけなら `printenv` を使えばよい。
+    # **`env` was removed.** In the form `env FOO=1 <destructive command>` it becomes **an entry
+    # point for any command** (raised by Codex; measured getting through during a HALT).
+    # To simply look at the environment, use `printenv`.
     r"|echo\b|pwd\b|printenv\b|which\b"
     r")", re.I)
-# 安全な修復 — 台帳の健全性を戻す操作だけ。**halt の解除はここに入れない**（H4b / H1 依存）。
-# `python3` / `/usr/bin/python3` / `python` に、`-B` `-u` などのフラグが付いた形までを
-# 1つの前置きとして扱う。**復旧の綴りを1通りに限定しない。**
+# Safe repair — only operations that restore the ledger's health. **Releasing the halt does not
+# belong here** (H4b / H1 depend on it). Treat `python3` / `/usr/bin/python3` / `python`, with
+# flags such as `-B` or `-u` attached, as one single prefix. **Do not restrict recovery to a
+# single spelling.**
 _PY = r"^\s*(?:\S*/)?python[0-9.]*(?:\s+-[A-Za-z]+)*"
 
 _RECOVERY_REPAIR = re.compile(
-    # **解除コマンド自身を通す。** HALT 中に `release-halt` まで止めると、
-    # 一度止まった org は二度と動かせない（実測: allowlist に無く deny されていた）。
-    # 解除は receipt 署名で守られているので、ここを通しても統制は緩まない
-    # ——「止められること」と「戻せること」は両方そろって初めて統制である。
-    # **interpreter の書き方で復旧できなくなってはいけない。** 実測（再監査）:
-    # `/usr/bin/python3`、`python3 -B`、引用符付きの script path はすべて誤拒否されていた。
-    # 復旧経路が「1通りの綴りでしか動かない」なら、それは実質デッドロックである。
-    # 解釈子のパス・`-B` などのフラグ・引用符を、ここ1箇所で吸収する。
+    # **Allow the release command itself.** Stop `release-halt` too during a HALT and an org that
+    # has halted once can never move again (measured: it was absent from the allowlist and denied).
+    # The release is protected by a receipt signature, so allowing it here does not loosen control
+    # — control only exists when **being stoppable and being restorable** hold together.
+    # **How the interpreter is written must never be what makes recovery impossible.** Measured
+    # (on re-audit): `/usr/bin/python3`, `python3 -B`, and a quoted script path were all falsely
+    # rejected. A recovery path that works under exactly one spelling is a deadlock in practice.
+    # Absorb the interpreter path, flags like `-B`, and quoting, here in this one place.
     _PY + r"\s+['\"]?\S*ledger\.py['\"]?\s+"
     r"(?:schema\s+--fix|append\s+.*--class\s+correction|release-halt)\b"
-    # **Stage B では解除も writer を通る。** direct `ledger.py release-halt` は
-    # single-writer gate に拒否されるので（実測 exit=4）、`writer_client.py release-halt`
-    # を通さないと **解除手段がゼロ**になり、一度止めた org は二度と動かせない。
-    # 解除そのものは receipt 署名で守られているので、ここを通しても統制は緩まない。
-    # **止める側（trip-halt）は復旧ではないので通さない。**
+    # **Under Stage B the release goes through the writer too.** A direct `ledger.py release-halt`
+    # is refused by the single-writer gate (measured exit=4), so without allowing
+    # `writer_client.py release-halt` there is **no way to release at all**, and an org stopped
+    # once can never move again. The release itself is protected by a receipt signature, so
+    # allowing it here does not loosen control.
+    # **The stopping side (trip-halt) is not recovery, so it is not allowed.**
     r"|" + _PY + r"\s+['\"]?\S*writer_client\.py['\"]?\s+release-halt\b"
     # The operational state machine owns its recovery transition. These commands remain ledger-
     # validated and session/authority checked; blocking the only recovery path would deadlock it.
@@ -1663,29 +1667,32 @@ _RECOVERY_REPAIR = re.compile(
 
 
 def _halt_recovery_allowed(tool_name, tool_input):
-    """halt 中でも通す行為か。**観測・検証・安全な修復に限る。**
+    """Is this an action to allow even during a halt? **Observation, verification and safe repair
+    only.**
 
-    通常の作業は止める — 止まっているとは、作業が進まないことである。ここを広く取ると
-    「halt したが実行は止まらない」に戻る。
+    Ordinary work stays stopped — being halted means work does not proceed. Draw this widely and
+    we are back to "the org halted but execution carried on".
     """
     if not _is_shell_tool(tool_name):
-        return False           # Write / Edit / ApplyPatch は halt 中は通さない
+        return False           # Write / Edit / ApplyPatch are not allowed during a halt
     cmd = _command_text(tool_input).strip()
     if not cmd:
         return False
-    # **shell が実行する形で照合する。** 実測（再監査5回目）: `-e""xec` は quote 除去後に
-    # `-exec` になり、`find . -maxdepth 0 -e""xec echo Q {} +` が allowlist を通って
-    # **実際に実行された**（`QUOTED_EFFECT .` を確認）。allowlist が「書かれた文字列」を見て、
-    # shell が「quote を外した文字列」を実行する限り、この差は必ず突かれる
-    # ——同じ形の迂回はこの監査で4回起きている。
-    # よって **照合の前に空 quote を畳む**。ここを直すと、find だけでなく
-    # 今後 allowlist に載るすべての規則が同じ保護を受ける。
-    # **quote の畳み方を自作しない。** 空 quote だけを畳む実装では `-e""xec` は塞げても
-    # `-ex"ec"` が残った（実測）。shell と同じ字句解析（shlex）で token に割り、
-    # **shell が実際に渡す引数**で照合する。解釈できない綴りは通さない。
-    # **メタ文字の判定は生の文字列で先に行う。** shlex は改行を空白として畳むので、
-    # token 化した後に見ると `git status\ngit push --force` の改行連結を見逃す（実測で回帰した）。
-    # 「連結・置換・リダイレクトを含むなら通さない」は、**shell が読む前の姿**で判断する。
+    # **Match against the form the shell will execute.** Measured (fifth re-audit): `-e""xec`
+    # becomes `-exec` once quotes are removed, so `find . -maxdepth 0 -e""xec echo Q {} +` passed
+    # the allowlist and **actually ran** (confirmed by `QUOTED_EFFECT .`). As long as the allowlist
+    # reads "the string as written" while the shell executes "the string with quotes removed",
+    # that gap will be exploited — the same shape of bypass occurred four times in this audit.
+    # So **fold quotes away before matching**. Fixing it here means not only find but every rule
+    # added to the allowlist in future gets the same protection.
+    # **Do not hand-roll the quote folding.** An implementation that folded only empty quotes
+    # closed `-e""xec` but left `-ex"ec"` (measured). Split into tokens with the same lexer the
+    # shell uses (shlex) and match on **the arguments the shell actually passes**. A spelling that
+    # cannot be interpreted is not allowed through.
+    # **Judge the metacharacters on the raw string first.** shlex folds a newline into whitespace,
+    # so looking after tokenisation misses the newline-joined `git status\ngit push --force`
+    # (measured as a regression). "Not allowed if it contains chaining, substitution or
+    # redirection" is decided on **the form before the shell reads it**.
     if re.search(r"[;&|`\n><]|\$\(", cmd):
         return False
     try:
