@@ -1175,7 +1175,7 @@ _OPAQUE_EXEC = re.compile(
     r"|\beval\b[^\n]*\$\([^)]*(?:base64|openssl\s+enc|xxd|uudecode|curl|wget)", re.I)
 
 
-# SQL クライアントは `-c` / `-e` に渡した文字列を **実行する**。
+# A SQL client **executes** the string handed to `-c` / `-e`.
 _SQL_CLIENT = re.compile(r"\b(?:psql|mysql|mariadb|sqlite3|mongo|redis-cli)\b", re.I)
 _EXECUTES_STRING = re.compile(
     r"(?:\b(?:ba|z|k|da)?sh\b\s+-c|\beval\b|\bxargs\b|\bsource\b|"
@@ -1188,17 +1188,19 @@ def _catastrophic_reason(tool_name, ti):
     cmd = _without_inert_heredoc_data(_command_text(ti))
     if not cmd.strip():
         return None
-    # **入れ子の中身も見る。ただし「実行される中身」だけ。**
-    # shlex は `$(rm` や `` `rm `` を1トークンとして残すので、token 一致だけでは
-    # 置換・backtick 経由が素通しする（実測）。一方、クォートを無条件に開くと
-    # `grep -n "…" notes.txt` や `echo "… は危険"` まで hard-block してしまい、
-    # **危険語を検索することも文書化することもできなくなる**（これも実測。統制ではなく妨害）。
-    # 区別は「その文字列が実行されるか」である:
-    #   - `$( )` / backtick … 必ず実行される → 常に開く
-    #   - クォート           … `sh -c` `eval` `xargs` やシェルへのパイプに渡るときだけ実行される
-    # `$( )` / backtick の **中身だけ** を取り出す（クォートの中は開かない）。
-    # 素朴に記号を空白へ置換すると、クォート内の文字列まで単語に割れてしまい、
-    # `echo "… は危険" >> README.md` のような **書くだけのコマンドまで hard-block** する。
+    # **Look inside nested values too — but only at what actually gets executed.**
+    # shlex keeps `$(rm` and `` `rm `` as single tokens, so matching on tokens alone lets
+    # substitutions and backticks straight through (measured). Opening every quote instead
+    # hard-blocks `grep -n "…" notes.txt` and `echo "… is dangerous"`, which makes it
+    # **impossible to search for or to document a dangerous word** (also measured — that is
+    # obstruction, not control).
+    # The distinction is whether the string gets executed:
+    #   - `$( )` / backtick … always executed → always open it
+    #   - a quote            … executed only when it reaches `sh -c`, `eval`, `xargs`,
+    #                          or a pipe into a shell
+    # So take **only the contents** of `$( )` / backtick, and leave quotes closed. Naively
+    # replacing the punctuation with spaces splits quoted text into words as well, and
+    # hard-blocks commands that merely WRITE — `echo "… is dangerous" >> README.md`.
     toks = _tokenize(cmd)
     for _inner in re.findall(r"\$\(([^)]*)\)|`([^`]*)`", cmd):
         toks += " ".join(x for x in _inner if x).split()
@@ -1207,12 +1209,14 @@ def _catastrophic_reason(tool_name, ti):
         toks += re.sub(r"[$'\"]", " ", _dec).split()
     if _EXECUTES_STRING.search(cmd):
         toks += re.sub(r"['\"]", " ", cmd).split()
-    # **中身が読めない実行**は、中身を確かめられないまま通すことになる。
-    # `base64 -d | sh` / `curl … | sh` の類は、静的には何を実行するか決められない
-    # （Codex の指摘、実測で hard-block を素通しした）。**読めないなら通さない。**
+    # **Execution whose contents cannot be read** would pass without anyone verifying them.
+    # For `base64 -d | sh` or `curl … | sh`, what will run is not statically decidable
+    # (raised by Codex; measured slipping past the hard-block). **If it cannot be read,
+    # it does not pass.**
     if _OPAQUE_EXEC.search(cmd):
-        return ("中身を静的に確かめられない実行（復号やダウンロードをシェルに直接流す形）— "
-                "何が実行されるか分からないものは通さない。一度ファイルに落として中身を確かめること")
+        return ("execution whose contents cannot be verified statically (a decode or a download "
+                "piped straight into a shell) — what cannot be read does not pass. Write it to a "
+                "file first and verify the contents")
     # **絶対パス指定の rm も rm である。** `/bin/rm` はトークンとしては `rm` と一致しない
     # ので、素の `rm` だけを見ていると素通しした（実測）。末尾が `/rm` の語も同じ扱いにする。
     # **記号がくっついた語も rm である。** shlex は `<(rm` `/bin/rm` `(rm` を
