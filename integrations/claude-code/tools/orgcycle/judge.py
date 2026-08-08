@@ -592,48 +592,55 @@ def cmd_verify(a):
                                  "failed to apply does not belong here — leave it in evidence / "
                                  "risk as unmeasured; that is what stops the next round "
                                  "re-probing the same place"),
-                   ("out_of_scope", "**MUST の範囲外**で見つけた欠陥（実在するが、この Issue が"
-                                    "守ると述べていないもの）。`verdict` には数えず、"
-                                    "「Issue 化を推奨」として返す — 実在の欠陥でも、それは次の "
-                                    "Issue の仕事。無ければ「無し」と明示。\n"
-                                    "    判断が難しいものは**あなたが決めず**、両方の読み方を"
-                                    "書いて監督に返すこと（スコープの carve out は監督の判断）")]
-    fields += [("risk", "承知の上で残す穴 / 排除しきれなかった失敗モード。無いなら「無い」と明示")]
+                   ("out_of_scope", "defects found **outside the MUSTs** (real, but not something "
+                                    "this Issue said it would uphold). They do not count towards "
+                                    "`verdict`; return them as \"recommend raising an Issue\" — a "
+                                    "real defect is still the next Issue's work. If there are "
+                                    "none, say so explicitly.\n"
+                                    "    For anything genuinely hard to place, **do not decide it "
+                                    "yourself**: write out both readings and return them to the "
+                                    "supervisor (carving up scope is the supervisor's call)")]
+    fields += [("risk", "holes knowingly left open / failure modes you could not rule out. If "
+                        "there are none, say so explicitly")]
 
     if role == "skeptic":
-        out.append("\n**skeptic の返り値は常に構造化 JSON にすること。** 静的判定で変異を"
-                   "使わなかった場合も `\"mutations\": []` を含める。散文だけの報告は、"
-                   "変異の適用・復元を機械検査できないため成果物として受理されない。")
+        out.append("\n**The skeptic's return value is always structured JSON.** Include "
+                   "`\"mutations\": []` even when a static judgment used no mutations. A report "
+                   "in prose alone is not accepted as a deliverable, because the applying and "
+                   "restoring of mutations cannot then be checked mechanically.")
 
-    out.append("\n## 返すもの（**判定はあなたが決める。記録は監督が行う**）\n")
+    out.append("\n## What to return (**you decide the judgment; the supervisor records it**)\n")
     for k, desc in fields:
         out.append(f"- **{k}** — {desc}")
-    out.append("\n> **記録コマンドは打たなくてよい。** あなたには `ORG_GITHUB_REPO` も台帳の"
-               "パスも渡っていない。上の項目を揃えて返せば、監督が Issue と台帳の両方に"
-               "1コマンドで記録する。\n"
-               "> **欠けたまま返してはいけない** — 監督は記録できず、判定が失われる"
-               "（実地で一度、判定が台帳に入らないまま失われかけた）。\n"
-               f"> なお台帳は、maker が自分の成果物を admit することも、maker や admit した "
-               f"gate が refute することも**拒否する** — あなたの独立性は記録の時点で"
-               f"機械的に検査される。")
+    out.append("\n> **You do not need to run any recording command.** You have neither "
+               "`ORG_GITHUB_REPO` nor the ledger path. Return the fields above complete, and the "
+               "supervisor records them to both the Issue and the ledger in one command.\n"
+               "> **Never return them incomplete** — the supervisor then cannot record, and the "
+               "judgment is lost (in the field, one judgment came close to being lost without "
+               "ever reaching the ledger).\n"
+               f"> Note that the ledger **refuses** both a maker admitting its own deliverable and "
+               f"a refutation by the maker or by the gate that admitted it — your independence is "
+               f"checked mechanically at the moment of recording.")
 
-    # **判定対象の同一性を、判定の前に固定する。** judge が subject を書けるなら、別の成果物を
-    # 見た2件を「同じものを見た」と申告して一致を作れる（監査が実証: revision A と B の admit で
-    # joint が生成された）。verify が観測し、judge は運ぶだけ。
-    out.append(f"\n## 判定対象（review_subject_id — **変更しないこと**）\n\n"
+    # **Fix the identity of what is judged BEFORE the judgment.** If a judge could write the
+    # subject, two judgments that looked at different deliverables could declare they looked at the
+    # same one and manufacture an agreement (demonstrated by audit: a joint was generated from
+    # admits of revision A and revision B). verify observes it; the judge only carries it.
+    out.append(f"\n## What is being judged (review_subject_id — **do not change it**)\n\n"
                f"    {_sid}\n\n"
-               + "\n".join(f"    {k:20}= {v or '(なし)'}" for k, v in _sparts.items())
+               + "\n".join(f"    {k:20}= {v or '(none)'}" for k, v in _sparts.items())
                + f"\n    {'descriptor':20}= {_subject_path}"
-               + "\n\nこの id は監督が記録に載せる。**あなたが作る値ではない。**"
-                 " 別の血統の judge にも同じ id が渡っており、"
-                 "**2件の id が一致しない限り admission は生成されない** —"
-                 " 別の revision を見た2つの通過は、一致ではない。")
+               + "\n\nThe supervisor puts this id into the record. **It is not a value you "
+                 "produce.** The judge of the other lineage has been given the same id, and "
+                 "**no admission is generated unless the two ids match** — two passes that looked "
+                 "at different revisions are not an agreement.")
 
     _lineage, _hcfg = _judge_lineage(role)
-    # cross-harness では stdout は **判定** の置き場所にする（intake にそのまま渡せる形）。
-    # 材料は stderr に回す — 監督が読めることは残す。
+    # Under cross-harness, stdout is where the **judgment** goes (in a form that can be handed
+    # straight to intake). The material is diverted to stderr — still readable by the supervisor.
     print("\n".join(out), file=sys.stderr if _lineage == "cross-harness" else sys.stdout)
-    # 監督向け（stderr）— subagent が返した値を流し込むコマンド。**判定は埋めない。**
+    # For the supervisor (stderr) — the command that pours in what the subagent returned.
+    # **It never fills in the judgment.**
     print(f"\n[review_subject_id] {_sid}\n"
           f"  記録のときにこの値を --subject に渡すこと。**judge に作らせない。**",
           file=sys.stderr)

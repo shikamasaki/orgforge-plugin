@@ -1000,8 +1000,8 @@ def test_verify_does_not_tell_subagent_to_record():
     src = _cycle_src("judge")
     seg = src[src.index("def cmd_verify"):]
     # subagent 向け（stdout）の節には記録コマンドを載せない
-    assert "返すもの（**判定はあなたが決める。記録は監督が行う**）" in seg
-    assert "記録コマンドは打たなくてよい" in seg
+    assert "What to return (**you decide the judgment; the supervisor records it**)" in seg
+    assert "You do not need to run any recording command" in seg
     # 監督向け（stderr）には、値を流し込むコマンドを出す — 配管が判定を運べないと本末転倒
     assert "監督（あなた）が打つコマンド" in seg
     assert "file=sys.stderr" in seg
@@ -1054,7 +1054,7 @@ def test_verify_asks_skeptic_for_out_of_scope_separately():
     """「返すもの」にも out_of_scope を入れる（憲章だけ直すとプロンプトと食い違う）。"""
     src = _cycle_src("judge")
     assert "out_of_scope" in src
-    assert "verdict` には数えず" in src or "verdict には数えず" in src
+    assert "do not count towards " in src
 
 
 def test_verify_scopes_blockers_and_repeated_findings():
