@@ -422,9 +422,9 @@ def _asset_dimension(tool_name, ti):
     # with tight anchors. See _tokenize/_has_token/_has_seq above and the tests that pin this.
     # **Look inside the container too.** shlex turns `psql -c 'DROP TABLE users'` into a
     # single quoted token, so it never matches as `DROP`. In other words, **a destructive SQL
-    # 使われる形（-c / -e にクォートで渡す形）では cap に一度も計上されていなかった**
-    # （実測: 素の `DROP TABLE users` だけが計上され、`psql -c '…'` は素通し）。
-    # 数えられないものは上限で止められない。
+    # operation in the form people actually write it — quoted after -c / -e — was never counted
+    # toward the cap** (measured: a bare `DROP TABLE users` counted, `psql -c '…'` passed).
+    # What cannot be counted cannot be capped.
     toks = _tokenize(cmd)
     for _inner in re.findall(r"\$\(([^)]*)\)|`([^`]*)`", cmd):
         toks += " ".join(x for x in _inner if x).split()
@@ -432,18 +432,19 @@ def _asset_dimension(tool_name, ti):
     if _dec != cmd:
         toks += re.sub(r"[$'\"]", " ", _dec).split()
     if _EXECUTES_STRING.search(cmd) or _SQL_CLIENT.search(cmd):
-        # `psql -c 'DROP …'` は **クォートの中身がそのまま実行される**。
-        # 実行される文字列だけを開く（`grep 'DROP …'` は開かない）。
+        # In `psql -c 'DROP …'` the **quoted text is what gets executed**. Open only the
+        # strings that are executed — `grep 'DROP …'` is not one of them.
         toks += re.sub(r"['\"]", " ", cmd).split()
     destructive = (
         _has_token(toks, "rm", "dd", "truncate", "mkfs", "shred")                 # dangerous binaries
         or _has_token(toks, "DROP", "DELETE", "TRUNCATE")                         # SQL (as whole tokens)
         or _has_token(toks, "--force", "--delete", "-delete")                     # force / find -delete
-        # `git push` は **force 系だけ**が破壊的。通常の push は追記であって、取り消せる
-        # （revert / 新しいコミット）。一律に数えた結果、実地では日常の開発で cap が満杯に
-        # なり、maker が作業を終えたのに push できなくなった。cap が測るのは irreversibility
-        # であって活動量ではない — 開発そのものを止めるなら、それは cap の誤用である。
-        # force-with-lease も他人の履歴を消しうるので重い側に残す。
+        # Only the **force variants** of `git push` are destructive. A normal push appends and
+        # is undoable — by a revert, or a further commit. Counting them all filled the cap
+        # during ordinary development: a maker finished its work and then could not push it.
+        # The cap measures IRREVERSIBILITY, not activity; stopping development itself is a
+        # misuse of it. force-with-lease stays on the heavy side — it can still erase someone
+        # else's history.
         or (_has_seq(toks, ("git", "push"))
             and _has_token(toks, "--force", "-f", "--force-with-lease", "--delete", "--mirror"))
         or _has_seq(toks, ("git", "reset"), ("reset", "--hard"),
@@ -453,12 +454,12 @@ def _asset_dimension(tool_name, ti):
         or bool(re.search(r"\|\s*(bash|sh)\b", cmd))                              # pipe-to-shell
     )
     if destructive:
-        # 再生成できる対象は「取り消せない影響」ではない。cap が測るのは irreversibility であって
-        # 活動量ではないので、作り直せば元に戻るものを同じ重さで数えると、日常の後片付けだけが
-        # 止まる。実地で1日に5回発火し、5件とも実害ゼロ（worktree の削除・node_modules の
-        # symlink・scratchpad）で、止まった結果 worktree が5個溜まった。
-        # rm -rf / 級は catastrophic denylist が別途 hard-block するので、ここを緩めても
-        # 破滅的操作は素通りしない。
+        # A regenerable target is not an irreversible effect. Because the cap measures
+        # irreversibility rather than activity, weighting something a rebuild restores stops
+        # only routine cleanup. Measured: five holds in one day, all five with zero real impact
+        # (removing a worktree, a node_modules symlink, a scratchpad) — and five worktrees
+        # piled up as a result. Relaxing this lets nothing catastrophic through: `rm -rf /`
+        # and its class are hard-blocked by the catastrophic denylist regardless.
         if _is_regenerable_target(cmd):
             return ("destructive_ops", 0)
         # scope-weight the catastrophic recursive/glob deletes so ONE can trip the cap alone
@@ -497,8 +498,8 @@ def _asset_dimension(tool_name, ti):
 # threat tier (asset-touching prod) sets these lower, a sandboxed dev tier may raise them further.
 _DEFAULT_CAPS = {
     # rm/DROP/force per day — irreversible but routine in real work; scope-weighted.
-    # 50 は実地で足りなかった: 18 Issue を並列で回す1日で満杯になり、maker が作業を終えたのに
-    # push できない状態が起きた。cap の目的は「取り返しのつかない操作の暴走を止める」ことで
+    # 50 was not enough in practice: a day running 18 Issues in parallel filled it, leaving a
+    # maker unable to push work it had finished. The cap exists to stop a runaway of irreversible
     # あって、開発の速度を律することではない。通常の `git push` を対象から外した（0.23.0）
     # うえで、なお現実的な余裕として 150 にする。**重み3の操作（rm -rf / DROP / reset --hard）
     # なら50回で到達する**ので、暴走に対する歯止めとしては十分に効く。
