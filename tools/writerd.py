@@ -1,43 +1,46 @@
 #!/usr/bin/env python3
-"""writerd — 台帳への書き込みを1つのプロセスに集約する（Authenticated Writer, 段階A）。
+"""writerd — funnel every ledger write through one process (Authenticated Writer, stage A).
 
-## 何を強くするのか
+## What this strengthens
 
-これまで台帳は「呼び出した側のプロセスが自分で書く」形だった。だから:
+Until now the ledger was written by whichever process happened to call it. So:
 
-  - `decision_by` を receipt で確かめても、**書く経路そのものは誰でも使える**
-  - halt のラッチ・鍵 registry・schema も、書く側と同じ権限で触れる
-  - 「検査に使う記録は検査する側だけが書ける」を宣言しても、経路が1つしかないことを
-    強制する仕組みが無い
+  - even with `decision_by` confirmed from a receipt, **the write path itself was open to anyone**
+  - the halt latch, the key registry and the schema were reachable with the same permissions as
+    a write
+  - declaring "the records a check relies on are writable only by the side doing the checking"
+    came with no mechanism to enforce that there is exactly ONE path
 
-writerd は Unix domain socket を1つだけ開き、**そこを通った要求だけを台帳に書く**。
-CLI が直接書こうとした場合は拒否する（`ORG_WRITER_SOCKET` が設定された org では）。
+writerd opens a single Unix domain socket and **writes to the ledger only what came through it**.
+A CLI attempting to write directly is refused (in an org where `ORG_WRITER_SOCKET` is set).
 
-## 何を強くしないのか — 明示する
+## What this does NOT strengthen — stated outright
 
-**これは OS 境界ではない。** 同じ UID で動く限り:
+**This is not an OS boundary.** As long as it runs under the same UID:
 
-  - caller は daemon を停止できる
-  - caller は socket や台帳のファイル権限を戻せる
-  - caller は writerd 自体を差し替えられる
+  - a caller can stop the daemon
+  - a caller can restore the file permissions on the socket or the ledger
+  - a caller can replace writerd itself
 
-したがって `workload_isolation` は **`process_mediated`** であって、`separate_uid` ではない。
-**「Authenticated Writer 完了」とは呼ばない。** 別 UID / LaunchDaemon / root 所有の設定と
-socket 親ディレクトリが揃って初めて `separate_uid` に上げられる（`tools/writer-install.sh`）。
+So `workload_isolation` is **`process_mediated`**, not `separate_uid`, and **this is never called
+"Authenticated Writer, done."** Only once a separate UID, a LaunchDaemon, and root-owned settings
+and socket parent directory are all in place can it be raised to `separate_uid`
+(`tools/writer-install.sh`).
 
-そして別 UID にしても、**ホストの管理者は突破できる** — 保証の対象は「通常の agent / caller の
-UID から writer の資産を変更できない」ことであって、root は脅威モデルの外である。
+And even under a separate UID, **the host's administrator gets through** — what is guaranteed is
+that the writer's assets cannot be altered from an ordinary agent's / caller's UID. root is outside
+the threat model.
 
-## peer identity の使い方
+## How a peer identity is used
 
-socket の peer credential（SO_PEERCRED / LOCAL_PEERCRED）から得た uid/pid は
-**`recorded_by` にしか使わない**。`decision_by` は署名 receipt からのみ確定する —
-「接続してきた」ことは「その判断をした」ことの証拠にならない。
+The uid/pid obtained from the socket's peer credential (SO_PEERCRED / LOCAL_PEERCRED) is used
+**only for `recorded_by`**. `decision_by` is settled by a signed receipt and nothing else —
+having connected is no evidence of having made the judgment.
 
-## RPC の改変・再送
+## Tampering with, and replaying, an RPC
 
-要求は nonce と本文の digest を持ち、writerd は **使用済み nonce を拒否**する。
-また要求全体の digest を検証するので、途中で書き換えられた要求は通らない。
+A request carries a nonce and a digest of its body, and writerd **refuses a nonce it has already
+seen**. It also verifies the digest of the whole request, so one altered in transit does not pass.
 """
 
 import argparse
@@ -56,15 +59,15 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 PROTOCOL = 1
-# **writer の内側であることの証拠。** 環境変数の値そのものを秘密にする —
-# `=1` のような当てられる値にすると、caller が名乗れてしまう（実測でそうなった）。
+# **The evidence of being inside the writer.** The value of the environment variable is itself the
+# secret — make it something guessable like `=1` and a caller can simply assert it (measured).
 _INSIDE_WRITER_TOKEN = __import__("secrets").token_hex(32)
 
-_MAX_REQUEST = 1 << 20          # 1 MiB。これを超える要求は読まずに拒否する
-_NONCE_TTL = 3600               # 使用済み nonce を覚えておく時間（秒）
+_MAX_REQUEST = 1 << 20          # 1 MiB. A request larger than this is refused unread
+_NONCE_TTL = 3600               # how long a used nonce is remembered (seconds)
 
 
-# ── socket のパスと、その親ディレクトリの検証 ────────────────────────────────
+# ── the socket path, and validating its parent directory ────────────────────
 def socket_path(root=None):
     env = os.environ.get("ORG_WRITER_SOCKET")
     if env:
@@ -80,13 +83,13 @@ def socket_path(root=None):
 
 
 def load_manifest(path=None):
-    """root 所有の manifest から **daemon の設定を固定配線する**。
+    """**Hard-wire the daemon's configuration** from a root-owned manifest.
 
-    daemon が起動時に「どの org を、どの schema と policy と trust store で扱うか」を
-    **caller の環境からではなく、root 所有のファイルから**受け取る。env や cwd に依存すると、
-    caller が差し替えられる。
+    At start-up the daemon takes "which org, with which schema, policy and trust store" **from a
+    root-owned file rather than from the caller's environment**. Depend on env or cwd and the caller
+    can swap it.
 
-    形:
+    Shape:
         orgs:
           default:
             ledger: /usr/local/var/orgforge/orgs/<ns>/ledger
@@ -95,7 +98,7 @@ def load_manifest(path=None):
         policy: /usr/local/etc/orgforge/policy.yaml
         allow_uids: [501]
 
-    返り値: (manifest, error)。**読めないなら起動しない。**
+    Returns: (manifest, error). **If it cannot be read, do not start.**
     """
     path = path or os.environ.get("ORG_WRITER_MANIFEST")
     if not path:
@@ -124,58 +127,59 @@ def load_manifest(path=None):
 
 
 def check_socket_parent(path, require_root_owned=False):
-    """socket の **親ディレクトリ** を検証する。
+    """Validate the socket's **parent directory**.
 
-    **caller が親ディレクトリを差し替えられるなら、socket も差し替えられる** — 偽の writerd を
-    立てて「書けた」と言わせられる。だから接続する側が親を確かめる。
+    **If a caller can replace the parent directory, it can replace the socket** — stand up a fake
+    writerd and have it report "written". So the connecting side checks the parent.
 
-    段階A（同一 UID）で確かめられるのは:
-      - 親が実在し、シンボリックリンクでないこと
-      - 他人に書き込み可能でないこと（group/other write が落ちていること）
-      - 所有者が自分か root であること
+    What stage A (same UID) can confirm:
+      - the parent exists and is not a symlink
+      - it is not writable by others (group/other write are off)
+      - it is owned by you or by root
 
-    `require_root_owned=True`（段階B）では **root 所有かつ他者書き込み不可** を要求する。
-    そこまで来て初めて「caller が差し替えられない」と言える。
+    With `require_root_owned=True` (stage B) it demands **root-owned and not writable by others**.
+    Only at that point can we say a caller cannot replace it.
     """
     parent = os.path.dirname(os.path.abspath(path))
     if not os.path.isdir(parent):
-        return f"socket の親ディレクトリが無い: {parent}"
+        return f"the socket's parent directory does not exist: {parent}"
     if os.path.islink(parent):
-        return (f"socket の親ディレクトリがシンボリックリンクである: {parent}\n"
-                f"  リンクを張り替えれば socket ごと差し替えられる。")
+        return (f"the socket's parent directory is a symlink: {parent}\n"
+                f"  Re-point the link and the whole socket can be replaced.")
     st = os.stat(parent)
-    # **other-write は常に不可。** 誰でも書けるなら socket を差し替えられる。
+    # **other-write is never acceptable.** If anyone can write there, the socket can be replaced.
     if st.st_mode & 0o002:
-        return (f"socket の親ディレクトリが誰からでも書き込み可能である "
-                f"（mode {oct(st.st_mode & 0o777)}）: {parent}\n"
-                f"  **書ける主体は socket を差し替えられる** — 偽の writer に繋がされる。")
+        return (f"the socket's parent directory is world-writable "
+                f"(mode {oct(st.st_mode & 0o777)}): {parent}\n"
+                f"  **Anyone who can write there can replace the socket** — and point you at a "
+                f"forged writer.")
     if require_root_owned:
-        # 段階B。**leaf は writer 所有でよい** — daemon が socket を作るには親への書き込み権限が
-        # 要るので、root 所有 0755 では bind できない（実測: Permission denied）。
-        # 保証は「**anchor（leaf の親）に caller が書けないので、leaf ごと差し替えられない**」
-        # ことである。したがって:
-        #   leaf   … 自分（writer）の所有で、他者から書けないこと
-        #   anchor … root 所有で、他者から書けないこと
+        # Stage B. **The leaf may be writer-owned** — creating the socket needs write permission on
+        # its parent, so a root-owned 0755 directory cannot be bound (measured: Permission denied).
+        # The guarantee is that **the caller cannot write to the anchor (the leaf's parent), so the
+        # leaf itself cannot be swapped out.** Hence:
+        #   leaf   … owned by the writer, not writable by others
+        #   anchor … owned by root, not writable by others
         if st.st_uid not in (0, os.getuid()):
-            return (f"socket の親（leaf）の所有者が writer でも root でもない"
-                    f"（uid={st.st_uid}）: {parent}")
+            return (f"the socket's parent (the leaf) is owned by neither the writer nor root "
+                    f"(uid={st.st_uid}): {parent}")
         if st.st_mode & 0o022:
-            return (f"socket の親（leaf）が他者から書き込み可能である "
-                    f"（mode {oct(st.st_mode & 0o777)}）: {parent}\n"
-                    f"  その主体は socket を差し替えられる。")
+            return (f"the socket's parent (the leaf) is writable by others "
+                    f"(mode {oct(st.st_mode & 0o777)}): {parent}\n"
+                    f"  Whoever can write there can replace the socket.")
         anchor = os.path.dirname(parent)
         try:
             ast_ = os.stat(anchor)
         except OSError as e:
-            return f"socket の anchor を stat できない（{e}）: {anchor}"
+            return f"cannot stat the socket's anchor ({e}): {anchor}"
         if ast_.st_uid != 0:
-            return (f"socket の anchor が root 所有でない（uid={ast_.st_uid}）: {anchor}\n"
-                    f"  anchor に書ける主体は **leaf ごと差し替えられる**。"
-                    f"**workload_isolation を separate_uid と呼べない。**")
+            return (f"the socket's anchor is not root-owned (uid={ast_.st_uid}): {anchor}\n"
+                    f"  Whoever can write to the anchor can **swap out the whole leaf**. "
+                    f"**workload_isolation cannot be called separate_uid.**")
         if ast_.st_mode & 0o022:
-            return (f"socket の anchor が他者から書き込み可能である "
-                    f"（mode {oct(ast_.st_mode & 0o777)}）: {anchor}\n"
-                    f"  **caller が leaf を差し替えられる。**")
+            return (f"the socket's anchor is writable by others "
+                    f"(mode {oct(ast_.st_mode & 0o777)}): {anchor}\n"
+                    f"  **A caller can replace the leaf.**")
     else:
         # 段階A / client 側。**leaf の所有者は writer であって caller ではない** —
         # 実測（監査）: installer が leaf を writer 所有にする一方、client が「root か自分」しか
@@ -186,7 +190,7 @@ def check_socket_parent(path, require_root_owned=False):
         if st.st_mode & 0o022:
             return (f"socket の親（leaf）が他者から書き込み可能である "
                     f"（mode {oct(st.st_mode & 0o777)}）: {parent}\n"
-                    f"  **書ける主体は socket を差し替えられる** — 偽の writer に繋がされる。")
+                    f"  **Anyone who can write there can replace the socket** — and point you at a forged writer.")
         anchor = os.path.dirname(parent)
         try:
             ast_ = os.stat(anchor)
