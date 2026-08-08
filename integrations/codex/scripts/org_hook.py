@@ -1698,41 +1698,43 @@ def _halt_recovery_allowed(tool_name, tool_input):
     try:
         _toks = shlex.split(cmd)
     except ValueError:
-        return False           # quote が閉じていない等 — 解釈できないなら通さない
+        return False           # unclosed quote and the like — if it cannot be parsed, deny
     if not _toks:
         return False
     cmd = " ".join(_toks)
-    # **allowlist は先頭一致である。** つまり `git status; <破壊的コマンド>` のように
-    # 連結すれば、先頭だけ安全に見せて後ろで何でも実行できる。実測で7通りの回避が通った
-    # （`;` `&&` `||` 改行 パイプ `$( )` バッククォート）。
-    # **HALT 中は「1つの安全なコマンド」だけを通す。** 連結・置換を含むなら、
-    # 中身が何であれ通さない。復旧は1コマンドずつ行えばよい。
-    # `>` `>>` も足す。**読み取りコマンドでもリダイレクトすればファイルを壊せる**
-    # （実測: HALT 中に `git status > important` が通った）。
-    # `<` も同じ理由で足す。**process substitution `<(cmd)` は任意コマンドを実行できる**
-    # （実測: HALT 中に `--receipt <(python3 -c ...)` が通り、中の python3 が走った）。
-    # `<` 単体のリダイレクトも、通す理由が無い。**同じ穴が3回開いたので、
-    # 個別の記法を1つずつ塞ぐのをやめ、ここを「メタ文字があれば通さない」境界にした。**
+    # **The allowlist matches on the prefix.** So chaining — `git status; <destructive command>`
+    # — makes only the head look safe while anything can run behind it. Seven such evasions were
+    # measured getting through (`;`, `&&`, `||`, newline, pipe, `$( )`, backtick).
+    # **During a HALT, allow exactly ONE safe command.** If it contains chaining or substitution,
+    # it is denied whatever the contents are. Recovery can be done one command at a time.
+    # Add `>` and `>>` as well: **even a read-only command can destroy a file by redirecting**
+    # (measured: `git status > important` was allowed during a HALT).
+    # Add `<` for the same reason: **a process substitution `<(cmd)` can execute any command**
+    # (measured: `--receipt <(python3 -c ...)` was allowed during a HALT and the python3 inside
+    # it ran). A plain `<` redirect has no reason to be allowed either. **The same hole opened
+    # three times, so we stopped closing individual notations one by one and made this the
+    # boundary: if it contains a metacharacter, it does not pass.**
     if re.search(r"[;&|`\n><]|\$\(", cmd):
         return False
     return bool(_RECOVERY_READONLY.match(cmd) or _RECOVERY_REPAIR.match(cmd))
 
 
 def _check_halt(tool_name, tool_input):
-    """active な halt があれば deny する。**毎回台帳を読む。**
+    """Deny if there is an active halt. **Read the ledger every time.**
 
-    宣言（環境変数や設定）ではなく **記録** で止める。宣言を読むだけなら、宣言を消せば動く。
-    台帳が読めないときは halt とみなす — 止まっているか分からないなら止める。
+    Stop on **the record**, not on a declaration (an environment variable or a setting): if we only
+    read a declaration, deleting the declaration makes it run again. When the ledger cannot be
+    read, treat it as halted — if we cannot tell whether it is stopped, stop.
     """
     if not LEDGER_ROOT:
         return
-    # **import せずに、別プロセスで聞く。** `ledger.py` を import すると、そのモジュールの
-    # トップレベルが hook プロセスの中で走る — 壊れた（あるいは差し替えられた）ledger.py が
-    # `sys.exit(0)` を持っていれば、**hook がそこで allow として終了する**（実測でそうなった）。
-    # 統制の判定を、判定対象と同じプロセスで動かしてはいけない。
-    # **停止の判定も writer に聞く。** org 側の symlink を張り替えて空の台帳を見せられると、
-    # hook は停止を見失う（実測: HALT 中でも exit 10 → 0 になった）。writer は起動時に固定した
-    # 実体のパスを見る。
+    # **Ask in a separate process; do not import.** Importing `ledger.py` runs that module's top
+    # level inside the hook process — and if a broken (or substituted) ledger.py contains a
+    # `sys.exit(0)`, **the hook exits right there as an allow** (measured happening).
+    # Never run a control decision in the same process as the thing it is judging.
+    # **Ask the writer about the halt too.** If the org-side symlink is swapped to show an empty
+    # ledger, the hook loses sight of the halt (measured: exit 10 became 0 even during a HALT).
+    # The writer looks at the real path it pinned at startup.
     _cmd = ([sys.executable, os.path.join(TOOLS_DIR, "writer_client.py"), "halt-status"]
             if os.environ.get("ORG_WRITER_SOCKET")
             else [sys.executable, os.path.join(TOOLS_DIR, "ledger.py"),
@@ -1741,23 +1743,24 @@ def _check_halt(tool_name, tool_input):
         r = subprocess.run(_cmd, capture_output=True, encoding="utf-8",
                            errors="replace", timeout=30)
     except Exception as e:
-        # 「確かめられない」は評価できなかった case — 開発用の逃げ道（ORG_HOOK_FAIL_OPEN）が
-        # 効く側である。**読めた結果が halt なら効かせない**（下で _deny する）。
+        # "cannot be confirmed" is the case where nothing could be evaluated — this is the side
+        # where the development escape hatch (ORG_HOOK_FAIL_OPEN) applies. **It does not apply
+        # when the reading succeeded and said halt** (that path _deny's below).
         if FAIL_OPEN:
-            print(f"org_hook: halt の状態を確かめられない（{e}）(fail-open) — allowing",
+            print(f"org_hook: cannot confirm the halt state ({e}) (fail-open) — allowing",
                   file=sys.stderr)
             return
-        _deny(f"org guardrail: halt の状態を確かめられない（{e}）。\n"
-              f"  **止まっているか分からないなら止める。** ledger.py を実行できることを"
-              f"確認すること。")
+        _deny(f"org guardrail: cannot confirm the halt state ({e}).\n"
+              f"  **If we cannot tell whether it is stopped, stop.** Check that ledger.py "
+              f"can be executed.")
         return
     if r.returncode not in (0, 10):
         if FAIL_OPEN:
-            print(f"org_hook: halt-status が exit {r.returncode} (fail-open) — allowing",
+            print(f"org_hook: halt-status exited {r.returncode} (fail-open) — allowing",
                   file=sys.stderr)
             return
-        _deny(f"org guardrail: halt の状態を確かめられない（halt-status が exit "
-              f"{r.returncode}）。**止まっているか分からないなら止める。**\n"
+        _deny(f"org guardrail: cannot confirm the halt state (halt-status exited "
+              f"{r.returncode}). **If we cannot tell whether it is stopped, stop.**\n"
               f"  {((r.stdout or '') + (r.stderr or '')).strip()[:300]}")
         return
     halt = None
@@ -1773,24 +1776,25 @@ def _check_halt(tool_name, tool_input):
                     halt = cand
                     break
         if halt is None:
-            _deny(f"org guardrail: halt-status が halt を報告したが（exit 10）、"
-                  f"内容を読めなかった。**判断が読めないなら止める。**\n"
+            _deny(f"org guardrail: halt-status reported a halt (exit 10) but its contents "
+                  f"could not be read. **If the decision cannot be read, stop.**\n"
                   f"  {(r.stdout or '').strip()[:300]}")
             return
     if not halt:
         return
     if _halt_recovery_allowed(tool_name, tool_input):
-        print(f"org_hook: HALT 中だが、観測・検証・安全な修復として通す: "
+        print(f"org_hook: halted, but allowed as observation / verification / safe repair: "
               f"{((tool_input or {}).get('command') or '')[:80]}", file=sys.stderr)
         return
-    _deny(f"org guardrail HALTED: この org は停止している。**gated な行為は通らない。**\n"
-          f"  理由: {halt.get('reason')}\n"
-          f"  発動: {halt.get('tripped_by') or '?'} / trigger={halt.get('trigger') or '?'} "
-          f"/ 出所={halt.get('source')}"
+    _deny(f"org guardrail HALTED: this org is stopped. **No gated action gets through.**\n"
+          f"  reason: {halt.get('reason')}\n"
+          f"  tripped by: {halt.get('tripped_by') or '?'} / trigger={halt.get('trigger') or '?'} "
+          f"/ source={halt.get('source')}"
           + (f" / seq={halt['seq']}" if halt.get("seq") else "") + "\n"
-          f"  通るのは観測・検証・安全な修復だけである（git status / ledger verify / "
-          f"ledger halt-status / schema --fix など）。\n"
-          f"  **解除は自動では行われない。** 何が起きたかを確かめ、復旧を検証してから解除する。")
+          f"  Only observation, verification and safe repair get through (git status / "
+          f"ledger verify / ledger halt-status / schema --fix and the like).\n"
+          f"  **The release never happens automatically.** Establish what happened and verify the "
+          f"recovery, then release.")
 
 
 _OPERATIONAL_READ_TOOLS = {"Read", "Grep", "Glob", "WebFetch", "WebSearch"}
@@ -1969,21 +1973,24 @@ def _check_operational_state(tool_name, tool_input):
 
 
 def _org_root_of_targets(tool_input):
-    """コマンド/引数に現れる **絶対パス** をたどり、gated org（`.orgforge/ledger` を持つ祖先）
-    を返す。**cwd に org が無くても、操作先が org なら統制を効かせる**ため。
-    見つからなければ None。判定に使うだけで、ここでは何も実行しない。"""
+    """Follow the **absolute paths** appearing in the command/arguments and return the gated org
+    (an ancestor holding `.orgforge/ledger`). The point is that **control applies when the target
+    of the operation is an org, even if the cwd is not**.
+    None if nothing is found. Used only for the decision; nothing is executed here."""
     import re as _re_mod
     blob = " ".join(str(v) for v in tool_input.values() if isinstance(v, (str, int, float)))
-    # **相対パスも解決する。** 絶対パスだけを見ていたので、`cd ./halted && npm run build` が
-    # 通っていた（実測: 再監査で HALT 中の org に対して exit=0、しかも理由は
-    # 「org state が無いので allow」——**見つからなければ全部通す**という最悪の形）。
-    # `cd ../halted` も同じ。cwd から解決すれば同じ org に着く以上、区別する理由がない。
+    # **Resolve relative paths too.** Looking only at absolute paths let `cd ./halted && npm run
+    # build` through (measured on re-audit: exit=0 against a HALTed org, and the reason given was
+    # "no org state, so allow" — **the worst possible shape: if nothing is found, allow
+    # everything**). `cd ../halted` is the same. Since resolving from the cwd arrives at the same
+    # org, there is no reason to treat them differently.
     _abs = _re_mod.findall(r"(?:^|[\s'\"=])(/[^\s'\";|&)]+)", blob)
     _rel = _re_mod.findall(r"(?:^|[\s'\"=])(\.{1,2}/[^\s'\";|&)]*)", blob)
-    # **`cd halted` のように `./` すら付かない形も解決する。** 実測（再監査4回目）:
-    # `./halted` と `../halted` だけを足したので `cd halted && npm run build` が素通りし、
-    # しかも理由は「org state 無し→allow」だった。**綴りを1つずつ足すのは3回失敗している。**
-    # cwd 直下に実在するディレクトリを指す語は、すべて候補として解決する。
+    # **Resolve forms without even a `./`, such as `cd halted`.** Measured (fourth re-audit):
+    # having added only `./halted` and `../halted`, `cd halted && npm run build` went straight
+    # through — and again the reason was "no org state → allow". **Adding spellings one at a time
+    # has failed three times.** Any word naming a directory that actually exists directly under
+    # the cwd is resolved as a candidate.
     _bare = []
     for _w in _re_mod.findall(r"(?:^|[\s'\"=])([A-Za-z0-9._-]+(?:/[^\s'\";|&)]*)?)", blob):
         try:
@@ -1993,7 +2000,8 @@ def _org_root_of_targets(tool_input):
             pass
     for raw in _abs + _rel + _bare:
         cand = os.path.abspath(raw.rstrip("/"))
-        # そのパス自身と祖先をたどる（存在しなくてよい — 消す先が対象だから）
+        # Walk the path itself and its ancestors (it need not exist — the target of a delete
+        # is exactly what does not)
         for _ in range(40):
             if os.path.isdir(os.path.join(cand, ".orgforge", "ledger")):
                 return cand
@@ -2004,65 +2012,68 @@ def _org_root_of_targets(tool_input):
     return None
 
 def main():
-    # **不正な UTF-8 でも落ちない。** sys.stdin.read() は decode 失敗で
-    # UnicodeDecodeError を投げ、hook がそこで落ちていた（実測 exit=1）。
-    # バイト列で読んで、置換しながら decode する。
+    # **Do not fall over on invalid UTF-8.** sys.stdin.read() raises UnicodeDecodeError when the
+    # decode fails, and the hook was dying right there (measured exit=1).
+    # Read the bytes and decode with replacement.
     try:
         raw = sys.stdin.buffer.read().decode("utf-8", "replace")
     except Exception:
         raw = ""
-    # **長い event を「大きいから」という理由で拒否しない。**
-    # 最初の実装は 64KB を超えた event を deny していたが、それは
-    # `echo <70,000文字>` のような **正当な長いコマンドを止める**（Codex が実測で指摘）。
-    # 長いファイル一覧、base64 の埋め込み、SQL スクリプトは現実に存在する。
-    # 止めたいのは「正規表現が事実上停止すること」であって、長さそのものではない。
-    # よって **event はそのまま解析し、危険語の照合だけを先頭 N 文字に限る**
-    # （危険なコマンドは先頭に現れる — 後ろに何万文字あっても実行されるのは同じ1行）。
+    # **Do not reject a long event for being large.**
+    # The first implementation denied any event over 64KB, which **stops legitimately long
+    # commands** such as `echo <70,000 characters>` (raised by Codex from a measurement).
+    # Long file listings, embedded base64 and SQL scripts all exist in reality.
+    # What we want to stop is the regex effectively hanging, not length itself.
+    # So **parse the event as-is and limit only the dangerous-word matching to the first N
+    # characters** (a dangerous command appears at the head — however many tens of thousands of
+    # characters follow, the line that executes is the same one).
     try:
         event = json.loads(raw) if raw.strip() else {}
     except json.JSONDecodeError:
         event = {}
-    # **object でない JSON でも落ちない。** `[1,2,3]` や `null` は json.loads を通るので
-    # 上の except では拾えず、直後の `.get()` が AttributeError になって **hook が落ちた**
-    # （実測 exit=1）。落ちた hook は判定を返さない = fail-open になりうる。
+    # **Do not fall over on JSON that is not an object.** `[1,2,3]` and `null` parse fine, so the
+    # except above does not catch them and the `.get()` right after raised AttributeError — **the
+    # hook died** (measured exit=1). A hook that dies returns no decision, which can fail open.
     if not isinstance(event, dict):
         event = {}
     # only gate PreToolUse; anything else passes (the hook may be wired to several events)
     if event.get("hook_event_name") not in (None, "PreToolUse"):
         _allow()
-    # **event の cwd を使って org を決め直す。**
-    # LEDGER_ROOT は import 時にプロセスの cwd から解決される。だが harness は hook を
-    # org の外から起動しうるので（だからこそ event に `cwd` が入っている）、そのままだと
-    # **org が見つからず、宣言した cap も判定も built-in default に落ちる** — hook は
-    # 動いているように見えるのに、その org の統制で判定していない（実測: プラグイン dir から
-    # 起動すると宣言 6 に対して cap=150 が使われた）。env の明示指定があればそれを優先する。
+    # **Re-resolve the org using the event's cwd.**
+    # LEDGER_ROOT is resolved from the process cwd at import time. But the harness may launch the
+    # hook from outside the org (which is exactly why the event carries a `cwd`), and left alone
+    # **the org is not found, so the declared cap and the decision both fall back to the built-in
+    # default** — the hook looks like it is working while not judging by that org's control
+    # (measured: launched from the plugin dir, cap=150 was used against a declared 6).
+    # An explicit env setting takes precedence.
     _ev_cwd = event.get("cwd") or ""
     if _ev_cwd and not os.environ.get("ORG_LEDGER_ROOT") and os.path.isdir(_ev_cwd):
         try:
-            os.chdir(_ev_cwd)                              # 以降の discover はこの org を見る
+            os.chdir(_ev_cwd)                              # later discovery looks at this org
         except OSError:
             pass
         global LEDGER_ROOT, _ENFORCEMENT_CACHE
         _rediscovered = _discover_ledger()
         if _rediscovered and _rediscovered != LEDGER_ROOT:
             LEDGER_ROOT = _rediscovered
-            _ENFORCEMENT_CACHE = None                      # 別 org の宣言を読み直す
+            _ENFORCEMENT_CACHE = None                      # re-read another org's declaration
     tool_name = event.get("tool_name", "")
     tool_input = event.get("tool_input", {})
-    # 冪等キーの材料。**(session_id, tool_use_id, rule, event_class) で一意にする** —
-    # tool_use_id 単独では別 session・別 rule の衝突を防げない。
-    # 欠けていれば metered action は writer 側で deny される（同一性を確かめられないなら、
-    # hook の再実行を二重計上しない保証が成り立たない）。
+    # Material for the idempotency key. **Uniqueness comes from (session_id, tool_use_id, rule,
+    # event_class)** — tool_use_id alone cannot prevent collisions across sessions or rules.
+    # If it is missing, a metered action is denied on the writer side (without being able to
+    # confirm identity, there is no guarantee that a re-run of the hook is not double-counted).
     global SESSION_ID, TOOL_USE_ID
-    # 2026-07 に code.claude.com/docs/en/hooks で確認: PreToolUse の stdin は
-    # `tool_use_id`（"Unique identifier for this tool call"）と `session_id` を snake_case で
-    # 持つ。subagent 実行時は `agent_id` / `agent_type` も入る。
+    # Confirmed at code.claude.com/docs/en/hooks in 2026-07: the PreToolUse stdin carries
+    # `tool_use_id` ("Unique identifier for this tool call") and `session_id` in snake_case.
+    # During a subagent run it also carries `agent_id` / `agent_type`.
     SESSION_ID = str(event.get("session_id") or "")
     TOOL_USE_ID = str(event.get("tool_use_id") or "")
-    # **subagent の識別を session に含める。** 親と子が同じ session_id を共有するなら、
-    # 別の agent が同じ tool_use_id を持ちうるかはドキュメントに書かれていない（不明）。
-    # 書かれていないことを「衝突しない」と読まない — 識別子に足しておけば、衝突しても
-    # 別の予約として数えられる（過大計上より、二重計上の見落としのほうが危ない）。
+    # **Fold the subagent identity into the session.** If parent and child share a session_id,
+    # the documentation does not say whether two agents can hold the same tool_use_id (unknown).
+    # Do not read "unstated" as "cannot collide" — adding it to the identifier means that even if
+    # they do collide, they count as separate reservations (over-counting is less dangerous than
+    # missing a double-count).
     _agent = str(event.get("agent_id") or "")
     if _agent:
         SESSION_ID = f"{SESSION_ID}/{_agent}"
@@ -2086,57 +2097,64 @@ def main():
     if seam_reason:
         _deny(f"org guardrail HELD this {tool_name} spawn: {seam_reason}")
 
-    # 保護ブランチへの直接統合を hold（台帳の有無に依存しない形状検査）。宣言があれば通すが、
-    # **通したことを台帳に残す** — 迂回が記録に残らないまま常用されるのを防ぐ。
+    # Hold a direct integration into a protected branch (a shape check that does not depend on a
+    # ledger existing). A declaration lets it through, but **the fact that it was let through is
+    # recorded in the ledger** — which prevents a bypass becoming habitual while leaving no trace.
     if (os.environ.get("ORG_ALLOW_MANUAL_MERGE") == "1"
             or _command_scoped_manual_merge(_command_text(tool_input))):
         byp = _integration_bypass(tool_name, tool_input)
         if byp and LEDGER_ROOT:
-            # **迂回そのものを記録する。** 宣言を許すが、記録に残らない迂回は許さない —
-            # そうしないと宣言が常用され、迂回が見えないまま高速化する。
-            # **記録できなければ通さない。** 宣言は記録されるから許されるのであって、
-            # 宣言したと言えば許されるのではない。
+            # **Record the bypass itself.** The declaration is permitted; a bypass that leaves no
+            # record is not — otherwise the declaration becomes habitual and bypassing gets faster
+            # while staying invisible.
+            # **If it cannot be recorded, it does not pass.** A declaration is permitted BECAUSE
+            # it is recorded, not because someone says they declared it.
             err = _record_bypass("manual merge into a protected branch", tool_input)
             if err:
-                _deny(f"org guardrail: 迂回の宣言を記録できなかったので通さない — {err}\n"
-                      f"  ORG_ALLOW_MANUAL_* は「宣言が台帳に残る」ことと引き換えの逃げ道で"
-                      f"ある。残らないなら、逃げ道は成立しない。")
+                _deny(f"org guardrail: the bypass declaration could not be recorded, so it "
+                      f"does not pass — {err}\n"
+                      f"  ORG_ALLOW_MANUAL_* is an escape hatch granted in exchange for the "
+                      f"declaration staying in the ledger. If nothing stays, there is no "
+                      f"escape hatch.")
     else:
         byp = _integration_bypass(tool_name, tool_input)
         if byp:
             _deny(f"org guardrail HELD this {tool_name}: {byp}"
                   f"{_held_call_atomicity(tool_name)}")
 
-    # 同じ形で、organ を通さない Issue の書き換えも hold する
+    # In the same shape, hold an Issue mutation that bypasses the organ
     if (os.environ.get("ORG_ALLOW_MANUAL_GH") == "1"
             or _command_scoped_manual_gh(_command_text(tool_input))):
         ghb = _gh_bypass(tool_name, tool_input)
         if ghb and LEDGER_ROOT:
-            # **記録できなければ通さない。** 宣言は記録されるから許されるのであって、
-            # 宣言したと言えば許されるのではない。
+            # **If it cannot be recorded, it does not pass.** A declaration is permitted BECAUSE
+            # it is recorded, not because someone says they declared it.
             err = _record_bypass("manual gh issue write", tool_input)
             if err:
-                _deny(f"org guardrail: 迂回の宣言を記録できなかったので通さない — {err}\n"
-                      f"  ORG_ALLOW_MANUAL_* は「宣言が台帳に残る」ことと引き換えの逃げ道で"
-                      f"ある。残らないなら、逃げ道は成立しない。")
+                _deny(f"org guardrail: the bypass declaration could not be recorded, so it "
+                      f"does not pass — {err}\n"
+                      f"  ORG_ALLOW_MANUAL_* is an escape hatch granted in exchange for the "
+                      f"declaration staying in the ledger. If nothing stays, there is no "
+                      f"escape hatch.")
     else:
         ghb = _gh_bypass(tool_name, tool_input)
         if ghb:
             _deny(f"org guardrail HELD this {tool_name}: {ghb}"
                   f"{_held_call_atomicity(tool_name)}")
 
-    # **HALT の検査。** 台帳を要する他の検査より前に置く — 止まっている org では、
-    # cap の予約を試すことにも意味が無い（そして予約は台帳に書く＝止まっているのに書く）。
+    # **The HALT check.** It goes before the other checks that need a ledger — in a stopped org
+    # there is no point even attempting a cap reservation (and a reservation writes to the ledger,
+    # i.e. writing while stopped).
     _check_halt(tool_name, tool_input)
 
     if not LEDGER_ROOT:
-        # **cwd に org が無いことは「統制の対象が無い」ことではない。**
-        # 空のディレクトリから harness を起動し、**管理下の org を絶対パスで操作する**と、
-        # 台帳が見つからず fail-open で素通しになっていた（実測: 空 cwd から
-        # `rm -rf <実 org>/.orgforge/ledger` が exit 0 で通った）。`rm -rf /` は止まるのに
-        # 実 org は消せる、という穴である。
-        # そこで **コマンドが触るパスの側から org を探す**。触る先が gated org なら、
-        # その org の統制で判定する。
+        # **"No org at the cwd" is not "there is nothing to govern".**
+        # Launching the harness from an empty directory and **operating on a governed org by
+        # absolute path** found no ledger and went straight through, fail-open (measured: from an
+        # empty cwd, `rm -rf <real org>/.orgforge/ledger` passed with exit 0). That is a hole where
+        # `rm -rf /` is stopped but a real org can be deleted.
+        # So **look for the org from the side of the paths the command touches.** If what it
+        # touches is a gated org, judge by that org's control.
         _target_root = _org_root_of_targets(tool_input)
         if _target_root:
             try:
@@ -2147,13 +2165,15 @@ def main():
             if _re:
                 LEDGER_ROOT = _re
                 _ENFORCEMENT_CACHE = None
-                print(f"org_hook: cwd に org は無いが、操作先 {_target_root} の統制で判定する",
+                print(f"org_hook: no org at the cwd; judging by the control of the target "
+                      f"{_target_root}",
                       file=sys.stderr)
-                # **org を解決したら、その台帳に対して HALT を確かめ直す。**
-                # `_check_halt()` は org が判明する *前* に一度走っている。cwd が org の外だと
-                # そのとき見る台帳が無く、**HALT 中の org へ絶対パスで書き込めた**
-                # （実測 B3: Bash / Write / Edit の4経路すべてが素通しした）。
-                # 止まっている org は、どこから呼ばれても止まっていなければならない。
+                # **Once the org is resolved, re-check HALT against its ledger.**
+                # `_check_halt()` already ran once *before* the org was known. With a cwd outside
+                # the org there was no ledger to look at then, so **a HALTed org could be written
+                # to by absolute path** (measured, B3: all four routes — Bash / Write / Edit —
+                # went straight through).
+                # A stopped org must be stopped no matter where it is called from.
                 _check_halt(tool_name, tool_input)
     if not LEDGER_ROOT:
         # no ledger configured => the org has no state to judge against. Fail-safe: allow, but
@@ -2172,15 +2192,16 @@ def main():
         if not argv:
             continue
         code, output = _run_organ(argv)
-        # **RPC 経由も同じ検査にかける。** 以前は直接呼びの形だけを見ており、
-        # writer_client 経由の予約は終了コードだけで判断されていた。
+        # **Put the RPC route through the same check.** This used to look only at the direct-call
+        # shape, so a reservation made via writer_client was judged on its exit code alone.
         is_reservation = argv[:2] in (["ledger.py", "reserve-exposure"],
                                       ["writer_client.py", "reserve-exposure"])
         if is_reservation:
-            # **終了コードだけを信じない。** 予約は structured result を返すので、
-            # `exit 0 かつ decision == "allow"` の組でしか通さない。
-            # 実測: deny を印字して exit 0 する writer に対して、hook は allow していた。
-            # JSON が無い・読めない・decision が allow 以外・code と矛盾 — すべて deny。
+            # **Do not trust the exit code alone.** A reservation returns a structured result, so
+            # nothing passes except the pair `exit 0 AND decision == "allow"`.
+            # Measured: against a writer that printed a deny and exited 0, the hook allowed.
+            # No JSON, unreadable JSON, a decision other than allow, or a decision contradicting
+            # the code — all deny.
             verdict = None
             for line in output.splitlines():
                 line = line.strip()
@@ -2194,33 +2215,35 @@ def main():
                     verdict = cand
                     break
             if verdict is None:
-                # **判断が読めないのは「評価できなかった」case である。** ここは
-                # ORG_HOOK_FAIL_OPEN（開発用の逃げ道）が効く側 — writer を起動できない、
-                # 出力が壊れている、といった環境の問題である。
-                # 一方、**読めた結果が hold / deny なら、それは評価できている**ので
-                # FAIL_OPEN では通さない（下の分岐）。
+                # **A decision that cannot be read is the "could not be evaluated" case.** This
+                # is the side where ORG_HOOK_FAIL_OPEN (the development escape hatch) applies —
+                # environmental problems such as the writer failing to start or its output being
+                # corrupt.
+                # By contrast, **a reading that succeeded and said hold / deny HAS been
+                # evaluated**, so FAIL_OPEN does not let it through (the branch below).
                 if FAIL_OPEN:
-                    print(f"org_hook: 上限の予約が structured result を返さなかった"
+                    print(f"org_hook: the cap reservation returned no structured result"
                           f"（exit {code}）: {output.strip()[:200]} (fail-open) — allowing",
                           file=sys.stderr)
                     continue
                 _deny(f"org guardrail HELD this {tool_name} call: "
-                      f"上限の予約が structured result を返さなかった"
-                      f"（exit {code}）。**判断が読めないなら通さない。**\n"
+                      f"the cap reservation returned no structured result "
+                      f"(exit {code}). **If the decision cannot be read, it does not pass.**\n"
                       f"  {output.strip()[:300]}")
             decision = verdict.get("decision")
             if code == 0 and decision == "allow":
-                continue        # 予約は writer が既に永続化している
-            # 語彙を揃える。監督（と検査）が探すのは "HELD" である — 判断の出所が
-            # organ から writer に移っても、止まったことの呼び名は変えない。
-            _deny(f"org guardrail HELD this {tool_name} call: 上限の予約が allow を"
-                  f"返さなかった (exit {code}, decision={decision!r}, "
+                continue        # the writer has already persisted the reservation
+            # Keep the vocabulary aligned. What a supervisor (and a check) looks for is "HELD" —
+            # the source of the decision moved from the organ to the writer, but what being
+            # stopped is called does not change.
+            _deny(f"org guardrail HELD this {tool_name} call: the cap reservation did not "
+                  f"return an allow (exit {code}, decision={decision!r}, "
                   f"reason={verdict.get('reason')!r})。\n"
                   f"  {verdict.get('detail') or ''}"[:600])
         if code == 10:
             _deny(f"org guardrail HELD this {tool_name} call: {output.strip()[:400]}")
         if code == 0:
-            # 従来の organ（LEDGER-EVENT を印字するだけのもの）は、ここで host が書く。
+            # For a legacy organ (one that only prints LEDGER-EVENT), the host writes it here.
             _append_emitted(output)
             continue        # keep checking other rules
         # ANY other code (2 = interpreter couldn't run the script, 99 = our sentinel, a crash,
