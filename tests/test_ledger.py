@@ -712,7 +712,7 @@ def test_idempotent_key_cannot_bypass_controls(tmp_path):
                         "--payload", json.dumps({"verdict": "admit", "issue": 5})],
                        capture_output=True, text=True, env=env, timeout=60)
     assert d.returncode != 0, "別 actor が冪等キーで統制を迂回できた"
-    assert "再実行ではない" in d.stderr
+    assert "is not a re-run" in d.stderr
 
 
 def test_decide_writes_ledger_before_issue():
@@ -820,7 +820,7 @@ def test_head_is_a_cache_rebuilt_from_the_log(tmp_path):
     (tmp_path / "HEAD").write_text('{"seq": 99, "hash": "bogus"}', encoding="utf-8")
     code, out = _app(tmp_path, payload={**_PR, "candidate_id": "c2"})
     assert code == 0, out
-    assert "log から再構築" in out
+    assert "rebuilt from the log" in out
     assert [e["seq"] for e in _evs(tmp_path)] == [1, 2]
 
 
@@ -858,7 +858,7 @@ def test_same_natural_key_different_payload_is_refused(tmp_path):
     code, out = _app(tmp_path, payload={**_PR, "fraction": 0.9},
                      extra=("--natural-key", "k1"))
     assert code == 3, out
-    assert "payload が違う" in out
+    assert "with a different payload" in out
 
 
 def test_verify_reports_both_assurances_separately(tmp_path):
