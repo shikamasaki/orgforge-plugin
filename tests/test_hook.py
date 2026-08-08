@@ -621,7 +621,7 @@ def test_rebase_recovery_fails_closed_for_ambiguous_or_compound_targets(tmp_path
         "git rebase --continue; git rebase feat/issue-38",
     ):
         result = h._integration_bypass("Bash", {"command": command})
-        assert result is not None and "静的に解決できない" in result, command
+        assert result is not None and "cannot statically resolve" in result, command
 
 
 def test_git_global_options_do_not_bypass_ordinary_rebase_guard(tmp_path, monkeypatch):
@@ -633,7 +633,7 @@ def test_git_global_options_do_not_bypass_ordinary_rebase_guard(tmp_path, monkey
     assert result is not None and "org_cycle" in result
     unresolved = h._integration_bypass(
         "Bash", {"command": "git --work-tree=/tmp rebase feat/x"})
-    assert unresolved is not None and "静的に解決できない" in unresolved
+    assert unresolved is not None and "cannot statically resolve" in unresolved
 
 
 def test_command_targeting_a_protected_checkout_is_held(tmp_path, monkeypatch):
@@ -666,7 +666,7 @@ def test_ambiguous_integration_target_fails_closed_in_an_org(
     monkeypatch.chdir(repo)
     result = h._integration_bypass("Bash", {"command": command})
     assert result is not None, command
-    assert "静的に解決できない" in result, result
+    assert "cannot statically resolve" in result, result
 
 
 def test_chained_cd_cannot_resolve_against_the_wrong_checkout(tmp_path, monkeypatch):
@@ -690,7 +690,7 @@ def test_chained_cd_cannot_resolve_against_the_wrong_checkout(tmp_path, monkeypa
     for command in commands:
         result = h._integration_bypass("Bash", {"command": command})
         assert result is not None, command
-        assert "静的に解決できない" in result, result
+        assert "cannot statically resolve" in result, result
 
 
 def test_read_only_git_and_gh_are_allowed(tmp_path, monkeypatch):
