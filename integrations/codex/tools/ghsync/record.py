@@ -189,6 +189,47 @@ def cmd_review_response(a):
     Plumbing only: it records that a response was given, never whether the response is adequate.
     That judgment stays with the next independent reviewer (docs/03 §6.5).
     """
+    return _review_response(a, gh)
+
+
+# How much of the review to carry into the response. Enough that the finding can be read without
+# leaving the comment; short enough that the response is still about the response.
+_QUOTE_CHARS = 1200
+
+
+def _review_quote(issue_json, review, finding):
+    """Find the review being answered among the Issue's comments. Returns (quote, url).
+
+    (None, None) when nothing matches — the caller refuses, because a response to a review that was
+    never written is not traceable to anything.
+
+    Matching is on the review id, then on the finding id, because a review comment carries its
+    `review_subject_id` while the finding id may only appear in the reasoning text. Either is a
+    real anchor; neither is inferred from the response itself.
+    """
+    try:
+        comments = (json.loads(issue_json) or {}).get("comments") or []
+    except Exception:
+        return None, None
+    for needle in (str(review or "").strip(), str(finding or "").strip()):
+        if not needle:
+            continue
+        for c in comments:
+            body = str(c.get("body") or "")
+            if needle not in body:
+                continue
+            # Do not quote a response as though it were the review it answers.
+            if "orgforge:review-response:" in body:
+                continue
+            text = re.sub(r"<!--.*?-->", "", body, flags=re.S).strip()
+            if len(text) > _QUOTE_CHARS:
+                text = text[:_QUOTE_CHARS].rstrip() + "\n…(truncated — see the linked comment)"
+            quote = "\n".join("> " + line for line in text.splitlines())
+            return quote, c.get("url")
+    return None, None
+
+
+def _review_response(a, gh):
     finding = (a.finding or "").strip()
     response = (a.response or "").strip()
     evidence = (a.evidence or "").strip()
@@ -209,13 +250,31 @@ def cmd_review_response(a):
         print(f"review-response: {finding} is already recorded on Issue #{a.issue} with the same "
               f"content (no-op).")
         return 0
+    # **The review being answered has to exist.** `--review` used to be accepted on its shape alone,
+    # so a response could name a review that was never written and still read as an answer to one.
+    # On a real Issue (#67 of domain-spec-notes) the responses cited SKEPTIC-001/002 while nothing
+    # on the Issue defined those ids: from the outside, "addressed" was unfalsifiable.
+    # The judgment stays with the next reviewer; what is enforced here is only that there is
+    # something to point AT.
+    quoted, review_url = _review_quote(existing, a.review, finding)
+    if quoted is None:
+        print(f"review-response: no review matching {a.review!r} is recorded on Issue #{a.issue}.\n"
+              f"  A response cannot answer a finding that was never written down. Record the "
+              f"review first (provisional / decide), then respond to it by its "
+              f"review_subject_id.", file=sys.stderr)
+        return 2
     body = "\n".join([
         f"### ↪ Review response — `{finding}` ({a.status})",
-        f"**Review:** `{a.review}`",
+        f"**Review:** `{a.review}`" + (f" — [the finding being answered]({review_url})"
+                                       if review_url else ""),
         f"**Responded by:** `{a.by}`",
+        # **Carry the finding, not just its id.** A reader of this comment alone could otherwise
+        # see only "SKEPTIC-001 (addressed)" and have no way to tell what was addressed.
+        "\n**The finding being answered:**\n" + quoted,
         "\n**Response:**\n" + response,
         "\n**Evidence:**\n" + evidence,
-        "\n次の独立 reviewer は、この対応と証拠を確認して自分の verdict に明記する。",
+        "\nThe next independent reviewer confirms this response and its evidence, and states the "
+        "conclusion in their own verdict.",
         marker,
     ])
     code, out = gh(["issue", "comment", str(a.issue), "--repo", a.repo, "--body", body])
