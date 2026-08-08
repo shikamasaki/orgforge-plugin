@@ -39,10 +39,10 @@ ROOTS = ("tools", "tests", "integrations/common")
 BUDGET = {
     "tools/ledger.py": 793,
     "tests/test_ledger.py": 701,
-    "tests/test_orgcycle.py": 590,
+    "tests/test_orgcycle.py": 589,
     "tests/test_hook.py": 448,
     "tools/orgcycle/judge.py": 373,
-    "integrations/common/org_hook.py": 209,
+    "integrations/common/org_hook.py": 180,
     "tools/writerd.py": 286,
     "tools/ghsync/record.py": 268,
     "tools/ghsync/backlog.py": 226,

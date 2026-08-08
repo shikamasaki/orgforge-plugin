@@ -1274,7 +1274,8 @@ def test_seam_gate_message_leads_with_the_shortest_path():
     seg = src[i:i + 1600]
     assert seg.index("INDEPENDENT") < seg.index("handoff.py"), \
         "handoff.py が先に読める（実際に通るのは INDEPENDENT: の方が短い）"
-    assert "owns` の宣言を免除する" in seg, "INDEPENDENT: が owns 検査を免除することを言っていない"
+    assert "waives the `owns` declaration" in seg, \
+        "does not say that INDEPENDENT: waives the owns check"
 
 
 # ── 0.28.1: 宣言は行頭に限る / パイプ経由でも判定できる ──────────────────
