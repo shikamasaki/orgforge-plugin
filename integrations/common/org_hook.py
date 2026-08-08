@@ -104,8 +104,8 @@ def _deny(reason):
     sys.exit(2)
 
 
-SESSION_ID = ""      # PreToolUse の stdin から。冪等キーの一部
-TOOL_USE_ID = ""     # 同上。**欠けていれば metered action は deny される**
+SESSION_ID = ""      # from the PreToolUse stdin; part of the idempotency key
+TOOL_USE_ID = ""     # likewise. **If it is missing, a metered action is denied**
 
 
 def _allow():
@@ -139,18 +139,19 @@ def _append_emitted(output):
 
 
 def _record_bypass(what, tool_input):
-    """迂回の宣言を台帳に残す。**記録できなければ deny する。**
+    """Record a declared bypass in the ledger. **If it cannot be recorded, deny.**
 
-    以前は `except: pass` で、しかも戻り値も見ていなかった。**記録に失敗した迂回は、
-    迂回の痕跡が無いまま通る** — 逃げ道を「宣言すれば通る」形にした意味が消える
-    （宣言は記録されるから許されるのであって、宣言したと言えば許されるのではない）。
+    This used to be `except: pass`, and the return value was not read either. **A bypass that
+    failed to record goes through leaving no trace of the bypass** — which empties the escape
+    hatch of its meaning (a declaration is permitted BECAUSE it is recorded, not because
+    someone says they declared it).
 
-    時刻は writer が付ける（`--ts` を渡さない）。
+    The writer stamps the time (do not pass `--ts`).
 
-    返り値: None なら記録できた。文字列なら失敗の理由。
+    Returns: None if it was recorded. A string giving the reason if it failed.
     """
     if not LEDGER_ROOT:
-        return "ORG_LEDGER_ROOT が無いので迂回を記録できない"
+        return "cannot record the bypass: ORG_LEDGER_ROOT is unset"
     payload = {"what": what,
                "command": _command_text(tool_input)[:400],
                "declared_by": os.environ.get("ORG_ROLE") or "unknown"}
@@ -347,18 +348,18 @@ def _redirects_to_system_path(cmd):
 
 # Regenerable build output — deleting it loses no information, it can be rebuilt.
 _REGENERABLE = (
-    ".orgforge/wt/",          # Issue ごとの worktree（begin が作り直せる）
-    "node_modules",           # 依存（install で戻る）
+    ".orgforge/wt/",          # per-Issue worktree (begin can recreate it)
+    "node_modules",           # dependencies (install brings them back)
     "/scratchpad/", ".pytest_cache", "__pycache__",
     "dist/", "build/", ".next/", "coverage/", ".turbo/",
 )
 
 
 def _is_regenerable_target(cmd):
-    """削除対象が再生成可能なものだけかを見る。
+    """Check whether every deletion target is regenerable.
 
-    「消したら戻らない」ものが1つでも混ざっていたら False — 緩めてよいのは、対象の全部が
-    作り直せるときだけ。判定を甘くすると cap の意味が消える。
+    False as soon as ONE "gone for good" item is mixed in — relaxing is only safe when all of
+    the targets can be rebuilt. Soften that judgement and the cap stops meaning anything.
     """
     if not any(m in cmd for m in _REGENERABLE):
         return False
@@ -811,12 +812,15 @@ def _git_integration_context(cwd):
 
 
 def _integration_bypass(tool_name, ti):
-    """保護ブランチへの直接統合か。hold の理由（と打つべきコマンド）を返す。
+    """Is this a direct integration into a protected branch? Return the reason to hold (and the
+    command to run instead).
 
-    **hold のメッセージに打つべきコマンドを貼るのが決定的である。** 迂回は速さのためではなく
-    「道具の名前を思い出すコスト」を払わなかったために起きる。コマンドが目の前にあれば迂回する
-    理由が消える。逆に hold だけしてコマンドを出さないと、宣言（`ORG_ALLOW_MANUAL_MERGE`）を
-    覚えて常用され、**迂回が記録に残らないまま高速化する** — それは今より悪い。
+    **Putting the command to run into the hold message is the decisive part.** People bypass not
+    for speed but because they did not want to pay the cost of remembering the tool's name. With
+    the command right in front of them, the reason to bypass disappears. Hold without offering
+    the command and they instead memorise the declaration (`ORG_ALLOW_MANUAL_MERGE`) and reach
+    for it habitually — **bypassing gets faster AND stops leaving a record**, which is worse
+    than where we are now.
     """
     if tool_name != "Bash":
         return None
@@ -826,9 +830,9 @@ def _integration_bypass(tool_name, ti):
         if recovery_cwd is None:
             _current_branch, current_root = _git_integration_context(os.getcwd())
             if current_root and os.path.isdir(os.path.join(current_root, ".orgforge")):
-                return ("rebase復旧コマンドの対象 worktree を静的に解決できない。"
-                        "対象worktreeをcwdにし、`git rebase --abort|--continue|--skip`を"
-                        "単独で実行すること。")
+                return ("cannot statically resolve which worktree this rebase-recovery command "
+                        "targets. Make the target worktree the cwd and run "
+                        "`git rebase --abort|--continue|--skip` on its own.")
             return None
         _branch, recovery_root = _git_integration_context(recovery_cwd)
         if recovery_root and os.path.isdir(os.path.join(recovery_root, ".orgforge")):
@@ -839,8 +843,9 @@ def _integration_bypass(tool_name, ti):
     _current_branch, current_root = _git_integration_context(os.getcwd())
     if target_cwd is None:
         if current_root and os.path.isdir(os.path.join(current_root, ".orgforge")):
-            return ("統合コマンドの対象 worktree を静的に解決できない。動的な `cd` / `git -C` "
-                    "や複数の統合を1回にまとめず、対象 worktree を cwd にして1件ずつ実行すること。")
+            return ("cannot statically resolve which worktree this integration command targets. "
+                    "Do not bundle a dynamic `cd` / `git -C` or several integrations into one "
+                    "call — make the target worktree the cwd and run them one at a time.")
         return None
     cur, repo_root = _git_integration_context(target_cwd)
     if cur not in _PROTECTED_BRANCHES:
