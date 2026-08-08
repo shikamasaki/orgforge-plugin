@@ -642,50 +642,60 @@ def cmd_verify(a):
     # For the supervisor (stderr) — the command that pours in what the subagent returned.
     # **It never fills in the judgment.**
     print(f"\n[review_subject_id] {_sid}\n"
-          f"  記録のときにこの値を --subject に渡すこと。**judge に作らせない。**",
+          f"  Pass this value to --subject when recording. **Never have the judge produce it.**",
           file=sys.stderr)
-    print(f"\n===== 監督（あなた）が打つコマンド — {role} が返した値を入れる =====\n"
+    print(f"\n===== The command you (the supervisor) run — fill in what {role} returned =====\n"
           f'{_organ_command(stable_organ, "github-sync")} decide --issue {a.issue} '
           f"--event {ev} \\\n"
-          f"  --verdict <{role} が返した verdict> --by {role} \\\n"
-          f"  --why \"<{role} の why をそのまま>\" \\\n"
-          f"  --evidence \"<{role} の evidence をそのまま>\" \\\n"
-          f"  --claimed \"<{role} が報告したこと。条件節（「〜には無い」「未測定」）は落とさず>\" \\\n"
-          f"  --verified \"<**あなたが自分で走らせて**確かめたこと。コマンドと出力>\" \\\n"
+          f"  --verdict <the verdict {role} returned> --by {role} \\\n"
+          f"  --why \"<{role}'s why, verbatim>\" \\\n"
+          f"  --evidence \"<{role}'s evidence, verbatim>\" \\\n"
+          f"  --claimed \"<what {role} reported. Keep the qualifiers — 'not present in …', "
+          f"'unmeasured' — do not drop them>\" \\\n"
+          f"  --verified \"<what **you ran yourself** and confirmed. The command and its "
+          f"output>\" \\\n"
           + (f"  --standard \"<...>\" --alternatives \"<...>\" \\\n" if role == "gate" else "")
           + f"  --risk \"<...>\"\n"
-          f"（0.21.0 以降、`decide` が Issue と台帳の**両方**に1コマンドで書く。台帳を先に"
-          f"通すので、統制が拒否するなら Issue にも記録されない）\n", file=sys.stderr)
-    # ① reject/refuted を受けたら rework の発注も記録する。**判定の記録と同じ場所に置く** —
-    # 発注は「判定を受け取る → 検証 → decide → 発注 → 記録」の順で、発注した subagent の通知が
-    # 来ると記録が流れる。記録のコマンドが目の前にある状態で発注すれば順序が逆転する。
-    # 運用で reject/refuted の多くに対し rework_requested が台帳に無く、show の警告が沈黙した。
+          f"(since 0.21.0, `decide` writes to **both** the Issue and the ledger in one command. "
+          f"It goes through the ledger first, so if control refuses, nothing is recorded on the "
+          f"Issue either)\n", file=sys.stderr)
+    # (1) On a reject/refuted, also record that rework was commissioned. **Put it in the same
+    # place as the record of the judgment** — the sequence is "receive the judgment → verify →
+    # decide → commission → record", and once the commissioned subagent's notification arrives the
+    # recording gets washed away. Commission it with the recording command already in front of you
+    # and the order reverses.
+    # In operation, many rejects/refuteds had no rework_requested in the ledger at all, and show's
+    # warning fell silent.
     bad = "reject" if role == "gate" else "refuted"
-    print(f"===== {bad} だった場合 — rework の発注も記録する =====\n"
+    print(f"===== If it was {bad} — also record the commissioning of rework =====\n"
           f'{_organ_command(stable_organ, "org-cycle")} rework --issue {a.issue} '
-          f"--after {bad} --by <あなたの役割> \\\n"
-          f'  --reason "<{role} の指摘のうち、maker に直させることを1行で>" '
-          f"--round {len(rounds) + 1 if 'rounds' in dir() else '<何周目か>'}\n"
-          f"（これを打たないと `show` の rework 警告が沈黙する — 台帳に材料が入らないので"
-          f"閾値に届かない。**道具は数えられないものを数えない**）\n", file=sys.stderr)
-    # ヘッドレスで回す形（Codex / claude -p）。**血統を分けるなら別ハーネスで動かす** —
-    # role-settings.yaml は skeptic に family-B（gate と別系統）を宣言しているが、同一ハーネスの
-    # subagent では inherit になり、同じ base model の盲点を共有する（docs/03 §3）。
-    # constitution の `enforcement.judges.lineage` を読む。**既定は same-harness** —
-    # 別ハーネスの契約・CLI・認証を前提にすると、持っていない環境で org が回らなくなる。
-    # 層を増やすのは選択であって前提ではない。
+          f"--after {bad} --by <your role> \\\n"
+          f'  --reason "<in one line, which of {role}\'s findings the maker is to fix>" '
+          f"--round {len(rounds) + 1 if 'rounds' in dir() else '<which round this is>'}\n"
+          f"(without this, `show`'s rework warning falls silent — the material never enters the "
+          f"ledger, so the threshold is never reached. **A tool does not count what it cannot "
+          f"count**)\n", file=sys.stderr)
+    # The headless form (Codex / claude -p). **If the lineages are to differ, run it on a different
+    # harness** — role-settings.yaml declares family-B for the skeptic (a different line from the
+    # gate), but as a subagent on the same harness that becomes inherit, and it shares the blind
+    # spots of the same base model (docs/03 §3).
+    # Read `enforcement.judges.lineage` from the constitution. **The default is same-harness** —
+    # presuppose another harness's contract, CLI and authentication and the org stops working in
+    # any environment that does not have them. Adding a layer is a choice, not a premise.
     _schema = _verdict_schema(role)
     _headless_rc = 0          # same-harness has no child to fail
     if _lineage == "cross-harness":
         if not os.path.isfile(_schema):
-            print(f"judges.lineage = cross-harness だが {role} の出力スキーマが無い "
-                  f"（探した先: {_schema}）。スキーマ無しで別ハーネスに投げると、verdict が"
-                  f"欠けた散文が返ってきても構造では気づけない。**血統を分ける前にスキーマを"
-                  f"揃えること。**", file=sys.stderr)
+            print(f"judges.lineage = cross-harness, but there is no output schema for {role} "
+                  f"(looked in: {_schema}). Dispatch to another harness without a schema and "
+                  f"prose that came back missing its verdict cannot be caught structurally. "
+                  f"**Put the schemas in place before separating the lineages.**",
+                  file=sys.stderr)
             return 2
-        # **judge は2人走る。** 同一ハーネスの subagent（材料は上の stderr）と、別ハーネスの
-        # headless（下で起動する）。片方でも reject/refuted なら reject —
-        # AND ではなく厳しい側に倒す。実測（#11 の認可穴・#42 の Testing Library 欠落）で
+        # **Two judges run.** The subagent on this harness (its material is on stderr above) and
+        # the headless one on another harness (launched below). If either says reject/refuted, the
+        # result is reject — fall to the stricter side, not to an AND. Measured (the authorisation
+        # hole in #11, the missing Testing Library in #42):
         # **2件とも厳しい側が正しかった**。多数決にすると 1:1 で決まらず、監督の裁量に戻る。
         rc = _run_headless(role, a.issue, "\n".join(out), _hcfg, _schema, stable_organ)
         _headless_rc = rc
