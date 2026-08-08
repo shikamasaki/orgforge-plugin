@@ -1410,17 +1410,19 @@ def rule_blast_radius(tool_name, ti):
 # handoff.py" from advice into structure: without one of the two, the spawn is blocked. Not an
 # organ/ledger rule — it's a pure shape check on the spawn prompt, so it returns a verdict
 # directly (see main()'s SPAWN_GATE branch) rather than an organ argv.
-# handoff.py が出す**構造**を見る。単なる語（"seam contract"）は散文に現れるので外した —
-# 「no seam contract is attached」が seam の宣言として通っていた（INDEPENDENT の部分一致と
-# 同じ穴が、こちら側にもあった）。構造は否定文に現れない: 「`Inputs you receive:` が無い」と
-# 書くことはあっても、コロン付きの見出しを否定文の中に置くことはまずない。
+# Look for the **structure** handoff.py emits. A bare phrase ("seam contract") was dropped
+# because it occurs in prose — "no seam contract is attached" was passing AS a seam declaration
+# (the same hole as the INDEPENDENT substring match, on this side too). Structure does not appear
+# inside a negation: someone may write "there is no `Inputs you receive:`", but they will
+# essentially never place a colon-terminated heading inside a negative sentence.
 _SEAM_MARKERS = ("outputs you must produce", "boundary contract", "inputs you receive",
                  "## your slice")
-# **宣言は行頭に限る。** 全文の部分一致だと、**否定文が宣言として通る** —
-# 「contract も INDEPENDENT: も付けていません」がそのまま (A) として一致した（実地のプローブ）。
-# 実害のある形は「この作業は independent ではないので contract を付ける」と書いた (B) の spawn
-# が (A) と誤判定されることで、**(A) は `owns` の宣言を免除する**ので偶然の一致で免除が取れる。
-# ガードのメッセージ自身が「子プロンプトの冒頭に1行書く」と言っているので、検査を文面に合わせる。
+# **The declaration must be at the start of a line.** Matching anywhere in the text lets **a
+# negation pass as a declaration** — "I have attached neither a contract nor INDEPENDENT:" matched
+# as (A) verbatim (found by a live probe). The harmful shape is a (B) spawn that says "this work
+# is not independent, so a contract is attached" being misread as (A): since **(A) waives the
+# `owns` declaration**, an accidental match wins the waiver. The guard's own message says to write
+# one line at the top of the child prompt, so the check is aligned with what the message asks for.
 _INDEP_RE = re.compile(
     r"^\s*(?:INDEPENDENT\s*:|独立\s*:"
     r"|(?:this (?:spawn|child|task) is )?non-integrating\b"
@@ -1429,14 +1431,16 @@ _INDEP_RE = re.compile(
     re.I | re.M)
 
 def _seam_from_referenced_file(prompt_raw):
-    """プロンプトが指すファイルを**ガード自身が読んで** seam contract を探す。
+    """Look for a seam contract by having **the guard itself read** the file the prompt points at.
 
-    以前は「参照先の中身は spawn 時点で保証できない」としてプロンプト本文しか見なかった。
-    しかし保証できないのは *ガードが読まなければ* の話で、読めば保証できる。本文限定だと
-    150行超の seam contract を毎回貼る必要があり、maker の context を圧迫する。
+    This used to consider only the prompt body, on the grounds that "the contents of a reference
+    cannot be guaranteed at spawn time". But that is only true *if the guard does not read it* —
+    read it and it can be guaranteed. Restricting to the body meant pasting a 150-line seam
+    contract every time, which crowds the maker's context.
 
-    読むのは **絶対パス、または org のルート配下の相対パス**に限る。パスは prompt に
-    書かれた文字列であって信用できないので、org の外や巨大ファイルは読まない。
+    Only **an absolute path, or a relative path under the org root**, is read. A path is a string
+    written in the prompt and therefore untrusted, so nothing outside the org and nothing huge
+    is opened.
     """
     hits = re.findall(r"(?:^|[\s\"'`(=])((?:/|\./|\.orgforge/|[\w.-]+/)[\w./-]+\.(?:md|txt))",
                       prompt_raw)
@@ -1445,7 +1449,7 @@ def _seam_from_referenced_file(prompt_raw):
         path = rel if os.path.isabs(rel) else os.path.join(root, rel)
         try:
             path = os.path.realpath(path)
-            # org のルート配下 / 一時ディレクトリのみ。任意のファイルを読ませない
+            # Under the org root or a temp directory only. Never read an arbitrary file.
             if not (path.startswith(os.path.realpath(root))
                     or path.startswith("/tmp") or path.startswith("/private/tmp")
                     or path.startswith(os.path.realpath(tempfile.gettempdir()))):
@@ -1527,28 +1531,31 @@ def spawn_needs_seam_or_independence(tool_name, ti):
     prompt_raw = ti.get("prompt") or ""
     prompt = prompt_raw.lower()
     has_seam = any(m in prompt for m in _SEAM_MARKERS)
-    # 行頭のみ（prompt_raw を使う — prompt は lower 済みだが位置は同じ。re.M で各行の頭を見る）
+    # Line starts only (use prompt_raw — prompt is lowercased but the positions are the same;
+    # re.M looks at the head of every line)
     has_indep = bool(_INDEP_RE.search(prompt_raw))
     seam_file = None
     if not (has_seam or has_indep):
-        # 本文に無ければ、プロンプトが指すファイルを読んで探す（参照渡しを許す）
+        # Not in the body: read the file the prompt points at and look there (pass by reference)
         seam_file = _seam_from_referenced_file(prompt_raw)
         has_seam = seam_file is not None
     if not (has_seam or has_indep):
-        # **通る道を、実際に短い順で書く。** 以前は handoff.py が主で INDEPENDENT: が従に読める
-        # 文面だったが、実地では後者だけで通した（それが正しい経路だった）。急いでいる監督に
-        # 使わない道具の名前を読ませるのは無駄である。
+        # **List the ways through in order of how short they actually are.** The wording used to
+        # read as though handoff.py were the main route and INDEPENDENT: an afterthought, but in
+        # practice the latter alone was what got people through — and it was the correct route.
+        # Making a supervisor in a hurry read the name of a tool they will not use is waste.
         return ("this Agent spawn carries no seam contract and no independence declaration. "
                 "Two ways through:\n"
-                "  (A) 出力が兄弟とマージされないなら — 子プロンプトの冒頭に "
-                "`INDEPENDENT: <なぜ独立か>` を1行書く。これで通る。\n"
-                "  (B) 兄弟と統合するなら — seam contract を本文に入れる（`## Your slice` / "
-                "`Inputs you receive:` / `Outputs you MUST produce:`）。"
-                "`tools/handoff.py <role> --slice … --inputs … --outputs … --owns …` が組み立てる。"
-                "ファイルに落として参照させてもよい（ガードが読む）。\n"
-                "  **(A) は `owns` の宣言を免除する。** 並列で複数の子を出すなら、同じ worktree や "
-                "同じファイルに向けていないかは**あなたが確かめること** — ガードは (A) では"
-                "衝突を検査できない（宣言が無いものは照合できない）。docs/06 §2.1.1.")
+                "  (A) If the output will not be merged with a sibling's — write one line at the "
+                "top of the child prompt: `INDEPENDENT: <why it is independent>`. That is enough.\n"
+                "  (B) If it will be integrated with a sibling's — put a seam contract in the body "
+                "(`## Your slice` / `Inputs you receive:` / `Outputs you MUST produce:`). "
+                "`tools/handoff.py <role> --slice … --inputs … --outputs … --owns …` assembles one. "
+                "You may write it to a file and reference that instead (the guard reads it).\n"
+                "  **(A) waives the `owns` declaration.** So if you are spawning several children "
+                "in parallel, checking that they are not aimed at the same worktree or the same "
+                "file is **yours to do** — under (A) the guard cannot check for a collision "
+                "(there is no declaration to compare). docs/06 §2.1.1.")
     # NON-COLLISION: a declared owns territory must not overlap a live sibling claim (concurrent-write
     # drift is PREVENTED here, not detected later by reconcile.py collision).
     if LEDGER_ROOT:
