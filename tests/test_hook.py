@@ -834,7 +834,7 @@ def test_bypass_that_cannot_be_recorded_is_denied(tmp_path):
     r = subprocess.run([sys.executable, str(HOOK)], input=json.dumps(ev),
                        capture_output=True, text=True, env=env, cwd=str(repo))
     assert r.returncode == 2, r.stdout + r.stderr
-    assert "記録できなかったので通さない" in (r.stdout + r.stderr)
+    assert "could not be recorded, so it does not pass" in (r.stdout + r.stderr)
 
 
 @pytest.mark.parametrize("command", [
