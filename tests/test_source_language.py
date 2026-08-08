@@ -37,7 +37,7 @@ ROOTS = ("tools", "tests", "integrations/common")
 # Remaining debt, measured 2026-08-08. Lower these as files are translated; never raise one.
 # A file that is not listed here must contain no Japanese at all.
 BUDGET = {
-    "tests/test_ledger.py": 670,
+    "tests/test_ledger.py": 635,
     "tests/test_orgcycle.py": 589,
     "tests/test_hook.py": 447,
     "tools/orgcycle/judge.py": 373,
@@ -64,7 +64,7 @@ BUDGET = {
     "tests/test_organs.py": 54,
     "tools/ghsync/branch.py": 50,
     "tests/test_domain_surface.py": 46,
-    "tools/status.py": 44,
+    "tools/status.py": 42,
     "tests/conftest.py": 30,
     "tests/test_rederivability.py": 29,
     "tools/repro_lint.py": 26,
@@ -74,7 +74,7 @@ BUDGET = {
     "tools/orgcycle/preflight.py": 19,
     "tools/review_freshness.py": 18,
     "tests/test_repro_lint.py": 16,
-    "tests/test_status.py": 15,
+    "tests/test_status.py": 12,
     "tools/ghsync/_core.py": 11,
     "tools/harness.py": 11,
     "tools/conventions.py": 10,
