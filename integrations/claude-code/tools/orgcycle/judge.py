@@ -525,58 +525,73 @@ def cmd_verify(a):
         out.append(f'{_organ_command(stable_organ, "repro-lint")} check . --phase implement')
         out.append("```")
         out.append("A HOLD (exit 10) means reject. If a path does not resolve, report that — "
-                   "「ツールが無いので未実行」は、機械バーが効いていないという最も重い所見。")
+                   "\"the tool was missing so it did not run\" is the gravest finding of all: "
+                   "the mechanical bar is not in force.")
     if role == "skeptic" and prior:
-        # 5: gate は毎回 --risk に「今回撃っていない領域」を書く。実地では で gate が
-        # 「1件も当てていない」と書いた領域から実バグが出た。人が手で転記していたので配管が運ぶ。
-        # **断片を正規表現で切り出すより、gate が書いた Known risk の節ごと渡す** —
-        # gate は既に構造化して書いており、切り刻むと重複した断片が並んで読めなくなる
-        # （最初の実装がそうなった）。**何を撃つかは skeptic が決める。**
+        # 5: the gate writes into --risk, every time, the areas it did NOT probe this round. In
+        # the field, a real bug came out of an area the gate had described as "not hit once". A
+        # person was copying this across by hand, so the plumbing carries it instead.
+        # **Pass the whole Known-risk section the gate wrote, rather than cutting fragments out
+        # with a regex** — the gate has already structured it, and chopping it up produces a run of
+        # duplicated fragments nobody can read (which is what the first implementation did).
+        # **What to probe is the skeptic's decision.**
         m = re.search(r"\*\*Known risk accepted:\*\*\s*(.+?)(?:\n\n|\Z)", prior, re.S)
         if m:
             body = m.group(1).strip()
             if re.search(r"撃って|当てて|試して|検証して|not exercised|no (?:test|probe|mutation)",
                          body):
-                out.append("\n## gate が「今回撃っていない」と書いた領域（**標的候補**）\n")
+                out.append("\n## Areas the gate described as \"not probed this round\" "
+                           "(**candidate targets**)\n")
                 out.append(body[:3000])
-                out.append("\n> gate がここを撃っていないと明言している以上、**この領域には"
-                           "検査が一度も通っていない**。実地では gate が「1件も当てていない」と"
-                           "書いた領域から実バグが出た。撃つかどうかは skeptic が決めるが、"
-                           "撃たないなら --risk にその理由を書くこと。")
+                out.append("\n> Since the gate states outright that it did not probe here, "
+                           "**no check has passed over this area even once**. In the field, a real "
+                           "bug came out of an area the gate had described as \"not hit once\". "
+                           "Whether to probe it is the skeptic's decision — but if you do not, "
+                           "write the reason into --risk.")
 
-        # 5: --risk を書けば admit できる構造なので、書き得にしない。gate が自分で書いた
-        # リスクは、skeptic が最初に潰しに行くべき的として明示する（配管: 抜き出して渡すだけ）。
+        # 5: the structure allows an admit as long as --risk is written, so writing one must not
+        # be a free pass. A risk the gate wrote itself is surfaced as the first target the skeptic
+        # should go after (plumbing: it is only extracted and carried).
         risks = re.findall(r"\*\*Known risk accepted:\*\*\s*(.+?)(?:\n\n|\Z)", prior, re.S)
         if risks:
-            out.append("\n## gate が自分で書いた残存リスク（**まずここを潰しに行くこと**）\n")
+            out.append("\n## Residual risks the gate wrote itself (**go after these first**)\n")
             out.append(risks[-1].strip())
-            out.append("\n> gate はリスクを書けば admit できる。書き得にしないために、"
-                       "この記述が「承知の上の判断」なのか「実は落とし穴」なのかを確かめるのは "
-                       "skeptic の仕事。潰せたなら refuted、潰せず承知の範囲だと確認できたなら "
-                       "その旨を --risk に書いて survives。")
+            out.append("\n> The gate can admit as long as it writes a risk. So that this is not "
+                       "a free pass, it is the skeptic's job to establish whether the statement is "
+                       "\"a decision taken knowingly\" or \"actually a trap\". If you can break "
+                       "it, refuted; if you cannot and confirm it is within what was knowingly "
+                       "accepted, say so in --risk and survives.")
 
     if role == "skeptic":
         out.append("\n## Mutation evidence rule\n")
         out.append("If you mutate, prove baseline → mutate → postcondition → test → restore → "
-                   "restore postcondition. 空振りした変異の GREEN は証拠ではない。"
-                   "適用後状態と復元後状態を実測し、未測定の変異を証拠に数えない。")
+                   "restore postcondition. A GREEN from a mutation that never landed is not "
+                   "evidence. Measure the post-apply state and the post-restore state, and never "
+                   "count an unmeasured mutation as evidence.")
 
-    # subagent に渡すのは「返すもの」の指定。**記録するコマンドは載せない** —
-    # subagent には ORG_GITHUB_REPO も台帳のパスも渡っておらず、載せると指示と権限が
-    # 食い違う。実地で7回、判定を出した後に「記録は監督に委ねます」と止まり、一度は
-    # 判定そのものが失われかけた。記録は監督の仕事で、subagent は判定に集中する。
-    fields = [("verdict", f"`{verdicts}` のいずれか1つ"),
-              ("why", "何を天秤にかけ、何が決め手になったか。verdict の言い換えは不可"),
-              ("evidence", "実際に走らせたコマンドと、その**実出力**（失敗も含む）")]
+    # What the subagent is given is a specification of WHAT TO RETURN. **The recording commands
+    # are not included** — the subagent has neither ORG_GITHUB_REPO nor the ledger path, so
+    # including them would put the instructions at odds with its permissions. Seven times in the
+    # field it produced a judgment and then stopped with "I leave the recording to the supervisor",
+    # and once the judgment itself came close to being lost. Recording is the supervisor's job; the
+    # subagent concentrates on judging.
+    fields = [("verdict", f"exactly one of `{verdicts}`"),
+              ("why", "what was weighed against what, and what decided it. Restating the verdict "
+                      "does not count"),
+              ("evidence", "the commands actually run, and their **actual output** (failures "
+                           "included)")]
     if role == "gate":
-        fields += [("standard", "適用した基準（SPEC の MUST / seam contract / 機械バー）"),
-                   ("alternatives", "採らなかった選択肢と、その理由")]
+        fields += [("standard", "the standard applied (the SPEC's MUSTs / the seam contract / "
+                                "the mechanical bar)"),
+                   ("alternatives", "the options not taken, and why")]
     else:
-        fields += [("mutations", "**適用後状態を実測できた**ミューテーションの一覧。各項目に "
-                                 "`applied: true` と postcondition の実コマンド/実出力を含める。"
-                                 "復元後の読取結果も `restore_postcondition` に含める。"
-                                 "適用失敗はここへ入れず evidence / risk に未測定として残す — "
-                                 "次の周回が同じ場所を撃ち直さないために要る"),
+        fields += [("mutations", "the mutations **whose post-apply state you were able to "
+                                 "measure**. Each entry includes `applied: true` and the actual "
+                                 "command/output of the postcondition. The reading taken after "
+                                 "restoring goes in `restore_postcondition`. A mutation that "
+                                 "failed to apply does not belong here — leave it in evidence / "
+                                 "risk as unmeasured; that is what stops the next round "
+                                 "re-probing the same place"),
                    ("out_of_scope", "**MUST の範囲外**で見つけた欠陥（実在するが、この Issue が"
                                     "守ると述べていないもの）。`verdict` には数えず、"
                                     "「Issue 化を推奨」として返す — 実在の欠陥でも、それは次の "
