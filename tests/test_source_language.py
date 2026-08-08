@@ -47,7 +47,6 @@ BUDGET = {
     "tools/ghsync/backlog.py": 226,
     "tests/test_github_sync.py": 173,
     "tools/orgcycle/_core.py": 159,
-    "tools/identity.py": 45,
     "tools/req_lint.py": 134,
     "tools/orgcycle/ship.py": 127,
     "tools/orgcycle/inspect.py": 109,
