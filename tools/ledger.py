@@ -3048,7 +3048,7 @@ def cmd_release_halt(a):
 
 
 def cmd_halt_status(a):
-    """halt しているかを報告する。**観測は halt 中でも通る。**"""
+    """Report whether it is halted. **Observation gets through even during a halt.**"""
     h, err = active_halt(a.root)
     if h is None:
         print(json.dumps({"halted": False}, ensure_ascii=False))
@@ -3062,29 +3062,30 @@ def cmd_halt_status(a):
 
 
 def cmd_derive_admission(a):
-    """**2件の認証済み provisional から admission を生成する。** writer の専用操作。
+    """**Derive an admission from two authenticated provisionals.** A writer-only operation.
 
-    ## なぜ専用操作にするのか
+    ## Why it is a dedicated operation
 
-    joint admission は「2つの判定が一致した」という **事実の関数**であって、新しい判断ではない。
-    したがって judge の receipt は存在しない — それを generic append で書こうとすると、
-    `require_attested_identity` が「receipt が無い」として拒否し、**一致しても admission を
-    作れないデッドロック**になる。
+    A joint admission is **a function of a fact** — that two judgments agreed — not a new judgment.
+    So no judge's receipt exists for it. Try to write it by generic append and
+    `require_attested_identity` refuses it for having no receipt, producing **a deadlock where
+    agreement can never turn into an admission**.
 
-    ここでは台帳の中の2件を読んで検証する:
-      - 同じ issue / event / subject であること
-      - verdict が一致していること
-      - **両方が認証済み**であること（claimed の判定からは joint を作らない）
-      - 血統が異なること（same-harness と cross-harness）
+    Here it reads the two events out of the ledger and verifies:
+      - they are the same issue / event / subject
+      - their verdicts agree
+      - **both are authenticated** (no joint is derived from claimed judgments)
+      - their lineages differ (same-harness and cross-harness)
 
-    生成する identity は `system:joint(...)` であり、**judge の identity ではない** —
-    誰かの判断として記録しない。
+    The identity it derives is `system:joint(...)`, **not a judge's identity** — it is never
+    recorded as anyone's judgment.
     """
-    # **writer が居るなら、ここも RPC を通す。** 他の書き込み経路（append /
-    # reserve-exposure / trip-halt / release-halt）は writer 経由を要求していたのに、
-    # **この経路だけ直接書けていた**（実測: writer 稼働中に台帳が 2 → 3 件に増えた）。
-    # しかもここが書くのは `admission_decided` — 最も強い権限の記録である。
-    # 単一 writer の保証は、**全部の経路が通って初めて成り立つ**。
+    # **If a writer is running, this path goes through the RPC too.** Every other write path
+    # (append / reserve-exposure / trip-halt / release-halt) required going via the writer, yet
+    # **this one path could still write directly** (measured: the ledger grew from 2 to 3 entries
+    # while the writer was running). And what it writes is `admission_decided` — the record with
+    # the strongest authority of all.
+    # A single-writer guarantee **holds only once every path goes through it**.
     _wp = require_writer_path("derive-admission")
     if _wp:
         print(json.dumps({"ok": False, "reason": "writer_required", "detail": _wp},
@@ -3122,7 +3123,7 @@ def cmd_derive_admission(a):
             if pl.get("for_event") != a.event:
                 continue
             found[pl.get("lineage")] = {**pl, "seq": e.get("seq")}
-        # 今回の一致がどの対象についてのものかを先に決める（同一性の鍵）。
+        # Decide first what subject this agreement is about (the key to its identity).
         _subject_now = None
         for e in evs:
             if e.get("class") != "verdict_provisional" or e.get("seq") in voided:
@@ -3131,50 +3132,53 @@ def cmd_derive_admission(a):
             if (norm_issue(_p.get("issue")) == norm_issue(a.issue)
                     and _p.get("for_event") == a.event):
                 _subject_now = _p.get("review_subject_id")
-        # **同じ一致から2件目を作らない。** joint は「2つの判定が一致した」という
-        # *事実の関数* であって、新しい判断ではない。事実は一度きりなので、
-        # 同じ issue / event に joint が既に在るなら、もう作ってはいけない。
-        # 作れてしまうと、1つの成果物が2回 admit されたように見える（二重計上）。
-        # 実測: derive-admission を2回呼ぶと admission が2件になっていた。
+        # **Never derive a second joint from the same agreement.** A joint is *a function of the
+        # fact* that two judgments agreed, not a new judgment. The fact happens once, so if a joint
+        # already exists for this issue / event, no further one may be made.
+        # Allow it and one deliverable appears to have been admitted twice (double counting).
+        # Measured: calling derive-admission twice produced two admissions.
         for e in evs:
-            # Gate の joint だけに固定すると skeptic の `refutation_attempted` は毎回
-            # 素通りし、同じ provisional pair から無限に複製できる。呼び出しが派生する
-            # event class 自体を natural key の一部として照合する。
+            # Pin it to the gate's joint alone and the skeptic's `refutation_attempted` slips
+            # through every time, so the same provisional pair can be duplicated without limit.
+            # Match on the event class the call derives as part of the natural key itself.
             if e.get("class") != a.event:
                 continue
-            # **訂正・取り消しされた admission は「既にある」に数えない。**
-            # 数えると、対象を差し替えて訂正したあと **二度と admit できない**
-            # （実測: superseded にしても already_admitted で拒否された）。
-            # 訂正できない統制は、間違えたら詰む統制である。
+            # **A corrected or withdrawn admission does not count as "already there".**
+            # Count it and, once the subject has been replaced and corrected, **it can never be
+            # admitted again** (measured: even after being superseded it was refused as
+            # already_admitted).
+            # A control that cannot be corrected is a control where one mistake is terminal.
             if e.get("seq") in voided:
                 continue
             _pl = e.get("payload") or {}
-            # **同じ「対象」に対する二重計上だけを止める。**
-            # (issue, event) だけを鍵にすると、**同じ issue の別リビジョンを
-            # 二度と admit できない**（実測: S1 を admit したあと S2 が
-            # already_admitted で拒否された）。判定の同一性は
-            # `review_subject_id` が決める — それが subject という概念の意味である。
+            # **Stop only the double counting of the same SUBJECT.**
+            # Key it on (issue, event) alone and **a different revision of the same issue can never
+            # be admitted again** (measured: after S1 was admitted, S2 was refused as
+            # already_admitted). What makes two judgments the same is `review_subject_id` — that is
+            # what the concept of a subject means.
             if (norm_issue(_pl.get("issue")) == norm_issue(a.issue)
                     and _pl.get("for_event", a.event) == a.event
                     and _pl.get("review_subject_id") == _subject_now):
                 print(json.dumps(
                     {"ok": False, "reason": "already_admitted",
                      "seq": e.get("seq"),
-                     "detail": f"#{a.issue} / {a.event} の joint は seq="
-                               f"{e.get('seq')} に既にある。**一致は事実なので、"
-                               f"同じ一致から2件目は作らない**（二重計上になる）。"},
+                     "detail": f"a joint for #{a.issue} / {a.event} already exists at "
+                               f"seq={e.get('seq')}. **Agreement is a fact, so no second joint is "
+                               f"derived from the same one** (it would be double counting)."},
                     ensure_ascii=False))
                 return 6
         if len(found) < 2:
             print(json.dumps({"ok": False, "reason": "not_enough_verdicts",
-                              "detail": f"#{a.issue} / {a.event} の provisional が "
-                                        f"{len(found)} 件しかない（血統: {sorted(found)}）。"
-                                        f"2血統が揃ってから生成すること。"}, ensure_ascii=False))
+                              "detail": f"there are only {len(found)} provisional(s) for "
+                                        f"#{a.issue} / {a.event} (lineages: {sorted(found)}). "
+                                        f"Derive it once both lineages are "
+                                        f"present."}, ensure_ascii=False))
             return 3
         subs = {v.get("review_subject_id") for v in found.values()}
         if len(subs) != 1:
             print(json.dumps({"ok": False, "reason": "subject_mismatch",
-                              "detail": f"2件が別の対象を見ている: {sorted(map(str, subs))}"},
+                              "detail": f"the two are looking at different subjects: "
+                                        f"{sorted(map(str, subs))}"},
                              ensure_ascii=False))
             return 3
         # Two independent positive judgments may still agree on the same obsolete premise.  Strict
@@ -3197,13 +3201,15 @@ def cmd_derive_admission(a):
                 if not isinstance(descriptor, dict):
                     print(json.dumps({
                         "ok": False, "reason": "subject_descriptor_missing",
-                        "detail": (f"{lineage} の provisional は integration ref/base の descriptor "
-                                   "を持たない。旧判定は strict admission に再利用できない。"
-                                   "verify と判定をやり直すこと。")}, ensure_ascii=False))
+                        "detail": (f"the {lineage} provisional carries no integration ref/base "
+                                   "descriptor. An old judgment cannot be reused for a strict "
+                                   "admission. Re-run verify and judge again.")},
+                       ensure_ascii=False))
                     return 7
                 if descriptor.get("review_subject_id") != provisional.get("review_subject_id"):
                     print(json.dumps({"ok": False, "reason": "subject_descriptor_mismatch",
-                                      "detail": f"{lineage} の descriptor が subject と一致しない"},
+                                      "detail": f"the {lineage} descriptor does not match the "
+                                                f"subject"},
                                      ensure_ascii=False))
                     return 7
                 subject_cwd = descriptor.get("subject_root") or os.getcwd()
@@ -3211,7 +3217,8 @@ def cmd_derive_admission(a):
                 if not freshness["ok"]:
                     print(json.dumps({"ok": False, "reason": freshness["reason"],
                                       "detail": (f"{lineage}: {freshness['detail']}。"
-                                                 "自動 rebase はせず、再検証を要求する。"),
+                                                 "It does not rebase automatically; it requires "
+                                                 "re-verification."),
                                       "review_subject_id": provisional.get("review_subject_id"),
                                       "integration_ref": descriptor.get("integration_ref"),
                                       "observed": freshness}, ensure_ascii=False))
@@ -3219,27 +3226,30 @@ def cmd_derive_admission(a):
         verdicts = {v.get("verdict") for v in found.values()}
         if len(verdicts) != 1:
             print(json.dumps({"ok": False, "reason": "verdicts_disagree",
-                              "detail": f"一致していない: {sorted(map(str, verdicts))}。"
-                                        f"**片方でも否なら否である。**"}, ensure_ascii=False))
+                              "detail": f"they do not agree: {sorted(map(str, verdicts))}. "
+                                        f"**If either one says no, the answer is no.**"},
+                             ensure_ascii=False))
             return 5
-        # **両方が認証済みでなければ joint を作らない。** claimed の判定から作ると、
-        # 「一致した」という事実に、確かめていない identity の重みが乗る。
+        # **No joint unless both are authenticated.** Derive one from claimed judgments and the
+        # fact "they agreed" is carrying the weight of an identity nobody verified.
         weak = {lin: v.get("identity_assurance") or "claimed" for lin, v in found.items()
                 if (v.get("identity_assurance") or "claimed") == "claimed"}
-        # **強制するかどうかを caller に尋ねない。**
-        # 元は `a.require_attested`（caller が渡す flag）だけを見ていたので、
-        # flag を省略するだけで claimed な判定から admission を作れた（実測: B1）。
-        # 宣言（constitution / root-owned policy）が真なら、flag の有無に関わらず強制する。
-        # flag は「宣言していない org でも厳しくしたい」ときの *上乗せ* としてのみ残す。
+        # **Do not ask the caller whether to enforce.**
+        # This used to look only at `a.require_attested`, a flag the caller passes — so merely
+        # omitting the flag was enough to build an admission out of claimed judgments (measured:
+        # B1). If the declaration (constitution / root-owned policy) is true, it is enforced with
+        # or without the flag. The flag survives only as an *addition on top*, for orgs that want
+        # to be stricter than they declared.
         _must_attest = bool(a.require_attested) or _enforce_attested()
         if weak and _must_attest:
             print(json.dumps({"ok": False, "reason": "unattested_verdicts",
-                              "detail": f"identity が claimed の判定がある: {weak}。"
-                                        f"**確かめていない identity から joint を作らない。**"},
+                              "detail": f"some judgments have a claimed identity: {weak}. "
+                                        f"**No joint is derived from an identity nobody "
+                                        f"verified.**"},
                              ensure_ascii=False))
             return 4
-        # **独立性も writer が判定する。** 2件の signer / key / workload は台帳にあるので、
-        # 呼び出し側の申告を待つ必要が無い。
+        # **The writer decides independence too.** The signer / key / workload of both events are
+        # in the ledger, so there is nothing to wait for the caller to report.
         try:
             sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
             from identity import reviewer_independence
@@ -3251,7 +3261,7 @@ def cmd_derive_admission(a):
                 {"signer_id": _b.get("signer_id"), "key_id": _b.get("key_id"),
                  "workload_isolation": _b.get("workload_isolation") or "none"})
         except Exception:
-            independence = "same_signer"        # 判定できないなら最も弱い方に倒す
+            independence = "same_signer"        # undecidable → fall to the weakest reading
         lineages = sorted(found)
         pair = {lin: {"seq": v["seq"], "reasoning_sha256": v.get("reasoning_sha256"),
                       "reasoning_ref": v.get("reasoning_ref")} for lin, v in found.items()}
@@ -3268,7 +3278,7 @@ def cmd_derive_admission(a):
                    "agreed_identity_assurance": min(
                        (v.get("identity_assurance") or "claimed" for v in found.values()),
                        key=order.index),
-                   # **judge の identity ではない。** 誰かの判断として記録しない。
+                   # **Not a judge's identity.** It is never recorded as anyone's judgment.
                    "decision_by": f"system:joint({','.join(lineages)})",
                    "recorded_by": "system:writer", "identity_assurance": "derived",
                    "recorder_assurance": "observed", "workload_isolation": "none"}
@@ -3291,7 +3301,8 @@ def cmd_derive_admission(a):
         log, headp = _paths(a.root)
         prior = os.path.getsize(log) if os.path.exists(log) else 0
         try:
-            # 故障注入。**書けなかったら生成しない**ことを検査できなければ、そう言えない。
+            # Fault injection. Without testing that **a failed write derives nothing**, we cannot
+            # say so.
             if os.environ.get("ORG_LEDGER_FORCE_APPEND_FAIL") == "1":
                 raise OSError("ORG_LEDGER_FORCE_APPEND_FAIL=1 (fault injection)")
             with open(log, "a", encoding="utf-8") as f:
@@ -3353,35 +3364,39 @@ def cmd_verify(a):
             print(f"BROKEN: hash mismatch at seq {ev['seq']} — event {ev['id']} was edited "
                   f"after it was written (tamper evidence)", file=sys.stderr)
             return 1
-        # 条件6: **version 別の validator を再実行する。** 鎖が通っていることは「書き換えられて
-        # いない」ことしか言わず、「schema に沿っている」ことは言わない。version を持つ
-        # イベントだけを検証する — legacy に遡って適用すると移行できない。
+        # Condition 6: **re-run the per-version validator.** An intact chain says only "this was
+        # not rewritten"; it says nothing about "this conforms to the schema". Validate only events
+        # that carry a version — applying it retroactively to legacy ones would make migration
+        # impossible.
         v = ev.get("schema_version")
         if v:
             if v > LEDGER_SCHEMA_VERSION:
-                print(f"BROKEN: seq {ev['seq']} は未知の schema_version {v} "
-                      f"（この writer は v{LEDGER_SCHEMA_VERSION} まで）。"
-                      f"新しい版で書かれた台帳を古い道具で読んでいる。", file=sys.stderr)
+                print(f"BROKEN: seq {ev['seq']} carries an unknown schema_version {v} (this "
+                      f"writer goes up to v{LEDGER_SCHEMA_VERSION}). An old tool is reading a "
+                      f"ledger written by a newer version.", file=sys.stderr)
                 return 1
             if vsnap is None:
                 vsnap, verr = load_schema_snapshot()
                 if verr:
-                    print(f"BROKEN: schema を読めないので v{v} の検証ができない — {verr}",
+                    print(f"BROKEN: the schema cannot be read, so v{v} cannot be validated — "
+                          f"{verr}",
                           file=sys.stderr)
                     return 1
-            # **記録時の digest を照合する。** 記録された schema_sha256 と、いま読んでいる
-            # schema の digest が違うなら、形式が入れ替わっている。検証が「いまの schema に
-            # 沿っているか」しか言えないなら、記録時に何で検証したのかは失われる。
+            # **Compare the digest recorded at write time.** If the recorded schema_sha256 differs
+            # from the digest of the schema being read now, the format has been swapped. If
+            # validation can only say "does it conform to the CURRENT schema", then what it was
+            # validated against when written is lost.
             rec = ev.get("schema_sha256")
             if rec and rec != vsnap["digest"]:
                 drift.add(rec)
-            # **verify では writer_only を検査しない。** これは「誰が書いたか」の検査で、
-            # append の時点でしか行えない（経路は記録に残らない）。既に書かれた予約を
-            # 「generic append では書けない」と拒否すると、正しい台帳が壊れていると報告される。
+            # **verify does not check writer_only.** That is a check on WHO wrote it, and can only
+            # be made at append time (the path leaves no trace in the record). Refuse an
+            # already-written reservation as "not writable by a generic append" and a sound ledger
+            # gets reported as broken.
             bad, _w = validate_event(ev.get("class"), ev.get("payload"), vsnap,
                                      writer_op=ev.get("class"))
             if bad:
-                print(f"BROKEN: seq {ev['seq']} が v{v} の検証を通らない — {bad}",
+                print(f"BROKEN: seq {ev['seq']} does not pass v{v} validation — {bad}",
                       file=sys.stderr)
                 return 1
             validated += 1
@@ -3390,12 +3405,14 @@ def cmd_verify(a):
         prev = ev["hash"]
         expect_seq += 1
     if validated or legacy:
-        # **2つの保証を混ぜない。** schema 検証済みかと actor 認証済みかは独立した性質である。
+        # **Do not conflate the two guarantees.** "Validated against the schema" and "the actor was
+        # authenticated" are independent properties.
         if drift:
-            print(f"注意: {len(drift)} 種類の schema digest で記録されたイベントがある "
-                  f"（いまの schema は {vsnap['digest'][:12]}…）。\n"
-                  f"  形式が入れ替わっている — 再検証は **いまの schema** に対して行われた。"
-                  f"記録時に何で検証したのかは、その版の schema が無ければ再現できない。",
+            print(f"note: events were recorded under {len(drift)} different schema digests "
+                  f"(the current schema is {vsnap['digest'][:12]}…).\n"
+                  f"  The format has been swapped — this re-validation ran against **the current "
+                  f"schema**. What each event was validated against when written cannot be "
+                  f"reproduced without that version of the schema.",
                   file=sys.stderr)
         print(f"validation_assurance: validated:v{LEDGER_SCHEMA_VERSION} {validated} 件 / "
               f"legacy_unvalidated {legacy} 件"
