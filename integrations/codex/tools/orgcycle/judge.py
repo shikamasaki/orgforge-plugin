@@ -771,14 +771,15 @@ _TRUNCATED = (r"^\s*(now|next|then)\b", r"(しましょう|します)。?\s*$",
 
 
 def _run_headless(role, issue, material, cfg, schema, stable_organ=None):
-    """judge を別ハーネスで実際に起動し、構造化された verdict を持ち帰る。
+    """Actually launch the judge on another harness and bring back a structured verdict.
 
-    **案内を出すだけにしない。** 打つかどうかを監督が選べるなら、それは「検査を呼ぶかどうかを
-    検査される側が決める」構造に戻る（docs/11）。cross-harness を宣言した org では、verify が
-    自分で起動して結果を出すところまでを配管とする。
+    **Do not merely print guidance.** If the supervisor gets to choose whether to run it, we are
+    back to the shape where **the thing being checked decides whether the check is called**
+    (docs/11). In an org that declared cross-harness, the plumbing extends to verify launching it
+    itself and producing the result.
 
-    judge は read-only で走らせる。**別ハーネスのガードレールは未検証**なので、書けないなら
-    そのハーネスが何を許していても安全側に倒れる。
+    The judge runs read-only. **The other harness's guardrails are unverified**, so if it cannot
+    write, it falls to the safe side whatever that harness happens to permit.
     """
     cfg = cfg or {}
     cli = str(cfg.get("cli") or "codex")
@@ -790,15 +791,16 @@ def _run_headless(role, issue, material, cfg, schema, stable_organ=None):
               f"same-harness in the constitution.", file=sys.stderr)
         return 4
 
-    # **固定パスにしない。** /tmp/orgforge-{role}-{issue}.json だと、並行実行が同じファイルを
-    # 踏み、失敗した回の古い出力を次の回が読む（監査指摘）。材料のダイジェストを名前に入れ、
-    # 同じ材料の再実行だけが同じファイルに当たるようにする。
+    # **Never use a fixed path.** With /tmp/orgforge-{role}-{issue}.json, concurrent runs tread on
+    # the same file and the next run reads stale output from a failed one (raised in audit). Put a
+    # digest of the material into the name, so that only a re-run on the same material lands on the
+    # same file.
     _mat = hashlib.sha256(material.encode("utf-8")).hexdigest()[:12]
     _dir = os.path.join(tempfile.gettempdir(), "orgforge-judge")
     os.makedirs(_dir, exist_ok=True)
     out_json = os.path.join(_dir, f"{role}-{issue}-{_mat}.json")
     if os.path.exists(out_json):
-        os.remove(out_json)          # 前回の残骸を判定として読まない
+        os.remove(out_json)          # never read last time's debris as a judgment
     if cli == "codex":
         cmd = [exe, "exec", "--sandbox", "read-only"]
         if model:
@@ -807,14 +809,14 @@ def _run_headless(role, issue, material, cfg, schema, stable_organ=None):
             cmd += ["-c", f"model_reasoning_effort={effort}"]
         cmd += ["--output-schema", schema, "-o", out_json, material]
     elif cli == "claude":
-        # Claude Code は --json-schema を備える。本文だけで JSON を要求すると散文を返して
-        # intake 不能になるため、Codex と同じく CLI 側で構造を強制する。
-        # Claude Code の validator は Draft 2020-12 の meta-schema URI を解決しない。
-        # 同じ object schema から宣言だけ除いた互換表現を CLI に渡す。
+        # Claude Code provides --json-schema. Asking for JSON in the prompt body alone gets prose
+        # back and makes intake impossible, so the structure is enforced at the CLI, as with Codex.
+        # Claude Code's validator does not resolve the Draft 2020-12 meta-schema URI, so what is
+        # passed to the CLI is the same object schema with only that declaration removed.
         _claude_schema = json.dumps({k: v for k, v in json.load(open(schema, encoding="utf-8")).items()
                                      if k != "$schema"}, ensure_ascii=False)
-        cmd = [exe, "-p", material + "\n\n## 返す形\n"
-               "次のスキーマに厳密に一致する JSON **のみ** を返すこと（前後に散文を付けない）:\n"
+        cmd = [exe, "-p", material + "\n\n## The shape to return\n"
+               "Return **only** JSON matching this schema exactly (no prose before or after):\n"
                + _claude_schema,
                "--output-format", "json", "--json-schema", _claude_schema]
         if model:
@@ -825,19 +827,20 @@ def _run_headless(role, issue, material, cfg, schema, stable_organ=None):
         print(f"judges.harness.{role}.cli = {cli!r} is unsupported (codex | claude).", file=sys.stderr)
         return 2
 
-    # **read-only の judge は、実行して緑を確かめる MUST を構造的に admit できない。**
-    # 実測: #34 は「静的には妥当だが『100回連続 green』を read-only サンドボックスで再導出
-    # できない」として park を返した。park 自体は正しい振る舞い（測れないのに admit しない）だが、
-    # 判定を回してから分かるのは無駄なので、**先に言う**。
-    print(f"[{role}] judge は read-only で走る（judges.read_only）。別ハーネスのガードレールは"
-          f"未検証なので、書けないなら安全側に倒れる。\n"
-          f"  ただし **実行して緑を確かめる類の MUST は再導出できず、park になる** "
-          f"（テストの連続実行・実 DB への到達・ビルド）。\n"
-          f"  その MUST が admission の荷重を持つなら、判定の前に監督が実測して "
-          f"evidence として渡すこと。", file=sys.stderr)
-    print(f"[{role}] {cli} を read-only で起動している"
+    # **A read-only judge structurally cannot admit a MUST that means "run it and see it go
+    # green".** Measured: #34 returned park, on the grounds that it was statically sound but that
+    # "100 consecutive greens" could not be re-derived inside a read-only sandbox. The park itself
+    # is correct behaviour (do not admit what you cannot measure), but discovering it only after
+    # running the judgment is waste — so **say it up front**.
+    print(f"[{role}] the judge runs read-only (judges.read_only). The other harness's guardrails "
+          f"are unverified, so if it cannot write, it falls to the safe side.\n"
+          f"  Note that **a MUST of the \"run it and see it go green\" kind cannot be re-derived, "
+          f"and becomes a park** (running tests repeatedly, reaching a real DB, building).\n"
+          f"  If such a MUST carries the weight of the admission, the supervisor should measure it "
+          f"before the judgment and hand it over as evidence.", file=sys.stderr)
+    print(f"[{role}] launching {cli} read-only"
           + (f"（model={model}" + (f", effort={effort}" if effort else "") + "）" if model else "")
-          + " — 応答まで数分かかることがある …", file=sys.stderr)
+          + " — a response can take several minutes …", file=sys.stderr)
     try:
         # stdin を閉じる。codex exec は stdin を読もうとして、端末が無いと止まる（実測）。
         # A timeout catches a HUNG child; it is not a budget for normal work. Measured on a
