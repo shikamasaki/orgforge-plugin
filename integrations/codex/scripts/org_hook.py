@@ -500,9 +500,9 @@ _DEFAULT_CAPS = {
     # rm/DROP/force per day — irreversible but routine in real work; scope-weighted.
     # 50 was not enough in practice: a day running 18 Issues in parallel filled it, leaving a
     # maker unable to push work it had finished. The cap exists to stop a runaway of irreversible
-    # あって、開発の速度を律することではない。通常の `git push` を対象から外した（0.23.0）
-    # うえで、なお現実的な余裕として 150 にする。**重み3の操作（rm -rf / DROP / reset --hard）
-    # なら50回で到達する**ので、暴走に対する歯止めとしては十分に効く。
+    # operations, not to govern the pace of development. With ordinary `git push` taken out
+    # of scope (0.23.0), 150 leaves realistic headroom while still biting: **a weight-3
+    # operation (recursive delete / DROP / reset --hard) reaches it in 50 uses.**
     "destructive_ops": "150",
     "external_writes": "30",   # outbound POST/PUT/DELETE per day — irreversible side effect
     "infra_changes":   "20",   # apply to real infra per day — irreversible, rarer than local deletes
@@ -531,11 +531,11 @@ def _enforcement():
     _ENFORCEMENT_CACHE = {}
     path = os.environ.get("ORG_CONSTITUTION")
     if not path:
-        # **org root を探す。** constitution.yaml は org root（= .orgforge の親）に置かれる
-        # （/org-init がそこに書く）。ledger root の親は `.orgforge/` なので、そこを見ても
-        # **絶対に見つからない**。見つからないと {} を返し、宣言した cap も window も
-        # 効かないまま built-in default で動く — しかも hook は正常に見える。
-        # 実測: 実 org (tatekae) で _enforcement() が空だった。
+        # **Find the org root.** constitution.yaml lives at the org root — the PARENT of
+        # `.orgforge/`, which is where /org-init writes it. The ledger root's parent IS
+        # `.orgforge/`, so looking there can never find it. On a miss this returned {} and
+        # every declared cap and window silently fell back to a built-in default, while the
+        # hook still looked healthy. Measured: `_enforcement()` came back empty on a live org.
         try:
             sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
                 os.path.dirname(os.path.abspath(__file__)))), "tools"))
@@ -546,7 +546,8 @@ def _enforcement():
         except Exception:
             pass
     if not path and LEDGER_ROOT:
-        # discover が使えないときの保険。**org root（.orgforge の親の親）** を見る。
+        # Fallback for when discover is unavailable: look at the **org root** — the parent of the
+    # parent of `.orgforge`.
         for cand in (
             os.path.join(os.path.dirname(os.path.dirname(
                 LEDGER_ROOT.rstrip("/"))), "constitution.yaml"),
@@ -620,11 +621,12 @@ def _window_since():
 # unambiguously catastrophic, root-scoped / whole-disk forms) to avoid false positives; the cap handles
 # the ordinary irreversible ops. Override for a sandbox with ORG_ALLOW_CATASTROPHIC=1 (never in prod).
 
-# 統合を organ の外で行う経路。**呼ばなかったことを検出できるのは hook だけである** —
-# `integrate` は gate の admit と skeptic の survives を確認するが、呼ばれなければ何も起きない。
-# 運用では、質の高い maker 報告を受けた監督が `git merge` で develop に入れ、gate も skeptic も
-# 通らないまま2件が統合された。台帳は後から正しく拒否したが、拒否が来たのはコードが入った後。
-# **検査を呼ぶかどうかを、検査される側が決められてはいけない。**
+# Integrating outside the organ. **Only the hook can notice a check that was never called** —
+# `integrate` verifies the gate's admit and the skeptic's survives, but verifies nothing if
+# nobody runs it. In the field a supervisor, convinced by a strong maker report, merged into
+# develop with `git merge`: two changes landed with neither gate nor skeptic. The ledger
+# refused them afterwards — correctly, and after the code was already in.
+# **Whether a check runs must not be the decision of the thing being checked.**
 _PROTECTED_BRANCHES = ("develop", "main", "master")
 _MERGE_VERBS = (("git", "merge"), ("git", "rebase"), ("git", "cherry-pick"))
 _MERGE_COMMANDS = {verb for _, verb in _MERGE_VERBS}
@@ -843,7 +845,7 @@ def _integration_bypass(tool_name, ti):
     cur, repo_root = _git_integration_context(target_cwd)
     if cur not in _PROTECTED_BRANCHES:
         return None
-    # org が無いリポジトリでは黙る（この規律は orgforge の org にだけ適用する）
+    # Stay silent in a repository with no org — this discipline applies only to an orgforge org.
     if not repo_root or not os.path.isdir(os.path.join(repo_root, ".orgforge")):
         return None
 
