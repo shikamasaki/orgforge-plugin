@@ -981,7 +981,7 @@ def test_schema_drift_is_reported_by_verify(tmp_path, monkeypatch):
     monkeypatch.setenv("ORG_LEDGER_SCHEMA", str(alt))
     code, out = run("ledger.py", "verify", str(tmp_path))
     assert code == 0, out                      # 鎖は無事
-    assert "形式が入れ替わっている" in out      # しかし drift は報告される
+    assert "The format has been swapped" in out      # しかし drift は報告される
 
 
 def test_schema_skew_is_diagnosed_and_fixable(tmp_path):
