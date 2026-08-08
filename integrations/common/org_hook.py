@@ -1139,8 +1139,8 @@ def _held_call_atomicity(tool_name):
 
 
 def _command_text(ti):
-    """tool_input からコマンド文字列を取り出す。**型の揺れをここで吸収する。**
-    dict / str / list、`command` / `cmd` のどれで来ても落ちない。"""
+    """Pull the command string out of tool_input. **Absorb the variation in type here.**
+    It must not fall over whether it arrives as dict / str / list, under `command` or `cmd`."""
     if isinstance(ti, str):
         return ti
     if isinstance(ti, (list, tuple)):
@@ -1225,69 +1225,77 @@ def _catastrophic_reason(tool_name, ti):
         return ("execution whose contents cannot be verified statically (a decode or a download "
                 "piped straight into a shell) — what cannot be read does not pass. Write it to a "
                 "file first and verify the contents")
-    # **絶対パス指定の rm も rm である。** `/bin/rm` はトークンとしては `rm` と一致しない
-    # ので、素の `rm` だけを見ていると素通しした（実測）。末尾が `/rm` の語も同じ扱いにする。
-    # **記号がくっついた語も rm である。** shlex は `<(rm` `/bin/rm` `(rm` を
-    # そのまま1語として残すので、素の `rm` としか比べないと素通しする（実測:
-    # `cat <(rm -rf /)` — プロセス置換の中身は **実行される**）。
-    # 語頭の記号を剥がしてから比べる。
+    # **`rm` given by absolute path is still `rm`.** `/bin/rm` does not match `rm` as a token,
+    # so looking only at a bare `rm` let it through (measured). Treat any word ending in `/rm`
+    # the same way.
+    # **A word with punctuation glued to it is still `rm`.** shlex keeps `<(rm`, `/bin/rm` and
+    # `(rm` as single words, so comparing against a bare `rm` lets them through (measured:
+    # `cat <(rm -rf /)` — the contents of a process substitution **are executed**).
+    # Strip the leading punctuation before comparing.
     _is_rm = _has_token(toks, "rm") or any(
         isinstance(x, str) and re.sub(r"^[^\w/]+", "", x).lstrip("/").split("/")[-1] == "rm"
         for x in toks)
     recursive_rm = _is_rm and _has_token(toks, "-rf", "-fr", "-r", "-R", "--recursive")
     # rm -rf targeting root, home, or a root glob — the unambiguously catastrophic forms
-    # **区切り文字も境界として扱う。** `$( )` や backtick の中では `/` の直後が `)` や
-    # `` ` `` になるため、空白・行末しか見ないと一致しない。実測で、素の形は deny なのに
-    # コマンド置換・バッククォート・`| sh` 経由が **素通し**していた。
-    # **不可視・不正な文字も境界として扱う。** 末尾に U+FFFD（不正 UTF-8 の置換文字）や
-    # ゼロ幅スペースを付けるだけで境界一致が外れ、**素通しした**（実測）。
-    # それらは実行を妨げない — シェルは `rm -rf /` を実行する。見えない差で統制が外れてはいけない。
+    # **Treat separators as boundaries too.** Inside `$( )` or a backtick, what follows `/` is
+    # `)` or `` ` ``, so matching only whitespace and end-of-line never fires. Measured: the bare
+    # form was denied while command substitution, backticks and `| sh` **went straight through**.
+    # **Treat invisible and invalid characters as boundaries too.** Appending U+FFFD (the
+    # replacement character for invalid UTF-8) or a zero-width space was enough to break the
+    # boundary match and **let it through** (measured). Neither stops execution — the shell still
+    # runs `rm -rf /`. Control must not come off over a difference nobody can see.
     _BND = r"[\s;&|()`'\"�​-‍⁠﻿ ]"
-    # **`rm` と根の指定が「つながっている」ことまで見る。**
-    # 単に同じ行のどこかに `rm` `-rf` `/` が在るだけで hard-block すると、
-    # `echo rm -rf foo / bar` のような **実行しても何も壊さない行まで止める**（実測）。
-    # hard-block は最も強い拒否なので、ここを広く取ると通常の作業が止まる。
-    # `rm` から根の指定までの間に **別のコマンド区切りが無い** ことを条件にする。
-    # `rm` が **コマンドの位置に在る** ことを見る。行頭・区切りの直後・置換の直後だけが
-    # 実行位置である。`echo rm -rf foo / bar` の `rm` は echo の引数であって実行されない。
-    # **「実行位置の形」を数え上げる方式は破綻する。**
-    # 行頭・区切り・sudo・env だけを許した実装は、`{ … }` `( … )` `if…then` ループ
-    # `time` `timeout` `xargs` `/bin/rm` `\rm` など **18通り中15通りを素通しした**（実測）。
-    # 前置詞は無限に増やせるので、列挙では追いつかない。
+    # **Also require that `rm` and the root target are CONNECTED.**
+    # Hard-blocking merely because `rm`, `-rf` and `/` appear somewhere on the same line stops
+    # lines that **destroy nothing when executed**, such as `echo rm -rf foo / bar` (measured).
+    # A hard-block is the strongest refusal there is, so drawing it widely halts ordinary work.
+    # The condition is that **no other command separator** sits between `rm` and the root target.
+    # And require that `rm` stands **in command position**. Only the start of a line, just after a
+    # separator, or just after a substitution is an execution position; the `rm` in
+    # `echo rm -rf foo / bar` is an argument to echo and never runs.
     #
-    # 逆にする: **`rm` が「引数として消費される」数少ない形だけを除外し、残りは実行とみなす。**
-    # `echo` / `printf` / `grep` の類は引数を実行しない。それ以外の位置に現れた `rm` は
-    # 実行されうるものとして扱う。**危険側に倒す。**
-    # `#` から行末まではコメントで、**シェルは何も実行しない**。
-    # 「危険なので絶対にやるな」と書いたメモまで hard-block していた（実測）。
-    # 危険を隠す用途には使えない — コメントにした時点で実行されないからである。
+    # **Enumerating the shapes of an execution position does not work.**
+    # An implementation that allowed only line-start, separator, `sudo` and `env` let
+    # **15 of 18 forms through** (measured) — `{ … }`, `( … )`, `if…then`, loops, `time`,
+    # `timeout`, `xargs`, `/bin/rm`, `\rm` and more. Prefixes can be invented without limit, so
+    # enumeration can never catch up.
+    #
+    # So invert it: **exclude only the few shapes where `rm` is CONSUMED AS AN ARGUMENT, and
+    # treat everything else as execution.** `echo` / `printf` / `grep` and their kin do not
+    # execute their arguments. An `rm` appearing anywhere else is treated as something that could
+    # run. **Fall to the dangerous side.**
+    # From `#` to end of line is a comment, and **the shell executes nothing there**.
+    # We were hard-blocking notes that said "this is dangerous, never do it" (measured). It cannot
+    # be used to hide danger — the moment it is a comment, it does not execute.
     _ARG_CONSUMERS = r"(?:echo|printf|cat|grep|rg|egrep|fgrep|sed|awk|comm|diff|test|\[)"
     _RM_AT_CMD = (
-        rf"(?<!\w)(?:{_ARG_CONSUMERS}\b(?:(?![;&|`\n]).)*?)?"        # 引数を食う語（あれば）
+        rf"(?<!\w)(?:{_ARG_CONSUMERS}\b(?:(?![;&|`\n]).)*?)?"        # a word that eats arguments (if any)
         rf"(?<!\w)rm\b(?:(?![;&|`\n]).)*?"
         rf"(?:^|{_BND})(/{_BND}|/\*|/$|~/?{_BND}|~/?$|\$HOME)")
-    # **隠された形も、開いてから位置を見る。** `'rm -rf /' | sh` や `$'\x72\x6d'` では
-    # 生の文字列上の `rm` はコマンド位置に来ないが、**シェルはそれを実行する**。
-    # 引用符を外した形・エスケープを復号した形にも、同じ「実行位置か」の判定をかける。
+    # **Open the hidden forms first, then look at position.** In `'rm -rf /' | sh` or
+    # `$'\x72\x6d'` the `rm` never lands in command position in the raw string, yet **the shell
+    # executes it**. Run the same "is this an execution position?" test against the unquoted form
+    # and the escape-decoded form as well.
     _variants = [cmd]
     if _EXECUTES_STRING.search(cmd) or _OPAQUE_EXEC.search(cmd):
         _variants.append(re.sub(r"['\"|]", " ", cmd))
     if _dec != cmd:
         _variants.append(re.sub(r"['\"$]", " ", _dec))
-    # **引数として消費される rm は実行されない。** `echo rm -rf foo / bar` の rm は
-    # echo の引数であって、シェルは rm を起動しない。それだけを除外する。
+    # **An `rm` consumed as an argument does not execute.** The rm in `echo rm -rf foo / bar` is
+    # an argument to echo; the shell never launches rm. That is the only thing excluded here.
     _ARG_ONLY = re.compile(
         rf"(?:^|[;&|`\n]|\$\(|<\()\s*(?:\w+=\S+\s+)*{_ARG_CONSUMERS}\b"
         rf"(?:(?![;&|`\n]).)*$", re.S)
-    # **xargs は削除対象を左から受け取る。** 区間を分けると rm 側に根の指定が無く、
-    # 見逃す（実測）。「左が根を出し、xargs で rm を起動する」形をひとつの危険とみなす。
+    # **xargs receives its deletion targets from the left.** Split the two sides apart and the
+    # rm side carries no root target, so it is missed (measured). Treat "the left side produces
+    # the root and xargs launches rm" as a single dangerous shape.
     if re.search(rf"(?:^|{_BND})(/{_BND}|/\*|~/?{_BND})(?:(?!\|).)*\|\s*xargs\b"
                  rf"(?:(?![;&|`\n]).)*?(?<![\w-])(?:/\S*/)?rm\b", cmd + " ", re.S):
         return ("recursive delete of a root/home/glob path "
                 "(`rm -rf /` class) — unrecoverable")
-    # **後で実行される形も実行である。**
-    #   `bash <<< '…'`   … 標準入力から読んで実行する
-    #   `trap '…' EXIT`  … 終了時に実行される
+    # **A shape that executes later is still execution.**
+    #   `bash <<< '…'`   … reads from stdin and executes it
+    #   `trap '…' EXIT`  … executed on exit
     #   `alias x='…'`    … 呼ばれた時点で実行される
     # いずれも引用符の中に危険が入るため、素の位置判定では見えない（実測で素通し）。
     if re.search(rf"(?:<<<|\btrap\b|\balias\b)(?:(?![;&|`\n]).)*?"
