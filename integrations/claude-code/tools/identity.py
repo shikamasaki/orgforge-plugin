@@ -395,14 +395,14 @@ def verify_receipt(receipt, expect, store=None, expect_release=False):
 
 
 def observed_recorder():
-    """`recorded_by` を **観測** する。申告ではない（が、認証でもない）。
+    """**Observe** `recorded_by`. Not something reported (but not authenticated either).
 
-    hook が渡す session / agent の識別子、または実行環境から取る。取れなければ
-    `unknown` を返し、`recorder_assurance` は `claimed` に落ちる。
+    Taken from the session / agent identifier the hook passes, or from the execution environment.
+    If neither is available it returns `unknown` and `recorder_assurance` drops to `claimed`.
     """
-    # **writer が観測した peer credential を最優先する。** socket 越しに得た uid/pid は
-    # 「接続してきた主体」であって申告ではない。ただし **判断の identity には使わない** —
-    # 接続してきたことは、その判断をしたことの証拠にならない。
+    # **Prefer the peer credential the writer observed.** A uid/pid obtained across the socket is
+    # "the principal that connected", not something self-reported. But **it is never used as the
+    # identity of a judgment** — having connected is no evidence of having made it.
     puid = os.environ.get("ORG_WRITER_PEER_UID")
     if puid:
         ppid = os.environ.get("ORG_WRITER_PEER_PID") or ""
@@ -413,18 +413,18 @@ def observed_recorder():
             return f"session:{v}", "observed"
     v = os.environ.get("ORG_ROLE")
     if v:
-        return f"role:{v}", "claimed"          # 自己申告。observed とは呼ばない
+        return f"role:{v}", "claimed"          # self-reported; never called observed
     return "unknown", "claimed"
 
 
 def reviewer_independence(decision_by, assurance, peer_assurance):
-    """2つの判定の独立性を **別軸として** 判定する。
+    """Decide the independence of two judgments **as a separate axis**.
 
-    **署名されていても、同じ signer が両方を作れるなら独立レビューではない。**
-    同じ鍵、同じ process なら、血統を分けたことの意味は失われる。
+    **Even when signed, it is not an independent review if one signer could have produced both.**
+    With the same key and the same process, splitting the lineages has lost its meaning.
     """
     if not (assurance and peer_assurance):
-        return "same_signer"                   # 分からないなら最も弱い方に倒す
+        return "same_signer"                   # when unknown, fall to the weakest reading
     if assurance.get("signer_id") == peer_assurance.get("signer_id"):
         return "same_signer"
     if assurance.get("key_id") == peer_assurance.get("key_id"):
@@ -436,16 +436,19 @@ def reviewer_independence(decision_by, assurance, peer_assurance):
 
 
 def _cmd_keygen(a):
-    """鍵を作る。**既定は非対称**（Authenticated Mode）。
+    """Create a key. **Asymmetric by default** (Authenticated Mode).
 
-    秘密鍵は `--private-out` に書き、**trust store には公開鍵だけを入れる**。writer が秘密鍵を
-    持つと judge の判定を偽造できるので、それは authenticated ではない。
+    The private key is written to `--private-out`, and **only the public key goes into the trust
+    store**. A writer holding the private key could forge the judge's verdicts, and that is not
+    authenticated.
 
-    `--shared-secret` で共有鍵も作れるが、それは Compatibility Mode（attested まで）である。
+    `--shared-secret` can create a shared key instead, but that is Compatibility Mode (`attested`
+    at most).
     """
     path = a.store or _trust_store_path()
     if not path:
-        print("trust store の場所が決まらない（--store か ORG_TRUST_STORE）", file=sys.stderr)
+        print("cannot determine where the trust store is (--store or ORG_TRUST_STORE)",
+              file=sys.stderr)
         return 2
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     doc = {"keys": {}}
@@ -453,7 +456,8 @@ def _cmd_keygen(a):
         try:
             doc = json.load(open(path, encoding="utf-8"))
         except Exception as e:
-            print(f"既存の trust store を読めない（上書きしない）: {e}", file=sys.stderr)
+            print(f"cannot read the existing trust store (it will not be overwritten): {e}",
+                  file=sys.stderr)
             return 2
     entry = {"signer_id": a.signer_id, "revoked": False}
     if a.authorized_roles:
@@ -467,12 +471,13 @@ def _cmd_keygen(a):
     if a.shared_secret:
         import secrets
         entry["secret"] = secrets.token_hex(32)
-        note = ("**共有鍵である（Compatibility Mode）。** 検証する側が署名も作れるので、"
-                "得られるのは `attested` まで。halt の解除には使えない。")
+        note = ("**This is a shared key (Compatibility Mode).** Whoever verifies can also sign, so "
+                "the most it reaches is `attested`. It cannot release a halt.")
     else:
         if not a.private_out:
-            print("非対称鍵には --private-out が必要（秘密鍵の置き場所）。\n"
-                  "  **trust store には入れない** — writer が秘密鍵を持つと判定を偽造できる。",
+            print("an asymmetric key needs --private-out (where the private key goes).\n"
+                  "  **It does not go into the trust store** — a writer holding the private key "
+                  "could forge verdicts.",
                   file=sys.stderr)
             return 2
         priv, pub, err = generate_keypair()
@@ -484,8 +489,9 @@ def _cmd_keygen(a):
             f.write(priv)
         os.chmod(a.private_out, 0o600)
         entry["public_pem"] = pub
-        note = (f"秘密鍵: {a.private_out}（judge が持つ。**writer には渡さない**）\n"
-                f"  trust store には公開鍵だけが入っている — writer は検証しかできない。")
+        note = (f"private key: {a.private_out} (the judge holds it. **Never hand it to the "
+                f"writer**)\n"
+                f"  the trust store holds only the public key — the writer can merely verify.")
 
     doc.setdefault("keys", {})[a.key_id] = entry
     doc.setdefault("mode", "authenticated" if not a.shared_secret else "compatibility")
@@ -498,19 +504,20 @@ def _cmd_keygen(a):
     os.chmod(path, 0o600)
     print(f"registered key_id={a.key_id} signer_id={a.signer_id} in {path}\n  {note}")
     if entry.get("may_release_halt"):
-        print("  この鍵は halt の解除を認可されている — **止めた主体とは別にすること。**")
+        print("  this key is authorised to release a halt — **keep it separate from whoever "
+              "stopped it.**")
     return 0
 
 
 def _cmd_revoke(a):
     path = a.store or _trust_store_path()
     if not path or not os.path.isfile(path):
-        print(f"trust store が無い: {path}", file=sys.stderr)
+        print(f"there is no trust store: {path}", file=sys.stderr)
         return 2
     doc = json.load(open(path, encoding="utf-8"))
     k = (doc.get("keys") or {}).get(a.key_id)
     if not k:
-        print(f"key_id {a.key_id!r} が無い", file=sys.stderr)
+        print(f"there is no key_id {a.key_id!r}", file=sys.stderr)
         return 2
     k["revoked"] = True
     k["revoked_reason"] = a.reason
@@ -525,25 +532,28 @@ def _cmd_revoke(a):
 
 
 def _cmd_receipt(a):
-    """judge が自分の判断に署名する。**監督はこれを運ぶだけ。**"""
+    """The judge signs its own judgment. **A supervisor only carries it.**"""
     store, err = load_trust_store()
     if err:
         print(f"receipt: {err}", file=sys.stderr)
         return 2
     key = (store["keys"] or {}).get(a.key_id)
     if not key:
-        print(f"receipt: key_id {a.key_id!r} が trust store に無い", file=sys.stderr)
+        print(f"receipt: key_id {a.key_id!r} is not in the trust store", file=sys.stderr)
         return 2
     if key.get("public_pem") and not a.private_key:
-        print(f"receipt: key_id {a.key_id!r} は非対称鍵なので --private-key が必要。\n"
-              f"  **秘密鍵は judge が持つ。** trust store（writer 側）には公開鍵しか無い。",
+        print(f"receipt: key_id {a.key_id!r} is an asymmetric key, so --private-key is "
+              f"required.\n"
+              f"  **The judge holds the private key.** The trust store (on the writer's side) has "
+              f"only the public one.",
               file=sys.stderr)
         return 2
     if not key.get("public_pem") and not key.get("secret"):
-        print(f"receipt: key_id {a.key_id!r} に public_pem も secret も無い", file=sys.stderr)
+        print(f"receipt: key_id {a.key_id!r} has neither a public_pem nor a secret",
+              file=sys.stderr)
         return 2
     if key.get("revoked"):
-        print(f"receipt: key_id {a.key_id!r} は失効している", file=sys.stderr)
+        print(f"receipt: key_id {a.key_id!r} has been revoked", file=sys.stderr)
         return 2
     if a.event_class == "adaptive_envelope_adopted" and not all(
             (a.envelope_id, a.human_decision_ref, a.microexperiment_ref, a.practice_change_ref)):
@@ -562,7 +572,7 @@ def _cmd_receipt(a):
          "reasoning_sha256": a.reasoning_sha256,
          "signer_id": key.get("signer_id") or a.key_id, "key_id": a.key_id,
          "issued_at": a.issued_at, "schema_version": a.schema_version,
-         # **judge 自身が申告する。** 署名が覆うので、後から足せない。
+         # **The judge states this itself.** The signature covers it, so it cannot be added later.
          "judge_workload": a.judge_workload,
          "event_class": a.event_class,
          "envelope_id": a.envelope_id,
@@ -588,29 +598,37 @@ def main(argv):
     import argparse
     p = argparse.ArgumentParser(
         prog="identity",
-        description="判断した主体・記録した主体・確定した主体を分ける（H1、Compatibility Mode）")
+        description="separate who judged, who recorded it, and who settled it "
+                    "(H1, Compatibility Mode)")
     sub = p.add_subparsers(dest="cmd", required=True)
-    q = sub.add_parser("keygen", help="鍵を登録する（既定は非対称 = Authenticated Mode）")
+    q = sub.add_parser("keygen", help="register a key (asymmetric by default = Authenticated "
+                                      "Mode)")
     q.add_argument("--key-id", dest="key_id", required=True)
     q.add_argument("--signer-id", dest="signer_id", required=True)
     q.add_argument("--store", default=None)
     q.add_argument("--private-out", dest="private_out", default=None,
-                   help="秘密鍵の置き場所（judge が持つ。**trust store には入らない**）")
+                   help="where the private key goes (the judge holds it. **It does not enter the "
+                        "trust store**)")
     q.add_argument("--shared-secret", dest="shared_secret", action="store_true",
-                   help="共有鍵にする（Compatibility Mode — attested まで。解除には使えない）")
+                   help="make it a shared key (Compatibility Mode — `attested` at most; it cannot "
+                        "release a halt)")
     q.add_argument("--authorized-roles", dest="authorized_roles", default=None,
-                   help="この鍵が出せる役（カンマ区切り）。既定は制限なし")
+                   help="the roles this key may issue for (comma-separated). Unrestricted by "
+                        "default")
     q.add_argument("--authorized-lineages", dest="authorized_lineages", default=None,
-                   help="この鍵が出せる血統（カンマ区切り）。既定は制限なし")
+                   help="the lineages this key may issue for (comma-separated). Unrestricted by "
+                        "default")
     q.add_argument("--may-release-halt", dest="may_release_halt", action="store_true",
-                   help="halt の解除を認可する。**止めた主体とは別の鍵にすること**")
+                   help="authorise releasing a halt. **Use a different key from whoever stopped "
+                        "it**")
     q.set_defaults(fn=_cmd_keygen)
-    q = sub.add_parser("revoke", help="鍵を失効させる")
+    q = sub.add_parser("revoke", help="revoke a key")
     q.add_argument("--key-id", dest="key_id", required=True)
     q.add_argument("--reason", required=True)
     q.add_argument("--store", default=None)
     q.set_defaults(fn=_cmd_revoke)
-    q = sub.add_parser("receipt", help="判断に署名する（judge / correction authority が使う）")
+    q = sub.add_parser("receipt", help="sign a judgment (used by a judge / correction "
+                                       "authority)")
     for f in ("org-id", "ledger-id", "subject", "role", "lineage", "verdict",
               "reasoning-sha256", "issued-at", "key-id"):
         q.add_argument(f"--{f}", dest=f.replace("-", "_"), required=True)
@@ -621,16 +639,19 @@ def main(argv):
     q.add_argument("--event-class", dest="event_class", required=True,
                    choices=("admission_decided", "refutation_attempted", "verdict_provisional",
                             "halt_released", "adaptive_envelope_adopted", "correction"),
-                   help="この receipt が使える台帳クラス。**署名が覆う**ので流用できない")
+                   help="the ledger class this receipt is valid for. **The signature covers it**, "
+                        "so it cannot be reused elsewhere")
     q.add_argument("--envelope-id", dest="envelope_id")
     q.add_argument("--human-decision-ref", dest="human_decision_ref")
     q.add_argument("--microexperiment-ref", dest="microexperiment_ref")
     q.add_argument("--practice-change-ref", dest="practice_change_ref")
     q.add_argument("--judge-workload", dest="judge_workload", default="none",
                    choices=("none", "separate_process", "separate_uid", "separate_host"),
-                   help="この judge がどこで動いたか。**署名が覆う**ので後から足せない")
+                   help="where this judge ran. **The signature covers it**, so it cannot be added "
+                        "later")
     q.add_argument("--private-key", dest="private_key", default=None,
-                   help="秘密鍵（非対称鍵のとき必須）。ファイルか PEM 文字列")
+                   help="the private key (required for an asymmetric key). A file or a PEM "
+                        "string")
     q.set_defaults(fn=_cmd_receipt)
     a = p.parse_args(argv[1:])
     return a.fn(a)
