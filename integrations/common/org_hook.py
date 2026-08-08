@@ -1296,8 +1296,9 @@ def _catastrophic_reason(tool_name, ti):
     # **A shape that executes later is still execution.**
     #   `bash <<< '…'`   … reads from stdin and executes it
     #   `trap '…' EXIT`  … executed on exit
-    #   `alias x='…'`    … 呼ばれた時点で実行される
-    # いずれも引用符の中に危険が入るため、素の位置判定では見えない（実測で素通し）。
+    #   `alias x='…'`    … executed the moment it is called
+    # In each of these the danger sits inside quotes, so the plain position test cannot see it
+    # (measured going straight through).
     if re.search(rf"(?:<<<|\btrap\b|\balias\b)(?:(?![;&|`\n]).)*?"
                  rf"(?<![\w-])(?:/\S*/)?rm\b(?:(?![;`\n]).)*?"
                  rf"(?:^|{_BND})(/{_BND}|/\*|/$|~/?{_BND}|~/?$|\$HOME)",
@@ -1306,30 +1307,30 @@ def _catastrophic_reason(tool_name, ti):
                 "(`rm -rf /` class) — unrecoverable")
     _rm_to_root = None
     for _v in _variants:
-        # **シングルクォートの中は展開されない。** `echo '$(…)'` の `$(` で区間を割ると、
-        # 展開されない文字列が実行位置に見えてしまう（実測で誤検知した）。
-        # 引用の内側を1つの語として保つため、素の cmd では割らずに残す。
-        # **エスケープされた引用符はクォートを開かない。** `echo \\'$(…)\\'` の
-        # `$(…)` は **展開される**。本物の（エスケープされていない）シングルクォートだけを見る。
+        # **Nothing inside single quotes is expanded.** Splitting segments at the `$(` of
+        # `echo '$(…)'` makes an unexpanded string look like an execution position (measured as a
+        # false positive). Keep the inside of a quote as one word: do not split it in the raw cmd.
+        # **An escaped quote does not open a quote.** In `echo \\'$(…)\\'` the `$(…)` **is**
+        # expanded, so only genuine (unescaped) single quotes count.
         _sq = re.sub(r"(?<!\\)'[^']*(?<!\\)'",
                      lambda m: m.group(0).replace("$(", "\x00("), _v)
         for _seg in re.split(r"[;&|`\n]|\$\(|<\(", _sq):
             _seg = _seg.replace("\x00(", "$(")
-            # **コメントは実行されない。** `#` 以降を落としてから判定する。
+            # **A comment does not execute.** Drop everything from `#` before judging.
             _seg = re.sub(r"(?:^|\s)#.*$", " ", _seg, flags=re.S)
             if not re.search(r"(?<![\w-])(?:/\S*/)?rm\b", _seg):
                 continue
-            # その区間で **rm より前に「引数を食う語」が在る**なら、rm は実行されない。
-            # 先頭だけを見ていると、`find … -exec echo rm -rf / …` や
-            # `xargs echo rm -rf /` のように **echo が途中に来る形**を拾えず、
-            # 何も実行しない行まで hard-block した（Codex が指摘、実測で確認）。
-            # 起動されるのは echo であって rm ではない。
+            # If **a word that eats arguments appears before rm** in this segment, the rm does
+            # not execute. Looking only at the start of the segment missed the shapes where
+            # **echo arrives partway through** — `find … -exec echo rm -rf / …` and
+            # `xargs echo rm -rf /` — and hard-blocked lines that execute nothing (raised by
+            # Codex, confirmed by measurement). What gets launched is echo, not rm.
             _rm_at = re.search(r"(?<![\w-])(?:/\S*/)?rm\b", _seg)
-            # **消費語も「コマンドの位置」に在るときだけ数える。**
-            # `X=echo rm -rf /`（代入値）、`>echo rm -rf /`（リダイレクト先）、
-            # `case echo in echo) rm -rf /;;`（比較語）では echo はコマンドではなく、
-            # **rm は実行される**。単に「前に echo が在る」で除外すると素通しした
-            # （Codex が指摘、実測で4件成立）。
+            # **The consuming word only counts when IT is in command position too.**
+            # In `X=echo rm -rf /` (an assigned value), `>echo rm -rf /` (a redirect target) and
+            # `case echo in echo) rm -rf /;;` (a compared word), echo is not the command and
+            # **the rm does execute**. Excluding on "there is an echo before it" alone let these
+            # through (raised by Codex; four of them measured succeeding).
             _before = _seg[:_rm_at.start()] if _rm_at else ""
             _consumer_is_cmd = re.search(
                 rf"(?:^|\s)(?:\w+=\S+\s+)*{_ARG_CONSUMERS}(?:\s|$)", _before) and not (
@@ -1365,27 +1366,31 @@ def rule_blast_radius(tool_name, ti):
     if not dim:
         return None
     dimension, delta = dim
-    # **weight 0 は「計量しない」という判断である。** 再生成可能な対象（node_modules /
-    # build 出力 / .orgforge/wt/）は削除しても曝露にならない、と `_is_regenerable_target` が
-    # 決めている。予約は delta > 0 を要求する（負や 0 を通すと合計を動かせない／減らせる）ので、
-    # **計量しないものは予約自体を行わない** — 0 を予約しようとして deny されるのは、
-    # 「無料の操作を止める」という真逆の結果になる（実測でそうなった）。
+    # **A weight of 0 is the judgement "this is not metered".** `_is_regenerable_target` has
+    # decided that deleting a regenerable target (node_modules / build output / .orgforge/wt/)
+    # is no exposure at all. A reservation requires delta > 0 (letting a negative or a zero
+    # through would leave the total unmovable, or reducible), so **what is not metered must not
+    # be reserved in the first place** — being denied while trying to reserve 0 produces the
+    # exact opposite of the intent: **stopping an operation that is free** (measured happening).
     if not delta or float(delta) <= 0:
         return None
     cap = _cap_for(dimension)   # env override → constitution.enforcement.caps → default (docs/11 §0)
-    # **writer 側の1操作に委ねる。** 以前は organ が「集計 → 判断 → LEDGER-EVENT 印字」し、
-    # hook が「その後 append（失敗は無視）」していた。そこには3つの穴があった:
-    #   並列の hook が同じ committed を読んで両方 allow できる（合計が cap を超える）／
-    #   append 失敗を無視するので次の呼び出しが committed=0 を見る（cap が記憶を失う）／
-    #   hold は deny して終わるので止めたことが残らない。
-    # reserve-exposure は lock の中で 検査と予約を一操作にし、**書けた判断だけが allow** になる。
-    # **writerd がいる org では RPC 経由で予約する。** 直接 ledger.py を呼ぶと
-    # 「writerd 経由でなければ書けない」に当たって exit 4 になり、正規運用が止まる
-    # （実測で指摘された）。
+    # **Delegate to a single operation on the writer side.** The organ used to "total up → judge
+    # → print LEDGER-EVENT" and the hook would "append afterwards (ignoring failure)". That left
+    # three holes:
+    #   two parallel hooks could read the same committed value and both allow (the total exceeds
+    #   the cap) / ignoring an append failure meant the next call saw committed=0 (the cap loses
+    #   its memory) / a hold ended in a deny, so nothing recorded that anything was stopped.
+    # reserve-exposure makes the check and the reservation one operation inside the lock, so
+    # **only a judgement that was successfully written becomes an allow.**
+    # **In an org running writerd, reserve through the RPC.** Calling ledger.py directly hits
+    # "writes must go through writerd" and exits 4, which halts legitimate operation (raised
+    # from a measurement).
     if os.environ.get("ORG_WRITER_SOCKET"):
-        # **hook は信頼を緩めない。** 以前ここで ORG_WRITER_TRUST_SELF を立てていたが、
-        # それは「caller 所有の anchor でも繋ぐ」という判断を **統制側が勝手に下す**ことで
-        # あり、偽 socket に繋がされる余地を残す。緩めるなら **利用者が明示する**。
+        # **The hook does not relax trust.** This used to set ORG_WRITER_TRUST_SELF, but that
+        # is the control plane **deciding on its own** to connect even to a caller-owned anchor,
+        # which leaves room for it to be pointed at a forged socket. If it is to be relaxed,
+        # **the user states so explicitly.**
         return ["writer_client.py", "reserve-exposure", "--",
                 "--dimension", dimension, "--delta", str(delta), "--cap", cap,
                 "--actor", "harness-agent", "--window-since", _window_since(),

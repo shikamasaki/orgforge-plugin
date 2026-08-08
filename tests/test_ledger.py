@@ -2728,8 +2728,8 @@ def test_B_hook_never_relaxes_trust():
     src = (REPO / "integrations" / "common" / "org_hook.py").read_text(encoding="utf-8")
     for pat in ('os.environ.setdefault("ORG_WRITER_TRUST_SELF"',
                 'os.environ["ORG_WRITER_TRUST_SELF"]'):
-        assert pat not in src, f"hook が信頼を緩めている: {pat}"
-    assert "hook は信頼を緩めない" in src
+        assert pat not in src, f"the hook is relaxing trust: {pat}"
+    assert "The hook does not relax trust." in src
 
 
 def test_B_manifest_pins_the_daemon(tmp_path):
