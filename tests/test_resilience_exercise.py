@@ -113,7 +113,7 @@ def test_false_green_mutation_is_rejected_by_the_production_skeptic_intake():
     assert report["test"]["green"] is True
     assert report["mutation"]["applied"] is False
     assert report["intake"]["returncode"] == 10
-    assert "mutation[0] の適用成立が確認されていない" in report["intake"]["rejection"]
+    assert "mutation[0] is not confirmed to have applied" in report["intake"]["rejection"]
     assert report["outcome"] == {"observed": "safe_stop", "acceptable": True}
     assert report["resilience_score"] is None
 
