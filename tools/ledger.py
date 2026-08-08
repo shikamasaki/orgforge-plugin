@@ -2660,12 +2660,12 @@ def cmd_reserve_exposure(a):
             # an allow**, we cannot claim "only a decision that was written becomes an allow"
             # (fail-closed is demonstrated by fault injection).
             if os.environ.get("ORG_LEDGER_FORCE_APPEND_FAIL") == "1":
-                raise OSError("ORG_LEDGER_FORCE_APPEND_FAIL=1（故障注入）")
+                raise OSError("ORG_LEDGER_FORCE_APPEND_FAIL=1 (fault injection)")
             with open(log, "a", encoding="utf-8") as f:
                 f.write(json.dumps(ev, ensure_ascii=False) + "\n")
                 f.flush()
                 if os.environ.get("ORG_LEDGER_FORCE_FSYNC_FAIL") == "1":
-                    raise OSError("ORG_LEDGER_FORCE_FSYNC_FAIL=1（故障注入）")
+                    raise OSError("ORG_LEDGER_FORCE_FSYNC_FAIL=1 (fault injection)")
                 os.fsync(f.fileno())
             tmp = headp + ".tmp"
             with open(tmp, "w", encoding="utf-8") as f:
@@ -2675,7 +2675,7 @@ def cmd_reserve_exposure(a):
             os.replace(tmp, headp)
             _fsync_dir(a.root)
         except Exception as e:
-            # 書きかけを切り戻す。lock の中なので、他の書き手は割り込んでいない。
+            # Roll back the partial write. We are inside the lock, so no other writer has cut in.
             try:
                 if os.path.exists(log) and os.path.getsize(log) > prior_size:
                     with open(log, "r+b") as f:
@@ -2683,14 +2683,15 @@ def cmd_reserve_exposure(a):
                         f.flush()
                         os.fsync(f.fileno())
             except Exception as te:
-                print(f"reserve-exposure: 書きかけを切り戻せなかった（{te}）。"
-                      f"台帳に未確定の行が残っている可能性がある — `ledger verify` で確認すること。",
+                print(f"reserve-exposure: could not roll back the partial write ({te}). An "
+                      f"uncommitted line may remain in the ledger — check with `ledger verify`.",
                       file=sys.stderr)
-            # **書けなかったら allow を返さない。** hold の記録に失敗した場合も deny である
-            # （記録できない hold を allow に読み替えるのが、いちばん危ない誤りである）。
+            # **A write that failed never returns an allow.** A failure to record a hold is also a
+            # deny — reinterpreting a hold that could not be recorded AS an allow is the most
+            # dangerous mistake available here.
             print(json.dumps({"decision": "deny", "reason": "reservation_not_persisted",
-                              "detail": f"予約を永続化できなかった（{e}）。"
-                                        f"**書けた判断だけが allow になる。**"},
+                              "detail": f"the reservation could not be persisted ({e}). "
+                                        f"**Only a decision that was written becomes an allow.**"},
                              ensure_ascii=False))
             return 4
 
@@ -2700,37 +2701,44 @@ def cmd_reserve_exposure(a):
     print(json.dumps(out, ensure_ascii=False))
     if decision == "hold":
         print(f"HOLD: {a.dimension} committed {committed} + requested {a.delta} = {would_be} "
-              f"> cap {a.cap}。**hold は記録済み（seq={ev['seq']}）** — 止めたことが残る。",
+              f"> cap {a.cap}. **The hold is recorded (seq={ev['seq']})** — being stopped leaves "
+              f"a trace.",
               file=sys.stderr)
         return 10
     return 0
 
 
 
-HALT_LATCH = "HALT"          # <ledger-root>/HALT — 台帳が読めなくても止まる第二経路
+HALT_LATCH = "HALT"          # <ledger-root>/HALT — the second path, which stops even when the
+                             # ledger cannot be read
 
 
 def active_halt(root):
-    """いま halt しているか。(halt_event | None, error | None) を返す。
+    """Is it halted right now? Returns (halt_event | None, error | None).
 
-    **2つの経路を見る。**
+    **Two paths are consulted.**
 
-      1. 台帳の `halt_tripped`（正）— 対応する `halt_released` が無いものが active
-      2. `<root>/HALT` ラッチ（保険）— 台帳が読めないときにも止まるため
+      1. `halt_tripped` in the ledger (authoritative) — one with no matching `halt_released` is
+         active
+      2. the `<root>/HALT` latch (the backstop) — so that it stops even when the ledger cannot be
+         read
 
-    台帳を読めないときは **halt とみなす**（error を返す）。読めないことを「halt していない」と
-    読むのは、いちばん危ない fail-open である — 止まっているかどうか分からないなら、止める。
+    When the ledger cannot be read, **treat it as halted** (return an error). Reading "unreadable"
+    as "not halted" is the most dangerous fail-open there is — if we cannot tell whether it is
+    stopped, stop.
 
-    ラッチは台帳の代わりではない。手でラッチを消しても台帳の halt は残るので、hook は止め続ける。
-    逆に台帳が読めなくてもラッチがあれば止まる。**どちらかが止めていれば止まる。**
+    The latch is not a substitute for the ledger. Delete the latch by hand and the ledger's halt
+    remains, so the hook keeps stopping. Conversely, the latch stops it even when the ledger cannot
+    be read. **If either one is stopping, it is stopped.**
     """
     latch = os.path.join(root, HALT_LATCH) if root else None
     latched = bool(latch and os.path.exists(latch))
     try:
         evs = read_events(root)
     except Exception as e:
-        # 読めないなら止める。ラッチの有無に関わらず。
-        return ({"reason": f"台帳を読めないので halt とみなす: {e}", "source": "unreadable"},
+        # If it cannot be read, stop — regardless of whether the latch is there.
+        return ({"reason": f"the ledger cannot be read, so it is treated as halted: {e}",
+                 "source": "unreadable"},
                 str(e))
     released = set()
     for e in evs:
@@ -2743,26 +2751,28 @@ def active_halt(root):
             return {**(e.get("payload") or {}), "seq": e.get("seq"),
                     "actor": e.get("actor"), "source": "ledger"}, None
     if latched:
-        # 台帳に active な halt が無いのにラッチがある。**ラッチを信じて止める** —
-        # halt を書けなかった（fail-open になりかけた）痕跡である可能性がある。
-        return ({"reason": "HALT ラッチが存在するが、台帳に対応する halt_tripped が無い。"
-                          "halt の記録に失敗した痕跡かもしれない。手で確かめること。",
+        # The latch is present although the ledger holds no active halt. **Believe the latch and
+        # stop** — it may be the trace of a halt that could not be written (a near fail-open).
+        return ({"reason": "the HALT latch exists but the ledger holds no matching halt_tripped. "
+                           "This may be the trace of a halt that failed to record. Check by hand.",
                  "source": "latch_only"}, None)
     return None, None
 
 
 def cmd_trip_halt(a):
-    """halt を発動する。**記録できなければ、その呼び出し自体を deny する。**
+    """Trip the halt. **If it cannot be recorded, deny the call itself.**
 
-    「記録できないなら宣言しない」は記録としては正しいが、**制御としては fail-open** になる —
-    止めるべき状況で止まらない。だから:
+    "Do not declare what cannot be recorded" is right as a rule about records, but as a control it
+    is **fail-open** — it fails to stop in exactly the situation that called for stopping. So:
 
-      1. 先に `<root>/HALT` ラッチを書く（台帳より先。台帳が壊れていても止まる）
-      2. 台帳に `halt_tripped` を書く
-      3. どちらかが失敗したら **非ゼロで返す** — 呼び出し側はその行為を通してはいけない
+      1. write the `<root>/HALT` latch first (before the ledger, so it stops even if the ledger is
+         broken)
+      2. write `halt_tripped` to the ledger
+      3. if either fails, **return non-zero** — the caller must not let that action through
 
-    ラッチが残って台帳が空になった場合、`active_halt` は `latch_only` として halt を報告する。
-    **止まりすぎる方向の失敗**であり、それが正しい向きである。
+    If the latch survives while the ledger ends up empty, `active_halt` reports the halt as
+    `latch_only`. That is **a failure in the direction of stopping too much**, and that is the
+    correct direction.
     """
     _wp = require_writer_path("trip-halt")
     if _wp:
@@ -2773,14 +2783,15 @@ def cmd_trip_halt(a):
 
     if not (a.reason or "").strip():
         print(json.dumps({"halted": False, "reason": "missing_reason",
-                          "detail": "--reason が必要。なぜ止めたのかが記録されない halt は、"
-                                    "解除の判断ができない。"}, ensure_ascii=False))
+                          "detail": "--reason is required. A halt that does not record WHY it "
+                                    "stopped leaves no basis for deciding to release it."},
+                          ensure_ascii=False))
         return 2
     os.makedirs(a.root, exist_ok=True)
     latch_path = os.path.join(a.root, HALT_LATCH)
     latch_ok = False
     try:
-        # **ラッチを先に書く。** 台帳の追記に失敗しても、次の呼び出しは止まる。
+        # **Write the latch first.** Even if the ledger append fails, the next call still stops.
         with open(latch_path, "w", encoding="utf-8") as f:
             json.dump({"trigger": a.trigger, "scope": a.scope, "reason": a.reason,
                        "tripped_by": a.tripped_by}, f, ensure_ascii=False)
@@ -2789,7 +2800,7 @@ def cmd_trip_halt(a):
         _fsync_dir(a.root)
         latch_ok = True
     except Exception as e:
-        print(f"trip-halt: HALT ラッチを書けなかった（{e}）。", file=sys.stderr)
+        print(f"trip-halt: could not write the HALT latch ({e}).", file=sys.stderr)
 
     payload = {"trigger": a.trigger, "scope": a.scope, "reason": a.reason,
                "tripped_by": a.tripped_by, "latch_written": latch_ok}
@@ -2811,7 +2822,8 @@ def cmd_trip_halt(a):
             return 4
         head, herr = _head_from_log(a.root)
         if herr:
-            # 台帳が壊れていても **ラッチは書けている** ので、次の呼び出しは止まる。
+            # Even with the ledger broken, **the latch is already written**, so the next call
+            # still stops.
             print(json.dumps({"halted": latch_ok, "reason": "ledger_unhealthy",
                               "latch_written": latch_ok, "detail": herr},
                              ensure_ascii=False))
@@ -2827,10 +2839,10 @@ def cmd_trip_halt(a):
         ev["hash"] = _hash(head["hash"], ev)
         log, headp = _paths(a.root)
         try:
-            # 故障注入。**halt が書けなかったときに何が起きるか**を検査できなければ、
-            # 「記録できない halt は fail-open にならない」とは言えない。
+            # Fault injection. Without being able to test **what happens when the halt cannot be
+            # written**, we cannot claim that a halt which fails to record does not fail open.
             if os.environ.get("ORG_LEDGER_FORCE_APPEND_FAIL") == "1":
-                raise OSError("ORG_LEDGER_FORCE_APPEND_FAIL=1（故障注入）")
+                raise OSError("ORG_LEDGER_FORCE_APPEND_FAIL=1 (fault injection)")
             with open(log, "a", encoding="utf-8") as f:
                 f.write(json.dumps(ev, ensure_ascii=False) + "\n")
                 f.flush()
@@ -2845,39 +2857,44 @@ def cmd_trip_halt(a):
         except Exception as e:
             print(json.dumps({"halted": latch_ok, "reason": "halt_not_persisted",
                               "latch_written": latch_ok,
-                              "detail": f"台帳に halt を書けなかった（{e}）。"
-                                        f"ラッチ={'あり' if latch_ok else 'なし'}。"},
+                              "detail": f"could not write the halt to the ledger ({e}). "
+                                        f"latch={'present' if latch_ok else 'absent'}."},
                              ensure_ascii=False))
             return 4
     print(json.dumps({"halted": True, "reason": "tripped", "seq": ev["seq"],
                       "latch_written": latch_ok}, ensure_ascii=False))
     print(f"HALT tripped (seq={ev['seq']}): {a.reason}\n"
-          f"  gated な行為はすべて止まる。観測・検証・安全な修復だけが通る。\n"
-          f"  **解除は H4a では実装していない** — trip した主体と独立した承認が要り、それは"
-          f"identity の認証（H1）に依存する。\n"
-          f"  いま解除するには、台帳に halt_released を書ける仕組みが必要である"
-          f"（writer 専用として宣言済み、操作は未実装）。", file=sys.stderr)
+          f"  Every gated action stops. Only observation, verification and safe repair get "
+          f"through.\n"
+          f"  **Release is not implemented in H4a** — it requires an approval independent of the "
+          f"principal that tripped it, which depends on identity authentication (H1).\n"
+          f"  Releasing it today would need a way to write halt_released to the ledger (declared "
+          f"writer-only; the operation is not implemented).", file=sys.stderr)
     return 0
 
 
 
 def cmd_release_halt(a):
-    """halt を解除する。**止めた主体とは独立した principal の署名が必要（H4b）。**
+    """Release the halt. **It requires the signature of a principal independent of the one that
+    stopped it (H4b).**
 
-    ## 順序が重要である
+    ## The order matters
 
-      1. active halt を確認する（無ければ解除するものが無い）
-      2. **独立した release principal** を receipt で検証する
-         - 非対称鍵であること（共有鍵は「別主体」を証明しない）
-         - `may_release_halt` を認可されていること
-         - **halt を発動した主体と別であること**
-      3. 復旧の証拠を検証する（`--recovery-verified` の中身が空なら拒否）
-      4. `halt_released` を append + fsync
-      5. **その後で初めて** HALT ラッチを消す
-      6. ラッチの削除に失敗したら **停止を維持する**（消せないなら止まったままにする）
+      1. confirm there is an active halt (with none, there is nothing to release)
+      2. verify an **independent release principal** by receipt
+         - it must be an asymmetric key (a shared key proves nothing about being a DIFFERENT
+           principal)
+         - it must be authorised for `may_release_halt`
+         - it must be **different from the principal that tripped the halt**
+      3. verify the evidence of recovery (refuse if `--recovery-verified` is empty)
+      4. append `halt_released` + fsync
+      5. **only then** remove the HALT latch
+      6. if removing the latch fails, **keep the halt in force** (if it cannot be cleared, stay
+         stopped)
 
-    逆順にすると、ラッチを消したあとに台帳への追記が失敗して **halt が消えたまま記録が無い**
-    状態になる。それは「止まっていたのに、止まっていた証拠も止まっている状態も無い」である。
+    Reverse that order and, once the latch is gone, a failed ledger append leaves **the halt gone
+    with no record of it**. That is the state of "it had been stopped, and now there is neither
+    evidence that it was stopped nor a state of being stopped".
     """
     _wp = require_writer_path("release-halt")
     if _wp:
@@ -2895,8 +2912,9 @@ def cmd_release_halt(a):
         return 2
     if not (a.recovery_verified or "").strip():
         print(json.dumps({"released": False, "reason": "missing_recovery_evidence",
-                          "detail": "--recovery-verified が必要。**何を確かめて復旧したのか**が"
-                                    "記録されない解除は、解除の判断を後から検証できない。"},
+                          "detail": "--recovery-verified is required. A release that does not "
+                                    "record **what was checked to establish recovery** leaves the "
+                                    "decision to release unverifiable afterwards."},
                          ensure_ascii=False))
         return 2
     try:
@@ -2907,8 +2925,8 @@ def cmd_release_halt(a):
                           "detail": str(e)}, ensure_ascii=False))
         return 2
 
-    # **解除の receipt は halt の seq に束縛する。** 束縛しないと、別の halt の解除 receipt を
-    # 持ち込んで使える（再利用）。
+    # **Bind the release receipt to the halt's seq.** Unbound, the release receipt of a DIFFERENT
+    # halt could be brought in and used (reuse).
     expect = {"review_subject_id": f"halt:{halt.get('seq')}", "role": "release",
               "verdict": "release", "lineage": "release"}
     released_by, ident, rerr = verify_receipt(rc, expect, expect_release=True)
@@ -2918,18 +2936,20 @@ def cmd_release_halt(a):
         return 4
     if ident.get("identity_assurance") != "authenticated":
         print(json.dumps({"released": False, "reason": "not_authenticated",
-                          "detail": f"解除には authenticated な identity が必要"
-                                    f"（いま {ident.get('identity_assurance')!r}）。\n"
-                                    f"  共有鍵は「鍵が違う」ことしか示さず、"
-                                    f"**別主体・独立した承認を証明しない。**"},
+                          "detail": f"a release requires an authenticated identity (currently "
+                                    f"{ident.get('identity_assurance')!r}).\n"
+                                    f"  A shared key shows only that the key differs; it "
+                                    f"**proves neither a different principal nor an independent "
+                                    f"approval.**"},
                          ensure_ascii=False))
         return 4
-    # **止めた主体が自分で解除できてはいけない。**
+    # **The principal that stopped it must not be able to release it itself.**
     tripped_by = halt.get("tripped_by")
     if tripped_by and released_by == tripped_by:
         print(json.dumps({"released": False, "reason": "not_independent",
-                          "detail": f"halt を発動した主体（{tripped_by}）が自分で解除しようと"
-                                    f"している。**独立した承認が要る。**"}, ensure_ascii=False))
+                          "detail": f"the principal that tripped the halt ({tripped_by}) is "
+                                    f"trying to release it itself. **An independent approval is "
+                                    f"required.**"}, ensure_ascii=False))
         return 4
 
     recorded_by, rec_assurance = observed_recorder()
@@ -2972,10 +2992,11 @@ def cmd_release_halt(a):
         log, headp = _paths(a.root)
         prior_size = os.path.getsize(log) if os.path.exists(log) else 0
         try:
-            # 故障注入。**記録できていないのに停止が解けることが、いちばん危ない fail-open**
-            # である。故障を再現できなければ「停止を維持する」とは言えない。
+            # Fault injection. **The halt lifting while nothing was recorded is the most
+            # dangerous fail-open here.** Without being able to reproduce the failure, we cannot
+            # claim that the halt is kept in force.
             if os.environ.get("ORG_LEDGER_FORCE_APPEND_FAIL") == "1":
-                raise OSError("ORG_LEDGER_FORCE_APPEND_FAIL=1（故障注入）")
+                raise OSError("ORG_LEDGER_FORCE_APPEND_FAIL=1 (fault injection)")
             with open(log, "a", encoding="utf-8") as f:
                 f.write(json.dumps(ev, ensure_ascii=False) + "\n")
                 f.flush()
@@ -2997,12 +3018,13 @@ def cmd_release_halt(a):
             except Exception:
                 pass
             print(json.dumps({"released": False, "reason": "release_not_persisted",
-                              "detail": f"解除を記録できなかった（{e}）。**停止は維持される。**"},
+                              "detail": f"the release could not be recorded ({e}). **The halt "
+                                        f"stays in force.**"},
                              ensure_ascii=False))
             return 4
 
-        # **記録できてから、初めてラッチを消す。** 逆順にすると、ラッチを消したあとに追記が
-        # 失敗して「止まっていた証拠も、止まっている状態も無い」状態になる。
+        # **Remove the latch only once the record exists.** Reversed, a failed append after the
+        # latch is gone leaves neither the evidence of having been stopped nor the stopped state.
         latch = os.path.join(a.root, HALT_LATCH)
         latch_cleared = True
         if os.path.exists(latch):
@@ -3011,9 +3033,10 @@ def cmd_release_halt(a):
                 _fsync_dir(a.root)
             except Exception as e:
                 latch_cleared = False
-                print(f"release-halt: ラッチを消せなかった（{e}）。**停止は維持される** — "
-                      f"台帳の解除は記録済みなので、同じ receipt で再実行すれば後片付けだけが"
-                      f"行われる（exact retry は安全）。", file=sys.stderr)
+                print(f"release-halt: could not remove the latch ({e}). **The halt stays in "
+                      f"force** — the release is already recorded in the ledger, so re-running "
+                      f"with the same receipt performs the cleanup alone (an exact retry is "
+                      f"safe).", file=sys.stderr)
 
     print(json.dumps({"released": latch_cleared, "reason": "released" if latch_cleared
                       else "recorded_but_latch_remains",
@@ -3270,7 +3293,7 @@ def cmd_derive_admission(a):
         try:
             # 故障注入。**書けなかったら生成しない**ことを検査できなければ、そう言えない。
             if os.environ.get("ORG_LEDGER_FORCE_APPEND_FAIL") == "1":
-                raise OSError("ORG_LEDGER_FORCE_APPEND_FAIL=1（故障注入）")
+                raise OSError("ORG_LEDGER_FORCE_APPEND_FAIL=1 (fault injection)")
             with open(log, "a", encoding="utf-8") as f:
                 f.write(json.dumps(ev, ensure_ascii=False) + "\n")
                 f.flush()
