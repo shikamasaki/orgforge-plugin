@@ -962,55 +962,59 @@ def _declared_lineage():
 # **Only an affirmative decision requires independence.**
 # `admit` and `survives` are decisions that LET WORK THROUGH; if either can be written alone, the
 # two-lineage rule is not being enforced.
-# `reject` / `park` / `refuted` は通さない方向なので、単独でも記録できてよい
-# （止めると、判定を記録する手段そのものが無くなる）。
+# `reject` / `park` / `refuted` point the other way — they stop work — so they may be recorded
+# alone (block them and there is no way left to record a judgment at all).
 _POSITIVE_VERDICTS = {"admission_decided": {"admit"},
                       "refutation_attempted": {"survives"}}
 
 
 def _dual_lineage_violation(ev):
-    """cross-harness を宣言した org で、generic append の肯定判断を拒否する理由を返す。
+    """In an org that declared cross-harness, return why an affirmative decision via generic
+    append is refused.
 
-    実測（B4）: 有効な receipt 1枚を generic append すると `admission_decided` が
-    直接1件記録された。joint 派生の経路が在っても、**それを通らなくても書けるなら
-    二血統は強制されていない。**
+    Measured (B4): a generic append of one valid receipt recorded a single `admission_decided`
+    directly. A joint-derivation path may exist, but **if the record can be written without going
+    through it, the two-lineage rule is not being enforced.**
     """
     cls = ev.get("class")
     positives = _POSITIVE_VERDICTS.get(cls)
     if not positives:
         return None
     if (ev.get("payload") or {}).get("verdict") not in positives:
-        return None                      # 否定的な判断は単独で記録してよい
+        return None                      # a negative decision may be recorded alone
     if _declared_lineage() != "cross-harness":
-        return None                      # same-harness org の互換経路は変えない
+        return None                      # leave the compatibility path for same-harness orgs
     if _inside_writer():
-        return None                      # writer 自身の派生（derive-admission）は通す
-    return (f"{cls} の肯定的な判断（{(ev.get('payload') or {}).get('verdict')}）は "
-            f"generic append では記録できない。\n"
-            f"  この org は **cross-harness**（二血統）を宣言している。"
-            f"1人の署名者で通せるなら、二血統は強制されていない。\n"
-            f"  二血統の provisional を記録してから、writer に派生させること:\n"
-            f"    github_sync.py provisional --receipt <judge の receipt> …  （血統ごとに1件）\n"
+        return None                      # the writer's own derivation (derive-admission) passes
+    return (f"an affirmative {cls} decision "
+            f"({(ev.get('payload') or {}).get('verdict')}) cannot be recorded through a generic "
+            f"append.\n"
+            f"  This org declares **cross-harness** (two lineages). If one signer can let it "
+            f"through, the two-lineage rule is not being enforced.\n"
+            f"  Record a provisional from each lineage, then have the writer derive from them:\n"
+            f"    github_sync.py provisional --receipt <the judge's receipt> …  (one per "
+            f"lineage)\n"
             f"    ledger.py derive-admission --issue <n> --event {cls}\n"
-            f"  否定的な判断（reject / park / refuted）は単独で記録できる。")
+            f"  A negative decision (reject / park / refuted) can be recorded alone.")
 
 
 def _inside_writer():
-    """**writer の内側から呼ばれているか。** caller が名乗れない形で判定する。
+    """**Are we being called from inside the writer?** Decided in a form the caller cannot simply
+    assert.
 
-    実測（再監査）: `ORG_INSIDE_WRITER=1` を環境に足すだけで、単独署名者が
-    cross-harness の admission を直接書けたし、single-writer gate も素通りした。
-    **検査の入力を、検査される側が書けてはいけない。**
+    Measured (re-audit): merely adding `ORG_INSIDE_WRITER=1` to the environment let a single signer
+    write a cross-harness admission directly, and walked straight through the single-writer gate.
+    **The input to a check must not be writable by the thing being checked.**
 
-    writerd は起動ごとに推測できない token を作り、子プロセスにだけ渡す。
-    よって「値が 1 である」ではなく「**当てられない長さの token である**」を条件にする。
-    `1` や `true` のような当てられる値は、writer の内側の証拠にならない。
+    writerd mints an unguessable token per start-up and passes it only to its child processes.
+    So the condition is not "the value is 1" but "**it is a token of unguessable length**".
+    A guessable value such as `1` or `true` is no evidence of being inside the writer.
 
-    **これは境界ではない。** 同じ UID の caller は自分で 64 桁の hex を作って名乗れる —
-    子プロセスは token が writerd 由来かを検証できないからである。ここで上がるのは
-    「当てずっぽうで通る」から「意図的に偽装する必要がある」までで、
-    **本当の境界は Stage B の別 UID**（OS 権限で台帳に書けない）である。
-    段階A でこれを `separate_uid` と呼んではいけない。
+    **This is not a boundary.** A caller with the same UID can mint its own 64 hex digits and
+    assert them — a child process cannot verify that the token came from writerd. What this raises
+    is the bar from "passes by guesswork" to "requires deliberate forgery"; **the real boundary is
+    the separate UID of Stage B** (where OS permissions forbid writing to the ledger).
+    Do not call this `separate_uid` at stage A.
     """
     v = os.environ.get("ORG_INSIDE_WRITER") or ""
     if len(v) < 32:
@@ -1032,47 +1036,58 @@ def _distinct_actor_violation(ev, hist):
     key_field, conflicting, why = rule
     ids = _correlation_ids(ev["payload"])
     if not ids:
-        # 相関キーが1つも無い判定は **拒否する**。以前はここで素通りさせており（"the payload-shape
-        # check is elsewhere" と書いてあったが、その elsewhere は存在しなかった）、実地で maker が
-        # 自分の成果物を admit できた。相関できない判定は、検証できない判定であって、
-        # 「検証を通った判定」ではない。無言で通すのが最悪で、統制が効いていないことが誰にも
-        # 見えないまま、ハッシュ連鎖が偽造にお墨付きを与える。
+        # **Refuse** a judgment that carries no correlation key at all. This used to be let
+        # through ("the payload-shape check is elsewhere", said the comment — but that elsewhere
+        # did not exist), and in practice a maker was able to admit its own deliverable. A judgment
+        # that cannot be correlated is a judgment that cannot be verified — it is not "a judgment
+        # that passed verification". Passing it silently is the worst outcome: nobody can see that
+        # control is not in force, while the hash chain lends its endorsement to the forgery.
         return (f"{ev['class']} rejected — the judged subject cannot be identified: payload "
-                f"{' / '.join(_CORRELATION_KEYS)} のいずれも無い。\n"
-                f"  相関キーが無いと maker と gate が同一 actor かを照合できず、この統制は"
-                f"無言で無効になる（{why}）\n"
-                f"  対象の Issue 番号か candidate_id を payload に入れて再実行すること。")
-    # **`--actor` を変えるだけで職務分離を回避できてはいけない。**
-    # 実測: maker 本人の自己 admit は拒否されるが、同じプロセスが `--actor gate-alias` に
-    # 変えると通り、鎖も intact だった。名乗りを変えられるなら、比較に意味が無い。
+                f"none of {' / '.join(_CORRELATION_KEYS)} is present.\n"
+                f"  Without a correlation key there is no way to check whether the maker and the "
+                f"gate are the same actor, and this control silently stops working ({why})\n"
+                f"  Put the target Issue number or the candidate_id into the payload and run "
+                f"again.")
+    # **Changing `--actor` must not be enough to evade separation of duties.**
+    # Measured: a maker's own self-admission is refused, but the same process passing
+    # `--actor gate-alias` got through — with the chain still intact. If the name can be changed at
+    # will, comparing names means nothing.
     #
-    # したがって **統制の中核となる判定は、検証済み receipt 由来の `decision_by` を要求する**。
-    # receipt が無ければ、その判定は「独立性を強制する根拠」にはならない — 記録は残せるが、
-    # `identity_assurance: claimed` として残り、admission の生成には使えない。
+    # So **a judgment at the core of control requires a `decision_by` derived from a verified
+    # receipt**. Without a receipt the judgment is no basis for enforcing independence — it can
+    # still be recorded, but it is recorded as `identity_assurance: claimed` and cannot be used to
+    # produce an admission.
     _ENFORCED = {"admission_decided", "refutation_attempted"}
     if ev["class"] in _ENFORCED and _enforce_attested():
         pl = ev.get("payload") or {}
-        # **identity は writer が生成する。** payload に書かれた値は自己申告であって証拠では
-        # ない — 実測（監査）: `identity_assurance: attested` と `decision_by` を書くだけで
-        # admit が通り、鎖も intact だった。そして **私のテストがそれを正常系として固定して
-        # いた**。書けるものを検査に使ってはいけない。
+        # **The writer derives the identity.** A value written into the payload is self-reported,
+        # not evidence — measured (audit): simply writing `identity_assurance: attested` and a
+        # `decision_by` was enough for the admit to pass, chain intact. And **our own test had
+        # pinned that as the expected behaviour.** Never use something writable as the thing you
+        # check.
         if not (ev.get("_verified_identity") or {}).get("decision_by"):
-            return (f"{ev['class']} は generic append では記録できない"
-                    f"（require_attested_identity が有効）。\n"
-                    f"  **payload に identity_assurance を書いても証拠にならない** — "
-                    f"書けるものを検査に使ってはいけない。\n"
-                    f"  **`--actor` を変えるだけで職務分離を回避できる** — 実測で、maker 本人の\n"
-                    f"  自己 admit は拒否されるが、同じプロセスが別名を名乗ると通っていた。\n"
-                    f"  judgment は **receipt を検証した経路** からのみ記録できる:\n"
-                    f"    github_sync.py provisional --receipt <judge が署名した receipt> …\n"
-                    f"  その経路が receipt を検証し、identity fields を生成する。\n"
-                    f"  （この強制は constitution の enforcement.judges.require_attested_identity\n"
-                    f"   が真のときに働く。既定は偽 — 段階的に移行できるようにするため）")
+            return (f"{ev['class']} cannot be recorded through a generic append "
+                    f"(require_attested_identity is enabled).\n"
+                    f"  **Writing identity_assurance into the payload is not evidence** — never "
+                    f"use something writable as the thing you check.\n"
+                    f"  **Changing `--actor` alone would evade separation of duties** — measured, "
+                    f"a maker's\n"
+                    f"  own self-admission is refused, yet the same process passed by giving "
+                    f"another name.\n"
+                    f"  A judgment can only be recorded through **a path that verified a "
+                    f"receipt**:\n"
+                    f"    github_sync.py provisional --receipt <a receipt signed by the judge> …\n"
+                    f"  That path verifies the receipt and derives the identity fields itself.\n"
+                    f"  (This enforcement applies when the constitution's\n"
+                    f"   enforcement.judges.require_attested_identity is true. It defaults to "
+                    f"false, so orgs can migrate in stages.)")
 
-    # **職務分離は `decision_by` 同士を比べる（H1）。** `recorded_by` を比べてはいけない —
-    # 代理記録では常に同じ主体になるので、比べると正当な運用が全て違反になる。
-    # `decision_by` が無い（0.36.x 以前 / receipt 無し）イベントは、legacy の `actor` を
-    # **claimed 属性として**使う。昇格はしない — 比較できることと、認証されていることは別。
+    # **Separation of duties compares `decision_by` against `decision_by` (H1).** Never compare
+    # `recorded_by` — under proxy recording that is always the same principal, so comparing it
+    # would make every legitimate operation a violation.
+    # For events with no `decision_by` (pre-0.36.x / no receipt), use the legacy `actor` **as a
+    # claimed attribute**. It is never promoted — being comparable and being authenticated are
+    # different things.
     def _who(e):
         return (e.get("payload") or {}).get("decision_by") or e.get("actor")
 
@@ -1080,15 +1095,17 @@ def _distinct_actor_violation(ev, hist):
     for e in hist:
         if e["class"] not in conflicting:
             continue
-        # 識別子は束ねて照合する — 書き手が deliverable で書いても candidate_id で書いても
-        # 同じ仕事として相関する（片方しか見ないと、キーを変えた瞬間に統制が消える）。
+        # Match on the identifiers as a bundle — whether the writer used deliverable or
+        # candidate_id, it correlates as the same work (look at only one and control disappears
+        # the moment someone switches key).
         if _same_work(e["payload"], ev["payload"], hist) and _who(e) == actor:
             shared = sorted(_correlation_ids(e["payload"]) & ids)
             if shared:
                 what = ", ".join(shared)
             else:
-                # 別名経由で一致した場合。**どう繋がったかを見せる** — 「同じ仕事だ」と
-                # 言われた側が納得も反論もできないメッセージは、拒否の理由になっていない。
+                # Matched via an alias. **Show how the connection was made** — a message that
+                # leaves the person told "this is the same work" unable to either accept or dispute
+                # it is not a reason for refusal at all.
                 mine = ", ".join(sorted(ids))
                 theirs = ", ".join(sorted(_correlation_ids(e["payload"])
                                           | _alias_ids(e["payload"])))
