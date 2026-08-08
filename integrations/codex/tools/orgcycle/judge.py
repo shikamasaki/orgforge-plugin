@@ -619,6 +619,7 @@ def cmd_verify(a):
     # 別ハーネスの契約・CLI・認証を前提にすると、持っていない環境で org が回らなくなる。
     # 層を増やすのは選択であって前提ではない。
     _schema = _verdict_schema(role)
+    _headless_rc = 0          # same-harness has no child to fail
     if _lineage == "cross-harness":
         if not os.path.isfile(_schema):
             print(f"judges.lineage = cross-harness だが {role} の出力スキーマが無い "
@@ -631,6 +632,7 @@ def cmd_verify(a):
         # AND ではなく厳しい側に倒す。実測（#11 の認可穴・#42 の Testing Library 欠落）で
         # **2件とも厳しい側が正しかった**。多数決にすると 1:1 で決まらず、監督の裁量に戻る。
         rc = _run_headless(role, a.issue, "\n".join(out), _hcfg, _schema, stable_organ)
+        _headless_rc = rc
         print(f"\n===== judge は2人いる（judges.lineage = cross-harness）=====\n"
               f"  1. 同一ハーネスの {role} subagent — 上の材料をそのまま渡す\n"
               f"  2. 別ハーネスの {role} — " +
@@ -651,7 +653,16 @@ def cmd_verify(a):
           f"  （seam ガードは本文に契約が無ければ、プロンプトが指すファイルを自分で読んで"
           f"検証する）。\n"
           f"配管はここまで。verdict / why / risk は {role} が決める。", file=sys.stderr)
-    return 0
+    # **A cross-harness dispatch that failed must not exit 0.** `_run_headless` already diagnoses an
+    # empty or malformed child result on stderr, but that diagnosis was discarded here: verify
+    # returned 0 regardless, so a supervisor reading the exit code saw success, printed the handoff,
+    # and moved on with no verdict recorded. In the field this read as "the child completed and the
+    # verdict vanished" (#201) — the verdict never existed, and the only signal that said so was
+    # thrown away one frame above the caller.
+    #
+    # Same-harness runs keep returning 0: there is no child to fail, and the subagent material on
+    # stderr IS the deliverable.
+    return _headless_rc
 
 
 
