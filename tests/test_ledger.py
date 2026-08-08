@@ -2026,7 +2026,7 @@ def test_socket_parent_may_not_be_a_symlink(tmp_path):
     (tmp_path / "real").mkdir()
     (tmp_path / "link").symlink_to(tmp_path / "real")
     err = wd.check_socket_parent(str(tmp_path / "link" / "writer.sock"))
-    assert err and "シンボリックリンク" in err
+    assert err and "is a symlink" in err
 
 
 def test_same_uid_cannot_claim_separate_uid(tmp_path):
@@ -2036,7 +2036,7 @@ def test_same_uid_cannot_claim_separate_uid(tmp_path):
     wd = importlib.import_module("writerd")
     parent = tmp_path / "p"; parent.mkdir()
     err = wd.check_socket_parent(str(parent / "writer.sock"), require_root_owned=True)
-    assert err and "root 所有でない" in err
+    assert err and "is not root-owned" in err
     assert "separate_uid" in err
 
 
@@ -2115,11 +2115,11 @@ def test_stage_b_permissions_let_the_daemon_start(tmp_path):
         sk.close()
     # anchor が root 所有でなければ段階B としては拒否される（このテストでは自分所有なので拒否）
     err = wd.check_socket_parent(str(leaf / "w.sock"), require_root_owned=True)
-    assert err and "anchor が root 所有でない" in err
+    assert err and "anchor is not root-owned" in err
     # leaf が他者から書けるなら拒否（other-write は段階A でも落ちる）
     os.chmod(leaf, 0o777)
     err = wd.check_socket_parent(str(leaf / "w.sock"), require_root_owned=True)
-    assert err and ("書き込み可能" in err)
+    assert err and ("writable" in err)
     os.chmod(leaf, 0o755)
 
 
