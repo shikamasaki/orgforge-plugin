@@ -1095,7 +1095,7 @@ def test_schema_diagnoses_nested_validation_gaps(tmp_path):
 
     code, out = run("ledger.py", "schema", cwd=str(org))
     assert code == 1, out
-    assert "validation 規則の欠落" in out
+    assert "missing validation rules" in out
     assert "verdict_provisional" in out
     # --fix で埋まり、差分なしになる
     assert run("ledger.py", "schema", "--fix", cwd=str(org))[0] == 0
@@ -1157,7 +1157,7 @@ def test_conflicting_scalar_is_reported_not_overwritten(tmp_path):
         "correction:          { corrects: list, target_classes: list, target_issues: list }",
         "correction:          { corrects: map, target_classes: list, target_issues: list }", 1))
     code, out = run("ledger.py", "schema", cwd=str(org))
-    assert "衝突" in out
+    assert "conflicting validation rules" in out
     assert "corrects" in out
     run("ledger.py", "schema", "--fix", cwd=str(org))
     import yaml
