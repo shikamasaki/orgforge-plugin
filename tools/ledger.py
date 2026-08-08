@@ -388,13 +388,13 @@ def _judgment_correction_violation(ev, judgments):
 
     target_principals = sorted({principal(target) for target in judgments})
     if actor in target_principals or str(authority_principal) in target_principals:
-        return (f"the judgment's decision principal {authority_principal!r} cannot correct "
-                f"{kind} にできない。\n  対象 seq={payload.get('corrects')}。"
-                "宣言済みの別 authority が訂正すること。")
+        return (f"the judgment's decision principal {authority_principal!r} cannot itself "
+                f"perform the {kind}.\n  targets seq={payload.get('corrects')}.\n"
+                "  A different, already-declared authority must make the correction.")
     supplied = payload.get("corrected_by")
     if supplied is not None and str(supplied) != actor:
         return (f"corrected_by={supplied!r} does not match envelope actor={actor!r}. "
-                "訂正主体は writer が確定する")
+                "the writer determines who made the correction")
     payload["corrected_by"] = actor
     payload["authority_role"] = authority_role
     payload["authority_principal"] = authority_principal
@@ -403,13 +403,14 @@ def _judgment_correction_violation(ev, judgments):
 
 
 def norm_issue(x):
-    """issue 番号の正規化。**比べる場所ごとに違う正規化をしてはいけない。**
+    """Normalise an issue number. **Do not normalise differently in each place you compare.**
 
-    `7` / `#7` / `007` / `" 7 "` は同じ issue である。ところが実装は3箇所で
-    別々に比べていた（`lstrip("#")` だけの場所と、先頭ゼロまで落とす場所）。
-    その食い違いで、**provisional は `007`、呼び出しは `7` だと「判定が足りない」**
-    と言われて admission を作れなくなっていた（Codex が指摘、実測で成立）。
-    同じものを同じと判定できないなら、鍵として使えない。
+    `7`, `#7`, `007` and `" 7 "` are the same issue. The implementation, however, compared them
+    three separate ways (some places only `lstrip("#")`, others stripping leading zeros as well).
+    Because of that mismatch, **a provisional written as `007` against a call using `7`** was
+    reported as "not enough judgments" and no admission could be created (raised by Codex,
+    reproduced by measurement).
+    If it cannot judge the same thing to be the same, it cannot serve as a key.
     """
     s = str(x if x is not None else "").strip().lstrip("#").strip()
     return s.lstrip("0") or s or ""
@@ -438,20 +439,23 @@ def _prior_phase(phase):
 
 
 def _phase_admitted_for(ev, hist, phase):
-    """この deliverable（またはその親）に対して `phase` が admit 済みか。
+    """Has `phase` been admitted for this deliverable (or for its parent)?
 
-    **なぜ親まで遡るのか。** founding は objective 単位で requirements/design を admit する
-    （設計はそこで起きるので当然）。一方 /org-work は task Issue 番号を deliverable にして
-    `phase_started{implement}` を打つ。両者は別の文字列なので、objective で admit しても
-    task には効かず、指示どおり進めても task が弾かれた（実地で判明）。
+    **Why walk up to the parent.** Founding admits requirements/design per objective — naturally,
+    since that is where the design happens. /org-work, on the other hand, uses the task Issue
+    number as the deliverable and emits `phase_started{implement}`. Those are different strings,
+    so an admission on the objective did not apply to the task, and a task was rejected even when
+    the instructions had been followed exactly (found in practice).
 
-    task ごとに requirements/design を再度 admit させるのは、同じ設計を N 回 admit させる
-    セレモニーにしかならない。**設計は objective の単位で起きた**のだから、その admit を
-    子タスクが継承するのが正しい。継承は payload の `parent`（/org-decompose が書く）で辿る。
+    Making every task admit requirements/design again would be pure ceremony: admitting the same
+    design N times. **The design happened at the level of the objective**, so the correct thing is
+    for the child tasks to inherit that admission. Inheritance follows `parent` in the payload
+    (written by /org-decompose).
 
-    親を持たない deliverable は従来どおり自分の admit だけを見る — 挙動は変わらない。"""
+    A deliverable with no parent still looks only at its own admission, exactly as before — its
+    behaviour does not change."""
     target = ev["payload"].get("deliverable")
-    parent = ev["payload"].get("parent")          # /org-decompose が task に書く objective Issue 番号
+    parent = ev["payload"].get("parent")          # the objective Issue /org-decompose writes onto the task番号
     for e in hist:
         if e["class"] != "phase_admitted":
             continue
@@ -461,7 +465,7 @@ def _phase_admitted_for(ev, hist, phase):
         if _same_deliverable(d, target):
             return True
         if parent is not None and _same_deliverable(d, parent):
-            return True                            # 親 objective の admit を継承する
+            return True                            # inherit the parent objective's admission
     return False
 
 
@@ -488,9 +492,9 @@ REQUIRES_PRIOR = {
         and e["payload"].get("phase") == ev["payload"].get("phase")
         for e in hist
     ),
-    # 識別子は束ねて見る（_same_work）。`claim_id == candidate_id` だけを見ていたため、
-    # deliverable/issue で書かれた実地の refutation 2件と相関できず、しかも
-    # None == None が一致してしまい **deploy ゲートが丸ごと無効**だった（が通った）。
+    # Look at the identifiers as a bundle (_same_work). Comparing only `claim_id == candidate_id`
+    # failed to correlate two real refutations that had been written with deliverable/issue — and
+    # worse, None == None compared equal, which **disabled the deploy gate entirely** (it passed).
     "result_deployed": lambda ev, hist: any(
         e["class"] == "refutation_attempted"
         and _same_work(e["payload"], ev["payload"], hist)
@@ -771,25 +775,26 @@ DISTINCT_ACTOR = {
 
 
 def _enforce_attested():
-    """統制イベントに receipt 由来の identity を要求するか。**三値で扱う。**
+    """Does a control event require a receipt-derived identity? **Treated as three-valued.**
 
-    **caller が消せる設定を根拠にしない。** 実測（監査）:
-      - `ORG_REQUIRE_ATTESTED_IDENTITY=0` を足すだけで強制が消えた
-      - `constitution.yaml` を **削除** するだけで強制が消えた
+    **Never rest on a setting the caller can erase.** Measured (audit):
+      - merely adding `ORG_REQUIRE_ATTESTED_IDENTITY=0` made the enforcement vanish
+      - merely **deleting** `constitution.yaml` made the enforcement vanish
 
-    したがって:
-      1. **policy は root 所有の場所から読む**（`ORG_POLICY_FILE`、既定
-         `/usr/local/etc/orgforge/policy.yaml`）。そこに宣言があれば **それが最終**で、
-         env でも org の constitution でも上書きできない。
-      2. policy が無い org（段階A / 未導入）では constitution を読む。**削除は「無効」ではなく
-         「宣言が無い」**なので、有効にしていた org が消しただけで無防備にならないよう、
-         **一度でも有効だった記録があれば消えたことを拒否する**（下の sticky）。
-      3. 読めない・型が違うなら止める（fail-closed）。
+    Therefore:
+      1. **Read the policy from a root-owned location** (`ORG_POLICY_FILE`, default
+         `/usr/local/etc/orgforge/policy.yaml`). A declaration there is **final** and cannot be
+         overridden by env or by the org's constitution.
+      2. In an org with no policy (stage A / not yet adopted), read the constitution. **Deletion is
+         not "disabled", it is "undeclared"** — so that an org which had it enabled does not become
+         defenceless merely by deleting the file, **any record of it once being enabled makes the
+         disappearance a refusal** (the sticky check below).
+      3. Unreadable, or the wrong type: stop (fail-closed).
 
-    env override は **policy が無いときの開発用**に限り、`ORG_ALLOW_POLICY_ENV=1` を同時に
-    要求する — 黙って効く逃げ道にしない。
+    The env override is **for development, and only when there is no policy**; it additionally
+    requires `ORG_ALLOW_POLICY_ENV=1` — no escape hatch that takes effect silently.
     """
-    # ① root 所有の policy が最終
+    # (1) a root-owned policy is final
     pol = os.environ.get("ORG_POLICY_FILE") or "/usr/local/etc/orgforge/policy.yaml"
     if os.path.isfile(pol):
         try:
@@ -816,9 +821,9 @@ def _enforce_attested():
             if not isinstance(v, bool):
                 raise SystemExit(f"the policy's require_attested_identity is not a boolean"
                                  f" ({v!r}): {pol}")
-            return v            # **これが最終。** env も constitution も上書きできない
+            return v            # **This is final.** Neither env nor the constitution overrides it
 
-    # ② env は policy が無いときの開発用。**黙って効かせない。**
+    # (2) env is for development when there is no policy. **It never takes effect silently.**
     env = os.environ.get("ORG_REQUIRE_ATTESTED_IDENTITY")
     if env is not None:
         if os.environ.get("ORG_ALLOW_POLICY_ENV") != "1":
@@ -833,7 +838,7 @@ def _enforce_attested():
             raise SystemExit(f"ORG_REQUIRE_ATTESTED_IDENTITY is not 0/1 ({env!r}).")
         return env == "1"
 
-    # ③ org の constitution
+    # (3) the org's constitution
     try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         from discover import constitution, ledger_root
@@ -852,7 +857,8 @@ def _enforce_attested():
                 c = yaml.safe_load(f)
         except Exception as e:
             raise SystemExit(f"constitution.yaml cannot be parsed, so this cannot be determined: {e}\n"
-                             f"  ファイル: {path}\n  **破損を「強制なし」と読み替えない。**")
+                             f"  file: {path}\n  **Do not reinterpret corruption as "
+                             f"'no enforcement'.**")
         if c is not None:
             if not isinstance(c, dict):
                 raise SystemExit(f"constitution.yaml is not a map: {path}")
@@ -868,8 +874,9 @@ def _enforce_attested():
                     raise SystemExit(f"require_attested_identity is not a boolean ({v!r}): {path}")
                 declared = v
 
-    # ④ **sticky。** 一度でも有効だった org で、宣言が消えたなら止める。
-    #    実測: constitution を削除するだけで強制が消えた。「消した」は「無効にした」ではない。
+    # (4) **sticky.** In an org where it was once enabled, stop if the declaration has vanished.
+    #     Measured: merely deleting the constitution made the enforcement vanish. "Deleted" is not
+    #     "disabled".
     try:
         root = ledger_root()
         marker = os.path.join(root, "attested-identity-enabled") if root else None
@@ -884,49 +891,51 @@ def _enforce_attested():
             pass
     if declared is None and marker and os.path.exists(marker):
         raise SystemExit(
-            f"この org は以前 require_attested_identity を有効にしていたが、いまその宣言が無い。\n"
-            f"  痕跡: {marker}\n"
-            f"  **宣言を消すことは無効にすることではない。** constitution が失われたか、"
-            f"意図的に外されたかを確かめること。\n"
-            f"  本当に無効にするなら constitution に `require_attested_identity: false` と"
-            f"明示し、この痕跡を消すこと。")
+            f"this org previously had require_attested_identity enabled, but the declaration is "
+            f"now absent.\n"
+            f"  trace: {marker}\n"
+            f"  **Deleting a declaration is not disabling it.** Establish whether the constitution "
+            f"was lost or removed deliberately.\n"
+            f"  To genuinely disable it, state `require_attested_identity: false` in the "
+            f"constitution and clear this trace.")
     return bool(declared)
 
 
 
-# **統制の中核となる judgment は、入口で認証を要求する。**
-# 元はこの判定が `_distinct_actor_violation()` の中にあり、その関数は
-# `DISTINCT_ACTOR` にクラスが無いと即 return するため、**`verdict_provisional`
-# には一度も適用されていなかった**（実測: B1 — receipt 無しの provisional を
-# 2件書いて joint admission を作れた）。
-# SoD（同じ actor か）と attestation（主体を確かめたか）は別の統制なので、
-# 片方の適用条件に相乗りさせない。
+# **A judgment at the core of control requires authentication at the door.**
+# This check originally lived inside `_distinct_actor_violation()`, and that function returns
+# immediately when the class is not in `DISTINCT_ACTOR` — so it **was never applied to
+# `verdict_provisional` at all** (measured, B1: writing two provisionals with no receipt was enough
+# to create a joint admission).
+# SoD (is it the same actor?) and attestation (has the principal been verified?) are separate
+# controls, so neither may ride on the other's applicability condition.
 _ATTESTED_REQUIRED = ("admission_decided", "refutation_attempted", "verdict_provisional")
 
 
 def _attestation_violation(ev):
-    """authenticated mode で、検証済み receipt 由来の identity が無ければ拒否理由を返す。"""
+    """In authenticated mode, return the reason for refusal when there is no identity derived
+    from a verified receipt."""
     if ev.get("class") not in _ATTESTED_REQUIRED:
         return None
     if not _enforce_attested():
         return None
     if (ev.get("_verified_identity") or {}).get("decision_by"):
         return None
-    return (f"{ev['class']} は generic append では記録できない"
-            f"（require_attested_identity が有効）。\n"
-            f"  **payload に identity_assurance を書いても証拠にならない** — "
-            f"書けるものを検査に使ってはいけない。\n"
-            f"  judgment は **receipt を検証した経路** からのみ記録できる:\n"
-            f"    github_sync.py provisional --receipt <judge が署名した receipt> …\n"
-            f"  その経路が receipt を検証し、identity fields を生成する。")
+    return (f"{ev['class']} cannot be recorded through a generic append "
+            f"(require_attested_identity is enabled).\n"
+            f"  **Writing identity_assurance into the payload is not evidence** — never use "
+            f"something the writer can set as the thing you check.\n"
+            f"  A judgment can only be recorded through **a path that verified a receipt**:\n"
+            f"    github_sync.py provisional --receipt <a receipt signed by the judge> …\n"
+            f"  That path verifies the receipt and derives the identity fields itself.")
 
 
 
 def _declared_lineage():
-    """org が宣言した lineage（`enforcement.judges.lineage`）。宣言が無ければ None。
+    """The lineage the org declared (`enforcement.judges.lineage`); None if undeclared.
 
-    **caller が消せる設定を根拠にしない** — `_enforce_attested()` と同じく
-    root 所有 policy / constitution から読む。読めない・壊れているは「強制なし」ではない。
+    **Never rest on a setting the caller can erase** — as in `_enforce_attested()`, read it from
+    the root-owned policy / the constitution. Unreadable or corrupt does not mean "no enforcement".
     """
     try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -950,8 +959,9 @@ def _declared_lineage():
     return v if isinstance(v, str) else None
 
 
-# **肯定的な判断だけが独立性を要する。**
-# `admit` と `survives` は「通す」判断であり、これが単独で書けるなら二血統は強制されていない。
+# **Only an affirmative decision requires independence.**
+# `admit` and `survives` are decisions that LET WORK THROUGH; if either can be written alone, the
+# two-lineage rule is not being enforced.
 # `reject` / `park` / `refuted` は通さない方向なので、単独でも記録できてよい
 # （止めると、判定を記録する手段そのものが無くなる）。
 _POSITIVE_VERDICTS = {"admission_decided": {"admit"},
