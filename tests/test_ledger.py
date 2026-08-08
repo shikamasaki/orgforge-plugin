@@ -1352,13 +1352,14 @@ def test_malformed_prior_exposure_denies(tmp_path):
     assert json.loads(out.splitlines()[0])["reason"] == "malformed_prior_exposure"
 
 
-# ══ 0.34.1 — 信頼境界の3経路（既存テストでは捕まらなかったもの）════════════════
+# ══ 0.34.1 — three paths through the trust boundary (which the existing tests missed) ═══════
 
 def test_exposure_events_cannot_be_forged_by_generic_append(tmp_path):
-    """**上限の予約は writer 専用。** generic append で書けると上限そのものが無効になる。
+    """**A cap reservation is writer-only.** If a generic append can write one, the cap itself is void.
 
-    実測: `delta_requested: -100` を append したあと、cap=5 に対して delta=50 が allow され、
-    鎖も intact だった。検査に使う記録は、検査する側だけが書ける必要がある。
+    Measured: after appending `delta_requested: -100`, a delta=50 was allowed against cap=5 — with
+    the chain intact. The records a check relies on must be writable only by the side doing the
+    checking.
     """
     code, out = _app(tmp_path, "exposure_budget_checked",
                      {"window_id": "all", "dimension": "destructive_ops",
@@ -1367,7 +1368,7 @@ def test_exposure_events_cannot_be_forged_by_generic_append(tmp_path):
     assert code == 2, out
     assert "writer-only class" in out
     assert _evs(tmp_path) == []
-    # そして予約は正常に働く
+    # and the reservation works normally
     assert _reserve(tmp_path, 50, 5, "t0")[0] == 10        # cap 5 < 50 → hold
 
 
@@ -1387,7 +1388,7 @@ def test_same_key_with_a_different_request_is_refused(tmp_path):
     d = json.loads(out.splitlines()[0])
     assert d["decision"] == "deny"
     assert d["reason"] == "idempotency_key_reused_with_different_request"
-    # 同じ内容なら no-op
+    # identical contents → no-op
     code, out = _reserve(tmp_path, 1, 5, "t1")
     assert code == 0
     assert json.loads(out.splitlines()[0])["reason"] == "idempotent_replay"
@@ -1433,16 +1434,16 @@ def test_persistence_failure_never_becomes_an_allow(tmp_path, var):
                        capture_output=True, text=True, env=env)
     assert r.returncode == 4
     assert json.loads(r.stdout.splitlines()[0])["reason"] == "reservation_not_persisted"
-    # 書きかけが残っていないこと
+    # no partial write is left behind
     assert (tmp_path / "ledger.jsonl").read_text(encoding="utf-8") == before
     assert run("ledger.py", "verify", str(tmp_path))[0] == 0
 
 
 def test_verify_accepts_legitimately_written_reservations(tmp_path):
-    """`verify` は writer_only を検査しない — 経路は append の時点でしか見られない。
+    """`verify` does not check writer_only — the path can only be seen at append time.
 
-    検査すると、**正しく書かれた予約が「generic append では書けない」と拒否され**、
-    健全な台帳が壊れていると報告される。
+    Check it there and **a correctly written reservation is refused as "not writable by a generic
+    append"**, so a sound ledger gets reported as broken.
     """
     assert _reserve(tmp_path, 1, 9, "t0")[0] == 0
     code, out = run("ledger.py", "verify", str(tmp_path))
@@ -1453,15 +1454,15 @@ def test_verify_accepts_legitimately_written_reservations(tmp_path):
 def test_idempotency_key_is_a_hash_not_a_delimited_join(tmp_path):
     """Delimiter-joined keys collide once a value contains the delimiter."""
     assert _reserve(tmp_path, 1, 9, "b", sess="a", rule="c")[0] == 0
-    # "a|b|c" と同じ連結になる組み合わせが、別のキーとして扱われること
-    assert _reserve(tmp_path, 1, 9, "c", sess="a|b", rule="")[0] == 3    # rule 空 → deny
-    assert _reserve(tmp_path, 1, 9, "c", sess="a|b", rule="x")[0] == 0   # 別キーとして通る
+    # combinations that would join into the same "a|b|c" must be treated as different keys
+    assert _reserve(tmp_path, 1, 9, "c", sess="a|b", rule="")[0] == 3    # empty rule → deny
+    assert _reserve(tmp_path, 1, 9, "c", sess="a|b", rule="x")[0] == 0   # passes as a different key
     assert len(_decisions(tmp_path)) == 2
 
 
-# ══ H4a — 単調な halt: 止まっている状態は警告ではない ═════════════════════════
+# ══ H4a — a monotonic halt: being stopped is not a warning ══════════════════════════════════
 
-def _trip(root, reason="検査のため", by="registrar", trigger="test", env=None):
+def _trip(root, reason="for the check", by="registrar", trigger="test", env=None):
     args = ["ledger.py", "trip-halt", str(root), "--trigger", trigger,
             "--reason", reason, "--tripped-by", by]
     if env:
@@ -1502,10 +1503,11 @@ def test_trip_halt_requires_a_reason(tmp_path):
 
 
 def test_halt_persistence_failure_returns_nonzero_and_still_latches(tmp_path):
-    """**halt を記録できなければ、その呼び出し自体を非ゼロで返す。**
+    """**If the halt cannot be recorded, the call itself returns non-zero.**
 
-    「記録できないなら宣言しない」は記録としては正しいが、制御としては fail-open になる —
-    止めるべき状況で止まらない。ラッチを先に書くので、次回の呼び出しは止まる。
+    "Do not declare what cannot be recorded" is right as a rule about records, but as a control it
+    is fail-open — it fails to stop in the very situation that called for stopping. The latch is
+    written first, so the next call stops.
     """
     code, out = _trip(tmp_path, env={"ORG_LEDGER_FORCE_APPEND_FAIL": "1"})
     assert code == 4, out
@@ -1513,8 +1515,8 @@ def test_halt_persistence_failure_returns_nonzero_and_still_latches(tmp_path):
     assert d["reason"] == "halt_not_persisted"
     assert d["latch_written"] is True
     assert (tmp_path / "HALT").is_file()
-    assert _evs(tmp_path) == []          # 台帳には入っていない
-    # **それでも次回は止まる**（ラッチが第二経路として働く）
+    assert _evs(tmp_path) == []          # nothing made it into the ledger
+    # **and yet the next call stops** (the latch acts as the second path)
     code, out = run("ledger.py", "halt-status", str(tmp_path))
     assert code == 10, out
     assert json.loads(out.splitlines()[0])["source"] == "latch_only"
@@ -1553,32 +1555,35 @@ def test_unreadable_ledger_counts_as_halted(tmp_path):
 
 
 def test_release_needs_an_authenticated_independent_approver(tmp_path):
-    """解除は存在するが、**自己申告では通らない。**
+    """A release exists, but **not on your own say-so.**
 
-    H4a では操作自体が無かった。0.38.0 で入ったが、要求するのは非対称鍵・独立した principal・
-    `may_release_halt` の認可・復旧の証拠である。generic append でも書けない。
+    In H4a the operation did not exist at all. It arrived in 0.38.0, and what it demands is an
+    asymmetric key, an independent principal, authorisation for `may_release_halt`, and evidence of
+    recovery. A generic append cannot write it either.
     """
     code, out = run("ledger.py", "--help")
     assert "trip-halt" in out and "release-halt" in out
     assert _trip(tmp_path)[0] == 0
-    # generic append では書けない（writer 専用）
+    # a generic append cannot write it (writer-only)
     code, out = _app(tmp_path, "halt_released",
                      {"releases_seq": 1, "reason": "r", "released_by": "x",
                       "recovery_verified": "y", "identity_assurance": "authenticated"},
                      actor="registrar")
     assert code == 2
-    # **どちらの層で止まってもよい。** identity fields を payload に書けない検査（0.39.3）が
-    # writer-only の検査より先に働く — どちらも「generic append では書けない」ことを言っている。
+    # **Either layer may be the one that stops it.** The check forbidding identity fields in the
+    # payload (0.39.3) fires before the writer-only check — both are saying "a generic append
+    # cannot write this".
     assert ("writer-only class" in out) or ("derives identity by verifying a receipt" in out), out
-    assert run("ledger.py", "halt-status", str(tmp_path))[0] == 10   # まだ止まっている
+    assert run("ledger.py", "halt-status", str(tmp_path))[0] == 10   # still stopped
 
 
 def test_schema_has_no_duplicate_top_level_keys():
-    """**YAML は後勝ちなので、重複したトップレベルキーは前を黙って消す。**
+    """**In YAML the last one wins, so a duplicated top-level key silently erases the earlier one.**
 
-    実際に、`identity` ブロックを「`validation:` の直前」に挿入したとき、その `validation:` が
-    説明コメントの見出し行だったため本物と重複し、**検証規則が丸ごと無効になった**
-    （しかも YAML として読めるので気づきにくい）。docs/11 の「修復が壊すのは最悪の形」の再演。
+    It happened: inserting the `identity` block "just before `validation:`" landed against a
+    `validation:` that was the heading line of an explanatory comment, so it duplicated the real
+    one and **voided the validation rules entirely** — and since it still parses as YAML, nothing
+    looked wrong. A re-run of docs/11's "the worst shape is a repair that breaks things".
     """
     for f in (TEMPLATE / "ledger-schema.yaml",
               REPO / "integrations" / "claude-code" / "template" / "ledger-schema.yaml",
@@ -1588,13 +1593,14 @@ def test_schema_has_no_duplicate_top_level_keys():
         keys = [l.split(":")[0] for l in f.read_text(encoding="utf-8").splitlines()
                 if l and not l[0].isspace() and ":" in l and not l.startswith("#")]
         dupes = sorted({k for k in keys if keys.count(k) > 1})
-        assert not dupes, f"{f.name} にトップレベルキーの重複: {dupes}"
+        assert not dupes, f"{f.name} has duplicated top-level keys: {dupes}"
 
 
 def test_identity_declares_four_separate_assurance_axes():
-    """**assurance を単一の強弱値に潰さない。**
+    """**Do not collapse assurance into a single strong/weak value.**
 
-    署名されていても、同じ process / 同じ鍵が両方の血統を作れるなら独立レビューではない。
+    Even when signed, it is not an independent review if the same process or the same key could
+    have produced both lineages.
     """
     import yaml
     d = yaml.safe_load((TEMPLATE / "ledger-schema.yaml").read_text(encoding="utf-8"))
@@ -1603,11 +1609,11 @@ def test_identity_declares_four_separate_assurance_axes():
                        "workload_isolation", "reviewer_independence"}
     assert "authenticated" in ax["identity_assurance"]
     assert "claimed" in ax["identity_assurance"]
-    # legacy actor は claimed のまま昇格しない
+    # a legacy actor stays claimed and is never promoted
     assert d["identity"]["legacy_actor"] == "claimed"
 
 
-# ══ Authenticated Mode + H4b — 認証付き halt 解除 ═════════════════════════════
+# ══ Authenticated Mode + H4b — releasing a halt with authentication ═════════════════════════
 # **共有鍵は「鍵が違う」ことしか示さない。** 別主体・別プロセス・独立した承認を証明しないので、
 # 解除には使えない。非対称鍵（judge が秘密鍵、writer は公開鍵だけ）が前提である。
 
@@ -1686,7 +1692,7 @@ def _am_setup_halt(tmp_path, **kw):
     assert _am_tool(org, "identity.py", "keygen", "--key-id", "k-shared",
                     "--signer-id", "shared", "--shared-secret").returncode == 0
     assert _am_tool(org, "ledger.py", "trip-halt", str(led), "--trigger", "t",
-                    "--reason", "検査のため", "--tripped-by", "reg").returncode == 0
+                    "--reason", "for the check", "--tripped-by", "reg").returncode == 0
     return org, led
 
 
