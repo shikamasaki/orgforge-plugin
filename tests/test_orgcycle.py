@@ -486,7 +486,8 @@ def test_verify_passes_rework_history_to_gate():
     src = _cycle_src()
     seg = src[src.index("def cmd_verify"):]
     assert "Judgment history" in seg and "judgment number" in seg
-    assert "再導出" in seg, "「前回の指摘が直ったか」だけを見る gate になってしまう"
+    assert "re-derive" in seg, \
+        "it would become a gate that only checks whether the previous findings were fixed"
 
 
 def test_integrate_plan_executes_nothing_and_warns_on_overlap(tmp_path):
