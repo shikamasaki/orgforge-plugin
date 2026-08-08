@@ -6,6 +6,23 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 2.9.1 — a dispatch that produced no verdict exits non-zero
+
+`_run_headless` has diagnosed an empty or malformed child result on stderr since 2.5.1 — exit code,
+stream sizes, the flags used, the probe to run next. `cmd_verify` then ended with a bare `return 0`,
+so that diagnosis was discarded one frame above the caller. A supervisor reading the exit code saw
+success, printed the handoff, and moved on with nothing recorded.
+
+Reported from the field as the Claude child completing and the verdict vanishing (#201). The verdict
+never existed; the signal that said so was thrown away.
+
+### Fixed
+
+- **`org-cycle verify` returns the headless dispatch's result.** No verdict now means a non-zero
+  exit, so a caller that checks it stops instead of continuing as if a review had happened.
+- Same-harness runs are unchanged: the default is 0, set before the lineage branch, because there
+  is no child to fail and the subagent material on stderr is the deliverable.
+
 ## 2.9.0 — a goal appears on GitHub, or says out loud that it did not
 
 `org-goal` wrote `goal_started` / `goal_completed` to the ledger and nowhere else. An agent could
