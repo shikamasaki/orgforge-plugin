@@ -6,6 +6,34 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 2.9.2 — set the dispatch timeout from a measurement
+
+Two open questions from 2.6.0 are now measured (gpt-5.6-terra / medium, repeated runs, concurrent).
+
+**Trimming the judge's material did not make it faster.** Cutting the framing 68% — full role
+charter 6,563 chars vs compact contract 2,123 — moved the median from 49.1s to 56.5s, with
+overlapping ranges. 2.6.0 remains right for the reason it was made (an unbounded review bar drifts
+between rounds), but it is not a latency fix and should not be described as one. Runtime is
+dominated by reading the subject and deciding.
+
+**The timeout had less margin than it looked.** On a realistic subject (compact contract plus ~6k
+of target code): median 46.4s, max 86.9s, spread 32–87s across four runs of the *same* prompt. The
+old default of 120s was 1.4x the observed maximum, and a ~3x run-to-run spread means a larger
+subject or a slower moment lands on that cutoff with nothing actually wrong.
+
+### Changed
+
+- **`ORG_JUDGE_TIMEOUT` defaults to 300s** (3.5x the measured maximum) instead of 120s. A timeout
+  exists to catch a hang, not to bound normal work; since 2.9.1 a cutoff is visible rather than
+  silently passing as success, but a killed judgment still costs the round and reads to the caller
+  exactly like a judge that produced nothing.
+- **The timeout message states the measured range**, so an operator who hits it raises the value
+  instead of concluding the judge is broken.
+- The measurement is recorded beside the constant, and a test pins the default above the observed
+  maximum — lowering it requires re-measuring.
+
+Closes #203.
+
 ## 2.9.1 — a dispatch that produced no verdict exits non-zero
 
 `_run_headless` has diagnosed an empty or malformed child result on stderr since 2.5.1 — exit code,
