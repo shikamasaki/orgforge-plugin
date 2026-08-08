@@ -2052,7 +2052,7 @@ def test_writer_owned_assets_are_audited(tmp_path):
     assert wd.audit_writer_assets(str(led)) == []
     os.chmod(led / "ledger.jsonl", 0o666)
     issues = wd.audit_writer_assets(str(led))
-    assert issues and "他者から書き込み可能" in issues[0][1]
+    assert issues and "writable by others" in issues[0][1]
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="writer-install.sh is macOS-only")
