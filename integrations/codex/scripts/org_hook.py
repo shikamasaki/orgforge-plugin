@@ -877,11 +877,11 @@ def _integration_bypass(tool_name, ti):
 # behind (the required `domain_model` went with them).
 # **Reads are never blocked** — `view` and `list` stay open.
 _GH_WRITE = {
-    ("issue", "create"): ("Issue の作成", "create --kind task --dept <役> --objective <id> "
-                                          "--parent <objective#> --title … --body …"),
-    ("issue", "close"): ("Issue のクローズ", None),
-    ("issue", "edit"): ("Issue のラベル/本文の変更", None),
-    ("issue", "reopen"): ("Issue の再オープン", None),
+    ("issue", "create"): ("Creating an Issue", "create --kind task --dept <role> --objective <id> "
+                                               "--parent <objective#> --title … --body …"),
+    ("issue", "close"): ("Closing an Issue", None),
+    ("issue", "edit"): ("Changing an Issue's labels or body", None),
+    ("issue", "reopen"): ("Reopening an Issue", None),
 }
 
 
@@ -1041,7 +1041,9 @@ def _command_scoped_manual_merge(cmd):
 
 
 def _gh_bypass(tool_name, ti):
-    """organ を通さない Issue の書き換えか。理由（と打つべきコマンド）を返す。"""
+    """Is this an Issue mutation that bypasses the organ? Return the reason (and the command
+    to run instead).
+    """
     if tool_name != "Bash":
         return None
     cmd = _without_inert_heredoc_data(_command_text(ti))
@@ -1064,23 +1066,24 @@ def _gh_bypass(tool_name, ti):
         if gs_args:
             how = f'    python3 "{gs}" {gs_args}'
         else:
-            how = (f'    python3 "{oc}" complete --role <役> --issue <N> --outputs … '
+            how = (f'    python3 "{oc}" complete --role <role> --issue <N> --outputs … '
                    f"--command … --result … \\\n"
                    f"        (--domain-model-updated … | --domain-model-none …)\n"
-                   f"  ラベル/ステージだけを変えるなら:\n"
+                   f"  To change only the label or the stage:\n"
                    f'    python3 "{gs}" stage --issue <N> --stage ready|in-progress|blocked|done')
-        return (f"{what} を organ の外で行っている。**organ を通すこと** — "
-                f"`dept` / `objective` / `parent` / 冪等キーが付き、台帳に記録が残る:\n"
+        return (f"{what} outside the organ. **Go through the organ** — it attaches "
+                f"`dept` / `objective` / `parent` and the idempotency key, and leaves a record "
+                f"in the ledger:\n"
                 f"{how}\n"
-                f"  organ を通さないと、`ready` が完了した Issue を返し続け、"
-                f"起票が objective に紐づかず、`cycle_completed` の `domain_model` が飛ぶ"
-                f"（すべて運用で起きた）。\n"
-                f"  読み取り（`gh issue view` / `gh issue list`）は止めていない。"
-                f"準備・mutation・確認は別々の Bash/exec call に分ける（例: 本文を準備して"
-                f"確認する → 上の organ command だけ → `gh issue view <N>` だけ）。"
-                f"手で書き換えるなら同じ Bash 呼び出しで "
-                f"`ORG_ALLOW_MANUAL_GH=1 gh issue …` と宣言すること。"
-                f"1呼び出し1 mutation とし、複数件は個別に実行する（台帳に1対1で残る）。")
+                f"  Without the organ, `ready` keeps handing back Issues that are already "
+                f"finished, new Issues are not tied to an objective, and the `domain_model` on "
+                f"`cycle_completed` goes missing (all three happened in operation).\n"
+                f"  Reads are not blocked (`gh issue view` / `gh issue list`). Split preparation, "
+                f"mutation, and confirmation into separate Bash/exec calls (e.g. prepare the body "
+                f"and check it → the organ command above on its own → `gh issue view <N>` on its "
+                f"own). To rewrite by hand, declare it in the same Bash call: "
+                f"`ORG_ALLOW_MANUAL_GH=1 gh issue …`. One mutation per call, and run several "
+                f"Issues separately (so the ledger keeps a one-to-one record).")
     return None
 
 
@@ -1109,7 +1112,7 @@ def _decode_escapes(cmd):
 # crashes returns no decision, which can fail open.
 # Upper bound on the hook event used for a decision; beyond it the regexes effectively
 # stall (measured).
-_MAX_TOKENIZE_CHARS = 64 * 1024   # shlex に渡す上限（shlex だけが遅い）
+_MAX_TOKENIZE_CHARS = 64 * 1024   # cap on what is handed to shlex (only shlex is slow)
 
 _SHELL_TOOLS = ("bash", "shell", "terminal", "sh", "zsh")
 
@@ -1127,12 +1130,12 @@ def _held_call_atomicity(tool_name):
     so do not incorrectly describe their input as a shell command sequence.
     """
     if _is_shell_tool(tool_name):
-        return ("\n\n  **この Bash/exec 呼び出しは PreToolUse が実行前に止めたため、"
-                "前段・後段を含む全コマンドが未実行です。** 準備、mutation、確認は"
-                "別々の tool call に分けてください。")
-    return (f"\n\n  **この {tool_name or 'tool'} 呼び出しは実行前に止めたため、"
-            "この tool call 自体は未実行です。** Bash のような前段・後段のコマンド列を"
-            "部分実行した、とは解釈しません。")
+        return ("\n\n  **PreToolUse held this Bash/exec call before it ran, so every command in "
+                "it — before and after — was not executed.** Split preparation, mutation, and "
+                "confirmation into separate tool calls.")
+    return (f"\n\n  **This {tool_name or 'tool'} call was held before it ran, so the tool call "
+            "itself was not executed.** Do not read this as a partially executed sequence of "
+            "commands the way a Bash call would be.")
 
 
 def _command_text(ti):

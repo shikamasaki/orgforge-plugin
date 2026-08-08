@@ -716,7 +716,7 @@ def test_manual_issue_writes_are_held(tmp_path, monkeypatch):
     for cmd in ("gh issue create --title x", "gh issue close 42",
                 "gh issue edit 42 --add-label y"):
         r = h._gh_bypass("Bash", {"command": cmd})
-        assert r is not None, f"organ の外の Issue 書き換えが通った: {cmd}"
+        assert r is not None, f"an Issue mutation outside the organ was allowed: {cmd}"
         assert "github_sync" in r or "org_cycle" in r, "打つべきコマンドが示されていない"
 
 
@@ -726,8 +726,8 @@ def test_held_bash_call_states_that_every_segment_was_not_run(tmp_path):
     result = _pretooluse(repo, "printf prepared > scratch.txt; gh issue create --title x")
     output = result.stdout + result.stderr
     assert result.returncode == 2, output
-    assert "前段・後段を含む全コマンドが未実行" in output
-    assert "別々の tool call" in output
+    assert "before and after — was not executed" in output
+    assert "into separate tool calls" in output
 
 
 def test_declared_manual_mutation_with_a_later_read_is_whole_call_held(tmp_path):
@@ -737,8 +737,8 @@ def test_declared_manual_mutation_with_a_later_read_is_whole_call_held(tmp_path)
         repo, "ORG_ALLOW_MANUAL_GH=1 gh issue close 42; gh issue view 42")
     output = result.stdout + result.stderr
     assert result.returncode == 2, output
-    assert "前段・後段を含む全コマンドが未実行" in output
-    assert "1呼び出し1 mutation" in output
+    assert "before and after — was not executed" in output
+    assert "One mutation per call" in output
 
 
 def test_non_shell_tool_does_not_interpret_command_text_as_an_executed_sequence(tmp_path):
@@ -752,8 +752,8 @@ def test_non_shell_tool_does_not_interpret_command_text_as_an_executed_sequence(
         note = h._held_call_atomicity("Write")
     finally:
         os.chdir(old_cwd)
-    assert "tool call 自体は未実行" in note
-    assert "全コマンドが未実行" not in note
+    assert "tool call itself was not executed" in note
+    assert "before and after — was not executed" not in note
 
 
 def test_quoted_cat_heredoc_body_is_data_not_an_executed_command(tmp_path, monkeypatch):
