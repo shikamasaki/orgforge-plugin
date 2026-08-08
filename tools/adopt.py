@@ -219,6 +219,22 @@ def prepare(root, language):
     created = []
     kept = []
 
+    # **Check every template before creating anything.** The check used to sit inside the copy
+    # loop, so a bundle missing one file left the repository half-prepared: some directories and
+    # spec files written, then a hard stop. The operator then had to guess which of those were
+    # theirs to delete (issue #197). Preparation either happens or it does not.
+    _needed = list(SPEC_FILES)
+    if not (root / "organization.yaml").exists() and not (root / "organization.SKELETON.yaml").exists():
+        _needed.append("organization.SKELETON.yaml")
+    missing = [name for name in _needed
+               if not (root / name).exists() and not (templates / name).is_file()]
+    if missing:
+        raise AdoptionError(
+            "required templates are missing from the plugin bundle: "
+            + ", ".join(str(templates / name) for name in missing)
+            + "\n  Nothing was created. This is a packaging defect, not a repository problem — "
+              "reinstall or update the plugin, then re-run prepare.")
+
     for relative in STATE_DIRS:
         path = root / relative
         if path.is_dir():

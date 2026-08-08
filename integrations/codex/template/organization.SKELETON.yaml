@@ -1,0 +1,150 @@
+# organization.SKELETON.yaml — fill this in to define YOUR org, then rename to organization.yaml
+#
+# This is the empty form of template/organization.yaml. The <ANGLE_BRACKET> slots are yours to
+# fill; the control skeleton (supervisor / gate / skeptic / registrar) is kept intact because every
+# org needs it — those four are the maker/checker/skeptic separation and the metabolism, not domain
+# choices. Fill the domain roles, run the lint, iterate:
+#
+#   python3 tools/org_lint.py organization.yaml constitution.yaml moves.yaml \
+#           ledger-schema.yaml sensors.yaml
+#
+# Read docs/01 (what it must be), docs/02 (elastic design), docs/07 (scopes) as you fill it.
+# Prefer /found <your RFP> to have the org draft this for you, then review — see the plugin command.
+
+# ── PURPOSE (Organ 1) ────────────────────────────────────────────────────────
+# One sentence. A purpose, NOT a metric. What net outcome does this org exist to produce?
+purpose: >
+  <ONE SENTENCE: the outcome this organization exists to deliver. e.g. "Ship correct, tested
+  features for product X while it runs unattended.">
+
+# The measurable proxy, explicitly SUBORDINATE to purpose and NEVER an agent's reward (Goodhart).
+objective_metric:
+  name: <the measurable proxy for the purpose, e.g. "net-positive shipped results after cost">
+  reward_agents_on_this: false          # non-negotiable
+  # O1 が要求する: 指標を「満たしたことにする」抜け道を先に塞ぐ。3種すべて埋めること。
+  gaming_defenses:
+    - placebo: <letter を満たすが intent を満たさない出力の例。これを成功に数えない>
+    - null_test: <分母が 0 の場合など、無意味な満点を除外する条件>
+    - forward_test: <同じ入力を2回流して同一結果になることの検証など、前向きの確認>
+
+# ── STRUCTURE (Organ 2) — the complete ideal chart, every dept the purpose will ever need ─────
+structure:
+  rfp: <REQUIREMENTS.md OR ledger://genesis/rfp — the purpose's source document>
+  # O2 が要求する: supervisor が実際に見られる直属数。既定は 6。
+  # 役割が増えて超えるなら、中間管理職を足すより先に「なぜこの数で見られるのか」を書いて
+  # ここを宣言し直すことを検討する（契約を持たない管理ロールを増やすのは docs/03 §6.5 と緊張する）。
+  span:
+    default_effective_span: <直属の数。既定 6。超えるなら理由をコメントで残す>
+  layers:
+    - name: supervisor
+      regime: mechanistic
+      role: supervisor                   # singleton control layer — keep
+    - name: <your_exploration_or_delivery_layer>   # e.g. "delivery_front" — your domain makers
+      regime: organic
+      # ロールの列挙キーは `departments:`（`roles:` ではない）。
+      # ここに書かれていないロールは O2b で「層に属さない」と落ちる。
+      departments: [<role_id>, <role_id>]
+    - name: control_layer
+      regime: mechanistic                # gate / skeptic / registrar — keep
+      departments: [gate, skeptic, registrar]
+
+# ── SEPARATION OF DUTIES (Organ 6) — the three incompatible duties must not concentrate ───────
+separation_of_duties:
+  # O6 が要求する3点セット。3つとも必須で、欠けると「不可分な職務が分離されていない」と落ちる。
+  authorization: gate                    # 誰が admit するか（実装しないロールであること）
+  recording: ledger                      # 記録の保持者（判定される側が書き換えられないこと）
+  custody: ledger                        # the single protected audit record (write-controlled; SSoT = code + the domain model) — keep
+  # maker != checker != skeptic; the lint enforces the skeptic is a DIFFERENT model_family.
+  # Keep the gate/skeptic below; name YOUR makers as the ones they check.
+
+# ── INFORMATION FLOW (Organ 5) — intent for everyone, details need-to-know ────────────────────
+information_flow:
+  intent_block:
+    contains: [purpose, current_priorities, constraints_in_force]
+  universal_pack_items: [intent_block, doctrine]   # every role carries these — keep
+  scopes:                                # deny-by-default; grant each role only the views it needs
+    grants:
+      # - { role: <your_role>, views: [<view1>, <view2>], pack_budget_tokens: 20000 }
+      - { role: gate,       views: [admission_standard, candidate_under_review, full_evidence_trail], pack_budget_tokens: 40000 }
+      - { role: skeptic,    views: [claim_under_review, refutation_checklist, full_evidence_trail],   pack_budget_tokens: 40000 }
+      - { role: registrar,  views: [sensor_readings, moves_catalog, proposal_queue, ledger_census],   pack_budget_tokens: 30000 }
+      - { role: supervisor, views: [direction_flags, sensor_readings, recent_ledger_census],          pack_budget_tokens: 30000 }
+
+  total_token_budget: null               # carved down at delegation (docs/09 §granularity)
+
+# ── ROLES ─────────────────────────────────────────────────────────────────────
+# Each role: id, regime (organic=may self-organize / mechanistic=fixed), active, a mission, and
+# (for makers) a contract {deliverable, standard, checker, depends_on}. A role that supervises
+# others lists them in `supervises`. Keep the four control roles; add your domain roles.
+roles:
+
+  # ---- control skeleton: keep these four (they are the SoD + metabolism, not domain choices) ----
+  - id: supervisor
+    regime: mechanistic
+    active: true
+    profile_lineage: control-supervisor-v1
+    mission: >
+      Oversee each department's DIRECTION. For ORGANIC roles, correct drift by editing the profile
+      (outside its immutable preamble); for MECHANISTIC roles, file a charter-tier proposal.
+    profile: template/SUPERVISOR.md
+    supervises: [<list every domain role you add below>, gate, skeptic, registrar]
+    context_pack: [intent_block, direction_flags, sensor_readings, recent_ledger_census]
+    loop: { cadence: every_5_min, stop_condition: on_operator_instruction }
+
+  - id: registrar
+    regime: mechanistic
+    active: true
+    profile_lineage: control-registrar-v1
+    mission: >
+      The org clerk (docs/05 §2.6): evaluate sensors, select legal moves, author reorg diffs (as
+      Maker), assemble context packs, generate the digest, own the org-wide priority ranking
+      (resource.py rank), service the approval queue. Approves nothing.
+    context_pack: [intent_block, sensor_readings, moves_catalog, proposal_queue, ledger_census]
+    functions: [organize, implement, operate]
+    loop: { cadence: every_30_min }
+    output_to: [gate]
+
+  - id: gate
+    regime: mechanistic
+    active: true
+    profile_lineage: control-gate-v1
+    mission: >
+      Independent admission: admit a candidate result ONLY if it meets the purpose-grounded
+      standard and a skeptic's refutation survived. Admits or rejects; makes nothing.
+    context_pack: [intent_block, admission_standard, candidate_under_review, full_evidence_trail]
+    functions: [judge]
+    loop: { cadence: on_candidate_arrival }   # CA が要求。ledger-schema の triggers にある名前のみ
+    output_to: [skeptic]                      # O6: admit した結果は必ず反証に回すこと
+
+  - id: skeptic
+    regime: mechanistic
+    active: true
+    profile_lineage: control-skeptic-v1
+    model_family: family-B               # MUST differ from the maker/gate family (decorrelate blind spots)
+    mission: >
+      Adversarially try to REFUTE a candidate before the gate sees it. Different base model from
+      whom it checks, by charter.
+    context_pack: [intent_block, claim_under_review, refutation_checklist, full_evidence_trail]
+    functions: [review]
+    loop: { cadence: on_positive_result }
+
+  # ---- YOUR domain roles: add one block per role (copy this template) --------------------------
+  # - id: <role_id>
+  #   regime: organic                    # organic = may self-organize; mechanistic = fixed
+  #   active: true
+  #   profile_lineage: <lineage-tag-v1>
+  #   mission: <one line: what this role does; propose vs judge; its lane>
+  #   contract:                          # makers declare a contract; the checker admits their work
+  #     deliverable: <what it produces>
+  #     standard: <the bar its output must meet>
+  #     checker: gate                    # who admits its output (usually the gate)
+  #     depends_on: []                   # roles whose output it consumes (the depends_on edges)
+  #   supervises: []                     # non-empty => this role is a manager (docs/09)
+  #   context_pack: [intent_block, doctrine, <the views this role is granted above>]
+  #   loop: { cadence: <on_candidate|every_N_min>, stop_condition: <verifiable stop> }
+
+# ── RUNTIME ───────────────────────────────────────────────────────────────────
+runtime:
+  constitution: template/constitution.yaml     # the charter — no agent writes it — keep
+  harness: adaptive                             # detect Claude Code or Codex; use the opposite
+                                                # reviewer when available, else pseudo same-harness
