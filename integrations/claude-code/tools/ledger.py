@@ -2205,66 +2205,68 @@ def _deep_add(dst, src, path=""):
 
 
 def cmd_schema(a):
-    """org の ledger-schema.yaml とプラグインのテンプレートの差分を診断し、必要なら埋める。
+    """Diagnose the difference between the org's ledger-schema.yaml and the plugin's template,
+    and fill it in when asked.
 
-    ## なぜこれが要るか（H8: schema rollout skew）
+    ## Why this is needed (H8: schema rollout skew)
 
-    org は自分の `ledger-schema.yaml` を持つ（org が自分の形式を所有するため）。プラグインが
-    新しいイベントクラスを増やしても、**org のコピーは古いまま**になる。そこに「宣言の無い
-    クラスは書けない」検査を入れると、**更新直後に org の記録が止まる**。
+    An org holds its own `ledger-schema.yaml` (so that the org owns its own format). When the
+    plugin adds a new event class, **the org's copy stays old**. Add a check saying "an undeclared
+    class cannot be written" on top of that, and **the org stops recording the moment it updates**.
 
-    実測: ある org の schema はプラグインより4クラス古く、うち2つ（`correction` 12件、
-    `asset_touched` 3件）は実データで使われていた。schema を配らずに検査を入れれば、
-    その org は訂正を書けなくなる。
+    Measured: one org's schema was four classes behind the plugin, and two of them (`correction`,
+    12 events; `asset_touched`, 3) were in use in real data. Introduce the check without shipping
+    the schema and that org can no longer write a correction.
 
-    **これは fail-closed ではなく、既知の移行不備による可用性事故である。** だから
-    「検査を入れる前に診断できること」「明示的に移行できること」を道具として持つ。
+    **That is not fail-closed; it is an availability incident caused by a known migration gap.**
+    Hence the tooling to diagnose it BEFORE the check goes in, and to migrate explicitly.
     """
-    here = os.path.dirname(os.path.abspath(__file__))    # ledger.py はローカルに here を作る流儀
+    here = os.path.dirname(os.path.abspath(__file__))    # ledger.py's habit: build `here` locally
     plug_p = os.path.join(here, "..", "template", "ledger-schema.yaml")
     if not os.path.isfile(plug_p):
         plug_p = os.path.join(here, "template", "ledger-schema.yaml")
     org_p = _schema_path()
     if not org_p or not os.path.isfile(org_p):
-        print("org の ledger-schema.yaml が見つからない。", file=sys.stderr)
+        print("the org's ledger-schema.yaml cannot be found.", file=sys.stderr)
         return 2
     if os.path.abspath(org_p) == os.path.abspath(plug_p):
-        print("この org はプラグインのテンプレートを直接使っている — skew は起こらない。")
+        print("this org uses the plugin's template directly — no skew is possible.")
         return 0
     try:
         import yaml
         plug = yaml.safe_load(open(plug_p, encoding="utf-8")) or {}
         org = yaml.safe_load(open(org_p, encoding="utf-8")) or {}
     except Exception as e:
-        print(f"schema を解析できない: {e}", file=sys.stderr)
+        print(f"cannot parse the schema: {e}", file=sys.stderr)
         return 2
 
     pc = set((plug.get("event_classes") or {}).keys())
     oc = set((org.get("event_classes") or {}).keys())
     missing = sorted(pc - oc)
-    # **validation の中身も比べる。** 「ブロックの有無」だけを見ていたので、org 側で
-    # `verdict_provisional` の required を削っても「差分なし」と判定した（監査が実証）。
-    # 検証規則が欠けていることは、クラスが欠けていることと同じくらい静かに効く。
+    # **Compare the contents of validation too.** Looking only at "is the block present?" meant
+    # that deleting `verdict_provisional`'s required on the org side still reported "no difference"
+    # (demonstrated by audit). A missing validation rule bites just as quietly as a missing class.
     pv, ov = plug.get("validation") or {}, org.get("validation") or {}
-    # **欠落と衝突を1つの計算から出す。** 別々に判定すると、片方だけ検出して片方を見落とす
-    # （実測: 欠落だけを見ていたので、org が型名を変えていた衝突が --fix に入らず報告もされなかった）。
+    # **Derive the gaps and the conflicts from one computation.** Decided separately, one gets
+    # detected and the other missed (measured: looking only at gaps meant a conflict where the org
+    # had changed a type name went into neither --fix nor the report).
     _merged, vconf = _deep_add(ov, pv, path="validation")
     vgaps = []
     for sect in ("required", "require_any", "enums", "types"):
         pd, od = pv.get(sect) or {}, ov.get(sect) or {}
         for cls_, spec in pd.items():
             if cls_ not in od:
-                vgaps.append(f"validation.{sect}.{cls_} が無い")
+                vgaps.append(f"validation.{sect}.{cls_} is absent")
             elif isinstance(spec, (list, dict)) and isinstance(od.get(cls_), (list, dict)):
                 lost = sorted(set(spec) - set(od[cls_]))
                 if lost:
-                    vgaps.append(f"validation.{sect}.{cls_} に {', '.join(map(str, lost))} が無い")
+                    vgaps.append(f"validation.{sect}.{cls_} is missing {', '.join(map(str, lost))}")
     for cls_ in (pv.get("additional_properties_false") or []):
         if cls_ not in (ov.get("additional_properties_false") or []):
-            vgaps.append(f"validation.additional_properties_false に {cls_} が無い")
+            vgaps.append(f"validation.additional_properties_false is missing {cls_}")
 
-    # **実データで使われているかを言う。** 使われているクラスが欠けているなら、検査を入れた
-    # 瞬間にその記録が止まる — 緊急度が違う。
+    # **Say whether it is in use in real data.** If a class that is IN USE is missing, that org
+    # stops recording the moment the check goes in — the urgency is not the same.
     used = set()
     try:
         for e in read_events(a.root):
@@ -2272,17 +2274,19 @@ def cmd_schema(a):
     except Exception:
         pass
 
-    # **クラス数が同じでも、field が欠けていれば最新ではない。**
-    # snapshot が読むのは `event_classes` の `fields:` 行なので、ここが古いと
-    # validation を直しても snapshot は古い形で固定され、正規経路が拒否される
-    # （実測: 実 org tatekae が「差分なし」と表示されたまま全 metered 操作がデッドロックしていた）。
+    # **The same number of classes does not mean up to date if a field is missing.**
+    # What the snapshot reads is the `fields:` line under `event_classes`, so when that is stale,
+    # fixing validation still pins the snapshot to the old shape and the legitimate path is
+    # refused (measured: the real org `tatekae` displayed "no difference" while every metered
+    # operation was deadlocked).
     _src_txt = open(plug_p, encoding="utf-8").read()
     _dst_txt = open(org_p, encoding="utf-8").read()
-    # **field は YAML の構造から読む。** inline-map の途中にコメントがあると、文字列を
-    # comma split する実装では `# ...\n phase, decision_by, ...` が1 chunkになり、コメント
-    # 以降の正当な field までまとめて捨てていた。その結果 ``schema --fix`` が「最新」と
-    # 誤報したまま、writer が生成する identity field を closed-world schema が拒否した
-    # （OBS-008）。safe_load 済みの map が、ここで比較すべき規範的な構造である。
+    # **Read the fields from the YAML structure.** With a comment partway through an inline map, an
+    # implementation that comma-splits the string turns `# ...\n phase, decision_by, ...` into one
+    # chunk and discards the legitimate fields after the comment along with it. The result:
+    # ``schema --fix`` falsely reported "up to date" while a closed-world schema refused the
+    # identity fields the writer derives (OBS-008). The safe_load'ed map is the normative structure
+    # to compare here.
     def _fields_from_doc(doc):
         return {name: list(spec.keys()) for name, spec in
                 ((doc.get("event_classes") or {}).items()) if isinstance(spec, dict)}
@@ -2297,46 +2301,47 @@ def cmd_schema(a):
             fgaps.append(f"{_c}: {', '.join(_miss)}")
 
     print(f"org schema : {org_p}")
-    print(f"テンプレート: {plug_p}")
-    print(f"  org {len(oc)} クラス / テンプレート {len(pc)} クラス")
+    print(f"template: {plug_p}")
+    print(f"  org {len(oc)} classes / template {len(pc)} classes")
     if fgaps:
-        print(f"\n**既存クラスに足りない field: {len(fgaps)}**"
-              " — snapshot はここを読む。欠けていると正規経路が拒否される。")
+        print(f"\n**fields missing from existing classes: {len(fgaps)}**"
+              " — this is what the snapshot reads. Missing, the legitimate path is refused.")
         for _g in fgaps:
             print(f"    {_g}")
     if not missing and not vgaps and not vconf and not fgaps:
-        print("  差分なし — この org の schema は最新である"
-              "（クラス宣言と validation 規則の両方）。")
+        print("  no difference — this org's schema is up to date "
+              "(both class declarations and validation rules).")
         return 0
 
     if missing:
-        print(f"\n**org に無いクラス: {len(missing)}**")
+        print(f"\n**classes absent from the org: {len(missing)}**")
         for c in missing:
-            mark = "  ← 実データで使用中。**このクラスの記録が止まる**" if c in used else ""
+            mark = "  ← in use in real data. **Recording of this class will stop**" if c in used else ""
             print(f"    {c}{mark}")
     if vconf:
-        print(f"\n**validation 規則の衝突: {len(vconf)}** — 自動では直さない。")
+        print(f"\n**conflicting validation rules: {len(vconf)}** — not fixed automatically.")
         for c in vconf:
             print(f"    {c}")
-        print("  同じ path に違う値がある。org が意図して変えたのか、テンプレートが変わったのかは"
-              "道具では判別できない。**手で決めること。**")
+        print("  The same path holds different values. The tool cannot tell whether the org "
+              "changed it deliberately or the template moved on. **Decide by hand.**")
     if vgaps:
-        print(f"\n**validation 規則の欠落: {len(vgaps)}**")
+        print(f"\n**missing validation rules: {len(vgaps)}**")
         for g in vgaps[:20]:
             print(f"    {g}")
         if len(vgaps) > 20:
-            print(f"    …他 {len(vgaps) - 20} 件")
-        print("  検証規則が欠けていることは、クラスが欠けていることと同じくらい静かに効く — "
-              "拒否されるべき記録が通る。")
+            print(f"    …and {len(vgaps) - 20} more")
+        print("  A missing validation rule bites just as quietly as a missing class — records "
+              "that ought to be refused get through.")
 
     if not a.fix:
-        print(f"\n埋めるには --fix を付けて実行すること:\n"
+        print(f"\nTo fill these in, run again with --fix:\n"
               f'    python3 "{os.path.join(here, "ledger.py")}" schema --fix\n'
-              f"  **既存の宣言は書き換えない。** 足りないものを足すだけである — org が自分で"
-              f"変えた宣言（実態に合わせた形）を上書きしてはいけない。")
+              f"  **Existing declarations are never rewritten.** It only adds what is missing — "
+              f"a declaration the org changed itself (to match its reality) must not be "
+              f"overwritten.")
         return 1
 
-    # ── --fix: 足りないクラスと validation を **追加するだけ** ──────────────
+    # ── --fix: **only adds** the missing classes and validation ──────────────
     src = open(plug_p, encoding="utf-8").read()
     dst = open(org_p, encoding="utf-8").read()
     added = []
@@ -2344,22 +2349,23 @@ def cmd_schema(a):
         m = re.search(rf"\n((?:  #[^\n]*\n)*  {re.escape(c)}:.*?)(?=\n  [a-z_]+:|\n  # ──|\n[a-z_]+:)",
                       src, re.S)
         if not m:
-            print(f"  警告: {c} の宣言をテンプレートから取り出せなかった（手で足すこと）",
+            print(f"  warning: could not extract {c}'s declaration from the template "
+                  f"(add it by hand)",
                   file=sys.stderr)
             continue
-        # event_classes の末尾に足す（既存の宣言には触らない）
+        # Append at the end of event_classes (existing declarations are left untouched)
         anchor = "\ntriggers:"
         if anchor not in dst:
-            print("  警告: 挿入位置（triggers:）が見つからない", file=sys.stderr)
+            print("  warning: cannot find the insertion point (triggers:)", file=sys.stderr)
             break
         dst = dst.replace(anchor, "\n" + m.group(1).rstrip() + "\n" + anchor, 1)
         added.append(c)
-    # ── **既存クラスの field 不足も直す。** ────────────────────────────────
-    # snapshot が読むのは `event_classes` の `fields:` 行であって validation ではない。
-    # ここが古いままだと、validation を直しても **snapshot は古い形で固定され続け**、
-    # 正規の `reserve-exposure` が schema_rejected で拒否される = 全 metered 操作の
-    # デッドロック（実測: 実 org tatekae がこの状態だった）。
-    # `--fix` は「クラスを足すだけ」だったので、この経路を直せていなかった。
+    # ── **Also repair fields missing from existing classes.** ────────────────
+    # What the snapshot reads is the `fields:` line under `event_classes`, not validation.
+    # Leave that stale and fixing validation still **pins the snapshot to the old shape**, so a
+    # legitimate `reserve-exposure` is refused as schema_rejected — a deadlock of every metered
+    # operation (measured: the real org `tatekae` was in exactly this state).
+    # `--fix` only ever "added classes", so it could not repair this path.
     field_added = []
     for cls in sorted(set(_sf) & set(_df)):
         ss = _class_field_span(src, cls)
@@ -2370,11 +2376,12 @@ def cmd_schema(a):
         missing_f = [f for f in want if f and f not in have]
         if not missing_f:
             continue
-        # 既存の並びは壊さず、閉じ括弧の直前に足すだけ
+        # Leave the existing ordering intact; just add before the closing brace
         body = dst[ds[0]:ds[1]].rstrip()
         if "\n" in body:
-            # 手書きschemaの揃え方を保持する。固定幅だと意味は同じでも、修復のたびに
-            # org-owned specへ不要なindent差分を作る。
+            # Preserve the alignment of a hand-written schema. A fixed width means the same
+            # thing, but every repair would introduce a pointless indent diff into an org-owned
+            # spec.
             last_line = body.rsplit("\n", 1)[-1]
             indent = re.match(r"[ \t]*", last_line).group(0)
             sep = ",\n" + indent
@@ -2383,15 +2390,15 @@ def cmd_schema(a):
         dst = dst[:ds[0]] + body + sep + ", ".join(missing_f) + " " + dst[ds[1]:]
         field_added.append(f"{cls}: +{', '.join(missing_f)}")
     if field_added:
-        print("  既存クラスに field を足した（snapshot が読む箇所）:", file=sys.stderr)
+        print("  added fields to existing classes (what the snapshot reads):", file=sys.stderr)
         for f in field_added:
             print(f"    {f}", file=sys.stderr)
 
     conflicts = vconf
     if vgaps or vconf:
-        # **deep-add でマージする。** ブロックごと差し替えると、org 独自の厳格規則が消える
-        # （実測: org が足した `required.progress_recorded: [milestone]` が --fix で失われた）。
-        # org 所有の安全規則を弱めるのは、修復ではなく退行である。
+        # **Merge by deep-add.** Replacing a whole block deletes the org's own stricter rules
+        # (measured: an org's added `required.progress_recorded: [milestone]` was lost to --fix).
+        # Weakening a safety rule the org owns is not a repair, it is a regression.
         #
         #   欠けている key / list 要素だけを足す
         #   org 側の追加規則は必ず残す
