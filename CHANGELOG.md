@@ -6,6 +6,31 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 2.8.3 — ship every template the organs open, on both harnesses
+
+`/org-adopt` reached READY on Claude Code and failed on Codex with "required template is missing:
+.../template/schedule.yaml". The Codex projection never listed `schedule.yaml` or
+`organization.SKELETON.yaml` for syncing, so `adopt.py` — which requires the first and copies the
+second — could not prepare a repository there at all.
+
+`build.sh --check` could not catch this: it verifies that a bundled file MATCHES its source, and
+says nothing about a file that was never listed. A projection that drifts is indistinguishable from
+a broken tool to whoever hits it, and the person who hits it is on the harness nobody tested.
+
+### Fixed
+
+- **The Codex bundle ships `schedule.yaml`, `organization.SKELETON.yaml`, `SPEC.md` and
+  `REQUIREMENTS.md`**, matching the Claude Code bundle.
+- **`adopt.py prepare` checks every template before creating anything.** The check used to sit
+  inside the copy loop, so a missing file left the repository half-prepared and the operator
+  guessing which of those files were theirs to remove. It now reports **all** missing templates at
+  once and states that the fault is in the package, not the repository.
+- `tests/test_bundled_templates.py` derives what must be bundled **from the organ sources** rather
+  than a second hand-maintained list, and asserts the two harness projections agree with each
+  other. Verified to fail when a template is removed.
+
+Closes #197.
+
 ## 2.8.2 — a proxy recorder is not the decision principal
 
 When a judge is unavailable, a supervisor records the outcome on its behalf. `decision_by` fell

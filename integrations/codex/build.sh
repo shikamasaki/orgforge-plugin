@@ -56,7 +56,12 @@ for d in "$REPO"/tools/*/; do
   done
 done
 # the schema/settings the tools read (source of truth: template/)
-for f in ledger-schema.yaml constitution.yaml sensors.yaml moves.yaml role-settings.yaml; do
+# Keep this list matched to what the organs actually open. `adopt.py` requires schedule.yaml
+# (SPEC_FILES) and copies organization.SKELETON.yaml; both were absent here, so /org-adopt
+# could not reach READY on Codex while working on Claude Code — a projection that drifts is
+# indistinguishable from a broken tool to whoever hits it (issue #197).
+for f in ledger-schema.yaml constitution.yaml sensors.yaml moves.yaml role-settings.yaml \
+         schedule.yaml organization.SKELETON.yaml SPEC.md REQUIREMENTS.md; do
   sync_one "$REPO/template/$f" "$HERE/template/$f" || rc=1
 done
 # Structured-output contracts used by cross-harness judges.
