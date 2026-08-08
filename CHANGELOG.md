@@ -6,6 +6,46 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 2.9.0 — a goal appears on GitHub, or says out loud that it did not
+
+`org-goal` wrote `goal_started` / `goal_completed` to the ledger and nowhere else. An agent could
+start a goal, implement, commit, push, open a PR and complete the goal with **no Issue at any
+point**, then truthfully report "recorded in OrgForge" — because it was, in a local ledger only the
+host that wrote it can read. Everyone else saw nothing. Observed in the field, where a completed
+proof-of-concept left no trace on GitHub at all.
+
+It also routed around every check that lives on the Issue path. `split-check` and `ready` are what
+require EARS acceptance, a runnable DoD command, the counterexamples and the domain sections — and
+they run on Issues. A goal that never becomes an Issue is never asked for any of them, which is how
+work reached "complete" with no spec.
+
+### Added
+
+- **`org-goal start` opens an objective Issue** for the goal, labelled and idempotent, whose body
+  routes the reader to where the work actually goes: `github-sync create --kind task` under this
+  objective, then `org-cycle begin`. The Issue states that the spec check runs there.
+- **`progress` mirrors each checkpoint** onto that Issue, keyed on its content so a replay does not
+  double-post. Progress is what a resuming session reads; in the ledger alone only one host can
+  resume from it.
+- **`complete` closes the Issue** with the summary and evidence.
+- `--repo` selects the target; otherwise `ORG_GITHUB_REPO` or the current checkout.
+
+### The degraded case is reported, never silent
+
+A goal exists to survive a lost session, so an unconfigured `gh` does not stop one being recorded.
+But the response now carries `issue.projected: false` with the reason **and the consequence** —
+"recorded in the ledger only — nobody else can see it". Silence was the defect.
+
+### Fixed
+
+- **A label GitHub refuses no longer surfaces as a different error one call later.**
+  `_ensure_labels` swallowed the failure and the next call died with `could not add label`, which
+  reads as "this repository is not initialised for OrgForge". In the field that sent an agent
+  looking for a setup command that does not exist; the real cause was a 53-character label against
+  GitHub's 50-character limit. `github-sync create` now stops before creating anything and says
+  which label, how long it is, and that `--objective` is an identifier rather than the objective's
+  prose.
+
 ## 2.8.3 — ship every template the organs open, on both harnesses
 
 `/org-adopt` reached READY on Claude Code and failed on Codex with "required template is missing:

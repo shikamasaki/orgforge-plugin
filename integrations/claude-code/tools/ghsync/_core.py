@@ -40,9 +40,38 @@ def issue_labels(repo, n):
         return None, f"parse: {e}"
 
 
+# GitHub refuses a label longer than this. Measured against the API, not inferred:
+#   HTTP 422: Validation Failed — name is too long (maximum is 50 characters)
+GITHUB_LABEL_MAX = 50
+
+
+def label_too_long(name):
+    """The label GitHub will refuse, or None. Length is counted the way GitHub counts it."""
+    return len(name) > GITHUB_LABEL_MAX
+
+
 def _ensure_labels(repo, names):
+    """Create every label, and REPORT the ones GitHub refuses.
+
+    `check=False` used to swallow the failure, and the very next call created an Issue *with* that
+    label — so the operation died at `gh error creating issue: could not add label` with no hint
+    that a label creation had already failed and why. In the field an agent read that as "the
+    repository is not initialised for OrgForge" and went looking for a setup command that does not
+    exist, when the real cause was a 53-character label: GitHub's limit is 50.
+
+    A silent failure that surfaces one call later as a different error is worse than the error
+    itself, because it sends the reader to the wrong place.
+    """
+    failed = []
     for name, color in names:
-        gh(["label", "create", name, "--repo", repo, "--color", color, "--force"], check=False)
+        if label_too_long(name):
+            failed.append((name, f"{len(name)} characters — GitHub allows {GITHUB_LABEL_MAX}"))
+            continue
+        code, out = gh(["label", "create", name, "--repo", repo,
+                        "--color", color, "--force"], check=False)
+        if code != 0:
+            failed.append((name, (out or "").strip().splitlines()[-1] if out else "unknown error"))
+    return failed
 
 
 def _find_open_issue(repo, title, objective):

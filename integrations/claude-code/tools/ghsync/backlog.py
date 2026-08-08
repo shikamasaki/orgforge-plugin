@@ -10,8 +10,10 @@ import subprocess
 import sys
 
 from ._core import (
+    GITHUB_LABEL_MAX,
     HERE,
     CLAIM_PREFIX,
+    label_too_long,
     _ensure_labels,
     _find_open_issue,
     _issue_number,
@@ -263,7 +265,26 @@ def cmd_create(a):
     if a.source:
         lbl = f"orgforge:{a.source}"
         labels.append(lbl); ensure.append((lbl, "fbca04"))
-    _ensure_labels(a.repo, ensure)
+    # **Stop here if a label could not be created.** Creating the Issue anyway fails one call
+    # later with `could not add label`, which reads as "this repository is not set up for
+    # OrgForge" and sends the reader looking for an initialisation command that does not exist.
+    # The real cause is usually a label over GitHub's 50-character limit, and it is fixable in
+    # one edit — but only if the message says so.
+    label_failures = _ensure_labels(a.repo, ensure)
+    if label_failures:
+        print("github_sync create: these labels could not be created, so no Issue was created:",
+              file=sys.stderr)
+        for name, why in label_failures:
+            print(f"  {name!r}\n      {why}", file=sys.stderr)
+        if any(label_too_long(name) for name, _ in label_failures):
+            print(f"\n  `--objective` and `--dept` become labels, so they must be SHORT, stable "
+                  f"identifiers — not the objective's prose. The full sentence belongs in --title "
+                  f"and --body.\n"
+                  f"    --objective self-dogfood-poc      # an id: label-safe, stable, greppable\n"
+                  f"    --objective \"自製品資料を…する\"   # prose: exceeds "
+                  f"{GITHUB_LABEL_MAX} characters and is refused\n"
+                  f"  Nothing was created; re-run with a shorter identifier.", file=sys.stderr)
+        return 2
     parent = getattr(a, "parent", None)
     args = ["issue", "create", "--repo", a.repo, "--title", a.title, "--body", body]
     for l in labels:

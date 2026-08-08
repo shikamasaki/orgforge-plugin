@@ -137,8 +137,36 @@ def cmd_start(args):
     if code:
         return _error(args, detail, code)
     goal, _ = _state(args.root, _session(args))
-    return _emit(args, {"ok": True, "goal": goal,
+    projection = _project_start(args, goal_id, objective)
+    return _emit(args, {"ok": True, "goal": goal, "issue": projection,
                         "host_action": _host_action(_harness(args), "start", goal)})
+
+
+def _project_start(args, goal_id, objective):
+    """Open the objective Issue for this goal, and say plainly when that was not possible.
+
+    A goal recorded only in the ledger is invisible to everyone who did not run the command — a
+    second agent, another harness, a human. It also skips every check that runs on the Issue path
+    (`split-check`, `ready`), which is how work reached "complete" with no spec at all.
+
+    GitHub being unavailable does not stop the goal: a goal exists to survive a lost session, so
+    refusing to record one when `gh` is unconfigured removes the mechanism exactly when it matters.
+    But the degradation is REPORTED, never silent — silence is the defect this fixes.
+    """
+    import goal_issue
+
+    repo = goal_issue.repo_slug(getattr(args, "repo", None))
+    if not repo:
+        return {"projected": False,
+                "reason": "no GitHub repository resolved (set ORG_GITHUB_REPO or pass --repo)",
+                "consequence": "this goal is recorded in the ledger only — nobody else can see it"}
+    number, detail = goal_issue.open_goal_issue(repo, goal_id, objective, _harness(args))
+    if number is None:
+        return {"projected": False, "repo": repo, "reason": detail,
+                "consequence": "this goal is recorded in the ledger only — nobody else can see it"}
+    return {"projected": True, "repo": repo, "issue": number, "detail": detail,
+            "next": "work happens in task sub-issues: github-sync create --kind task "
+                    f"--objective {goal_issue.objective_label_id(goal_id)} --parent {number} …"}
 
 
 def cmd_status(args):
@@ -180,7 +208,36 @@ def cmd_progress(args):
     if code:
         return _error(args, detail, code)
     goal, _ = _state(args.root, _session(args))
-    return _emit(args, {"ok": True, "goal": goal})
+    projection = _project_progress(args, goal["goal_id"], payload)
+    return _emit(args, {"ok": True, "goal": goal, "issue": projection})
+
+
+def _project_progress(args, goal_id, payload):
+    """Mirror a progress checkpoint onto the goal's Issue.
+
+    Progress is what a resuming session — or a different harness — reads to find out where the work
+    stopped. Keeping it in the ledger alone means only the host that wrote it can resume from it.
+    """
+    import goal_issue
+
+    repo = goal_issue.repo_slug(getattr(args, "repo", None))
+    if not repo:
+        return {"projected": False, "reason": "no GitHub repository resolved"}
+    lines = [payload["summary"], "", f"**Next step:** {payload['next_step']}"]
+    if payload.get("evidence"):
+        lines += ["", "**Evidence:** " + ", ".join(payload["evidence"])]
+    ok, detail = goal_issue.comment_on_goal_issue(
+        repo, goal_id, "Progress", "\n".join(lines),
+        event_id=_stable_event_id(goal_id, payload))
+    return {"projected": bool(ok), "repo": repo, "detail": detail}
+
+
+def _stable_event_id(goal_id, payload):
+    """Key the Issue comment on the checkpoint's content, so a replay does not double-post."""
+    import hashlib
+
+    joined = "\x1f".join([goal_id, payload.get("summary", ""), payload.get("next_step", "")])
+    return hashlib.sha256(joined.encode("utf-8")).hexdigest()[:16]
 
 
 def cmd_pause(args):
@@ -263,8 +320,29 @@ def cmd_complete(args):
     if code:
         return _error(args, detail, code)
     goal, _ = _state(args.root, _session(args))
-    return _emit(args, {"ok": True, "goal": goal,
+    projection = _project_close(args, goal["goal_id"], args.summary.strip(), args.evidence)
+    return _emit(args, {"ok": True, "goal": goal, "issue": projection,
                         "host_action": _host_action(_harness(args), "complete", goal)})
+
+
+def _project_close(args, goal_id, summary, evidence):
+    """Close the goal's Issue with its summary, or report that no Issue carries this goal.
+
+    Reporting matters here more than anywhere: "completed" with a ledger-only record reads as done
+    to the person who ran it and as nothing at all to everyone else.
+    """
+    import goal_issue
+
+    repo = goal_issue.repo_slug(getattr(args, "repo", None))
+    if not repo:
+        return {"projected": False, "reason": "no GitHub repository resolved",
+                "consequence": "completion is recorded in the ledger only — "
+                               "do not report it as visible on GitHub"}
+    body = summary + ("\n\nEvidence: " + ", ".join(evidence) if evidence else "")
+    ok, detail = goal_issue.close_goal_issue(repo, goal_id, body)
+    return {"projected": bool(ok), "repo": repo, "detail": detail,
+            **({} if ok else {"consequence": "completion is recorded in the ledger only — "
+                                             "do not report it as visible on GitHub"})}
 
 
 def cmd_host_sync(args):
@@ -384,6 +462,10 @@ def _common(parser, *, mutating=True):
     parser.add_argument("--actor")
     parser.add_argument("--session-id")
     parser.add_argument("--harness")
+    # The goal is projected onto an Issue in this repository. Resolved from ORG_GITHUB_REPO or the
+    # checkout when omitted; a goal that reaches no Issue is visible only to the host that wrote it.
+    parser.add_argument("--repo", help="owner/name to project this goal onto "
+                                       "(default: ORG_GITHUB_REPO, else the current checkout)")
     parser.add_argument("--json", action="store_true")
     return parser
 
