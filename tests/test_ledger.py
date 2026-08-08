@@ -147,7 +147,7 @@ def test_scheduler_receipt_cannot_be_forged_by_generic_append(tmp_path):
     code, out = run("ledger.py", "append", str(tmp_path),
                     "--actor", "system:scheduler_tick",
                     "--class", "scheduled_check_completed", "--payload", payload)
-    assert code == 2 and "writer 専用" in out
+    assert code == 2 and "writer-only class" in out
 
 
 def test_ledger_tamper_detected(tmp_path):
@@ -415,7 +415,7 @@ def test_alias_bridges_candidate_id_and_issue(tmp_path):
             {"role": "m", "candidate_id": "cand-x", "pack_manifest_id": "issue-42"})
     p = _append(env, "m", "admission_decided", {"verdict": "admit", "deliverable": "42"})
     assert p.returncode != 0, "別名経由の自己 admit が通った"
-    assert "同じ仕事" in p.stderr, "どう繋がったかを示していない"
+    assert "the same work" in p.stderr, "does not show how they were connected"
 
 
 def test_alias_via_contract_ref(tmp_path):
@@ -797,7 +797,7 @@ def test_unreadable_schema_fails_closed(tmp_path, monkeypatch):
     monkeypatch.setenv("ORG_LEDGER_SCHEMA", str(tmp_path / "nope.yaml"))
     code, out = _app(tmp_path)
     assert code == 2
-    assert "検証" in out
+    assert "unable to validate" in out
 
 
 def test_concurrent_appends_do_not_collide(tmp_path):
@@ -1341,7 +1341,7 @@ def test_exposure_events_cannot_be_forged_by_generic_append(tmp_path):
                       "committed_so_far": 0, "delta_requested": -100, "cap": 5,
                       "actor_role": "x", "decision": "allow"}, actor="attacker")
     assert code == 2, out
-    assert "writer 専用" in out
+    assert "writer-only class" in out
     assert _evs(tmp_path) == []
     # そして予約は正常に働く
     assert _reserve(tmp_path, 50, 5, "t0")[0] == 10        # cap 5 < 50 → hold
@@ -1454,7 +1454,7 @@ def test_halt_is_writer_only(tmp_path):
                      {"trigger": "t", "scope": "global", "reason": "r", "tripped_by": "x"},
                      actor="attacker")
     assert code == 2, out
-    assert "writer 専用" in out
+    assert "writer-only class" in out
     assert _evs(tmp_path) == []
 
 
@@ -1545,7 +1545,7 @@ def test_release_needs_an_authenticated_independent_approver(tmp_path):
     assert code == 2
     # **どちらの層で止まってもよい。** identity fields を payload に書けない検査（0.39.3）が
     # writer-only の検査より先に働く — どちらも「generic append では書けない」ことを言っている。
-    assert ("writer 専用" in out) or ("receipt を検証して生成する" in out), out
+    assert ("writer-only class" in out) or ("receipt を検証して生成する" in out), out
     assert run("ledger.py", "halt-status", str(tmp_path))[0] == 10   # まだ止まっている
 
 
