@@ -1580,7 +1580,7 @@ def test_verify_offers_the_headless_route():
     src = _cycle_src("judge")
     seg = src[src.index("def cmd_verify"):]
     assert "--output-schema" in seg and "intake" in seg
-    assert "別の血統" in seg or "別ハーネス" in seg
+    assert "other harness" in seg or "another harness" in seg
 
 
 def test_claude_judge_receives_the_declared_effort():
