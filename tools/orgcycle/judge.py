@@ -464,59 +464,67 @@ def cmd_verify(a):
     issue_rounds = _issue_decision_comments(a.issue, "admission_decided")
     if history or issue_rounds:
         n = max(len(rounds), len(issue_rounds)) + 1
-        out.append(f"\n## この Issue の判定履歴 — **{n} 回目の判定です**\n")
+        out.append(f"\n## Judgment history for this Issue — **this is judgment number {n}**\n")
         for h in history:
             line = (f"- seq {h['seq']}: {h['class']} = `{h['verdict']}` by {h['actor']}")
             out.append(line + (f"\n    {' '.join(str(h['why']).split())[:300]}" if h["why"] else ""))
-        # 台帳は digest しか持たないので、理由の本文は Issue から引く
+        # The ledger holds only a digest, so the text of the reason is pulled from the Issue
         bodies = issue_rounds
         if bodies:
             if len(bodies) > len(rounds):
-                out.append(f"\n（台帳には {len(rounds)} 件しか無いが、Issue には "
-                           f"{len(bodies)} 件ある — 二重記録の片側が落ちている）")
-            out.append("\n<details><summary>前回までの判定の全文（Issue のコメント）</summary>\n")
+                out.append(f"\n(the ledger holds only {len(rounds)}, while the Issue has "
+                           f"{len(bodies)} — one side of the double record has gone missing)")
+            out.append("\n<details><summary>Full text of the previous judgments (Issue "
+                       "comments)</summary>\n")
             for b in bodies[-2:]:
                 out.append(b[:5000] + "\n\n---\n")
             out.append("</details>")
-        out.append("\n> **前回の指摘が直ったかだけを見るのでは足りない。** 直っていることの確認に加え、"
-                   "MUST を1つずつ**再導出**すること — 前回の rework で新しく壊れた箇所は、"
-                   "前回の指摘リストには載っていない。実地では、指摘を直す過程で別の穴"
-                   "（警報を切る / 新しい公開面を足す）が生まれている。\n"
-                   "> 判定にあたっては「前回見落とした点を今回どう確認したか」を --why に書くこと。")
+        out.append("\n> **Checking only whether the previous findings were fixed is not enough.** "
+                   "As well as confirming they are fixed, **re-derive** each MUST one at a time — "
+                   "whatever the last rework newly broke does not appear on the previous list of "
+                   "findings. In practice, fixing a finding has itself opened another hole "
+                   "(silencing an alarm, adding a new public surface).\n"
+                   "> When you judge, write into --why how you checked this time for what was "
+                   "missed last time.")
 
-    out.append(f"\n## 検証対象の SPEC / MUST（Issue #{a.issue} 本文）\n")
-    out.append(body or "(本文が空 — SPEC の無い Issue は、それ自体が reject 事由)")
-    out.append("\n## 判定範囲とレビューラリーの規律\n")
+    out.append(f"\n## The SPEC / MUSTs under verification (body of Issue #{a.issue})\n")
+    out.append(body or "(the body is empty — an Issue with no SPEC is itself grounds for reject)")
+    out.append("\n## The scope of judgment, and the discipline of a review rally\n")
     out.append(
-        "この Issue の SPEC / MUST と handoff の seam contract に、具体的な証拠で結び付く"
-        "所見だけを `reject` / `refuted` の根拠にしてよい。安全性、データ完全性、"
-        "セキュリティ、またはリリース不能を具体的に示す場合を除き、変更範囲外の所見は"
-        "判定を止めず `out_of_scope` として follow-up Issue 化を勧めること。\n\n"
-        "前回と同じ finding を再び blocker にするには、reviewed head・根拠・残余リスクの"
-        "少なくとも一つが変化していることを明記する。変化が無い再提示は新しい review round"
-        "を要求しない。これは見落としを無視する規則ではなく、同じ証拠で無限に往復しない"
-        "ための規則である。")
-    # `prior`（gate の最新判定の全文）は、上の判定履歴が既に同じものを出している。
-    # **両方出すと同じ本文が2回並ぶ** — 実測で skeptic のプロンプト457行のうち、
-    # 「0013 の一手隣」26行と「maker の自己申告」20行超が重複していた。プロンプトの長さは
-    # 読む時間に直結する（実地の計測では総時間の21%が1回の待ち時間で、その一部がこれ）。
-    # 履歴を出していないときだけ prior を出す。
+        "Only a finding tied by concrete evidence to this Issue's SPEC / MUSTs and to the "
+        "handoff seam contract may ground a `reject` / `refuted`. Unless it concretely "
+        "demonstrates a safety, data-integrity or security problem, or that the work cannot be "
+        "released, a finding outside the scope of the change must not stop the judgment — mark it "
+        "`out_of_scope` and recommend a follow-up Issue.\n\n"
+        "To make the same finding a blocker again, state which of the reviewed head, the "
+        "evidence, or the residual risk has changed — at least one must have. Re-raising it with "
+        "nothing changed does not demand a new review round. This is not a rule for ignoring "
+        "something that was missed; it is a rule against rallying forever on the same evidence.")
+    # `prior` (the full text of the gate's latest judgment) is already emitted by the judgment
+    # history above. **Emit both and the same text appears twice** — measured, of the skeptic's
+    # 457-line prompt, 26 lines of "one move away from 0013" and over 20 lines of "the maker's own
+    # report" were duplicated. Prompt length translates directly into reading time (in a field
+    # measurement, 21% of the total was a single wait, and part of that was this).
+    # So emit prior only when the history was not emitted.
     if prior and not (history or issue_rounds):
-        out.append("\n## gate が既に見たこと（重複を避けるため。追認する義務はない）\n")
+        out.append("\n## What the gate has already looked at (to avoid duplication; you are "
+                   "under no obligation to endorse it)\n")
         out.append(prior)
     elif role == "skeptic" and not prior:
-        out.append("\n## gate が既に見たこと\n(#%d に admission_decided の記録が無い。"
-                   "gate の admit 前に skeptic を回そうとしていないか確認すること)" % a.issue)
+        out.append("\n## What the gate has already looked at\n(there is no admission_decided "
+                   "record for #%d. Check whether you are trying to run the skeptic before the "
+                   "gate has admitted)" % a.issue)
 
     if role == "gate":
-        # 6: ツールのパスが解決できず repro_lint が一度も走っていなかった。org_cycle は自分の
-        # 位置を知っているので絶対パスを埋める。機械的拒否層は、誰も diff を読まない以上
-        # 「走らなかった」が最も危ない失敗形。
-        out.append("\n## 機械バー（**このコマンドをそのまま実行すること。未実行は reject 事由**）\n")
+        # 6: the tool path could not be resolved and repro_lint had never run once. org_cycle
+        # knows where it is, so it fills in the absolute path. For a mechanical refusal layer,
+        # "it never ran" is the most dangerous failure of all, since nobody reads the diff.
+        out.append("\n## The mechanical bar (**run these commands exactly as given. Not running "
+                   "them is grounds for reject**)\n")
         out.append("```")
         out.append(f'{_organ_command(stable_organ, "repro-lint")} check . --phase implement')
         out.append("```")
-        out.append("HOLD（exit 10）なら reject。パスが通らない場合はそう報告すること — "
+        out.append("A HOLD (exit 10) means reject. If a path does not resolve, report that — "
                    "「ツールが無いので未実行」は、機械バーが効いていないという最も重い所見。")
     if role == "skeptic" and prior:
         # 5: gate は毎回 --risk に「今回撃っていない領域」を書く。実地では で gate が

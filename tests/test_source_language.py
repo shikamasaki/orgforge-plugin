@@ -38,9 +38,9 @@ ROOTS = ("tools", "tests", "integrations/common")
 # A file that is not listed here must contain no Japanese at all.
 BUDGET = {
     "tests/test_ledger.py": 460,
-    "tests/test_orgcycle.py": 588,
+    "tests/test_orgcycle.py": 583,
     "tests/test_hook.py": 447,
-    "tools/orgcycle/judge.py": 305,
+    "tools/orgcycle/judge.py": 271,
     "integrations/common/org_hook.py": 1,
     "tools/writerd.py": 286,
     "tools/ghsync/record.py": 267,
