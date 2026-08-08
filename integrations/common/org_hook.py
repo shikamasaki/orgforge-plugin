@@ -866,10 +866,11 @@ def _integration_bypass(tool_name, ti):
 
 
 
-# Issue を organ の外で作る/閉じる経路。運用では6件を `gh issue create` で作り、
-# `dept` / `objective` / `parent` / 冪等キーを全部落とし、5件を `gh issue close` で閉じて
-# `cycle_completed` を1件も残さなかった（`domain_model` の必須項目が丸ごと飛んだ）。
-# **読み取り（view / list）は止めない。**
+# Creating or closing an Issue outside the organ. In the field six were created with
+# `gh issue create` — dropping `dept`, `objective`, `parent` and the idempotency key
+# entirely — and five closed with `gh issue close`, leaving not one `cycle_completed`
+# behind (the required `domain_model` went with them).
+# **Reads are never blocked** — `view` and `list` stay open.
 _GH_WRITE = {
     ("issue", "create"): ("Issue の作成", "create --kind task --dept <役> --objective <id> "
                                           "--parent <objective#> --title … --body …"),
@@ -1078,11 +1079,13 @@ def _gh_bypass(tool_name, ti):
     return None
 
 
-# **クォートの中身が「実行される」形か。** `sh -c '…'` `eval "…"` `xargs` や
-# シェルへのパイプは中身をコマンドとして実行する。`grep '…'` や `echo "…"` は実行しない。
-# この区別が無いと、危険語を **検索・文書化することすらできなくなる**（実測で3件誤検知した）。
-# **エスケープで綴りを隠せてはいけない。** `$'\x72\x6d'` は shell が `rm` に展開する。
-# 綴りが違えば token 一致は外れるので、判定の前に**復号してから**見る（Codex の指摘、実測で素通し）。
+# **Is the quoted text something that gets EXECUTED?** `sh -c '…'`, `eval "…"`, `xargs`
+# and a pipe into a shell run their contents as commands; `grep '…'` and `echo "…"` do not.
+# Without that distinction it becomes impossible to even **search for or document** a
+# dangerous word — measured, three false positives.
+# **A spelling must not be hideable behind an escape.** The shell expands `$'\x72\x6d'`
+# to `rm`, and a different spelling misses a token match — so decode BEFORE deciding
+# (raised by Codex; measured passing through).
 def _decode_escapes(cmd):
     def _hex(m):
         try:
@@ -1095,11 +1098,12 @@ def _decode_escapes(cmd):
     return out
 
 
-# **harness の綴り・型の揺れで統制が外れてはいけない。**
-# 実測: `tool_name` が `"bash"`（小文字）だと3つの判定すべてが素通しし、
-# `command` が配列（`["rm","-rf","/"]`）だと **hook が AttributeError で落ちた**
-# ——落ちた hook は判定を返さないので、fail-open になりうる。
-# 判定に使う hook event の上限。これを超えると正規表現が実質停止する（実測）。
+# **A difference in spelling or type must not switch enforcement off.**
+# Measured: a lowercase `"bash"` in `tool_name` slipped past all three checks, and a
+# `command` given as an array crashed the hook with AttributeError — and a hook that
+# crashes returns no decision, which can fail open.
+# Upper bound on the hook event used for a decision; beyond it the regexes effectively
+# stall (measured).
 _MAX_TOKENIZE_CHARS = 64 * 1024   # shlex に渡す上限（shlex だけが遅い）
 
 _SHELL_TOOLS = ("bash", "shell", "terminal", "sh", "zsh")
