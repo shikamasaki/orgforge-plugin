@@ -1145,28 +1145,31 @@ def _command_text(ti):
     if isinstance(v, (list, tuple)):
         return " ".join(str(x) for x in v)
     if isinstance(v, dict):
-        # **入れ子でも中身を見る。** `{"command": {"c": "…"}}` のような形で
-        # 危険が隠れると、判定に一度も渡らない。
+        # **Look inside nested values too.** A payload shaped like
+        # `{"command": {"c": "…"}}` hides the danger where no check ever sees it.
         return " ".join(_command_text(x) if isinstance(x, (dict, list, tuple)) else str(x)
                         for x in v.values())
-    # **切り詰めない。** 先頭＋末尾だけを見る実装にしたところ、**真ん中に隠せた**
-    # （`echo <7万文字>; <破壊的コマンド>; echo <7万文字>` が素通し。実測）。
-    # そもそも遅かったのは正規表現ではなく `shlex.split` だった（実測: 100万文字で
-    # 正規表現 10ms に対し shlex は 11秒）。**遅い方を切り、照合は全体に効かせる。**
+    # **Do not truncate.** An implementation that read only the head and tail let anything
+    # **hide in the middle** — measured, `echo <70k chars>; <destructive command>;
+    # echo <70k chars>` passed straight through. And the slow part was never the regex:
+    # at a million characters the regex costs ~10ms while `shlex.split` costs 11 seconds.
+    # **Cut the slow one; keep matching over the whole string.**
     return v if isinstance(v, str) else ("" if v is None else str(v))
 
 
-# **中身を静的に読めない実行。** 復号・ダウンロードした結果をそのままシェルへ流す形。
+# **Execution whose contents cannot be read statically** — decoded or downloaded output
+# piped straight into a shell.
 _OPAQUE_EXEC = re.compile(
-    # ⓪ **文字列をシェルに流し込む形そのもの。** `echo '…' | sh` は、中身が何であれ
-    #    「別のコマンドを組み立てて実行する」形である。静的には中身の位置関係を
-    #    追えない（実測: `echo '<破壊的コマンド>' | sh` が位置判定をすり抜けた）。
-    #    **中身を確かめられないなら通さない。** 一度ファイルに落とせばよい。
+    # (0) **The shape itself: a string fed into a shell.** Whatever `echo '…' | sh` carries,
+    #     it is the shape "assemble another command and run it". Nothing static can follow
+    #     the positions inside it (measured: `echo '<destructive command>' | sh` slipped past
+    #     the positional check). **If the contents cannot be verified, do not allow it** —
+    #     writing them to a file first is enough.
     r"\b(?:echo|printf|cat)\b[^|]*\|\s*(?:ba|z|k|da)?sh\b"
-    # ① 復号／取得の結果をシェルへ直接パイプする
+    # (1) piping the result of a decode or a fetch straight into a shell
     r"|\b(?:base64|openssl\s+enc|xxd|uudecode|curl|wget)\b[^|]*\|\s*(?:ba|z|k|da)?sh\b"
-    # ② `sh -c "$( … 復号 … )"` のように **置換の中で復号してから実行**する
-    #    （Codex の例。パイプが置換の内側にあるので ① では捕まらない）
+    # (2) `sh -c "$( … decode … )"` — **decoding inside the substitution, then executing**
+    #     (Codex's example: the pipe is inside the substitution, so (1) does not catch it)
     r"|\b(?:ba|z|k|da)?sh\b\s+-c[^\n]*\$\([^)]*"
     r"(?:base64|openssl\s+enc|xxd|uudecode|curl|wget)"
     r"|\beval\b[^\n]*\$\([^)]*(?:base64|openssl\s+enc|xxd|uudecode|curl|wget)", re.I)
