@@ -2400,35 +2400,38 @@ def cmd_schema(a):
         # (measured: an org's added `required.progress_recorded: [milestone]` was lost to --fix).
         # Weakening a safety rule the org owns is not a repair, it is a regression.
         #
-        #   欠けている key / list 要素だけを足す
-        #   org 側の追加規則は必ず残す
-        #   同じ path で値が違うなら **自動で上書きせず conflict として報告する**
+        #   add only the missing keys / list elements
+        #   always keep the rules the org added
+        #   where the same path holds different values, **report a conflict rather than
+        #   overwriting automatically**
         merged = _merged
         if conflicts:
-            print(f"\n**衝突: {len(conflicts)}** — 自動では直さない。", file=sys.stderr)
+            print(f"\n**conflicts: {len(conflicts)}** — not fixed automatically.", file=sys.stderr)
             for c in conflicts:
                 print(f"    {c}", file=sys.stderr)
-            print("  同じ path に違う値がある。org が意図して変えたのか、テンプレートが"
-                  "変わったのかは道具では判別できない。**手で決めること。**", file=sys.stderr)
+            print("  The same path holds different values. The tool cannot tell whether the org "
+                  "changed it deliberately or the template moved on. **Decide by hand.**",
+                  file=sys.stderr)
         if merged != ov:
-            # YAML として書き直すのは validation ブロックだけに限る。event_classes は
-            # コメントが規律の説明そのものなので、再 serialize で失いたくない。
+            # Re-serialise only the validation block as YAML. In event_classes the comments ARE
+            # the explanation of the discipline, and we do not want to lose them to a rewrite.
             try:
                 import yaml as _y
                 block = _y.dump({"validation": merged}, sort_keys=False,
                                 allow_unicode=True, default_flow_style=False, width=100)
             except Exception as e:
-                print(f"validation を書き出せない: {e}", file=sys.stderr)
+                print(f"cannot write out validation: {e}", file=sys.stderr)
                 return 3
             span = _yaml_block_span(dst, "validation")
             if span is None:
                 dst = dst.replace("\nevent_classes:", "\n" + block + "\nevent_classes:", 1)
             else:
                 dst = dst[:span[0]] + block + dst[span[1]:]
-            added.append(f"validation 規則（{len(vgaps)} 件を deep-add。org 独自の規則は保存）")
+            added.append(f"validation rules ({len(vgaps)} deep-added; the org's own rules kept)")
 
-    # **atomic write。** 直接上書きすると、修復途中で止まったときに schema を壊す — org の
-    # 形式定義が壊れれば、その org は何も書けなくなる。temp → fsync → rename → fsync(dir)。
+    # **Atomic write.** Overwriting in place corrupts the schema if the repair dies partway — and
+    # once an org's format definition is broken, that org can write nothing at all.
+    # temp → fsync → rename → fsync(dir).
     tmp_p = org_p + ".tmp"
     with open(tmp_p, "w", encoding="utf-8") as f:
         f.write(dst)
@@ -2436,50 +2439,56 @@ def cmd_schema(a):
         os.fsync(f.fileno())
     os.replace(tmp_p, org_p)
     _fsync_dir(os.path.dirname(os.path.abspath(org_p)))
-    print(f"\n足した: {', '.join(added)}\n"
-          f"  **--fix の exit 0 を preflight 成功と読まないこと。** 修復したあとに"
-          f"通常の診断（--fix なし）が exit 0 を返すことを確かめる:\n"
+    print(f"\nadded: {', '.join(added)}\n"
+          f"  **Do not read `--fix` exiting 0 as a successful preflight.** After repairing, confirm "
+          f"that the ordinary diagnosis (without --fix) returns exit 0:\n"
           f'    python3 "{os.path.join(here, "ledger.py")}" schema\n'
-          f"  衝突が残っていれば --fix は 0 を返しても差分は残っている。\n"
-          f"  **クラス宣言は足すだけ**で、既存のものは書き換えていない — org が実態に合わせて"
-          f"変えた宣言はそのままである。\n"
-          + ("  **validation 規則は deep-add した** — org が自分で足した厳格規則は残っている。"
-             "同じ path で値が違うものは上書きせず、衝突として報告した。\n"
+          f"  If conflicts remain, --fix still returns 0 while the difference is still there.\n"
+          f"  **Class declarations are only added**, never rewritten — a declaration the org "
+          f"changed to match its reality is left as it is.\n"
+          + ("  **Validation rules were deep-added** — the stricter rules the org added itself "
+             "are still there. Where the same path held different values, nothing was overwritten "
+             "and it was reported as a conflict.\n"
              if any("validation" in x for x in added) else ""))
     return 0
 
 
 
 def cmd_reserve_exposure(a):
-    """**書けた判断だけが allow になる。** cap の検査と予約を1つの writer 操作にする。
+    """**Only a decision that was written becomes an allow.** The cap check and the reservation
+    are one writer operation.
 
-    ## なぜ二段構成では足りないか
+    ## Why a two-stage design is not enough
 
-    0.33.x までは organ が「集計して判断して LEDGER-EVENT を印字」し、hook が「その後で
-    append（失敗は無視）」していた。そこには3つの穴がある:
+    Up to 0.33.x the organ would "total up, judge, and print LEDGER-EVENT" and the hook would
+    "append afterwards (ignoring failure)". That leaves three holes:
 
-      1. 集計と判断が lock の外なので、**並列の hook が同じ committed を読んで両方 allow**
-         してから順に append できる。合計が cap を超える。
-      2. append の失敗を無視するので、allow したのに曝露が記録されない。**次の呼び出しは
-         committed=0 を見る**ので、cap は記憶を失った per-action 検査に退化する。
-      3. hold は deny して終わるので、**止めたことが記録に残らない**。
+      1. The totalling and the judging sit outside the lock, so **two parallel hooks can read the
+         same committed value and both allow**, then append in turn. The total exceeds the cap.
+      2. An append failure is ignored, so an allow is granted while the exposure goes unrecorded.
+         **The next call sees committed=0**, and the cap degrades into a memoryless per-action
+         check.
+      3. A hold ends in a deny, so **nothing records that anything was stopped**.
 
-    ここでは lock の中で
-    schema snapshot → 履歴検証 → 冪等性照合 → 現在の曝露を算出 → allow/hold 判断 →
-    予約 event の append + fsync
-    を一操作として行い、**予約が永続化された後にだけ allow を返す**。
+    Here, inside the lock,
+    schema snapshot → validate the history → match idempotency → compute the current exposure →
+    decide allow/hold → append the reservation event + fsync
+    happen as one operation, and **an allow is returned only after the reservation has been
+    persisted**.
 
-    ## caller から受け取らないもの
+    ## What is never taken from the caller
 
-    - `committed_so_far` — writer が数える。caller が渡せるなら、少なく申告して cap を通れる。
-    - 時刻 — writer が付ける。`--backfill-ts` も隠し `--ts` も **この操作には定義しない**。
-      通常台帳の backfill 権限は identity の側（H1）に残すが、cap 予約に持ち込んではいけない。
+    - `committed_so_far` — the writer counts it. If the caller could pass it, it could under-report
+      and get past the cap.
+    - the time — the writer stamps it. Neither `--backfill-ts` nor the hidden `--ts` is **defined
+      for this operation at all**. Backfill authority over the ordinary ledger stays on the identity
+      side (H1), but it must never be carried into a cap reservation.
 
-    ## 冪等キー
+    ## The idempotency key
 
-    `(session_id, tool_use_id, rule, event_class)`。`tool_use_id` 単独では、別 session・別 rule の
-    衝突を防げない。**欠落していれば metered action を deny する** — 同一性を確かめられないなら、
-    hook の再実行を二重計上しないという保証が成り立たない。
+    `(session_id, tool_use_id, rule, event_class)`. `tool_use_id` alone cannot prevent collisions
+    across sessions or rules. **If it is missing, the metered action is denied** — without being
+    able to confirm identity, there is no guarantee that a re-run of the hook is not double-counted.
     """
     _wp = require_writer_path("reserve-exposure")
     if _wp:
@@ -2491,14 +2500,15 @@ def cmd_reserve_exposure(a):
     for k in ("session_id", "tool_use_id", "rule"):
         if not (getattr(a, k, None) or "").strip():
             print(json.dumps({"decision": "deny", "reason": f"missing_{k}",
-                              "detail": f"--{k.replace('_', '-')} が無い。冪等キーは "
-                                        f"(session_id, tool_use_id, rule, event_class) で、"
-                                        f"欠けていると hook の再実行を二重計上しない保証が"
-                                        f"成り立たない。metered action は通さない。"},
+                              "detail": f"--{k.replace('_', '-')} is missing. The idempotency key "
+                                        f"is (session_id, tool_use_id, rule, event_class); without "
+                                        f"it there is no guarantee that a re-run of the hook is "
+                                        f"not double-counted. A metered action does not pass."},
                              ensure_ascii=False))
             return 3
 
-    # **入力の検証を先に。** 負・NaN・inf の delta は上限の判定を壊す（負なら合計を減らせる）。
+    # **Validate the input first.** A negative, NaN or inf delta breaks the cap decision (a
+    # negative one would let the total be reduced).
     for name, val, ok in (
             ("--delta", a.delta, lambda v: v == v and v > 0 and v != float("inf")),
             ("--cap", a.cap, lambda v: v == v and v >= 0 and v != float("inf"))):
@@ -2507,18 +2517,20 @@ def cmd_reserve_exposure(a):
                 raise ValueError
         except (TypeError, ValueError):
             print(json.dumps({"decision": "deny", "reason": "invalid_request",
-                              "detail": f"{name}={val!r} は使えない。delta は有限かつ正、"
-                                        f"cap は有限かつ非負でなければならない — 負や NaN を"
-                                        f"通すと合計を減らして上限を迂回できる。"},
+                              "detail": f"{name}={val!r} cannot be used. delta must be finite and "
+                                        f"positive and cap finite and non-negative — letting a "
+                                        f"negative or a NaN through would allow the total to be "
+                                        f"reduced and the cap evaded."},
                              ensure_ascii=False))
             return 3
 
-    # 冪等キーは **canonical tuple の hash**。区切り文字で連結すると、値に区切り文字が
-    # 入ったときに別のキーと衝突する（"a|b" + "c" と "a" + "b|c" が同じになる）。
+    # The idempotency key is **a hash of the canonical tuple**. Joining with a separator makes it
+    # collide with a different key once a value contains that separator ("a|b" + "c" and "a" +
+    # "b|c" come out the same).
     nk = "reserve:" + hashlib.sha256(json.dumps(
         ["exposure_budget_checked", a.session_id, a.tool_use_id, a.rule],
         ensure_ascii=False, separators=(",", ":")).encode("utf-8")).hexdigest()[:32]
-    # 要求内容の digest。**同じキーで内容が違う要求は再実行ではない。**
+    # A digest of the request contents. **The same key with different contents is not a re-run.**
     req_digest = hashlib.sha256(json.dumps(
         {"dimension": a.dimension, "delta": float(a.delta), "cap": float(a.cap),
          "window_since": a.window_since or "", "actor": a.actor},
@@ -2549,22 +2561,23 @@ def cmd_reserve_exposure(a):
                               "detail": str(e)}, ensure_ascii=False))
             return 4
 
-        # 冪等性 — 同じ (session, tool_use, rule) の予約が既にあるなら、その判断を返す。
-        # hook が再実行されても二重計上しない。
+        # Idempotency — if a reservation for the same (session, tool_use, rule) already exists,
+        # return that decision. A re-run of the hook is then not double-counted.
         for e in hist:
             if e.get("class") != "exposure_budget_checked":
                 continue
             if (e.get("payload") or {}).get("_nk") != nk:
                 continue
             prior = e["payload"]
-            # **exact retry だけが再実行である。** 同じキーで内容が違う要求を通すと、
-            # delta=1 の allow を根拠に delta=100 が通る（実測でそうなった）。
+            # **Only an exact retry is a re-run.** Let the same key through with different
+            # contents and a delta=100 passes on the strength of a delta=1 allow (measured
+            # happening).
             if prior.get("request_digest") != req_digest:
                 print(json.dumps(
                     {"decision": "deny", "reason": "idempotency_key_reused_with_different_request",
-                     "detail": f"同じ冪等キー（session/tool_use/rule）が seq={e.get('seq')} で"
-                               f"別の要求に使われている。dimension / delta / cap / window / actor の"
-                               f"どれかが違う要求は再実行ではない。",
+                     "detail": f"the same idempotency key (session/tool_use/rule) is already used "
+                               f"at seq={e.get('seq')} for a different request. A request differing "
+                               f"in dimension / delta / cap / window / actor is not a re-run.",
                      "prior": {"dimension": prior.get("dimension"),
                                "delta_requested": prior.get("delta_requested"),
                                "cap": prior.get("cap")},
@@ -2577,7 +2590,7 @@ def cmd_reserve_exposure(a):
                               "cap": prior.get("cap")}, ensure_ascii=False))
             return 0 if prior.get("decision") == "allow" else 10
 
-        # **writer が数える。** caller の申告は受け取らない。
+        # **The writer counts.** No figure reported by the caller is accepted.
         voided = set()
         try:
             voided = set(voided_seqs(hist))
@@ -2594,16 +2607,19 @@ def cmd_reserve_exposure(a):
                 continue
             try:
                 dv = float(p.get("delta_requested"))
-                # **負・NaN・inf の過去の曝露を数えない。** 数えると合計を減らせる／比較が壊れる。
+                # **Do not count a past exposure that is negative, NaN or inf.** Counting one
+                # would let the total be reduced, or break the comparison.
                 if not (dv == dv) or dv < 0 or dv in (float("inf"), float("-inf")):
                     raise ValueError(f"delta_requested={dv!r}")
                 committed += dv
             except (TypeError, ValueError):
-                # 壊れた曝露記録は 0 として数えず、**deny する** — 合計が実際より小さく見える。
+                # A corrupt exposure record is not counted as 0 — it is **denied**, because the
+                # total would otherwise look smaller than it really is.
                 print(json.dumps({"decision": "deny", "reason": "malformed_prior_exposure",
-                                  "detail": f"seq={e.get('seq')} の delta_requested が数値でない"
-                                            f"（{p.get('delta_requested')!r}）。合計が実際より"
-                                            f"小さく見えるので通さない。"}, ensure_ascii=False))
+                                  "detail": f"delta_requested at seq={e.get('seq')} is not a "
+                                            f"number ({p.get('delta_requested')!r}). The total "
+                                            f"would look smaller than it is, so this does not "
+                                            f"pass."}, ensure_ascii=False))
                 return 4
 
         would_be = committed + a.delta
@@ -2622,7 +2638,7 @@ def cmd_reserve_exposure(a):
                               "detail": bad}, ensure_ascii=False))
             return 4
         for w in warns:
-            print(f"reserve-exposure: 注意 — {w}", file=sys.stderr)
+            print(f"reserve-exposure: note — {w}", file=sys.stderr)
 
         ev = {"id": "e" + hashlib.sha256(
                   f"{head['seq'] + 1}:exposure_budget_checked:"
@@ -2635,12 +2651,14 @@ def cmd_reserve_exposure(a):
         ev["hash"] = _hash(head["hash"], ev)
 
         log, headp = _paths(a.root)
-        # 途中で失敗したら、書いた分を切り戻す位置。**deny したのに曝露が残る**と、次の予約が
-        # それを数える（過大計上）。それは安全側だが正確ではなく、上限が実際より早く尽きる。
+        # Where a partial write is rolled back on failure. **An exposure left behind after a
+        # deny** gets counted by the next reservation (over-counting). That errs on the safe side
+        # but is not accurate, and the cap runs out earlier than it should.
         prior_size = os.path.getsize(log) if os.path.exists(log) else 0
         try:
-            # 故障注入。**書けなかったら allow にならない**ことを検査できなければ、
-            # 「書けた判断だけが allow になる」とは言えない（fail-closed は故障注入で示す）。
+            # Fault injection. Without being able to test that **a failed write does not become
+            # an allow**, we cannot claim "only a decision that was written becomes an allow"
+            # (fail-closed is demonstrated by fault injection).
             if os.environ.get("ORG_LEDGER_FORCE_APPEND_FAIL") == "1":
                 raise OSError("ORG_LEDGER_FORCE_APPEND_FAIL=1（故障注入）")
             with open(log, "a", encoding="utf-8") as f:
