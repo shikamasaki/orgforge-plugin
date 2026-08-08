@@ -770,7 +770,7 @@ def test_client_cannot_name_the_schema_version(tmp_path):
     """Condition 2: a client-supplied version is a downgrade attack, so it is refused."""
     code, out = _app(tmp_path, payload={**_PR, "schema_version": 1})
     assert code == 2
-    assert "writer が決める" in out
+    assert "the writer decides the schema version" in out
     code, out = _app(tmp_path, payload={**_PR, "schema_sha256": "deadbeef"})
     assert code == 2
 
@@ -832,7 +832,7 @@ def test_torn_line_is_not_auto_repaired(tmp_path):
         f.write('{"seq": 2, "class": "progress_recorded"')     # 改行なし
     code, out = _app(tmp_path)
     assert code == 4, out
-    assert "自動修復しない" in out
+    assert "not auto-repaired" in out
 
 
 def test_interior_tampering_blocks_further_appends(tmp_path):
@@ -1545,7 +1545,7 @@ def test_release_needs_an_authenticated_independent_approver(tmp_path):
     assert code == 2
     # **どちらの層で止まってもよい。** identity fields を payload に書けない検査（0.39.3）が
     # writer-only の検査より先に働く — どちらも「generic append では書けない」ことを言っている。
-    assert ("writer-only class" in out) or ("receipt を検証して生成する" in out), out
+    assert ("writer-only class" in out) or ("derives identity by verifying a receipt" in out), out
     assert run("ledger.py", "halt-status", str(tmp_path))[0] == 10   # まだ止まっている
 
 
@@ -1845,7 +1845,7 @@ def test_writerd_accepts_a_request_and_direct_write_is_refused(tmp_path):
                             "--payload", _WD_PAYLOAD.replace("c1", "DIRECT-WRITE")],
                            capture_output=True, text=True, env=env)
         assert r.returncode == 4, r.stdout + r.stderr
-        assert "writerd 経由" in (r.stdout + r.stderr)
+        assert "only through writerd" in (r.stdout + r.stderr)
         assert "DIRECT-WRITE" not in (led / "ledger.jsonl").read_text(encoding="utf-8")
     finally:
         proc.terminate(); proc.wait(timeout=10)
@@ -2352,7 +2352,7 @@ def test_payload_cannot_forge_identity_fields(tmp_path):
                     {"deliverable": "7", "verdict": "admit",
                      "identity_assurance": "attested", "decision_by": "i-made-this-up"})
     assert r.returncode == 2, r.stdout + r.stderr
-    assert "この道具が receipt を検証して生成する" in (r.stdout + r.stderr)
+    assert "this tool derives identity by verifying a receipt" in (r.stdout + r.stderr)
     assert not (led / "ledger.jsonl").exists() or \
         not (led / "ledger.jsonl").read_text(encoding="utf-8").strip()
 
