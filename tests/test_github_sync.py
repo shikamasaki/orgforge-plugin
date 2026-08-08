@@ -1260,7 +1260,7 @@ def test_receipt_cannot_be_replayed_into_another_judgment(tmp_path):
     for kw in ({"issue": "9"}, {"lineage": "cross-harness"}, {"verdict": "reject"}):
         r = _h1_prov(org, subj, rc, **kw)
         assert r.returncode == 4, f"{kw} で通った: {r.stdout + r.stderr}"
-        assert "一致しない" in (r.stdout + r.stderr)
+        assert "does not match" in (r.stdout + r.stderr)
     assert _h1_events(org) == []
 
 
@@ -1274,7 +1274,7 @@ def test_tampering_with_a_receipt_is_refused(tmp_path):
     r = _h1_prov(org, subj, rc)
     assert r.returncode == 4
     both = r.stdout + r.stderr
-    assert "署名が一致しない" in both or "一致しない" in both
+    assert "signature does not match" in both or "does not match" in both
 
 
 def test_a_revoked_key_is_refused(tmp_path):
@@ -1285,7 +1285,7 @@ def test_a_revoked_key_is_refused(tmp_path):
                  "--reason", "検査").returncode == 0
     r = _h1_prov(org, subj, rc)
     assert r.returncode == 4
-    assert "失効している" in (r.stdout + r.stderr)
+    assert "has been revoked" in (r.stdout + r.stderr)
 
 
 def test_unreadable_trust_store_does_not_record_the_judgment(tmp_path):
