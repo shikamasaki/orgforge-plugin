@@ -1109,8 +1109,8 @@ def _distinct_actor_violation(ev, hist):
                 mine = ", ".join(sorted(ids))
                 theirs = ", ".join(sorted(_correlation_ids(e["payload"])
                                           | _alias_ids(e["payload"])))
-                what = (f"同じ仕事（この判定は {mine} を指し、seq {e.get('seq')} は {theirs} を"
-                        f"指す。台帳の別名対応で同一と解決した）")
+                what = (f"the same work (this judgment names {mine}, seq {e.get('seq')} names "
+                        f"{theirs}; the ledger's alias correspondence resolved them as one)")
             return (f"{ev['class']} rejected — actor {actor!r} already acted as {e['class']} for "
                     f"{what}: {why}")
     return None
@@ -1140,24 +1140,27 @@ REQUIRES_PRIOR_WHY = {
                        "domain model (SSoT底上げ, docs/11 §4d) — state it or the append is rejected.",
 }
 
-# ── views は ledger-schema.yaml の `views:` を単一の情報源として読む ────────────────────────
-# 以前はここに13件をハードコードしていたが、スキーマは26件を宣言していた。乖離の実害:
-#   - `/org-work` が parts_inventory を引けず、コマンド全体が起動しなかった
-#   - **gate の context_pack 3件と skeptic の 2件がすべて未実装**だった。organization.yaml が
-#     「gate はこの3つを見て admit する」と宣言していても、実行時に1つも引けない。
-#     SoD（maker≠checker）は中核主張なのに、checker が判断材料を取得できなかった
-#   - それでも `org_lint` は pass した（CP 検査は「スキーマに定義があるか」しか見ず、
-#     「ツールが実装しているか」を見ていなかった）
-# スキーマを読めば、view を足すのに Python を触る必要がなくなり、乖離が構造的に起きない。
+# ── views read `views:` in ledger-schema.yaml as the single source of truth ──────────────────
+# This used to hardcode 13 views while the schema declared 26. What the drift actually cost:
+#   - `/org-work` could not fetch parts_inventory, so the whole command failed to start
+#   - **all three of the gate's context_pack views and both of the skeptic's were unimplemented.**
+#     organization.yaml could declare "the gate admits by looking at these three" and at runtime
+#     not one of them could be fetched. SoD (maker ≠ checker) is a central claim, yet the checker
+#     could not obtain the material it was to judge by
+#   - and `org_lint` passed anyway (the CP check only asked "is it defined in the schema?", never
+#     "does the tool implement it?")
+# Reading the schema means adding a view no longer requires touching Python, so the drift cannot
+# structurally recur.
 _VIEW_FROM_CACHE = None
 
 
 def _schema_path():
-    """ledger-schema.yaml の場所。org のもの → プラグインのテンプレート、の順に探す。
+    """Where ledger-schema.yaml lives: look at the org's copy first, then the plugin's template.
 
-    `ORG_LEDGER_SCHEMA` が勝つ（discover 系と同じ規律 — env は「本当に上書きが必要な場合」の
-    ための逃げ道）。**壊れた／存在しない schema を指した状態を検査できることも要件**である。
-    検証できない状態で書かないことを、実際に確かめられなければ意味がない。
+    `ORG_LEDGER_SCHEMA` wins (the same discipline as the discover family — env is the escape hatch
+    for when an override is genuinely needed). **Being able to test the state where it points at a
+    broken or missing schema is itself a requirement**: "do not write while unable to validate" is
+    meaningless if it cannot actually be confirmed.
     """
     env = os.environ.get("ORG_LEDGER_SCHEMA")
     if env:
@@ -1181,7 +1184,7 @@ def _schema_path():
 
 
 def _view_from():
-    """{view_id: [derived-from classes]} をスキーマから読む。読めなければ空 dict。"""
+    """Read {view_id: [derived-from classes]} from the schema; an empty dict if it cannot be read."""
     global _VIEW_FROM_CACHE
     if _VIEW_FROM_CACHE is not None:
         return _VIEW_FROM_CACHE
@@ -1201,32 +1204,35 @@ def _view_from():
     return out
 
 
-# census 系は全クラスを数えるので、スキーマの `from` に関わらず "*" 扱いにする
+# The census views count every class, so treat them as "*" regardless of the schema's `from`
 _ALL_CLASS_VIEWS = ("ledger_census", "recent_ledger_census")
 
 
-# ══ Writer Phase 0 — schema 境界 / lock / fsync / HEAD 回復 ═══════════════════
+# ══ Writer Phase 0 — schema boundary / lock / fsync / HEAD recovery ══════════
 #
-# **actor には触らない。** ここで扱うのは「書き込みが壊れないこと」と「新規イベントが検証済み
-# であること」だけで、誰が書いたのかの認証（identity_assurance）は別の軸として後で扱う。
-# 混ぜると、schema を検証しただけで actor も信頼できるという読み違いを招く。
+# **Do not touch actor here.** This phase covers only "the write does not get corrupted" and "a
+# new event has been validated"; authenticating who wrote it (identity_assurance) is a separate
+# axis handled later. Mixing them invites the misreading that validating the schema also makes the
+# actor trustworthy.
 #
 #   validation_assurance:  legacy_unvalidated | validated:v1
-#   identity_assurance:    claimed | observed | attested | authenticated   ← 未着手
+#   identity_assurance:    claimed | observed | attested | authenticated   ← not started
 #
-# **schema_version は writer が付ける。** クライアントが指定できるなら、緩い版を名指しして
-# 検証を素通りできる（downgrade）。指定されたら拒否する。
+# **The writer stamps schema_version.** If a client could specify it, it could name a laxer
+# version and slip past validation (a downgrade). Specifying it is refused.
 
-LEDGER_SCHEMA_VERSION = 1          # 台帳の形式。プラグインの version とは連動させない —
-                                   # コード修正のたびに形式が変わったことにしてはいけない。
+LEDGER_SCHEMA_VERSION = 1          # the ledger's format. Deliberately not tied to the plugin's
+                                   # version — a code fix must not imply the format changed.
 
 
 def _envelope_core_keys(ev):
-    """hash が覆うフィールド。**version ごとに切り替える。**
+    """The fields the hash covers. **Switched per version.**
 
-    v1 以降は `schema_version` を hash に含める — 含めないと、書き換えても検出できないので
-    downgrade の拒否が意味を持たない。legacy（version なし）は従来の6フィールドで検証する。
-    validator は過去 version を変更せず追加する、という規律の具体形である。
+    From v1 onward the hash includes `schema_version` — without it, a rewrite would go undetected
+    and refusing downgrades would mean nothing. Legacy events (no version) are validated over the
+    original six fields.
+    This is the concrete form of the discipline that a validator adds versions rather than altering
+    past ones.
     """
     if ev.get("schema_version"):
         return ("id", "seq", "ts", "actor", "class", "payload",
@@ -1235,7 +1241,8 @@ def _envelope_core_keys(ev):
 
 
 def schema_digest():
-    """使っている ledger-schema.yaml の digest。形式が入れ替わったことを後から検出できる。"""
+    """A digest of the ledger-schema.yaml in use, so a swapped format can be detected after the
+    fact."""
     path = _schema_path()
     if not path or not os.path.isfile(path):
         return None
@@ -1244,17 +1251,19 @@ def schema_digest():
 
 
 def load_schema_snapshot():
-    """schema を **1回だけ読み、解析結果と digest を1つの snapshot にする**。
+    """Read the schema **exactly once, and make the parse result and the digest one snapshot**.
 
-    検証と digest 取得が別々に schema を読むと、その間に差し替えられる（TOCTOU）。
-    lock 内でこの snapshot を1つ作り、検証・digest の両方に同じものを使う。
+    If validation and digest collection each read the schema separately, it can be swapped in
+    between (TOCTOU).
+    Build one snapshot inside the lock and use that same one for both validation and the digest.
 
-    返り値: (snapshot, error)。error があれば新規 append を拒否する（fail-closed）。
+    Returns: (snapshot, error). If there is an error, refuse the new append (fail-closed).
     """
     path = _schema_path()
     if not path or not os.path.isfile(path):
-        return None, ("ledger-schema.yaml が見つからない。**検証できないまま書かない** — "
-                      "検証済みでないものが validated として台帳に残る方が悪い。")
+        return None, ("ledger-schema.yaml cannot be found. **Do not write while unable to "
+                      "validate** — something unvalidated sitting in the ledger AS validated is "
+                      "the worse outcome.")
     try:
         with open(path, "rb") as f:
             raw = f.read()
@@ -1295,66 +1304,72 @@ def _check_type(name, val):
     if name == "map":
         return isinstance(val, dict)
     if name == "number":
-        # bool は int の subclass なので除く。NaN / inf は「数」として扱わない —
-        # 合計に混ぜると比較が壊れ、上限の判定が意味を失う。
+        # bool is a subclass of int, so exclude it. NaN / inf are not treated as numbers — mixed
+        # into a total they break comparison, and the cap decision stops meaning anything.
         if isinstance(val, bool) or not isinstance(val, (int, float)):
             return False
         return val == val and val not in (float("inf"), float("-inf"))
-    # **未知の型名は通さない。** 黙って True を返すと、schema の typo が「検査の無効化」になる —
-    # `list` を `lst` と書いた瞬間にその検査が消え、消えたことに気づく経路が無い。
-    return None                       # 呼び側が「schema 側の誤り」として拒否する
+    # **An unknown type name does not pass.** Returning True silently turns a typo in the schema
+    # into a disabled check — write `lst` for `list` and that check vanishes, with no route by
+    # which anyone would notice it had gone.
+    return None                       # the caller refuses it as an error in the schema
 
 
 def validate_event(cls, payload, snap, writer_op=None):
-    """新規 append の検証。**3つの軸を分けて扱う。**
+    """Validate a new append. **Three axes, kept separate.**
 
-      1. required を宣言したクラスだけ、必須 field の欠落を拒否
-      2. 宣言済み field は **存在する場合に** enum / 型を検証
-      3. additional_properties_false のクラスだけ、未宣言 field を拒否
+      1. only for classes that declare `required`, refuse a missing mandatory field
+      2. for declared fields, validate enum / type **when the field is present**
+      3. only for classes with additional_properties_false, refuse undeclared fields
 
-    全クラスを一度に closed-world にすると、schema の乖離が「組織全体の記録停止」に変わる。
-    それは fail-closed ではなく、既知の移行不備による可用性事故である。
+    Making every class closed-world at once turns any schema drift into "the whole organisation
+    stops recording". That is not fail-closed; it is an availability incident caused by a known
+    migration gap.
 
-    返り値: (error, warnings)。error があれば拒否、warnings は記録して通す。
+    Returns: (error, warnings). An error refuses; warnings are recorded and let through.
     """
     if cls not in snap["classes"]:
         near = sorted(k for k in snap["classes"] if k[:4] == cls[:4])
         return (f"unknown event class {cls!r} (not in event_classes of ledger-schema.yaml). "
                 + (f"\n  近いもの: {', '.join(near)}" if near else "")
-                + "\n  クラスを増やすなら schema に宣言してから書くこと — 宣言の無いクラスは"
-                  "projection にも sensor にも乗らず、書いても読まれない。"), []
+                + "\n  To add a class, declare it in the schema before writing it — an "
+                  "undeclared class appears in no projection and no sensor, so writing it means "
+                  "nobody reads it."), []
     if not isinstance(payload, dict):
-        return f"payload は map でなければならない（{type(payload).__name__} が来た）。", []
+        return f"payload must be a map (got {type(payload).__name__}).", []
 
-    # **writer 専用のクラスは、その writer 操作からしか書けない。** 検査に使う記録を通常の
-    # append で書けると、検査そのものが無効になる（実測: 負の曝露を1件入れると上限が消えた）。
+    # **A writer-only class can be written only by that writer operation.** If the records a
+    # check relies on can be written by an ordinary append, the check itself is void (measured:
+    # inserting a single negative exposure made the cap disappear).
     if cls in snap["writer_only"] and writer_op != cls:
-        return (f"{cls} は writer 専用のクラスで、generic append では書けない"
+        return (f"{cls} is a writer-only class and cannot be written by a generic append"
                 f"（ledger-schema.yaml validation.writer_only）。\n"
-                f"  検査に使う記録は、検査する側だけが書ける必要がある — この記録を自由に"
-                f"書けると、検査そのものが無効になる。\n"
-                f"  上限の予約なら `ledger.py reserve-exposure` を使うこと。"), []
+                f"  The records a check relies on must be writable only by the side doing the "
+                f"checking — if this record can be written freely, the check itself is void.\n"
+                f"  For a cap reservation, use `ledger.py reserve-exposure`."), []
 
     given = {k for k in payload if k != "_nk"}
 
-    # ① required（宣言したクラスだけ）
+    # (1) required (only for classes that declare it)
     req = snap["required"].get(cls) or []
     missing = [k for k in req if k not in payload or payload[k] in (None, "")]
     if missing:
         return (f"{cls} is missing required fields: {', '.join(missing)}\n"
                 f"  （ledger-schema.yaml validation.required.{cls}）\n"
-                f"  統制イベントは中身が無ければ検査に使えない — 空の記録は"
-                f"「記録されている」という見た目だけを作る。"), []
+                f"  A control event with no contents is of no use to a check — an empty record "
+                f"creates only the APPEARANCE of having been recorded."), []
 
-    # ①' 相関キー — **どれか1つあればよい。** どれを使うかは経路で違う（union-find で束ねる）。
-    #    1つも無い判定は「何についての判定か分からない」ので、検査に使えない。
+    # (1') correlation key — **any one of them suffices.** Which one is used differs by path
+    #      (union-find bundles them). A judgment with none of them is a judgment whose subject is
+    #      unknown, and so is of no use to a check.
     anyof = snap["require_any"].get(cls) or []
     if anyof and not any(payload.get(k) not in (None, "") for k in anyof):
         return (f"{cls} has no correlation key: exactly one of {' / '.join(anyof)} is "
                 f"required.\n"
-                f"  何についての判定か分からない記録は、検査にも projection にも使えない。"), []
+                f"  A record whose subject is unknown is of no use to a check or to a "
+                f"projection."), []
 
-    # ② enum / 型（**存在する場合に**検証する）
+    # (2) enum / type (validated **when the field is present**)
     for f, allowed in (snap["enums"].get(cls) or {}).items():
         if f in payload and payload[f] not in allowed:
             return (f"{cls}.{f} = {payload[f]!r} is not an allowed value: "
