@@ -348,8 +348,8 @@ def audit_writer_assets(root, org_root=None, require_owner_uid=None):
     Returns: [(path, issue)] — empty means nothing wrong. **Absence is not counted as a problem**
     (with no halt in force, there being no latch is the normal state).
 
-    `require_owner_uid` を渡すと所有者も検査する（段階B）。渡さないと
-    「他者から書き込み可能でないこと」だけを見る（段階A で確かめられる範囲）。
+    Pass `require_owner_uid` and the owner is checked too (stage B). Without it, only "not writable
+    by others" is checked — as far as stage A can confirm.
     """
     found = []
     cands = []
@@ -364,45 +364,46 @@ def audit_writer_assets(root, org_root=None, require_owner_uid=None):
         try:
             st = os.stat(path)
         except OSError as e:
-            found.append((path, f"stat できない: {e}"))
+            found.append((path, f"cannot stat it: {e}"))
             continue
         if st.st_mode & 0o022:
-            found.append((path, f"他者から書き込み可能（mode {oct(st.st_mode & 0o777)}）— {why}"))
+            found.append((path, f"writable by others (mode {oct(st.st_mode & 0o777)}) — {why}"))
         if require_owner_uid is not None and st.st_uid != require_owner_uid:
-            found.append((path, f"所有者が uid={st.st_uid}（要求 {require_owner_uid}）— {why}"))
+            found.append((path, f"owned by uid={st.st_uid} (required: {require_owner_uid}) — "
+                                f"{why}"))
     return found
 
 
 
 def measured_isolation(sock_path, ledger_roots, peer_uid=None):
-    """`workload_isolation` を **実測で** 決める。フラグでは決めない。
+    """Decide `workload_isolation` **by measurement**, never from a flag.
 
-    実測（監査）: `--require-root-owned` を渡しただけで `separate_uid` と報告していた。
-    渡したかどうかは意図であって、状態ではない。
+    Measured (audit): merely passing `--require-root-owned` was enough to have it report
+    `separate_uid`. Whether a flag was passed is an intention, not a state.
 
-    `separate_uid` と言えるのは:
-      - socket の親が root 所有で、group からも書けない
-      - 台帳が **この writer プロセスの UID** の所有である（= caller の UID ではない）
-      - writerd 自身のプロセスが caller と別 UID で動いている
+    It may be called `separate_uid` only when:
+      - the socket's parent is root-owned and not writable by the group either
+      - the ledger is owned by **this writer process's UID** (i.e. not the caller's)
+      - the writerd process itself runs under a different UID from the caller
 
-    そのどれかが欠ければ `process_mediated` である。
+    If any of those is missing, it is `process_mediated`.
     """
     if check_socket_parent(sock_path, require_root_owned=True):
         return "process_mediated"
     me = os.getuid()
     if me == 0:
-        return "process_mediated"        # root で走る writer は隔離ではない
+        return "process_mediated"        # a writer running as root is not isolation
     for root in ledger_roots:
         try:
             if os.stat(root).st_uid != me:
                 return "process_mediated"
         except OSError:
             return "process_mediated"
-    # **caller と同じ UID なら隔離ではない。** 実測（監査）: writer UID = caller UID = 502 でも
-    # separate_uid を返していた。**要求ごとに peer UID と比べる**必要がある — 起動時には
-    # 誰が繋いでくるか分からない。
+    # **The same UID as the caller is not isolation.** Measured (audit): it returned separate_uid
+    # even with writer UID = caller UID = 502. The comparison against the peer UID has to happen
+    # **per request** — at start-up there is no telling who will connect.
     if peer_uid is None:
-        return "process_mediated"        # 比べられないなら弱い方に倒す
+        return "process_mediated"        # nothing to compare against: fall to the weaker reading
     if peer_uid == me:
         return "process_mediated"
     return "separate_uid"
@@ -412,33 +413,36 @@ class Writer:
     def __init__(self, roots, require_root_owned=False, isolation="process_mediated",
                  schema=None, caller_uid_differs=None, allowed_uids=None):
         self.roots = roots                      # {org_name: ledger_root}
-        self.isolation = isolation              # **実測値**。フラグではない
-        self.schema = schema                    # root 所有の設定から固定する
-        self.trust = None                       # 同上
-        self.policy = None                      # 同上
+        self.isolation = isolation              # **a measured value**, not a flag
+        self.schema = schema                    # fixed from the root-owned configuration
+        self.trust = None                       # likewise
+        self.policy = None                      # likewise
         self.caller_uid_differs = caller_uid_differs
-        self.sock_path = None                   # serve が設定する
-        self.allowed_uids = allowed_uids        # None = 制限なし（段階A）
-        self.org_constitutions = {}             # {org: constitution path}。宣言を子に届けるため
-        # **再起動で忘れない。** プロセス内だけに持つと、daemon を落として上げれば同じ要求を
-        # 再送できる（実測で指摘された）。writer が所有する台帳の隣に残す。
+        self.sock_path = None                   # set by serve
+        self.allowed_uids = allowed_uids        # None = unrestricted (stage A)
+        self.org_constitutions = {}             # {org: constitution path} — carries the
+                                                # declaration through to the child
+        # **Not forgotten across a restart.** Held only in the process, stopping and starting the
+        # daemon would let the same request be replayed (raised in audit). It is kept beside the
+        # ledger the writer owns.
         self.nonces = _NonceStore(
             os.path.join(list(roots.values())[0], "writer-nonces.json") if roots else None)
         self.require_root_owned = require_root_owned
-        self.lock = threading.Lock()            # 1プロセス内の直列化
+        self.lock = threading.Lock()            # serialisation within this one process
 
     def handle(self, req, peer_uid, peer_pid):
-        """要求を処理する。(response_dict, ok) を返す。**すべての拒否理由を言う。**"""
+        """Handle a request. Returns (response_dict, ok). **Every reason for refusal is stated.**"""
         if req.get("protocol") != PROTOCOL:
             return {"ok": False, "reason": "protocol_mismatch",
-                    "detail": f"protocol={req.get('protocol')!r}（writerd は v{PROTOCOL}）。"
-                              f"未知の版の要求は処理しない。"}, False
-        # **改変の検出。** digest は本文全体を覆う。
+                    "detail": f"protocol={req.get('protocol')!r} (writerd is v{PROTOCOL}). "
+                              f"A request of an unknown version is not processed."}, False
+        # **Detecting tampering.** The digest covers the whole body.
         if req.get("digest") != request_digest(req):
             return {"ok": False, "reason": "request_tampered",
-                    "detail": "要求の digest が本文と一致しない。途中で書き換えられている。"}, False
-        # **読み取りは nonce を要求しない。** 副作用が無く、拒否すると org を診断できない。
-        # ただし digest（改変の検出）は読み取りにも効かせる。
+                    "detail": "the request digest does not match the body — it was altered in "
+                              "transit."}, False
+        # **A read requires no nonce.** It has no side effect, and refusing one would leave the org
+        # undiagnosable. The digest — tamper detection — still applies to reads.
         if req.get("op") == "halt-status":
             org_r = req.get("org")
             if org_r not in self.roots:
@@ -454,35 +458,38 @@ class Writer:
         nonce = req.get("nonce")
         if not nonce or not isinstance(nonce, str) or len(nonce) < 16:
             return {"ok": False, "reason": "missing_nonce",
-                    "detail": "nonce が無い（または短すぎる）。再送を拒否できない。"}, False
+                    "detail": "there is no nonce (or it is too short), so a replay could not be "
+                              "refused."}, False
         if not self.nonces.check_and_add(nonce):
             return {"ok": False, "reason": "replayed_nonce",
-                    "detail": f"nonce {nonce[:16]}… は既に使われている。**再送は通さない。**"}, False
+                    "detail": f"nonce {nonce[:16]}… has already been used. **A replay does not "
+                              f"pass.**"}, False
 
-        # **peer UID の認可。** socket は 0666 なので繋げること自体は誰でもできる。
-        # 「繋げた」ことは「書いてよい」ことではない。
+        # **Authorising the peer UID.** The socket is 0666, so anyone can connect to it at all.
+        # Having connected is not the same as being allowed to write.
         if self.allowed_uids is not None and peer_uid not in self.allowed_uids:
             return {"ok": False, "reason": "peer_not_authorized",
-                    "detail": f"peer uid={peer_uid} は書き込みを認可されていない"
-                              f"（許可: {sorted(self.allowed_uids)}）。"}, False
+                    "detail": f"peer uid={peer_uid} is not authorised to write "
+                              f"(permitted: {sorted(self.allowed_uids)})."}, False
 
         org = req.get("org")
         if org not in self.roots:
             return {"ok": False, "reason": "unknown_org",
-                    "detail": f"org={org!r} は writerd が書ける対象ではない"
-                              f"（許可: {sorted(self.roots)}）。\n"
-                              f"  **caller は台帳のパスを指定できない** — 指定できれば、"
-                              f"writer 経由でどこにでも書ける。"}, False
+                    "detail": f"org={org!r} is not something writerd may write to "
+                              f"(permitted: {sorted(self.roots)}).\n"
+                              f"  **A caller cannot name the ledger path** — if it could, anything "
+                              f"could be written anywhere by way of the writer."}, False
         root = self.roots[org]
 
         op = req.get("op")
         argv = req.get("argv")
         if not isinstance(argv, list) or not all(isinstance(x, str) for x in argv):
             return {"ok": False, "reason": "bad_argv",
-                    "detail": "argv が文字列の配列でない。"}, False
-        # **読み取りも writer に聞く。** org 側の symlink を張り替えて空の台帳を見せられると、
-        # hook は停止を見失う（実測: HALT 中でも halt-status が exit 10 → 0 になった）。
-        # writer は起動時に固定した **実体のパス** を見るので、張り替えても影響しない。
+                    "detail": "argv is not an array of strings."}, False
+        # **Reads go through the writer too.** Swap the org-side symlink to show an empty ledger
+        # and the hook loses sight of the stop (measured: during a HALT, halt-status went from exit
+        # 10 to 0). The writer looks at **the real path** it pinned at start-up, so re-pointing the
+        # link changes nothing.
         if op == "halt-status":
             try:
                 r = subprocess.run([sys.executable, os.path.join(HERE, "ledger.py"),
@@ -495,18 +502,19 @@ class Writer:
         if op not in ("append", "record-scheduled-check", "trip-halt", "release-halt",
                       "reserve-exposure", "derive-admission"):
             return {"ok": False, "reason": "unsupported_op",
-                    "detail": f"op={op!r} は writerd 経由では実行できない"
+                    "detail": f"op={op!r} cannot be run by way of writerd"
                               f"（append / record-scheduled-check / trip-halt / release-halt / "
                               f"reserve-exposure / derive-admission / halt-status）。"}, False
-        # **caller が root を指定する経路を閉じる。** argv からパスらしきものを弾く。
+        # **Close the route by which a caller names a root.** Anything path-like in argv is
+        # rejected.
         for a in argv:
             if a == root or a.startswith("/") and os.path.sep in a and (
                     "ledger" in a or a.endswith(".jsonl")):
                 return {"ok": False, "reason": "path_in_argv",
-                        "detail": f"argv に台帳のパスらしき値がある: {a!r}\n"
-                                  f"  **書き込み先は writerd が決める。** caller は org 名でしか"
-                                  f"選べない。"}, False
-        # **recorded_by は peer credential から。** decision_by には使わない。
+                        "detail": f"argv holds something that looks like a ledger path: {a!r}\n"
+                                  f"  **writerd decides where writes go.** A caller can only "
+                                  f"choose by org name."}, False
+        # **recorded_by comes from the peer credential.** It is never used for decision_by.
         env = dict(os.environ)
         env["ORG_LEDGER_ROOT"] = root
         # **schema を明示する。** 渡さないと ledger.py が cwd から org を探し、見つからなければ
