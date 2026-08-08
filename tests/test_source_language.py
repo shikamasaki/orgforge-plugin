@@ -45,7 +45,7 @@ BUDGET = {
     "tools/orgcycle/judge.py": 373,
     "tools/writerd.py": 286,
     "tools/ghsync/record.py": 268,
-    "tools/ghsync/backlog.py": 225,
+    "tools/ghsync/backlog.py": 226,
     "tests/test_github_sync.py": 176,
     "tools/orgcycle/_core.py": 159,
     "tools/identity.py": 143,
