@@ -1,7 +1,8 @@
-"""判定の材料を組み立てる — verify / record。
+"""Assemble the material for a judgment — verify / record.
 
-**判定ロジックは一切持たない。** verdict / why / risk / どのミューテーションを試すかは
-gate / skeptic が決める。ツールが verdict を決めた瞬間に gate は形骸化する。"""
+**It holds no judging logic whatsoever.** The verdict, the why, the risk, and which mutations to
+try are decided by the gate / skeptic. The moment a tool decides the verdict, the gate becomes a
+formality."""
 
 import hashlib
 import json
@@ -36,11 +37,12 @@ from .preflight import PreflightConfigError, run_declared_preflights
 
 
 def _role_charter(role):
-    """agents/<role>.md の本文（front-matter を落とす）。
+    """The body of agents/<role>.md (with the front-matter stripped).
 
-    **これが案2の肝。** 検証手順を毎回人が書き下ろすと、書くたびに gate の厳しさが変わる。
-    18 Issue なら18通りの基準になる。charter を注入すれば基準は1つに固定され、
-    しかも基準の変更は agents/<role>.md の1箇所で効く。
+    **This is the heart of approach 2.** If a person writes out the verification steps each time,
+    the gate's strictness changes with every writing — 18 Issues means 18 different standards.
+    Inject the charter and the standard is fixed at one, and changing it takes effect from the
+    single place in agents/<role>.md.
     """
     d = _agents_dir()
     path = os.path.join(d, f"{role}.md") if d else None
@@ -81,8 +83,8 @@ def _stable_organ_invocation():
     stable = invocation(root, harness) if root else None
     if root and harness in ("claude-code", "codex") and not stable:
         raise BindingError(
-            "installed plugin で動いているが organization-side launcher が未登録。"
-            "SessionStart hookを有効にしてhost sessionを再起動すること")
+            "running from an installed plugin, but the organization-side launcher is not "
+            "registered. Enable the SessionStart hook and restart the host session")
     return stable
 
 
@@ -95,30 +97,33 @@ def _organ_command(stable, organ):
 
 
 def _seam(role, issue, title):
-    """handoff.py を内部で呼んで seam contract を作る。引数6個の手打ちをここで吸収する。"""
+    """Build the seam contract by calling handoff.py internally, absorbing the six arguments that
+    would otherwise be typed by hand."""
     slice_ = {
-        "gate": f"#{issue} 「{title}」の admission — MUST を1つずつ再導出する",
-        "skeptic": f"#{issue} 「{title}」の admit 済み成果物への反証",
+        "gate": f"admission of #{issue} \"{title}\" — re-derive each MUST one at a time",
+        "skeptic": f"refutation of the admitted deliverable for #{issue} \"{title}\"",
     }.get(role, f"#{issue} 「{title}」")
     outputs = {
-        "gate": "admission_decided（verdict は自分で決める。admit には --evidence が要る）",
-        "skeptic": "refutation_attempted（verdict は自分で決める。survives には --evidence が要る）",
-    }.get(role, "決定と、その根拠")
+        "gate": "admission_decided (you decide the verdict yourself; an admit needs --evidence)",
+        "skeptic": ("refutation_attempted (you decide the verdict yourself; a survives needs "
+                    "--evidence)"),
+    }.get(role, "a decision, and the grounds for it")
     code, out = _run([os.path.join(HERE, "handoff.py"), role,
                "--slice", slice_,
-               "--inputs", f"task Issue #{issue} の SPEC / MUST と、maker の成果物",
+               "--inputs", f"the SPEC / MUSTs of task Issue #{issue}, and the maker's deliverable",
                "--outputs", outputs,
-               "--owns", "判定そのもの（この配管は verdict を決めない）",
-               "--forbid", "自分が作った成果物の admit／maker の手順の再追跡（結果を再導出すること）"])
+               "--owns", "the judgment itself (this plumbing does not decide the verdict)",
+               "--forbid", ("admitting a deliverable you produced yourself / retracing the "
+                            "maker's steps (re-derive the result instead)")])
     return out if code == 0 else None
 
 
 def _prior_gate(issue, repo=None):
-    """skeptic に渡す「gate が既に見たこと」。
+    """What the gate has already looked at, handed to the skeptic.
 
-    渡さないと skeptic は gate と同じミューテーションを繰り返して無駄になる（実地で確認済み）。
-    **これは配管であって判断ではない** — gate が何を書いたかをそのまま運ぶだけで、
-    その内容の当否も、次に何を試すべきかも、こちらは決めない。
+    Without it the skeptic repeats the gate's mutations and wastes the round (confirmed in
+    practice). **This is plumbing, not judgment** — it carries what the gate wrote, verbatim, and
+    decides neither whether that was right nor what should be tried next.
     """
     args = ["gh", "issue", "view", str(issue), "--json", "comments"]
     r = repo or _repo()
@@ -136,11 +141,12 @@ def _prior_gate(issue, repo=None):
 
 
 def _judgment_history(issue, cls=None):
-    """この Issue に対する過去の判定（訂正済みは除く）を古い順に。
+    """Past judgments on this Issue (excluding corrected ones), oldest first.
 
-    gate は毎回これを渡されないと **初回判定として扱う**。3周目の で「前回見落とした点を
-    今回どう確認したか」を明示させたら質が上がった、という実地の観察がある。過去の reject を
-    知らない gate は、同じ指摘を繰り返すか、直ったことの確認を飛ばすかのどちらかになる。
+    Without being handed these each time, the gate **treats it as a first judgment**. There is a
+    field observation that quality rose once a third round was made to state "how what was missed
+    last time was checked this time". A gate that does not know about a past reject either repeats
+    the same finding or skips confirming that it was fixed.
     """
     evs, voided = _events_for(issue)
     out = []
@@ -213,7 +219,8 @@ def _prior_verdict_for_subject(issue, role, subject_id):
 
 
 def _issue_decision_comments(issue, event):
-    """Issue に書かれた判定の理由（台帳は digest だけを持つので、本文はこちらにある）。"""
+    """The reason for a judgment as written on the Issue (the ledger holds only a digest, so the
+    text lives here)."""
     args = ["gh", "issue", "view", str(issue), "--json", "comments"]
     r = _repo()
     if r:
@@ -251,7 +258,7 @@ def _focused_review_contract(role):
 
 
 def cmd_verify(a):
-    """gate / skeptic を起動するための材料を組み立てて印字する。判定はしない。"""
+    """Assemble and print the material for launching the gate / skeptic. It does not judge."""
     role = a.role
     from review_freshness import (descriptor_status, freshness_policy, integration_ref_policy,
                                   persist_descriptor)
@@ -275,9 +282,10 @@ def cmd_verify(a):
               "`verify --base <ref>` for this run only.", file=sys.stderr)
         return 11
     _integration_ref = getattr(a, "base", None) or _configured_ref
-    # 判定対象は **Issue の worktree** の tree（#101）。cwd の tree を黙って記述すると、
-    # 本体から打った verify がどの Issue でも同じ subject（ahead=0 の main）を mint し、
-    # joint admission が使う「二血統が同じものを見た」証拠が壊れる — 実測 OBS-031/055/071。
+    # What is judged is the tree of **the Issue's worktree** (#101). Silently describing the cwd's
+    # tree instead means a verify run from the main checkout mints the same subject (main at
+    # ahead=0) for every Issue, which destroys the evidence a joint admission relies on — that both
+    # lineages looked at the same thing. Measured: OBS-031/055/071.
     _subject_override = getattr(a, "subject_root", None)
     if _subject_override:
         _subject_cwd = os.path.abspath(_subject_override)
@@ -286,54 +294,58 @@ def cmd_verify(a):
             return 2
     else:
         _subject_cwd = issue_worktree(a.issue)
-        # isdir では足りない: 空の残骸ディレクトリや repo root への symlink は primary の
-        # 内側に居るので、git が primary に解決して OBS-071 の偽造がそのまま通る。
-        # 「まさにそこを toplevel とする実 worktree」まで確かめる（worktree_rooted_at）。
+        # isdir is not enough: an empty leftover directory, or a symlink to the repo root, sits
+        # inside the primary checkout, so git resolves it to the primary and the OBS-071 forgery
+        # goes straight through.
+        # Confirm it is a real worktree whose toplevel is exactly there (worktree_rooted_at).
         if not _subject_cwd or not worktree_rooted_at(_subject_cwd):
             _expected = _subject_cwd or os.path.join(
                 ".orgforge", "wt", f"issue-{a.issue}")
-            _hint = ("（パスは存在するが実 worktree ではない — 残骸なら "
-                     "`git worktree prune` で片付けてから begin し直すこと）\n"
+            _hint = ("(the path exists but is not a real worktree — if it is leftover debris, "
+                     "clear it with `git worktree prune` and begin again)\n"
                      if _subject_cwd and os.path.lexists(_subject_cwd) else "")
-            print(f"Issue #{a.issue} の worktree が無い: {_expected}\n{_hint}"
-                  "  cwd の tree では代用しない — 本体から打つと、どの Issue でも同じ "
-                  "subject が mint され、判定の同一性が壊れる（#101）。\n"
-                  "  `org_cycle begin --issue N` で worktree を作るか、worktree 以外の "
-                  "checkout を意図して判定するなら `--subject-root <path>` を明示すること。",
+            print(f"there is no worktree for Issue #{a.issue}: {_expected}\n{_hint}"
+                  "  The cwd's tree is not used as a substitute — run from the main checkout and "
+                  "every Issue mints the same subject, destroying the identity of the judgment "
+                  "(#101).\n"
+                  "  Create the worktree with `org_cycle begin --issue N`, or, if you mean to "
+                  "judge a checkout that is not a worktree, state it with `--subject-root <path>`.",
                   file=sys.stderr)
             return 12
         _actual_branch = issue_worktree_head(a.issue, cwd=_subject_cwd)
         if not _actual_branch or not re.fullmatch(
                 rf"feat/issue-{int(a.issue)}(?:-[A-Za-z0-9][A-Za-z0-9._-]*)?",
                 _actual_branch):
-            print(f"Issue #{a.issue} の worktree branch が束縛規約に一致しない: "
-                  f"{_actual_branch or '(detached)'}。"
-                  f" `feat/issue-{int(a.issue)}[-<slug>]` の worktree を作るか、"
-                  "意図した checkout を `--subject-root` で明示すること。",
+            print(f"the worktree branch for Issue #{a.issue} does not match the binding "
+                  f"convention: "
+                  f"{_actual_branch or '(detached)'}.\n"
+                  f"  Create a `feat/issue-{int(a.issue)}[-<slug>]` worktree, or state the "
+                  "checkout you intend with `--subject-root`.",
                   file=sys.stderr)
             return 12
     _sid, _sparts = review_subject(
         a.issue, role, getattr(a, "phase", None), cwd=_subject_cwd,
         integration_ref=_integration_ref)
     if _subject_override:
-        # digest には入らない（SUBJECT_FIELDS 外）が、どの checkout を意図して判定した
-        # かは印字に残す — escape hatch は黙って使わせない。
+        # It does not enter the digest (it is outside SUBJECT_FIELDS), but which checkout was
+        # deliberately judged is still printed — an escape hatch is never used silently.
         _sparts = {**_sparts, "subject_root": _subject_cwd}
     _subject_path = persist_descriptor(_sid, _sparts, cwd=_subject_cwd)
     _freshness = descriptor_status({**_sparts, "review_subject_id": _sid}, _subject_cwd)
     if _strict_freshness and not _freshness["ok"]:
-        print(f"review subject が現在の統合先に対して有効でない: "
+        print(f"the review subject is not valid against the current integration target: "
               f"{_freshness['reason']} — {_freshness['detail']}\n"
               f"  subject: {_sid}\n  evidence: {_subject_path}\n"
-              "  自動 rebase はしない。統合先を取り込み、同じ verify で再判定すること。",
+              "  It does not rebase automatically. Take in the integration target and judge "
+              "again through the same verify.",
               file=sys.stderr)
         return 11
-    # **記録のためだけに judge を回さない。** subject は git と受け入れ基準から決まるので、
-    # 材料を組む前に答えられる。
+    # **Do not run a judge merely to record something.** The subject is determined by git and the
+    # acceptance criteria, so it can be answered before the material is assembled.
     if getattr(a, "print_subject", False):
         print(_sid)
         for k, v in _sparts.items():
-            print(f"  {k:20}= {v or '(なし)'}", file=sys.stderr)
+            print(f"  {k:20}= {v or '(none)'}", file=sys.stderr)
         print(f"  {'descriptor':20}= {_subject_path}", file=sys.stderr)
         return 0
     # **Do not re-judge an unchanged subject.** The subject id already encodes the revision under
@@ -376,8 +388,9 @@ def cmd_verify(a):
     if title is None:
         print(f"could not read Issue #{a.issue} (check gh auth and repo resolution).", file=sys.stderr)
         return 3
-    # judge を起動する前に、**この Issue / phase / role にだけ適用される**環境probeを走らせる。
-    # プロセス名から Docker 等を推測せず、org が宣言した argv の実測結果だけを証拠にする。
+    # Before launching the judge, run the environment probes that apply **only to this Issue /
+    # phase / role**. Nothing is inferred about Docker and the like from process names; the only
+    # evidence is the measured result of the argv the org declared.
     phase = getattr(a, "phase", None) or "implement"
     try:
         preflight_ok, preflight_evidence = run_declared_preflights(
@@ -397,11 +410,13 @@ def cmd_verify(a):
               "  Do not substitute another checkout — restart the host session, then verify again.",
               file=sys.stderr)
         return 9
-    # **judge を起動する前に**、read-only judge が再導出できない MUST を静的に指摘する。
-    # read_only の judge は「実際に走らせて緑を確かめる」類の MUST を構造的に再導出できず
-    # park を返すしかないが、それが分かるのは起動して数分〜30分待った後だった（実測 #34）。
-    # 空振りの park は判定を1つも生まないので、待つ前に言う。**判定はしない** — 満たして
-    # いるかには触れず、「read-only の能力の外にある」ことだけを助言する（docs/03 §6.5）。
+    # **Before launching the judge**, point out statically the MUSTs a read-only judge cannot
+    # re-derive. A read_only judge structurally cannot re-derive the kind of MUST that means
+    # "actually run it and see it go green", and can only return park — but that only became
+    # apparent after launching and waiting minutes to half an hour (measured, #34).
+    # A wasted park produces no judgment at all, so say it before the wait. **It does not judge** —
+    # it says nothing about whether the MUST is met, only that it lies outside what read-only can
+    # do (docs/03 §6.5).
     if _judges_read_only():
         from .rederivability import advisory, unmeasurable_musts
         _unmeasurable = unmeasurable_musts(body)
@@ -420,17 +435,20 @@ def cmd_verify(a):
     verdicts = {"gate": "admit|reject|park", "skeptic": "survives|refuted"}[role]
 
     out = []
-    out.append(f"===== {role} subagent への投入プロンプト（#{a.issue}: {title}）=====\n")
-    out.append(seam or "(seam contract の生成に失敗 — handoff.py を確認)")
+    out.append(f"===== prompt to feed the {role} subagent (#{a.issue}: {title}) =====\n")
+    out.append(seam or "(failed to generate the seam contract — check handoff.py)")
     if stable_organ:
-        out.append("\n## OrgForge organ の呼び出し契約（**この固定launcherだけを使う**）\n")
+        out.append("\n## How to invoke an OrgForge organ (**use only this fixed launcher**)\n")
         out.append(f"`{stable_organ} <organ> [args...]`\n\n"
-                   "version付きcache pathや別のdevelopment checkoutを探索しない。"
-                   "plugin更新後の実体はSessionStartがこのlauncherへ再束縛する。")
+                   "Do not go looking for a versioned cache path or another development "
+                   "checkout. After a plugin update, SessionStart re-binds this launcher to the "
+                   "new implementation.")
     if preflight_evidence:
-        out.append("\n## judge dispatch 前の environment preflight（監督が実測）\n")
+        out.append("\n## Environment preflight before dispatching the judge (measured by the "
+                   "supervisor)\n")
         out.extend(preflight_evidence)
-        out.append("\n> これは宣言されたコマンドの測定結果であり、daemon名や実装を推測した結果ではない。")
+        out.append("\n> This is the measured result of a declared command, not something "
+                   "inferred from a daemon name or an implementation.")
     # The complete role charter is an organization-wide doctrine, not the per-Issue standard.
     # The latter is fixed in the Issue body below; dispatch only the compact contract by default.
     # ORG_JUDGE_FULL_CHARTER remains an explicit diagnostic escape hatch, never the default.
@@ -439,9 +457,10 @@ def cmd_verify(a):
         out.append("\n\n## Full role charter (diagnostic override)\n")
         out.append(charter)
     rounds = [h for h in history if h["class"] == "admission_decided"]
-    # 台帳と Issue の**多い方**を採る。二重記録の片側が落ちるのが実地の失敗形なので、
-    # 台帳だけを数えると「2回目」と言ってしまう（実際は3回目）。回数を過少に伝えると、
-    # gate は「ほぼ初回」として扱ってしまい、この節を入れた意味が消える。
+    # Take **the larger** of the ledger's count and the Issue's. The failure seen in practice is
+    # one side of a double record going missing, so counting the ledger alone would say "the second
+    # time" when it is the third. Under-report the count and the gate treats it as near-enough a
+    # first judgment, which empties this section of its purpose.
     issue_rounds = _issue_decision_comments(a.issue, "admission_decided")
     if history or issue_rounds:
         n = max(len(rounds), len(issue_rounds)) + 1

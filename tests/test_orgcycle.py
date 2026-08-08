@@ -2472,7 +2472,7 @@ def test_verify_rejects_issue_worktree_with_unbound_branch(tmp_path):
     code, sid, _, err = _print_subject(repo, 7)
     assert code == 12
     assert sid is None
-    assert "branch" in err and "束縛" in err
+    assert "branch" in err and "binding convention" in err
 
 
 # ── #101 rework: isdir では偽 worktree が通る（skeptic の反証）─────────────────
