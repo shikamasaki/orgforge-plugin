@@ -181,61 +181,65 @@ def check_socket_parent(path, require_root_owned=False):
                     f"(mode {oct(ast_.st_mode & 0o777)}): {anchor}\n"
                     f"  **A caller can replace the leaf.**")
     else:
-        # 段階A / client 側。**leaf の所有者は writer であって caller ではない** —
-        # 実測（監査）: installer が leaf を writer 所有にする一方、client が「root か自分」しか
-        # 許さず、**正規の書き込み経路がゼロ**になっていた。
+        # Stage A / the client side. **The leaf is owned by the writer, not by the caller** —
+        # measured (audit): the installer made the leaf writer-owned while the client accepted only
+        # "root or me", which left **no legitimate write path at all**.
         #
-        # client が確かめるべきは「**誰が leaf を差し替えられるか**」であって「leaf が誰のものか」
-        # ではない。他者から書けなければ、その socket は差し替えられない。
+        # What the client has to establish is **who could replace the leaf**, not who owns it. If
+        # others cannot write there, that socket cannot be swapped out.
         if st.st_mode & 0o022:
-            return (f"socket の親（leaf）が他者から書き込み可能である "
+            return (f"the socket's parent (the leaf) is writable by others "
                     f"（mode {oct(st.st_mode & 0o777)}）: {parent}\n"
                     f"  **Anyone who can write there can replace the socket** — and point you at a forged writer.")
         anchor = os.path.dirname(parent)
         try:
             ast_ = os.stat(anchor)
         except OSError:
-            return None                  # anchor を辿れないなら leaf の検査までで止める
-        # **caller 所有の anchor を信頼しない。** anchor に書ける主体は leaf ごと差し替えられる
-        # ので、偽の writer に繋がされる（実測で指摘された）。`ORG_WRITER_TRUST_SELF=1` は
-        # 段階A（同じ利用者が daemon も動かしている）でだけ使う逃げ道である。
+            return None                  # cannot reach the anchor: stop at the leaf check
+        # **Do not trust a caller-owned anchor.** Whoever can write to the anchor can swap out the
+        # whole leaf and point you at a forged writer (raised in audit). `ORG_WRITER_TRUST_SELF=1`
+        # is an escape hatch for stage A alone, where the same user is also running the daemon.
         if (ast_.st_uid == os.getuid() and ast_.st_uid != 0
                 and os.environ.get("ORG_WRITER_TRUST_SELF") != "1"):
-            return (f"socket の anchor が caller 自身の所有である（uid={ast_.st_uid}）: {anchor}\n"
-                    f"  **書ける主体は leaf ごと差し替えられる** — 偽の writer に繋がされる。\n"
-                    f"  段階A（自分で daemon を動かしている）なら ORG_WRITER_TRUST_SELF=1 を"
-                    f"明示すること。**それは信頼境界ではない。**")
+            return (f"the socket's anchor is owned by the caller itself (uid={ast_.st_uid}): "
+                    f"{anchor}\n"
+                    f"  **Whoever can write there can swap out the whole leaf** — and point you at "
+                    f"a forged writer.\n"
+                    f"  On stage A, where you run the daemon yourself, state "
+                    f"ORG_WRITER_TRUST_SELF=1 explicitly. **That is not a trust boundary.**")
         if ast_.st_mode & 0o022:
-            return (f"socket の anchor が他者から書き込み可能である "
+            return (f"the socket's anchor is writable by others "
                     f"（mode {oct(ast_.st_mode & 0o777)}）: {anchor}\n"
-                    f"  **caller が leaf ごと差し替えられる。**")
+                    f"  **A caller can swap out the whole leaf.**")
     return None
 
 
 
 def check_socket_length(path):
-    """**AF_UNIX のパス長には OS の上限がある**（macOS 104 / Linux 108 バイト）。
+    """**AF_UNIX path lengths have an OS limit** (104 bytes on macOS, 108 on Linux).
 
-    超えると bind が黙って失敗する。深い場所に org を置いた人が「なぜか動かない」に当たるので、
-    何が起きているかを言う。段階B の install は `/var/run/orgforge/` を使うので通常は問題ない。
+    Exceed it and bind fails silently. Someone who put their org somewhere deep runs into "it just
+    does not work", so say what is happening. A stage B install uses `/var/run/orgforge/`, where
+    this is normally not a problem.
 
-    **これは bind する側だけの問題**なので、親ディレクトリの権限検査とは分ける — 混ぜると
-    「権限が悪い」と「パスが長い」を区別できなくなる。
+    **This concerns only the side that binds**, so it is kept apart from the parent-directory
+    permission checks — mix them and "the permissions are wrong" becomes indistinguishable from
+    "the path is too long".
     """
     limit = 104 if sys.platform == "darwin" else 108
     n = len(os.path.abspath(path).encode("utf-8"))
     if n >= limit:
-        return (f"socket のパスが長すぎる（{n} バイト、上限 {limit}）: {path}\n"
-                f"  AF_UNIX の OS 上限である。--socket で短い場所を指すこと。")
+        return (f"the socket path is too long ({n} bytes, limit {limit}): {path}\n"
+                f"  That is the OS limit for AF_UNIX. Point --socket somewhere shorter.")
     return None
 
 
-# ── peer credential（recorded_by にしか使わない）──────────────────────────────
+# ── the peer credential (used only for recorded_by) ─────────────────────────
 def peer_credential(conn):
-    """接続相手の (uid, pid)。取れなければ (None, None)。
+    """The (uid, pid) of the peer, or (None, None) if unavailable.
 
-    **これは `recorded_by` にしか使わない。** 「接続してきた」ことは「その判断をした」ことの
-    証拠にならないので、`decision_by` には決して使わない。
+    **This is used only for `recorded_by`.** Having connected is no evidence of having made the
+    judgment, so it is never used for `decision_by`.
     """
     try:
         if sys.platform == "darwin":
@@ -250,7 +254,7 @@ def peer_credential(conn):
         return None, None
 
 
-# ── 要求の digest（改変・再送の検出）─────────────────────────────────────────
+# ── the request digest (detecting tampering and replay) ─────────────────────
 def request_digest(req):
     core = {k: v for k, v in req.items() if k != "digest"}
     return hashlib.sha256(json.dumps(core, sort_keys=True, separators=(",", ":"),
@@ -258,11 +262,12 @@ def request_digest(req):
 
 
 class _NonceStore:
-    """使用済み nonce。**再送を拒否するために持つ。**
+    """The nonces already used. **Kept in order to refuse a replay.**
 
-    **プロセス内だけに持たない。** daemon を落として上げれば同じ要求を再送できてしまう
-    （実測で指摘された）。writer が所有するファイルに残し、書けないなら受け付けない —
-    再送を防げない状態で通すのは、nonce を持たないのと同じである。
+    **Never held only in the process.** Stop the daemon and start it again and the same request
+    could be replayed (raised in audit). They live in a file the writer owns, and if that cannot be
+    written, nothing is accepted — allowing writes while unable to prevent a replay is the same as
+    having no nonces at all.
     """
 
     def __init__(self, path=None):
@@ -275,12 +280,12 @@ class _NonceStore:
                 with open(path, encoding="utf-8") as f:
                     self._seen = {k: float(v) for k, v in (json.load(f) or {}).items()}
             except Exception as e:
-                # **壊れた nonce ファイルを「空」として再開しない。** 実測（監査）: 壊すと
-                # 空から始まり、同じ nonce が再受理された。再送を検出できない状態は、
-                # nonce を持たないのと同じである。
-                self.load_error = (f"nonce ファイルを読めない（{e}）: {path}\n"
-                                   f"  **空として再開しない** — 再送を検出できない。"
-                                   f"内容を確認して手当てすること。")
+                # **Never resume from a corrupt nonce file as though it were empty.** Measured
+                # (audit): corrupting it started from empty and the same nonce was accepted again.
+                # Being unable to detect a replay is the same as having no nonces at all.
+                self.load_error = (f"cannot read the nonce file ({e}): {path}\n"
+                                   f"  **It is not resumed as empty** — a replay could not be "
+                                   f"detected. Inspect the contents and deal with it.")
 
     def check_and_add(self, nonce):
         if self.load_error:
@@ -307,38 +312,41 @@ class _NonceStore:
             return True
 
 
-# ── org allowlist（caller が台帳のパスを指定できないようにする）──────────────
+# ── the org allowlist (so a caller cannot name the ledger path) ─────────────
 def allowed_roots():
-    """writerd が書いてよい台帳のルート。**caller は RPC でパスを指定できない。**
+    """The ledger roots writerd may write to. **A caller cannot name a path over the RPC.**
 
-    指定できるなら、writer 経由でどこにでも書ける — 「台帳は writer が所有する」が意味を失う。
-    `--root` で起動時に固定し、要求側は `org` という名前でしか選べない。
+    If it could, anything could be written anywhere by way of the writer — and "the ledger belongs
+    to the writer" would mean nothing. It is fixed at start-up with `--root`, and the requesting
+    side can only choose by the name `org`.
     """
     return {}
 
 
 
-# ── writer が所有すべき資産（段階B で root/writer 所有にする）─────────────────
-# **ラッチ・鍵 registry・schema は、書き込み経路と同じ強さで守る必要がある。**
-# 台帳だけを writerd 経由にしても、halt のラッチを消せる／trust store の公開鍵を差し替えられる／
-# schema の検証規則を緩められるなら、統制は迂回できる。
+# ── the assets the writer should own (root/writer-owned at stage B) ─────────
+# **The latch, the key registry and the schema need guarding as strongly as the write path.**
+# Routing only the ledger through writerd achieves nothing if the halt latch can still be deleted,
+# a public key in the trust store swapped, or the schema's validation rules loosened — control is
+# bypassable through any of them.
 #
-# 段階A（同一 UID）で確かめられるのは「**他者から書き込み可能でないこと**」までである。
-# 段階B では所有者が writer / root であることを要求する — そこで初めて caller から変更不能になる。
+# What stage A (same UID) can confirm goes as far as "**not writable by others**".
+# Stage B requires the owner to be the writer or root — only then is it beyond a caller's reach.
 WRITER_OWNED = (
-    ("HALT", "halt のラッチ。消せる主体は停止を解除できる"),
-    ("keys.json", "鍵 registry。差し替えられる主体は判定の署名者を偽装できる"),
-    ("ledger-schema.yaml", "検証規則。緩められる主体は拒否されるべき記録を通せる"),
-    ("ledger.jsonl", "台帳そのもの"),
-    ("HEAD", "鎖の先端（cache だが、壊せば健全性検査が止まる）"),
+    ("HALT", "the halt latch. Whoever can delete it can lift the stop"),
+    ("keys.json", "the key registry. Whoever can swap it can forge the signer of a judgment"),
+    ("ledger-schema.yaml", "the validation rules. Whoever can loosen them can push through a "
+                           "record that ought to be refused"),
+    ("ledger.jsonl", "the ledger itself"),
+    ("HEAD", "the tip of the chain (a cache, but breaking it stops the soundness check)"),
 )
 
 
 def audit_writer_assets(root, org_root=None, require_owner_uid=None):
-    """writer が所有すべき資産の権限を検査する。
+    """Check the permissions on the assets the writer should own.
 
-    返り値: [(path, issue)] — 空なら問題なし。**「無い」は問題として数えない**
-    （halt していなければラッチは無いのが正常）。
+    Returns: [(path, issue)] — empty means nothing wrong. **Absence is not counted as a problem**
+    (with no halt in force, there being no latch is the normal state).
 
     `require_owner_uid` を渡すと所有者も検査する（段階B）。渡さないと
     「他者から書き込み可能でないこと」だけを見る（段階A で確かめられる範囲）。

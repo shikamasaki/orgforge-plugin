@@ -2536,7 +2536,7 @@ def test_client_accepts_a_writer_owned_leaf(tmp_path):
     # 明示しなければ、caller 所有の anchor は拒否される
     os.chmod(leaf, 0o755)
     err = wd.check_socket_parent(str(leaf / "w.sock"))
-    assert err and "caller 自身の所有" in err
+    assert err and "owned by the caller itself" in err
 
 
 def test_peer_uid_allowlist_is_available():
