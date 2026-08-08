@@ -936,7 +936,7 @@ def test_enum_and_type_are_checked_when_present(tmp_path):
     code, out = _app(tmp_path, "correction",
                      {"corrects": 5, "kind": "probe"}, actor="sup")     # list であるべき
     assert code == 2
-    assert "型が違う" in out
+    assert "has the wrong type" in out
 
 
 def test_undeclared_fields_warn_but_pass_except_in_strict_classes(tmp_path):
@@ -945,7 +945,7 @@ def test_undeclared_fields_warn_but_pass_except_in_strict_classes(tmp_path):
     code, out = _app(tmp_path, "admission_decided",
                      {**_ADM, "some_new_field": "x"}, actor="gate")
     assert code == 0, out
-    assert "宣言の無い field" in out
+    assert "undeclared fields" in out
     # verdict_provisional は additional_properties: false
     code, out = _app(tmp_path, "verdict_provisional",
                      {"issue": 7, "deliverable": "7", "role": "gate",
@@ -953,7 +953,7 @@ def test_undeclared_fields_warn_but_pass_except_in_strict_classes(tmp_path):
                       "admission_decided", "review_subject_id": "s", "reasoning_sha256": "d",
                       "not_declared": "x"}, actor="gate")
     assert code == 2
-    assert "宣言の無い field" in out
+    assert "undeclared fields" in out
 
 
 def test_unset_timestamp_is_refused(tmp_path):
@@ -1024,7 +1024,7 @@ def test_lock_failure_refuses_the_append(tmp_path):
                         "--actor", "w", "--class", "progress_recorded", "--payload", "{}"],
                        capture_output=True, text=True, env=env)
     assert r.returncode == 4, r.stdout + r.stderr
-    assert "ロックできない" in (r.stdout + r.stderr)
+    assert "cannot lock the append" in (r.stdout + r.stderr)
     assert not (tmp_path / "ledger.jsonl").exists(), "拒否したのに書いている"
 
 
@@ -1037,8 +1037,8 @@ def test_unlocked_escape_is_explicit_and_says_what_it_cannot_verify(tmp_path):
                        capture_output=True, text=True, env=env)
     assert r.returncode == 0, r.stdout + r.stderr
     both = r.stdout + r.stderr
-    assert "ロックせずに append" in both
-    assert "確かめられない" in both
+    assert "appending without a lock" in both
+    assert "cannot confirm the guarantee" in both
 
 
 def test_backfill_ts_must_be_a_real_moment(tmp_path):
@@ -1046,17 +1046,17 @@ def test_backfill_ts_must_be_a_real_moment(tmp_path):
     code, out = _app(tmp_path, "progress_recorded", {},
                      extra=("--backfill-ts", "2026-99-99T99:99:99Z"))
     assert code == 2
-    assert "実在しない日時" in out
+    assert "not a date-time that exists" in out
 
 
 def test_backfill_ts_refuses_future_and_distant_past(tmp_path):
     """Refuse the future and the distant past — both sidestep the cap's time window."""
     code, out = _app(tmp_path, "progress_recorded", {},
                      extra=("--backfill-ts", "2099-01-01T00:00:00Z"))
-    assert code == 2 and "未来である" in out
+    assert code == 2 and "is in the future" in out
     code, out = _app(tmp_path, "progress_recorded", {},
                      extra=("--backfill-ts", "2000-01-01T00:00:00Z"))
-    assert code == 2 and "遠すぎる過去" in out
+    assert code == 2 and "too far in the past" in out
 
 
 def test_normal_append_needs_no_timestamp(tmp_path):
@@ -3138,7 +3138,7 @@ def test_schema_fix_repairs_fields_after_inline_comments_and_unblocks_provisiona
          "--by", "skeptic"],
         capture_output=True, text=True, cwd=str(org), timeout=60)
     assert before.returncode != 0
-    assert "宣言の無い field" in before.stdout + before.stderr
+    assert "undeclared fields" in before.stdout + before.stderr
 
     fixed = subprocess.run(
         [sys.executable, str(TOOLS / "ledger.py"), "schema", "--fix", led],
