@@ -1573,16 +1573,16 @@ def _head_from_log(root):
             if not line.strip():
                 continue
             if not line.endswith("\n"):
-                return None, (f"log の {lineno} 行目が改行で終わっていない（torn line — "
-                              f"書き込み途中で落ちた痕跡）。**自動修復しない。** "
-                              f"内容を確認して手当てすること。")
+                return None, (f"line {lineno} of the log does not end in a newline (a torn "
+                              f"line — the trace of a write that died partway). **This is not "
+                              f"auto-repaired.** Inspect the contents and deal with it.")
             try:
                 ev = json.loads(line)
             except Exception as e:
                 return None, f"line {lineno} of the log is not readable as JSON: {e}"
             if ev.get("seq") != expect:
-                return None, (f"seq の飛び／順序違反: {lineno} 行目で {expect} を期待したが "
-                              f"{ev.get('seq')} だった。")
+                return None, (f"seq gap / out of order: expected {expect} at line {lineno}, "
+                              f"got {ev.get('seq')}.")
             if ev.get("prev_hash") != prev:
                 return None, f"prev_hash mismatch (seq={ev.get('seq')}) — the chain has been cut."
             if _hash(prev, ev) != ev.get("hash"):
@@ -1621,42 +1621,47 @@ def _in_window(ev, since, until):
 
 
 def require_writer_path(op):
-    """`ORG_WRITER_SOCKET` が設定された org では、**writerd を通らない書き込みを拒否する**。
+    """In an org where `ORG_WRITER_SOCKET` is set, **refuse any write that does not go through
+    writerd**.
 
-    段階A（process_mediated）で強制できるのは「経路が1つであること」だけである。
-    **これは OS 境界ではない** — 同じ UID の caller は daemon を止められ、この環境変数も外せる。
-    したがって `workload_isolation` は `process_mediated` であって `separate_uid` ではない。
+    All stage A (process_mediated) can enforce is that there is exactly ONE path.
+    **This is not an OS boundary** — a caller with the same UID can stop the daemon and can unset
+    this environment variable. That is why `workload_isolation` is `process_mediated` and not
+    `separate_uid`.
 
-    別 UID + root 所有の socket 親ディレクトリまで揃えば、環境変数を外しても台帳のファイルに
-    書けなくなる（OS 権限で失敗する）。そこで初めて境界になる。
+    Only once a separate UID and a root-owned parent directory for the socket are both in place
+    does unsetting the variable stop working — writing to the ledger file then fails on OS
+    permissions. That is the point at which it becomes a boundary.
 
-    返り値: None なら続行してよい。文字列なら拒否の理由。
+    Returns: None to continue. A string giving the reason for refusal.
     """
     if _inside_writer():
-        return None                     # writerd 自身が呼んでいる
+        return None                     # writerd itself is the caller
     sock = os.environ.get("ORG_WRITER_SOCKET")
     if not sock:
-        return None                     # writerd を使わない org（従来どおり）
-    return (f"この org は writerd 経由の書き込みだけを許している"
+        return None                     # an org that does not use writerd (unchanged behaviour)
+    return (f"this org permits writes only through writerd"
             f"（ORG_WRITER_SOCKET={sock}）。\n"
-            f"  `{op}` を直接実行せず、writerd に送ること:\n"
-            f"    python3 tools/writer_client.py {op} -- <引数…>\n"
-            f"  **台帳への経路を1つにするのが目的である。** 経路が複数あると、"
-            f"「検査に使う記録は検査する側だけが書ける」を強制できない。\n"
-            f"  注意: これは OS 境界ではない（同一 UID なら daemon を止められる）。"
-            f"workload_isolation は process_mediated である。")
+            f"  Do not run `{op}` directly; send it to writerd:\n"
+            f"    python3 tools/writer_client.py {op} -- <arguments…>\n"
+            f"  **The point is to have exactly one path to the ledger.** With several paths, "
+            f"\"the records a check relies on are writable only by the side doing the checking\" "
+            f"cannot be enforced.\n"
+            f"  Note: this is not an OS boundary (the same UID can stop the daemon). "
+            f"workload_isolation is process_mediated.")
 
 
 
 
 def _org_and_ledger_id(root):
-    """(org_id, ledger_id)。**書き込み先から取る** — payload の値は caller が書ける。
+    """(org_id, ledger_id). **Taken from the write destination** — a value in the payload is
+    something the caller can write.
 
-    org_id  … org の識別子（`.orgforge/ORG_ID` があればそれ、無ければ org root のハッシュ）
-    ledger_id … 台帳の識別子（`<root>/LEDGER_ID` があればそれ、無ければ root のハッシュ）
+    org_id    … the org's identifier (`.orgforge/ORG_ID` if present, otherwise a hash of the org root)
+    ledger_id … the ledger's identifier (`<root>/LEDGER_ID` if present, otherwise a hash of the root)
 
-    どちらも無い org では None を返し、その項目の一致検査は行わない — 既存の org を
-    止めないため。**新しく作る org では書く**（`org-init` が置く）。
+    In an org with neither, return None and skip the matching check for that item — so as not to
+    stop existing orgs. **A newly created org does write them** (`org-init` places them).
     """
     def _read_or_hash(path, fallback):
         if path and os.path.isfile(path):
@@ -1683,13 +1688,14 @@ def _org_and_ledger_id(root):
 
 
 def _verify_receipt_for(a, payload, cls, receipt_expect=None):
-    """`--receipt` を検証し、identity fields を生成する。(fields, error)。
+    """Verify `--receipt` and derive the identity fields. (fields, error).
 
-    **環境変数の「検証済み」印は使わない。** caller が立てられるものは証拠にならない —
-    実測（監査）で、`ORG_IDENTITY_VERIFIED=1` を足すだけで偽の identity が通った。
+    **Never use an environment variable as a "verified" marker.** Anything the caller can set is
+    not evidence — measured (audit): merely adding `ORG_IDENTITY_VERIFIED=1` let a forged identity
+    through.
 
-    ここで検証するのはこの道具自身であり、caller は receipt を **渡せるだけ**である。
-    署名が合わなければ何も生成しない。
+    What verifies here is this tool itself; the caller can only **hand over** a receipt.
+    If the signature does not check out, nothing is derived.
     """
     rc_arg = getattr(a, "receipt", None)
     if not rc_arg:
@@ -1704,10 +1710,10 @@ def _verify_receipt_for(a, payload, cls, receipt_expect=None):
         from identity import verify_receipt, observed_recorder
     except Exception as e:
         return None, f"cannot load the identity module: {e}"
-    # **判定の中身と receipt が一致することを確かめる。** 一致を見ないと、別の判定の receipt を
-    # 持ち込んで identity だけ借りられる。
-    # **receipt を、この判定に完全に束縛する。** 一部だけ見ると、見ていない項目が違う receipt を
-    # 流用できる（別 org / 別 issue / 別クラスへの再利用）。
+    # **Check that the receipt matches the contents of the judgment.** Without that check, one
+    # could bring the receipt of a DIFFERENT judgment and borrow only its identity.
+    # **Bind the receipt completely to this judgment.** Check only part of it and a receipt that
+    # differs in the unchecked items can be reused (across orgs, issues, or classes).
     expect = {"event_class": cls}
     for k, pk in (("verdict", "verdict"), ("role", "role"), ("lineage", "lineage"),
                   ("review_subject_id", "review_subject_id"),
@@ -1721,8 +1727,9 @@ def _verify_receipt_for(a, payload, cls, receipt_expect=None):
             expect[k] = payload[pk]
     if receipt_expect:
         expect.update(receipt_expect)
-    # org / ledger は台帳の側が持つ。**payload からではなく、書き込み先から取る** —
-    # payload の値は caller が書けるので、一致を確かめても意味が無い。
+    # org / ledger belong to the ledger itself. **Take them from the write destination, not from
+    # the payload** — a payload value is something the caller can write, so checking it against
+    # itself proves nothing.
     _org_id, _led_id = _org_and_ledger_id(a.root)
     if _org_id:
         expect["org_id"] = _org_id
@@ -1760,48 +1767,56 @@ def cmd_append(a):
         print("append: payload must not carry its own 'actor' — actor comes from --actor "
               "(runtime identity), never the event body (ledger-schema §envelope)", file=sys.stderr)
         return 2
-    # **schema_version は writer が付ける。** クライアントが名指しできるなら、緩い版を指定して
-    # 検証を素通りできる（downgrade）。payload 経由でも envelope 経由でも受け取らない。
-    # 禁じるのは **版を名指しする値** だけ。`schema_id` は
-    # `schema_enforcement_started` のような「スキーマ境界そのものを記録する」イベントが
-    # payload に持って自然な値で、downgrade の的にはならない（版ではないので）。
-    # 禁止を広く取りすぎると、記録したい事実が書けなくなる（実際に自分の epoch 記録が弾かれた）。
-    # **`_nk` は payload に書かせない。** 冪等キーは道具が付ける印であって、caller が名指しする
-    # ものではない。名指しできると、既存の記録と同じキーを主張して no-op を作れる
-    # （＝書いたつもりで書かれていない、あるいは他人の記録を自分のものとして読ませる）。
-    # **identity fields は caller が書けない。** writer（receipt を検証した経路）が生成する。
-    # **caller が立てられる印を信頼しない。** 実測（監査）: `ORG_IDENTITY_VERIFIED=1` を
-    # 環境に足すだけで偽の identity が通った。環境変数は caller が制御できるので、
-    # 「検証済み」の証拠にならない。
+    # **The writer stamps schema_version.** If a client could name it, it could specify a laxer
+    # version and slip past validation (a downgrade). It is accepted neither via the payload nor
+    # via the envelope.
+    # What is forbidden is only **a value that names a version**. `schema_id` is a value an event
+    # that records the schema boundary itself — such as `schema_enforcement_started` — naturally
+    # carries in its payload, and it is not a downgrade target (it is not a version).
+    # Draw the prohibition too widely and facts you want to record become unwritable (our own
+    # epoch record was rejected that way).
+    # **`_nk` must not be written into the payload.** The idempotency key is a mark the tool
+    # applies, not something the caller names. If it could be named, one could claim the same key
+    # as an existing record and manufacture a no-op (i.e. believe you wrote something when nothing
+    # was written, or make someone else's record read as your own).
+    # **The caller cannot write the identity fields.** The writer — the path that verified a
+    # receipt — derives them.
+    # **Never trust a marker the caller can set.** Measured (audit): merely adding
+    # `ORG_IDENTITY_VERIFIED=1` to the environment let a forged identity through. An environment
+    # variable is under the caller's control, so it is no evidence of verification.
     #
-    # 代わりに **receipt そのものを渡させ、ここで検証する**。検証できたときだけ identity を
-    # 生成する（caller が書いた identity fields は常に拒否する）。
+    # Instead, **make them hand over the receipt itself and verify it here.** Identity is derived
+    # only when that verification succeeds (identity fields written by the caller are always
+    # refused).
     _IDENT = ("identity_assurance", "decision_by", "recorder_assurance", "signer_id", "key_id",
               "workload_isolation", "writer_isolation", "authority_principal",
               "authority_role", "authority_assurance", "authority_receipt_subject")
     if isinstance(payload, dict):
         forged = [k for k in _IDENT if k in payload]
         if forged:
-            print(f"append: payload に {', '.join(forged)} を含めてはいけない — "
-                  f"identity は **この道具が receipt を検証して生成する**。\n"
-                  f"  **書けるものを検査に使ってはいけない。** 実測で、これらを書くだけで"
-                  f"職務分離を回避でき、環境変数を足すだけでも回避できた。\n"
-                  f"  judgment を記録するなら --receipt を渡すこと。", file=sys.stderr)
+            print(f"append: the payload must not contain {', '.join(forged)} — "
+                  f"**this tool derives identity by verifying a receipt**.\n"
+                  f"  **Never use something writable as the thing you check.** Measured: writing "
+                  f"these alone evaded separation of duties, and so did merely adding an "
+                  f"environment variable.\n"
+                  f"  To record a judgment, pass --receipt.", file=sys.stderr)
             return 2
     if isinstance(payload, dict) and "_nk" in payload:
-        print("append: payload に '_nk' を含めてはいけない — 冪等キーは道具が付ける。"
-              "caller が名指しできると、既存の記録と同じキーを主張して no-op を作れる。",
+        print("append: the payload must not contain '_nk' — the tool applies the idempotency "
+              "key. If the caller could name it, they could claim the same key as an existing "
+              "record and manufacture a no-op.",
               file=sys.stderr)
         return 2
     for k in ("schema_version", "schema_sha256"):
         if isinstance(payload, dict) and k in payload:
-            print(f"append: payload に {k!r} を含めてはいけない — schema の版は writer が"
-                  f"決める。クライアントが名指しできると、緩い版を指定して検証を迂回できる。",
+            print(f"append: the payload must not contain {k!r} — the writer decides the schema "
+                  f"version. If a client could name it, it could specify a laxer version and "
+                  f"bypass validation.",
                   file=sys.stderr)
             return 2
         if getattr(a, k, None):
-            print(f"append: --{k.replace('_', '-')} は受け取らない — schema の版は writer が"
-                  f"決める（downgrade 防止）。", file=sys.stderr)
+            print(f"append: --{k.replace('_', '-')} is not accepted — the writer decides the "
+                  f"schema version (to prevent a downgrade).", file=sys.stderr)
             return 2
 
     # ── idempotency (docs/11 §0 reproducibility): if a natural key is given, this event is a
@@ -1812,11 +1827,12 @@ def cmd_append(a):
     # counter is monotonic, so without this an identical logical event would land twice under two
     # ids — the non-idempotency the "idempotent under replay" note wrongly claimed we already had.
     #
-    # **冪等 no-op は「同じ actor による同じ論理イベント」に限る。** 以前は (class, natural_key)
-    # だけを見ていたため、キーさえ一致すれば **actor が違っても no-op** になり、統制
-    # （DISTINCT_ACTOR / REQUIRES_PRIOR）は評価すらされなかった。実地では、gate の判定と
-    # 同じキー `admission_decided-11` を maker が使うと、自己承認が「既に記録済み」として
-    # exit 0 で通った。冪等性は再実行を守るための仕組みであって、統制を迂回する裏口ではない。
+    # **An idempotent no-op is limited to "the same logical event BY THE SAME ACTOR".** This used
+    # to look only at (class, natural_key), so a matching key made it **a no-op even for a
+    # different actor**, and the controls (DISTINCT_ACTOR / REQUIRES_PRIOR) were never even
+    # evaluated. In practice, a maker using the same key as the gate's decision —
+    # `admission_decided-11` — got its self-approval through as "already recorded", exit 0.
+    # Idempotency exists to make a re-run safe; it is not a back door around control.
     # **ここから書き込みまでを1つの critical section にする。** log を読む → seq を決める →
     # 書く → HEAD を更新する、が分かれていると並列 append が同じ seq を計算する
     # （実測: 12並列で12件すべて seq=1）。
