@@ -1012,10 +1012,11 @@ def _judge_lineage(role):
     environment that lacks its contract, CLI or authentication. Lining up several lineages is a
     choice to add another slice of the Swiss cheese — not a premise for the org to exist at all.
 
-    **ただし読めないときは止める（fail-closed）。** 0.32.0 は例外を握りつぶして
-    `same-harness` を返していた — cross-harness を宣言した org で YAML が壊れていると、
-    **強い安全モードが黙って通常モードに落ちる**。判定の血統が分かれていないことに
-    気づく経路が無くなるので、これは沈黙してはいけない側の失敗である。
+    **But when it cannot be read, stop (fail-closed).** 0.32.0 swallowed the exception and returned
+    `same-harness` — so in an org that declared cross-harness, a broken YAML meant **a strong safety
+    mode quietly dropping to the ordinary one**. That leaves no route by which anyone notices the
+    lineages are not actually separated, which puts it firmly on the side that must not fail
+    silently.
     """
     env = os.environ.get("ORG_JUDGE_LINEAGE")
     if env:
@@ -1025,25 +1026,25 @@ def _judge_lineage(role):
         from discover import constitution
         path = constitution()
     except Exception as e:
-        raise SystemExit(f"constitution の場所を解決できない: {e}\n"
-                         "  judges.lineage を読めないまま judge を起動すると、cross-harness を"
-                         "宣言した org が黙って同一血統で判定する。")
+        raise SystemExit(f"cannot resolve where the constitution is: {e}\n"
+                         "  Launch a judge without having read judges.lineage and an org that "
+                         "declared cross-harness judges quietly on a single lineage.")
     if not path or not os.path.isfile(path):
-        return "same-harness", None        # constitution が無い = 宣言が無い
+        return "same-harness", None        # no constitution = no declaration
     try:
         import yaml
     except Exception:
-        raise SystemExit("PyYAML が無いので constitution を読めない。\n"
-                         "  cross-harness の宣言が黙って消えることは許さない:\n"
+        raise SystemExit("PyYAML is missing, so the constitution cannot be read.\n"
+                         "  A cross-harness declaration is never allowed to vanish silently:\n"
                          "    python3 -m pip install pyyaml")
     try:
         with open(path, encoding="utf-8") as f:
             c = yaml.safe_load(f) or {}
     except Exception as e:
-        raise SystemExit(f"constitution.yaml を解析できない: {e}\n  ファイル: {path}\n"
-                         "  **設定を読めないなら止める。**")
+        raise SystemExit(f"cannot parse constitution.yaml: {e}\n  file: {path}\n"
+                         "  **If the configuration cannot be read, stop.**")
     if not isinstance(c, dict):
-        raise SystemExit(f"constitution.yaml が map ではない（{type(c).__name__}）: {path}")
+        raise SystemExit(f"constitution.yaml is not a map ({type(c).__name__}): {path}")
     j = ((c.get("enforcement") or {}).get("judges") or {})
     declared = str(j.get("lineage") or "same-harness").strip()
     sys.path.insert(0, HERE)
@@ -1054,33 +1055,34 @@ def _judge_lineage(role):
 
     harness = j.get("harness") or {}
     if not isinstance(harness, dict):
-        raise SystemExit("judges.harness が map でない。cross-harness の経路を選べない。")
+        raise SystemExit("judges.harness is not a map, so no cross-harness route can be chosen.")
     missing = [name for name in ("claude", "codex")
                if not isinstance(harness.get(name), dict)]
     if missing:
-        raise SystemExit("judges.harness に claude / codex 両方の map が必要（不足: "
+        raise SystemExit("judges.harness needs a map for both claude and codex (missing: "
                          + ", ".join(missing) + "）。")
 
     primary = active_harness()
     secondary = opposite_harness(primary)
     cfg = harness[secondary].get(role)
     if not isinstance(cfg, dict):
-        raise SystemExit(f"judges.harness.{secondary}.{role} が必要。\n"
-                         "  cross-harness の役割を暗黙の CLI に委ねない。")
+        raise SystemExit(f"judges.harness.{secondary}.{role} is required.\n"
+                         "  A cross-harness role is never left to an implicit CLI.")
     cli = str(cfg.get("cli") or "").strip()
     if cli != secondary:
-        raise SystemExit(f"主系 {primary!r} の別血統 CLI は {secondary!r} でなければならないが、"
-                         f"{cli!r} が指定されている。\n"
-                         "  同じハーネスを2回走らせても cross-harness にはならない。")
+        raise SystemExit(f"with {primary!r} as the primary, the other lineage's CLI must be "
+                         f"{secondary!r}, but {cli!r} is configured.\n"
+                         "  Running the same harness twice does not make it cross-harness.")
     return lineage, cfg
 
 
 def cmd_intake(a):
-    """subagent が返した報告が成果物の形になっているかを検査する。
+    """Check whether the report a subagent returned has the shape of a deliverable.
 
-    **判定はしない。** verdict の中身も、その妥当性も見ない — 見るのは「役割として要求される
-    欄が埋まっているか」だけである。埋まっていなければ「報告が不完全。再開させること」と言う。
-    いまは監督が目で気づくかどうかに賭かっている。
+    **It does not judge.** It looks neither at the contents of the verdict nor at whether it is
+    sound — only at whether the fields the role requires are filled in. When they are not, it says
+    "the report is incomplete; resume it". As things stand, that rests on whether the supervisor
+    happens to notice by eye.
     """
     text = a.report
     if a.report == "-":
@@ -1088,13 +1090,14 @@ def cmd_intake(a):
     role = a.role
     checks = _INTAKE.get(role)
     if not checks:
-        print(f"役割 {role!r} の受け入れ検査は定義されていない"
-              f"（定義済み: {', '.join(sorted(_INTAKE))}）。", file=sys.stderr)
+        print(f"no intake check is defined for the role {role!r} "
+              f"(defined: {', '.join(sorted(_INTAKE))}).", file=sys.stderr)
         return 2
 
-    # 構造化された返り値（Codex の --output-schema など）なら、**正規表現ではなく構造で見る**。
-    # スキーマが形を保証していても、`out_of_scope` に「無し」と書くべき欄が空文字だったり、
-    # verdict が enum 外の値だったりはしうる。JSON なら確実に読めるので、そちらを優先する。
+    # For a structured return value (Codex's --output-schema and the like), **read the structure
+    # rather than a regex**. Even with the schema guaranteeing the shape, a field that ought to say
+    # "none" in `out_of_scope` can be an empty string, and a verdict can hold a value outside the
+    # enum. JSON can be read with certainty, so it takes precedence.
     as_json = None
     try:
         cand = json.loads(text)
@@ -1112,12 +1115,14 @@ def cmd_intake(a):
             else:
                 ok = bool(str(v).strip()) if not isinstance(v, (list, dict)) else bool(v) or v == []
             if not ok:
-                missing.append((k, why + "（構造化された返り値の該当欄が空 / 値が不正）"))
-        # スキーマが required にしていても、値が空文字なら埋まっていない
+                missing.append((k, why + " (the corresponding field of the structured return "
+                                       "value is empty, or holds an invalid value)"))
+        # Even where the schema marks it required, an empty string is not filled in
         for k in ("why", "evidence"):
             v = str(as_json.get(k) or "").strip()
             if k in dict((c[0], 1) for c in checks) and len(v) < 20 and (k, ) not in [(m[0],) for m in missing]:
-                missing.append((k, "構造化された返り値の該当欄が短すぎる（20文字未満）"))
+                missing.append((k, "the corresponding field of the structured return value is "
+                                   "too short (under 20 characters)"))
         # **A withholding verdict has to say what it is withholding for, item by item.** The id in
         # the prose ("GATE-001") used to be the judge's own numbering, which the tools could not
         # see — so nothing could count the findings, answer them in one pass, or tell a re-raised
@@ -1158,20 +1163,24 @@ def cmd_intake(a):
         if role == "skeptic":
             mutations = as_json.get("mutations")
             if not isinstance(mutations, list):
-                missing.append(("mutations", "mutations が array ではない / 欠落している"))
+                missing.append(("mutations", "mutations is not an array, or is absent"))
                 mutations = []
             for index, mutation in enumerate(mutations):
                 if not isinstance(mutation, dict):
-                    missing.append(("mutations", f"mutation[{index}] が object ではない"))
+                    missing.append(("mutations", f"mutation[{index}] is not an object"))
                     continue
                 if mutation.get("applied") is not True:
-                    missing.append(("mutations", f"mutation[{index}] の適用成立が確認されていない"))
+                    missing.append(("mutations",
+                                    f"mutation[{index}] is not confirmed to have applied"))
                 post = mutation.get("postcondition")
                 if not isinstance(post, str) or len(post.strip()) < 10:
-                    missing.append(("mutations", f"mutation[{index}] に適用後状態の実測が無い"))
+                    missing.append(("mutations",
+                                    f"mutation[{index}] has no measurement of the post-apply state"))
                 restored = mutation.get("restore_postcondition")
                 if not isinstance(restored, str) or len(restored.strip()) < 10:
-                    missing.append(("mutations", f"mutation[{index}] に復元後状態の実測が無い"))
+                    missing.append(("mutations",
+                                    f"mutation[{index}] has no measurement of the post-restore "
+                                    f"state"))
     else:
         missing = [(k, why) for k, pat, why in checks
                    if not re.search(pat, text, re.I | re.M)]
@@ -1180,122 +1189,137 @@ def cmd_intake(a):
             # empty list: a decoy `mutations: []` line may coexist with mutation claims elsewhere.
             # Require the structured contract for every skeptic report.  Static proofs represent
             # the empty list in JSON, which keeps both harness paths on the same intake boundary.
-            missing.append(("mutations", "skeptic 報告は常に構造化 JSON が必要。"
-                            "静的判定も `\"mutations\": []` を含む JSON で返す"))
+            missing.append(("mutations", "a skeptic report always requires structured JSON. A "
+                                         "static judgment returns JSON too, including "
+                                         "`\"mutations\": []`"))
     truncated = [p for p in _TRUNCATED if re.search(p, text.strip(), re.I | re.M)]
 
-    print(f"— intake #{a.issue} ({role}) — {len(text)} 文字")
+    print(f"— intake #{a.issue} ({role}) — {len(text)} characters")
     if not missing:
-        print(f"  ✓ 必須要素は揃っている（{', '.join(k for k, _, _ in checks)}）")
+        print(f"  ✓ the required elements are all present "
+              f"({', '.join(k for k, _, _ in checks)})")
         if truncated:
-            print(f"  · 途中で切れたように読める語があるが、必須要素は揃っているので"
-                  f"完走とみなす（{truncated[0]}）")
+            print(f"  · there is wording that reads as cut off partway, but the required "
+                  f"elements are all present, so it is taken as having run to completion "
+                  f"({truncated[0]})")
         return 0
 
-    print(f"  ✗ **報告が不完全 — 再開させること。**", file=sys.stderr)
+    print(f"  ✗ **the report is incomplete — resume it.**", file=sys.stderr)
     for k, why in missing:
         print(f"      {k}: {why}", file=sys.stderr)
     if truncated:
-        print(f"    作業の途中で turn が終わった可能性が高い"
-              f"（「{text.strip()[-60:]}」で終わっている）。", file=sys.stderr)
-    print(f"    SendMessage で続きを促すこと。**この報告を判定として読まないこと** — "
-          f"実地では「Now the key attack:」の1文だけが返り、status は completed だった。\n"
-          f"    途中の1文を verdict として読めば、確かめていないものを admit する。\n"
+        print(f"    the turn most likely ended partway through the work "
+              f"(it ends with \"{text.strip()[-60:]}\").", file=sys.stderr)
+    print(f"    Prompt it to continue with SendMessage. **Do not read this report as a "
+          f"judgment** — in the field, the single sentence \"Now the key attack:\" came back with "
+          f"status completed.\n"
+          f"    Read a mid-work sentence as a verdict and you admit something nobody verified.\n"
           f"    [intake] INCOMPLETE issue={a.issue} role={role} "
           f"missing={','.join(k for k, _ in missing)} exit=10",
           file=sys.stderr)
-    # 最後の1行は**機械が拾える形**にしてある。`| tail` や `| grep` を通すとシェルの終了コードは
-    # 最後のコマンドのものになり、この 10 は消える（実地でそう観測された — 実装は 10 を返して
-    # いたが、観測経路が 0 を見せた）。パイプで読む経路でも判定できるように、
-    # `INCOMPLETE` を出力に置く。
+    # The final line is shaped so **a machine can pick it up**. Through `| tail` or `| grep` the
+    # shell's exit code becomes that of the last command and this 10 disappears (observed in the
+    # field — the implementation returned 10 while the observation path showed 0). So `INCOMPLETE`
+    # is placed in the output, letting a piped reader decide too.
     return 10
 
 
 def cmd_rework(a):
-    """reject / refuted を受けて rework を発注したことを記録する。
+    """Record that rework was commissioned in response to a reject / refuted.
 
-    **専用コマンドが無かったことが記録漏れの一因である。** 運用で reject/refuted の多くに対し
-    `rework_requested` が記録されていなかった（4回 reject されて記録0件の Issue もあった）。監督は
-    `ledger.py append --class rework_requested --payload '{...}'` を手で組む必要があり、
-    しかも発注は「判定を受け取る → 検証 → decide → **発注** → 記録」の順で、発注した subagent の
-    通知が来ると記録が流れる。
+    **Part of why records went missing is that there was no dedicated command.** In operation, many
+    rejects and refuteds had no `rework_requested` recorded (one Issue was rejected four times with
+    zero records). The supervisor had to assemble
+    `ledger.py append --class rework_requested --payload '{...}'` by hand — and the commissioning
+    sits in the sequence "receive the judgment → verify → decide → **commission** → record", so once
+    the commissioned subagent's notification arrives, the recording gets washed away.
 
-    副作用として `show` の rework 警告（0.26.0）が沈黙していた — 台帳に材料が無いので閾値に
-    届かない。**道具の誤検出ではなく、監督が材料を入れていなかった。**
+    As a side effect, `show`'s rework warning (0.26.0) had fallen silent — with no material in the
+    ledger the threshold is never reached. **Not a false negative in the tool: the supervisor was
+    not putting the material in.**
     """
     payload = {"deliverable": str(a.issue), "issue": a.issue,
                "verdict": "rework", "reason": a.reason,
                "from_verdict": a.after, "to_role": a.to or "",
                "round": str(a.round)}
-    # 死因の根の分類（Issue #104）。再発検出（learning.py repeats）は root の一致で数える —
-    # 記録時に分類されなければ、この rework が同根の再発でも検出器は文字列一致でしか見えない。
-    # 語彙は learning.DEATH_ROOTS が単一の情報源（schema の enum とはテストが突き合わせる）。
+    # Classifying the root cause of death (Issue #104). Recurrence detection (learning.py repeats)
+    # counts by matching roots — so if it is not classified at record time, a recurrence of the same
+    # root is visible to the detector only as a string match.
+    # learning.DEATH_ROOTS is the single source for the vocabulary (a test reconciles it with the
+    # schema's enum).
     root = (getattr(a, "root", None) or "").strip()
     if root:
         sys.path.insert(0, HERE)
         from learning import DEATH_ROOTS
         if root not in DEATH_ROOTS:
-            print(f"rework: --root {root!r} は死因の根の語彙に無い。許される値:\n"
+            print(f"rework: --root {root!r} is not in the root-cause vocabulary. Permitted "
+                  f"values:\n"
                   + "\n".join(f"  {k:<24}{v}" for k, v in DEATH_ROOTS.items()),
                   file=sys.stderr)
             return 2
         payload["root"] = root
     rc = _execute([
-        # GitHub を先に作業可能な状態へ戻す。ここが失敗したら台帳へ rework を記録しない —
-        # CLOSED/COMPLETED のまま ledger だけ次周へ進む分岐が実地で起きた。
+        # Put GitHub back into a workable state first. If that fails, the rework is not recorded to
+        # the ledger — in the field there was a branch where the Issue stayed CLOSED/COMPLETED while
+        # only the ledger moved on to the next round.
         (f"stage ready / reopen → #{a.issue}",
          lambda: _gh_sync("stage", "--issue", str(a.issue), "--stage", "ready")),
-        (f"rework_requested #{a.issue}（{a.after} を受けて）",
+        (f"rework_requested #{a.issue} (in response to {a.after})",
          lambda: _ledger("append", "--actor", a.by, "--class", "rework_requested",
                          "--natural-key", f"rework-{a.issue}-{a.round}",
                          "--payload", json.dumps(payload, ensure_ascii=False))),
         (f"log → #{a.issue}",
          lambda: _gh_sync("log", "--issue", str(a.issue), "--event", "progress_recorded",
-                          "--detail", f"rework を発注（{a.after} を受けて）: {a.reason}",
+                          "--detail", f"commissioned rework (in response to {a.after}): "
+                                      f"{a.reason}",
                           "--command", f"org_cycle.py rework --issue {a.issue} "
                                        f"--after {a.after} --round {a.round}",
                           "--result", a.reason[:2000])),
     ], f"record rework #{a.issue}")
     if rc == 0:
-        print(f"\n  Issue は OPEN / ready に戻り、`show --issue {a.issue}` の rework 警告も"
-              f"正しく数えられる（台帳に材料が入っていないと、閾値に届かず沈黙する）。")
+        print(f"\n  The Issue is back to OPEN / ready, and `show --issue {a.issue}`'s rework "
+              f"warning counts correctly too (with no material in the ledger it never reaches the "
+              f"threshold and stays silent).")
     return rc
 
 
 def cmd_record(a):
-    """2: 済んだ判定を遡って台帳に記録する。
+    """2: record a judgment that has already been made, retroactively.
 
-    統合の判定がどこにも残らないことがある（`integration_admitted` が0件）。しかも「マージ後の
-    10件失敗のうち8件は worktree 走査の偽陽性で、の欠陥はゼロ」という切り分けの判断が
-    記録から消えていた。**その切り分けこそ後から最も知りたい情報**なので、遡って残せる口を開ける。
+    An integration judgment can end up recorded nowhere (`integration_admitted` at zero). And the
+    analysis that "of the 10 post-merge failures, 8 were false positives from the worktree scan and
+    none were real defects" had disappeared from the record along with it. **That analysis is
+    precisely what one most wants to know afterwards**, so there is an opening to put it back.
 
-    追記型なので過去は書き換わらない — `backfilled: true` を付けて、後から足した記録だと
-    分かるようにする（実時点の記録と混ぜない）。
+    The ledger is append-only, so the past is not rewritten — `backfilled: true` marks it as
+    something added later (never mixed in with records made at the time).
     """
     payload = {"verdict": a.verdict, "issue": a.issue, "deliverable": str(a.issue),
                "backfilled": True, "why": a.why}
     if a.event == "integration_admitted":
-        # base を消費するのはこのイベントだけなので、必要になった時だけ解決する（#106）。
+        # This is the only event that consumes base, so it is resolved only when needed (#106).
         from ._core import resolve_integration_base
         base, base_err = resolve_integration_base(getattr(a, "base", None))
         if base_err:
-            print(f"integration_admitted の統合先が決まらない（#{a.issue}）:\n{base_err}",
+            print(f"cannot determine the integration target for integration_admitted "
+                  f"(#{a.issue}):\n{base_err}",
                   file=sys.stderr)
             return 2
         payload.update({"integration_branch": base, "deliverables": [str(a.issue)],
-                        "combined_ci_ref": a.command or "(記録なし)"})
+                        "combined_ci_ref": a.command or "(not recorded)"})
     if a.result:
         payload["result"] = a.result[:4000]
     steps = [
-        (f"{a.event}（backfill）を記録",
+        (f"record {a.event} (backfill)",
          lambda: _ledger("append", "--actor", a.by, "--class", a.event,
                          "--natural-key", f"backfill-{a.event}-{a.issue}",
                          "--payload", json.dumps(payload, ensure_ascii=False))),
         (f"log → #{a.issue}",
          lambda: _gh_sync("log", "--issue", str(a.issue), "--event", a.event,
                           "--event-id", f"backfill-{a.event}-{a.issue}",
-                          "--detail", f"[遡って記録] {a.why}",
-                          "--command", a.command or "(当時のコマンドは記録に残っていない)",
+                          "--detail", f"[recorded retroactively] {a.why}",
+                          "--command", a.command or "(the command used at the time is not on "
+                                                    "record)",
                           "--result", a.result or a.why)),
     ]
     return _execute(steps, f"backfill {a.event} #{a.issue}")

@@ -8,7 +8,7 @@ false_green:
   test_injection_id: false-green-test-fixture-v1
 expected:
   intake_returncode: 10
-  rejection_marker: mutation[0] の適用成立が確認されていない
+  rejection_marker: mutation[0] is not confirmed to have applied
   outcome: safe_stop
   gaps: []
 blast_radius:
