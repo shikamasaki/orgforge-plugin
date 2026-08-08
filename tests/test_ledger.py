@@ -1614,8 +1614,9 @@ def test_identity_declares_four_separate_assurance_axes():
 
 
 # ══ Authenticated Mode + H4b — releasing a halt with authentication ═════════════════════════
-# **共有鍵は「鍵が違う」ことしか示さない。** 別主体・別プロセス・独立した承認を証明しないので、
-# 解除には使えない。非対称鍵（judge が秘密鍵、writer は公開鍵だけ）が前提である。
+# **A shared key shows only that the key differs.** It proves nothing about a different principal,
+# a different process, or an independent approval, so it cannot be used for a release. An asymmetric
+# key is the premise (the judge holds the private key; the writer holds only the public one).
 
 def _am_org(tmp_path):
     org = tmp_path / "org"
@@ -1645,8 +1646,9 @@ def test_trust_store_holds_public_keys_only(tmp_path):
     assert r.returncode == 0, r.stdout + r.stderr
     store = json.loads((org / ".orgforge" / "trust" / "keys.json").read_text(encoding="utf-8"))
     k = store["keys"]["k1"]
-    assert k.get("public_pem"), "公開鍵が入っていない"
-    assert "private_pem" not in k and "secret" not in k, "秘密鍵/共有鍵が store に漏れている"
+    assert k.get("public_pem"), "the public key is not present"
+    assert "private_pem" not in k and "secret" not in k, \
+        "a private or shared key has leaked into the store"
     assert store["mode"] == "authenticated"
     assert (org / "keys" / "k1.pem").is_file()
 
@@ -1679,7 +1681,7 @@ def test_public_key_cannot_produce_a_signature(tmp_path):
     assert not err and sig.startswith("ed25519:")
     assert ident.verify_bytes(b"m", sig, pub) == (True, None)
     assert ident.verify_bytes(b"tampered", sig, pub)[0] is False
-    assert ident.sign_bytes(b"m", pub)[0] is None      # 公開鍵で署名できない
+    assert ident.sign_bytes(b"m", pub)[0] is None      # a public key cannot sign
 
 
 def _am_setup_halt(tmp_path, **kw):
@@ -1713,7 +1715,7 @@ def _am_receipt(org, key_id, priv=None, subject="halt:1", out="r.json"):
 
 def _am_release(org, led, receipt, evidence="ledger verify → chain intact", env=None):
     r = _am_tool(org, "ledger.py", "release-halt", str(led), "--receipt", receipt,
-                 "--reason", "復旧を確認した", "--recovery-verified", evidence, env=env)
+                 "--reason", "recovery was confirmed", "--recovery-verified", evidence, env=env)
     return r.returncode, json.loads(r.stdout.splitlines()[0]) if r.stdout.strip() else {}
 
 
@@ -1724,7 +1726,7 @@ def test_the_principal_that_tripped_cannot_release(tmp_path):
     code, d = _am_release(org, led, rc)
     assert code == 4
     assert d["released"] is False
-    assert _am_tool(org, "ledger.py", "halt-status", str(led)).returncode == 10   # 維持
+    assert _am_tool(org, "ledger.py", "halt-status", str(led)).returncode == 10   # still in force
 
 
 def test_a_shared_secret_cannot_release(tmp_path):
@@ -1775,9 +1777,10 @@ def test_an_independent_authorized_approver_can_release(tmp_path):
 
 
 def test_a_release_that_cannot_be_recorded_keeps_the_halt(tmp_path):
-    """**記録できていないのに停止が解けることが、いちばん危ない fail-open である。**
+    """**The halt lifting while nothing was recorded is the most dangerous fail-open here.**
 
-    順序: 検証 → append+fsync → **その後で** ラッチを消す。記録に失敗したら停止を維持する。
+    The order: verify → append + fsync → **and only then** remove the latch. If the record fails,
+    the halt stays in force.
     """
     org, led = _am_setup_halt(tmp_path)
     rc = _am_receipt(org, "k-appr", "keys/k-appr.pem")
@@ -1785,10 +1788,10 @@ def test_a_release_that_cannot_be_recorded_keeps_the_halt(tmp_path):
     code, d = _am_release(org, led, rc, env=env)
     assert code == 4
     assert d["reason"] == "release_not_persisted" and d["released"] is False
-    assert (led / "HALT").exists(), "記録できていないのにラッチが消えた"
+    assert (led / "HALT").exists(), "the latch was removed although nothing was recorded"
     assert _am_tool(org, "ledger.py", "halt-status", str(led)).returncode == 10
     assert "halt_released" not in (led / "ledger.jsonl").read_text(encoding="utf-8")
-    # exact retry で安全に解除できる
+    # an exact retry releases it safely
     code, d = _am_release(org, led, rc)
     assert code == 0 and d["released"] is True
     assert run("ledger.py", "verify", str(led))[0] == 0
@@ -1803,10 +1806,11 @@ def test_releasing_when_nothing_is_halted_is_a_noop(tmp_path):
     assert code == 2 and d["reason"] == "no_active_halt"
 
 
-# ══ Authenticated Writer 段階A — 経路を1つにする（process_mediated）═══════════
-# **これは OS 境界ではない。** 同一 UID の caller は daemon を止められ、権限も戻せる。
-# 強制できるのは「台帳への経路が1つであること」までで、workload_isolation は
-# `process_mediated` にとどまる。`separate_uid` は別 UID + root 所有の親ディレクトリが要る。
+# ══ Authenticated Writer, stage A — make the path singular (process_mediated) ═══════════════
+# **This is not an OS boundary.** A caller with the same UID can stop the daemon and restore its own
+# permissions. All that can be enforced is "there is exactly one path to the ledger", so
+# workload_isolation stays at `process_mediated`. `separate_uid` requires a separate UID and a
+# root-owned parent directory.
 
 import socket as _socket
 
@@ -1817,30 +1821,30 @@ def _wd_start(tmp_path):
     import shutil as _sh
     _sh.copy(TEMPLATE / "ledger-schema.yaml", tmp_path / "ledger-schema.yaml")
     (tmp_path / "constitution.yaml").write_text("enforcement: {}\n", encoding="utf-8")
-    # **socket は短いパスに置く。** pytest の tmp_path は AF_UNIX の上限（macOS 104 バイト）を
-    # 超える。実装側もその旨を報告するが、テストでは短い場所を使う。
-    # **anchor / leaf を作る。** socket を /tmp 直下に置くと anchor が /tmp（0777）になり、
-    # 「caller が leaf ごと差し替えられる」として writerd が正しく拒否する。
+    # **Put the socket at a short path.** pytest's tmp_path exceeds the AF_UNIX limit (104 bytes
+    # on macOS). The implementation reports as much, but the test uses a short location.
+    # **Create an anchor / leaf.** Put the socket directly under /tmp and the anchor becomes /tmp
+    # (0777), which writerd correctly refuses as "the caller could swap the whole leaf".
     import tempfile as _tf
     anchor = pathlib.Path(_tf.mkdtemp(prefix="wd", dir="/tmp"))
     os.chmod(anchor, 0o755)
     sdir = anchor / "r"; sdir.mkdir(); os.chmod(sdir, 0o755)
     sock = sdir / "w.sock"
-    os.environ["ORG_WRITER_TRUST_SELF"] = "1"   # 段階A。**信頼境界ではない**
+    os.environ["ORG_WRITER_TRUST_SELF"] = "1"   # stage A. **Not a trust boundary**
     proc = subprocess.Popen(
         [sys.executable, str(TOOLS / "writerd.py"), "serve",
          "--org", f"default={led}", "--socket", str(sock)],
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-    # **起動を待ちきる。** 待たずに接続すると FileNotFoundError になり、
-    # 「daemon が動いていない」のか「まだ準備中」なのか区別できない。
+    # **Wait for start-up to finish.** Connect without waiting and you get FileNotFoundError, which
+    # cannot distinguish "the daemon is not running" from "it is still getting ready".
     for _ in range(200):
         if sock.exists():
             break
-        if proc.poll() is not None:      # 落ちたなら理由を出す
+        if proc.poll() is not None:      # if it died, show why
             out = proc.stdout.read() if proc.stdout else ""
-            raise AssertionError(f"writerd が起動しなかった（exit {proc.returncode}）:\n{out}")
+            raise AssertionError(f"writerd did not start (exit {proc.returncode}):\n{out}")
         time.sleep(0.05)
-    assert sock.exists(), "writerd が socket を作らなかった"
+    assert sock.exists(), "writerd did not create the socket"
     return led, sock, proc
 
 
@@ -1866,7 +1870,7 @@ def test_writerd_accepts_a_request_and_direct_write_is_refused(tmp_path):
         code, d = _wd_client(sock, "--actor", "w", "--class", "progress_recorded",
                              "--payload", _WD_PAYLOAD)
         assert code == 0 and d.get("ok") is True, d
-        assert d["workload_isolation"] == "process_mediated"     # separate_uid とは呼ばない
+        assert d["workload_isolation"] == "process_mediated"     # never called separate_uid
         assert (led / "ledger.jsonl").read_text(encoding="utf-8").strip()
 
         env = dict(os.environ, ORG_WRITER_SOCKET=str(sock))
@@ -1895,7 +1899,7 @@ def test_a_stopped_daemon_fails_closed(tmp_path):
                         "--actor", "w", "--class", "progress_recorded",
                         "--payload", _WD_PAYLOAD],
                        capture_output=True, text=True, env=env)
-    assert r.returncode == 4, "daemon 停止中に直接書き込みが通った"
+    assert r.returncode == 4, "a direct write got through while the daemon was stopped"
     assert not (led / "ledger.jsonl").exists() or \
         not (led / "ledger.jsonl").read_text(encoding="utf-8").strip()
 
@@ -1931,7 +1935,7 @@ def test_a_tampered_request_is_refused(tmp_path):
     led, sock, proc = _wd_start(tmp_path)
     try:
         req = _wd_req()
-        req["argv"] = list(req["argv"]); req["argv"][1] = "attacker"   # digest 後に改変
+        req["argv"] = list(req["argv"]); req["argv"][1] = "attacker"   # altered after the digest
         assert _wd_raw(sock, req)["reason"] == "request_tampered"
         assert not (led / "ledger.jsonl").exists() or \
             "attacker" not in (led / "ledger.jsonl").read_text(encoding="utf-8")
@@ -1948,7 +1952,7 @@ def test_a_replayed_request_is_refused(tmp_path):
         assert _wd_raw(sock, req)["reason"] == "replayed_nonce"
         lines = [l for l in (led / "ledger.jsonl").read_text(encoding="utf-8").splitlines()
                  if l.strip()]
-        assert len(lines) == 1, "再送が二重に記録された"
+        assert len(lines) == 1, "a resend was recorded twice"
     finally:
         proc.terminate(); proc.wait(timeout=10)
 
@@ -1978,10 +1982,10 @@ def test_only_write_operations_are_accepted(tmp_path):
 
 
 def test_peer_credential_is_reported_for_the_recorder_only(tmp_path):
-    """peer identity は `recorded_by` にしか使わない。
+    """A peer identity is used only for `recorded_by`.
 
-    **「接続してきた」ことは「その判断をした」ことの証拠にならない** — decision_by は
-    署名 receipt からのみ確定する。
+    **Having connected is no evidence of having made the judgment** — `decision_by` is settled only
+    by a signed receipt.
     """
     led, sock, proc = _wd_start(tmp_path)
     try:
@@ -1990,7 +1994,7 @@ def test_peer_credential_is_reported_for_the_recorder_only(tmp_path):
         assert code == 0
         assert d.get("recorded_by_peer_uid") == os.getuid()
         ev = json.loads((led / "ledger.jsonl").read_text(encoding="utf-8").splitlines()[0])
-        # peer uid が decision_by に流れていないこと
+        # the peer uid must not flow into decision_by
         assert str(os.getuid()) not in json.dumps(ev["payload"].get("decision_by") or "")
     finally:
         proc.terminate(); proc.wait(timeout=10)
