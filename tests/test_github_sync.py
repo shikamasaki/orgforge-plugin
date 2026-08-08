@@ -1651,3 +1651,72 @@ def test_ready_open_dependency_withhold_is_not_reported_as_unverifiable(monkeypa
     # ...but the withhold is still OBSERVABLE (info line, not an alarm): empty-because-waiting
     # must be distinguishable from empty-because-nothing on stderr (skeptic, #103 rework 2)
     assert "#9" in captured.err, captured.err
+
+
+# ── review-response: a response has to point AT something (Issue #67 of domain-spec-notes) ──
+# The responses there cited SKEPTIC-001/002 while nothing on the Issue defined those ids, so
+# "addressed" was unfalsifiable from the outside. `--review` was validated on its shape alone.
+
+_REVIEW_COMMENT = (
+    "### 🧪 verdict_provisional — `refuted` (same-harness)\n"
+    "**review_subject_id:** `abc123`\n\n"
+    "SKEPTIC-001: the template cannot express required relations.\n"
+    "<!-- orgforge:provisional:same-harness:deadbeef -->")
+
+
+def _rr_ns(**kw):
+    base = dict(repo="o/r", issue=67, review="abc123", finding="SKEPTIC-001", status="addressed",
+                response="Added required_relations to the normative schema and propagated it.",
+                evidence="commit b51c76b; make test: 10 passed; rg required_relations: 5 hits.",
+                by="maker", blocked_by=None)
+    base.update(kw)
+    return _ns(**base)
+
+
+def _issue_with(*comment_bodies):
+    return json.dumps({"comments": [{"body": b, "url": f"https://gh/c/{i}"}
+                                    for i, b in enumerate(comment_bodies)]})
+
+
+def test_review_response_refuses_a_finding_that_was_never_written(monkeypatch, capsys):
+    """**A response cannot answer a finding nobody recorded.** Without this, `addressed` is a claim
+    no reviewer can check — which is how #67 came to carry responses to undefined ids."""
+    fake = FakeGh(replies={"issue view": (0, _issue_with("unrelated chatter"))})
+    monkeypatch.setattr(GS, "gh", fake)
+    rc = GS.cmd_review_response(_rr_ns())
+    assert rc == 2
+    assert "never written down" in capsys.readouterr().err
+    assert fake.calls_matching("issue comment") == [], "it must not post an unanchored response"
+
+
+def test_review_response_carries_the_finding_and_links_back(monkeypatch, capsys):
+    """**Carry the finding, not just its id.** A reader of the response alone could otherwise see
+    only `SKEPTIC-001 (addressed)` with no way to tell what was addressed."""
+    fake = FakeGh(replies={"issue view": (0, _issue_with(_REVIEW_COMMENT))})
+    monkeypatch.setattr(GS, "gh", fake)
+    assert GS.cmd_review_response(_rr_ns()) == 0
+    body = " ".join(fake.calls_matching("issue comment")[0])
+    assert "The finding being answered" in body
+    assert "cannot express required relations" in body, "the finding text itself is missing"
+    assert "https://gh/c/0" in body, "there is no link back to the review"
+
+
+def test_review_response_matches_on_the_finding_id_too(monkeypatch):
+    """A review comment carries its review_subject_id; the finding id may live only in the prose.
+    Either is a real anchor, so either resolves."""
+    fake = FakeGh(replies={"issue view": (0, _issue_with(_REVIEW_COMMENT))})
+    monkeypatch.setattr(GS, "gh", fake)
+    assert GS.cmd_review_response(_rr_ns(review="a-subject-id-not-in-the-comment")) == 0
+    assert fake.calls_matching("issue comment")
+
+
+def test_review_response_does_not_quote_another_response_as_the_review(monkeypatch, capsys):
+    """A previous response mentions the same ids. Quoting it back would make a response look like
+    the finding it answers, and the chain would anchor to nothing."""
+    prior = ("### ↪ Review response — `SKEPTIC-001` (addressed)\n"
+             "**Review:** `abc123`\n<!-- orgforge:review-response:abc123:SKEPTIC-001:addressed -->")
+    fake = FakeGh(replies={"issue view": (0, _issue_with(prior))})
+    monkeypatch.setattr(GS, "gh", fake)
+    rc = GS.cmd_review_response(_rr_ns(status="deferred"))
+    assert rc == 2, "the only match was another response — that is not an anchor"
+    assert "never written down" in capsys.readouterr().err

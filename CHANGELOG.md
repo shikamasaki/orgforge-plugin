@@ -6,6 +6,23 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 2.9.3 — a review response has to point at the review
+
+### Fixed
+- `github-sync review-response` accepted `--review` on its shape alone, so a response could name a
+  review that was never written and still read as an answer to one. On a real Issue
+  (domain-spec-notes #67) the responses cited `SKEPTIC-001` / `SKEPTIC-002` while nothing on the
+  Issue defined those ids: from the outside, `addressed` was unfalsifiable. The review is now
+  located among the Issue's comments — by `review_subject_id`, or by the finding id when it appears
+  only in the reasoning text — and an unresolvable reference is refused rather than posted.
+- The response now carries **the finding itself**, quoted, plus a link back to the comment it came
+  from. A reader of the response alone previously saw `SKEPTIC-001 (addressed)` and had no way to
+  tell what was addressed. A prior response is never quoted as though it were the review, so the
+  chain cannot anchor to itself.
+
+This is plumbing, not judgment: whether a response is *adequate* remains the next independent
+reviewer's call (docs/03 §6.5). What is enforced is only that there is something to point at.
+
 ## 2.9.2 — set the dispatch timeout from a measurement
 
 Two open questions from 2.6.0 are now measured (gpt-5.6-terra / medium, repeated runs, concurrent).
