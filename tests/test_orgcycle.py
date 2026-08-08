@@ -1003,7 +1003,7 @@ def test_verify_does_not_tell_subagent_to_record():
     assert "What to return (**you decide the judgment; the supervisor records it**)" in seg
     assert "You do not need to run any recording command" in seg
     # 監督向け（stderr）には、値を流し込むコマンドを出す — 配管が判定を運べないと本末転倒
-    assert "監督（あなた）が打つコマンド" in seg
+    assert "The command you (the supervisor) run" in seg
     assert "file=sys.stderr" in seg
 
 
@@ -1131,7 +1131,7 @@ def test_verify_offers_the_rework_command_on_reject():
     src = _cycle_src("judge")
     seg = src[src.index("def cmd_verify"):]
     assert "rework --issue" in seg
-    assert "show` の rework 警告が沈黙する" in seg or "rework 警告が沈黙" in seg
+    assert "rework warning falls silent" in seg
 
 
 def test_banner_shows_version_and_cwd():
