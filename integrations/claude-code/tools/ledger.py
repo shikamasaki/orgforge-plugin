@@ -1331,7 +1331,7 @@ def validate_event(cls, payload, snap, writer_op=None):
     if cls not in snap["classes"]:
         near = sorted(k for k in snap["classes"] if k[:4] == cls[:4])
         return (f"unknown event class {cls!r} (not in event_classes of ledger-schema.yaml). "
-                + (f"\n  近いもの: {', '.join(near)}" if near else "")
+                + (f"\n  did you mean: {', '.join(near)}" if near else "")
                 + "\n  To add a class, declare it in the schema before writing it — an "
                   "undeclared class appears in no projection and no sensor, so writing it means "
                   "nobody reads it."), []
@@ -1380,35 +1380,37 @@ def validate_event(cls, payload, snap, writer_op=None):
         r = _check_type(tname, payload[f])
         if r is None:
             return (f"validation.types.{cls}.{f} in ledger-schema.yaml names an unknown type "
-                    f"{tname!r} を指している（list | int | str | map | int_or_str）。\n"
-                    f"  **schema の書き間違いを黙って通さない** — 通すと、その検査は消えたまま"
-                    f"になり、消えたことに気づく経路が無い。"), []
+                    f"names {tname!r} (expected one of list | int | str | map | int_or_str).\n"
+                    f"  **A typo in the schema does not pass silently** — let it through and that "
+                    f"check stays gone, with no route by which anyone notices."), []
         if not r:
-            return (f"{cls}.{f} の型が違う（{tname} を期待、"
-                    f"{type(payload[f]).__name__} が来た）"), []
+            return (f"{cls}.{f} has the wrong type (expected {tname}, got "
+                    f"{type(payload[f]).__name__})"), []
 
-    # ③ 未宣言 field — 既定は許可し、乖離として記録する
+    # (3) undeclared fields — allowed by default, and recorded as drift
     declared = snap["fields"].get(cls, set())
     unknown = sorted(given - declared)
     if unknown and cls in snap["closed"]:
-        return (f"{cls} に宣言の無い field がある: {', '.join(unknown)}\n"
-                f"  このクラスは additional_properties: false（統制の中核）。"
-                f"field を増やすなら schema に宣言してから書くこと。"), []
-    warns = ([f"{cls} に宣言の無い field: {', '.join(unknown)} — 書けるが、projection にも "
-              f"sensor にも乗らない。schema と実態が乖離している"] if unknown else [])
+        return (f"{cls} carries undeclared fields: {', '.join(unknown)}\n"
+                f"  This class is additional_properties: false (it is core to control). "
+                f"To add a field, declare it in the schema before writing it."), []
+    warns = ([f"{cls} has undeclared fields: {', '.join(unknown)} — they can be written, but "
+              f"they appear in no projection and no sensor. The schema and reality have "
+              f"drifted apart"] if unknown else [])
     return None, warns
 
 
 
 def _now_iso():
-    """writer 側の時刻。**"UNSET" を書かない。**
+    """The writer's own clock. **Never write "UNSET".**
 
-    受け入れ条件: timestamp は writer が付ける。クライアントが決められるなら順序を偽れるので、
-    cap の時間窓を迂回できる。実データには `ts: "UNSET"` のイベントが残っており、窓で絞る
-    view や sensor はそれを黙って落とすか、境界の外に置く。
+    Acceptance condition: the writer stamps the timestamp. If a client could decide it, it could
+    fake the ordering and thereby evade the cap's time window. Real data still holds events with
+    `ts: "UNSET"`, and any view or sensor that filters by window either drops them silently or
+    places them outside the boundary.
 
-    イベント `id` は (seq, class, payload) からのみ導出されるので、ここに時計が入っても
-    append の決定性は損なわれない — 同じ論理イベントは同じ id になる。
+    An event `id` is derived only from (seq, class, payload), so putting a clock here does not
+    cost append its determinism — the same logical event still gets the same id.
     """
     import datetime as _dt
     return _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -1416,37 +1418,40 @@ def _now_iso():
 
 
 def _check_backfill_ts(ts):
-    """backfill の時刻を検証する。**形が合っているだけでは足りない。**
+    """Validate a backfill timestamp. **Matching the shape is not enough.**
 
-    0.33.1 は正規表現だけで見ていたので、`2026-99-99T99:99:99Z` が通った（実測）。
-    実日時として parse し、**未来と、遠すぎる過去を拒否する** — 順序を偽れると cap の
-    時間窓を迂回できる。
+    0.33.1 looked only at a regex, so `2026-99-99T99:99:99Z` passed (measured). Parse it as a real
+    date-time and **refuse the future, and a past that is too distant** — being able to fake the
+    ordering means being able to evade the cap's time window.
 
-    権限（誰が backfill してよいか）は identity_assurance の側の問題で、ここでは扱えない。
-    **扱えないことを言う**のがこの関数の役目でもある。
+    Authority (who may backfill at all) belongs to identity_assurance and cannot be settled here.
+    **Saying what it cannot settle** is also part of this function's job.
     """
     import datetime as _dt
     if not isinstance(ts, str) or not re.match(
             r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", ts):
-        return (f"--backfill-ts {ts!r} は ISO8601 の UTC 形式ではない"
+        return (f"--backfill-ts {ts!r} is not ISO8601 UTC"
                 f"（YYYY-MM-DDTHH:MM:SSZ）。")
     try:
         when = _dt.datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(
             tzinfo=_dt.timezone.utc)
     except ValueError as e:
-        return (f"--backfill-ts {ts!r} は実在しない日時である（{e}）。\n"
-                f"  形が合っているだけでは足りない — 2026-99-99T99:99:99Z のような値が"
-                f"通っていた。")
+        return (f"--backfill-ts {ts!r} is not a date-time that exists ({e}).\n"
+                f"  Matching the shape is not enough — values like 2026-99-99T99:99:99Z used to "
+                f"pass.")
     now = _dt.datetime.now(_dt.timezone.utc)
     if when > now + _dt.timedelta(minutes=5):
-        return (f"--backfill-ts {ts} は未来である（いま {now.strftime('%Y-%m-%dT%H:%M:%SZ')}）。\n"
-                f"  backfill は **実時点を後から補う**ためのもので、先に日付を打つ手段ではない。"
-                f"未来の時刻は窓で絞る cap を迂回できる。")
+        return (f"--backfill-ts {ts} is in the future (now "
+                f"{now.strftime('%Y-%m-%dT%H:%M:%SZ')}).\n"
+                f"  backfill exists to **fill in a moment that already happened**, not to stamp a "
+                f"date ahead of time. A future timestamp can evade a window-filtered cap.")
     if when < now - _dt.timedelta(days=int(os.environ.get("ORG_BACKFILL_MAX_DAYS", "90"))):
-        return (f"--backfill-ts {ts} は遠すぎる過去である"
-                f"（{os.environ.get('ORG_BACKFILL_MAX_DAYS', '90')} 日より前）。\n"
-                f"  古い時点に書くと、いま起きたことが過去の窓に入り、cap の集計から外れる。\n"
-                f"  正当な理由があるなら ORG_BACKFILL_MAX_DAYS で明示的に広げること。")
+        return (f"--backfill-ts {ts} is too far in the past (earlier than "
+                f"{os.environ.get('ORG_BACKFILL_MAX_DAYS', '90')} days).\n"
+                f"  Writing at an old moment puts something that happened NOW into a past window, "
+                f"where the cap no longer counts it.\n"
+                f"  If there is a legitimate reason, widen it explicitly with "
+                f"ORG_BACKFILL_MAX_DAYS.")
     return None
 
 
@@ -1463,33 +1468,34 @@ def _hash(prev_hash, ev):
 
 
 class _LedgerLock:
-    """append 全体を1つの critical section にする排他ロック。
+    """An exclusive lock making the whole append one critical section.
 
-    **これが無いと、並列 append が全て同じ seq を計算する。** 実測（監査）: 12並列で12件すべてが
-    seq=1 になり、検証は seq gap/disorder で落ちた。`log を読む → seq を決める → 書く →
-    HEAD を更新する` の全体が1つの操作でなければならない。
+    **Without it, parallel appends all compute the same seq.** Measured (audit): with 12 in
+    parallel, all 12 came out as seq=1 and validation failed on seq gap/disorder. The whole of
+    `read the log → decide the seq → write → update HEAD` has to be a single operation.
 
-    6 worktree で並列に回している org なので、これは理論上の危険ではない。
+    This org runs six worktrees in parallel, so the danger is not theoretical.
     """
 
     def __init__(self, root):
         self.path = os.path.join(root, "LOCK")
         self.fh = None
         self.locked = False
-        self.error = None          # ロックできなかった理由。呼び側が append を止める
+        self.error = None          # why the lock failed; the caller stops the append
 
     def __enter__(self):
         os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
         try:
             self.fh = open(self.path, "a+")
         except Exception as e:
-            self.error = f"LOCK ファイルを開けない（{e}）: {self.path}"
+            self.error = f"cannot open the LOCK file ({e}): {self.path}"
             return self
-        # **ロックできないなら書かない。** 警告して続行すると、並列 append が同じ seq を
-        # 計算して鎖が壊れる（実測: 12並列で全件 seq=1）。逃げ道は明示の環境変数だけにし、
-        # **その保証（逐次実行）は道具の側では確かめられない**ことを言う。
-        # 故障注入用に ORG_LEDGER_FORCE_LOCK_FAIL=1 を見る — ロックの fail-closed を
-        # 検査できなければ、「fail-closed である」と言えない。
+        # **If it cannot be locked, do not write.** Warning and carrying on lets parallel appends
+        # compute the same seq and break the chain (measured: 12 in parallel, all seq=1). The only
+        # escape hatch is an explicit environment variable, and it says outright that **the
+        # guarantee it asks for (serial execution) is not something the tool can confirm.**
+        # ORG_LEDGER_FORCE_LOCK_FAIL=1 exists for fault injection — without being able to test the
+        # lock's fail-closed behaviour, we cannot claim it IS fail-closed.
         try:
             if os.environ.get("ORG_LEDGER_FORCE_LOCK_FAIL") == "1":
                 raise OSError("ORG_LEDGER_FORCE_LOCK_FAIL=1 (fault injection)")
@@ -1498,17 +1504,19 @@ class _LedgerLock:
             self.locked = True
         except Exception as e:
             if os.environ.get("ORG_LEDGER_ALLOW_UNLOCKED") == "1":
-                print(f"ledger: ロックせずに append している"
-                      f"（ORG_LEDGER_ALLOW_UNLOCKED=1、理由: {e}）。\n"
-                      f"  **並列で走らせないこと。** 逐次実行の保証は道具では確かめられない。",
+                print(f"ledger: appending without a lock "
+                      f"(ORG_LEDGER_ALLOW_UNLOCKED=1, reason: {e}).\n"
+                      f"  **Do not run this in parallel.** The tool cannot confirm the guarantee "
+                      f"of serial execution.",
                       file=sys.stderr)
             else:
                 self.error = (
-                    f"append をロックできない（{e}）。\n"
-                    f"  ロック無しの並列 append は同じ seq を計算し、鎖を壊す"
-                    f"（実測: 12並列で全件 seq=1）。\n"
-                    f"  逐次実行を保証できる場合のみ ORG_LEDGER_ALLOW_UNLOCKED=1 で外せる — "
-                    f"**その保証は道具の側では確かめられない。**")
+                    f"cannot lock the append ({e}).\n"
+                    f"  Unlocked parallel appends compute the same seq and break the chain "
+                    f"(measured: 12 in parallel, all seq=1).\n"
+                    f"  It can be lifted with ORG_LEDGER_ALLOW_UNLOCKED=1 only where serial "
+                    f"execution can be guaranteed — **and that guarantee is not something the "
+                    f"tool can confirm.**")
         return self
 
     def __exit__(self, *exc):
@@ -1527,11 +1535,11 @@ class _LedgerLock:
 
 
 def _fsync_dir(path):
-    """ディレクトリの fsync。rename の永続化はこれが無いと保証されない。
+    """fsync the directory. Without it, the durability of a rename is not guaranteed.
 
-    **失敗を黙らない。** 一部の FS では不可なので append 自体は止めないが、その台帳の
-    durability は best-effort である、と言わないままにしてはいけない — 電源断で HEAD の
-    rename が失われうる状態を「永続化した」と読まれる。
+    **Do not stay silent about a failure.** Some filesystems cannot do it, so this does not stop
+    the append itself — but it must not leave unsaid that the ledger's durability is best-effort.
+    Otherwise a state where a power cut can lose the HEAD rename gets read as "persisted".
     """
     try:
         fd = os.open(path, os.O_RDONLY)
@@ -1541,20 +1549,20 @@ def _fsync_dir(path):
             os.close(fd)
         return True
     except Exception as e:
-        print(f"ledger: 注意 — ディレクトリの fsync ができなかった（{e}）。"
-              f"この FS では HEAD の rename の永続化は best-effort である"
-              f"（log 自体は fsync 済みで、HEAD は log から再構築できる）。", file=sys.stderr)
+        print(f"ledger: note — could not fsync the directory ({e}). On this filesystem the "
+              f"durability of the HEAD rename is best-effort (the log itself is fsynced, and HEAD "
+              f"can be rebuilt from the log).", file=sys.stderr)
         return False
 
 
 def _head_from_log(root):
-    """log から HEAD を **再構築** する。HEAD は権威ではなく cache である。
+    """**Rebuild** HEAD from the log. HEAD is a cache, not the authority.
 
-    **log 全体が健全なときだけ再構築する。** 途中の破損（torn line、seq の飛び、hash 不一致）を
-    自動修復してはいけない — 壊れた記録の上に整合した HEAD を載せると、壊れていることが
-    分からなくなる。破損は fail-closed で報告する。
+    **Rebuild only when the whole log is sound.** Never auto-repair a corruption partway through
+    (a torn line, a seq gap, a hash mismatch) — placing a consistent HEAD on top of a broken record
+    makes the breakage impossible to see. Corruption is reported fail-closed.
 
-    返り値: (head, error). error があれば append してはいけない。
+    Returns: (head, error). If there is an error, do not append.
     """
     log, _ = _paths(root)
     if not os.path.isfile(log):
