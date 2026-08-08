@@ -189,6 +189,110 @@ def cmd_review_response(a):
     Plumbing only: it records that a response was given, never whether the response is adequate.
     That judgment stays with the next independent reviewer (docs/03 §6.5).
     """
+    return _review_response(a, gh)
+
+
+# How much of the review to carry into the response. Enough that the finding can be read without
+# leaving the comment; short enough that the response is still about the response.
+_QUOTE_CHARS = 1200
+
+
+def _review_quote(issue_json, review, finding):
+    """Find the review being answered among the Issue's comments. Returns (quote, url).
+
+    (None, None) when nothing matches — the caller refuses, because a response to a review that was
+    never written is not traceable to anything.
+
+    Matching is on the review id, then on the finding id, because a review comment carries its
+    `review_subject_id` while the finding id may only appear in the reasoning text. Either is a
+    real anchor; neither is inferred from the response itself.
+    """
+    try:
+        comments = (json.loads(issue_json) or {}).get("comments") or []
+    except Exception:
+        return None, None
+    for needle in (str(review or "").strip(), str(finding or "").strip()):
+        if not needle:
+            continue
+        for c in comments:
+            body = str(c.get("body") or "")
+            if needle not in body:
+                continue
+            # Do not quote a response as though it were the review it answers.
+            if "orgforge:review-response:" in body:
+                continue
+            text = re.sub(r"<!--.*?-->", "", body, flags=re.S).strip()
+            if len(text) > _QUOTE_CHARS:
+                text = text[:_QUOTE_CHARS].rstrip() + "\n…(truncated — see the linked comment)"
+            quote = "\n".join("> " + line for line in text.splitlines())
+            return quote, c.get("url")
+    return None, None
+
+
+def cmd_review_findings(a, gh=None):
+    """List the findings raised on an Issue and which of them have been answered.
+
+    **A rally you cannot count is a rally you cannot end.** Findings were only ever ids inside a
+    judge's prose, so nobody could say how many were open, which were answered, or which were the
+    same finding raised again — every round read as whack-a-mole because the tools could only see
+    one response at a time. With `findings` first-class in the verdict schema, the open set is a
+    fact rather than an impression.
+
+    Reports, does not judge: it never decides whether a response was adequate, only whether one was
+    recorded for each finding (docs/03 §6.5).
+    """
+    _gh = gh or globals()["gh"]
+    code, existing = _gh(["issue", "view", str(a.issue), "--repo", a.repo, "--json", "comments"])
+    if code != 0:
+        print(existing, file=sys.stderr)
+        return 3
+    try:
+        comments = (json.loads(existing) or {}).get("comments") or []
+    except Exception as exc:
+        print(f"review-findings: cannot read the comments on #{a.issue}: {exc}", file=sys.stderr)
+        return 3
+
+    raised, answered = {}, {}
+    for c in comments:
+        body = str(c.get("body") or "")
+        if "orgforge:review-response:" in body:
+            for fid in re.findall(r"orgforge:review-response:[^:]*:([A-Z]+-[0-9]{3}):(\w+)", body):
+                answered[fid[0]] = fid[1]
+            continue
+        for block in re.findall(r'"id"\s*:\s*"([A-Z]+-[0-9]{3})"[^}]*?"claim"\s*:\s*"(.*?)"',
+                                body, re.S):
+            raised.setdefault(block[0], block[1][:160])
+        # A judge that wrote its findings as prose still names them; count those too, so the
+        # report does not silently under-report on Issues that predate the structured schema.
+        for fid in re.findall(r"\b([A-Z]+-[0-9]{3})\b", body):
+            raised.setdefault(fid, "")
+
+    # An id answered but never raised means the finding lived only in a judge's prose, in a shape
+    # this cannot read — which is the very gap `findings` closes. Say so rather than reporting a
+    # tidy zero: "raised: 0, answered: 7" is not a clean sheet, it is a blind spot.
+    unraised = sorted(f for f in answered if f not in raised)
+    open_ids = sorted(f for f in raised if f not in answered)
+    print(json.dumps({"issue": a.issue,
+                      "raised": len(raised), "answered": len(answered), "open": len(open_ids),
+                      "answered_but_never_raised": unraised,
+                      "open_findings": [{"id": f, "claim": raised[f]} for f in open_ids],
+                      "answered_findings": [{"id": f, "status": s}
+                                            for f, s in sorted(answered.items())]},
+                     ensure_ascii=False, indent=2))
+    if unraised:
+        print(f"\n{len(unraised)} finding(s) have a response but no finding recorded on the Issue: "
+              f"{', '.join(unraised)}\n"
+              f"  These were raised as prose inside a verdict, so nothing can check what was "
+              f"answered. Judges emitting the structured `findings` array fixes this going "
+              f"forward.", file=sys.stderr)
+    if open_ids:
+        print(f"\n{len(open_ids)} finding(s) have no recorded response: {', '.join(open_ids)}\n"
+              f"  Answer each with `github_sync.py review-response --finding <id>`. An unanswered "
+              f"finding is what the next round re-raises.", file=sys.stderr)
+    return 0
+
+
+def _review_response(a, gh):
     finding = (a.finding or "").strip()
     response = (a.response or "").strip()
     evidence = (a.evidence or "").strip()
@@ -209,13 +313,31 @@ def cmd_review_response(a):
         print(f"review-response: {finding} is already recorded on Issue #{a.issue} with the same "
               f"content (no-op).")
         return 0
+    # **The review being answered has to exist.** `--review` used to be accepted on its shape alone,
+    # so a response could name a review that was never written and still read as an answer to one.
+    # On a real Issue (#67 of domain-spec-notes) the responses cited SKEPTIC-001/002 while nothing
+    # on the Issue defined those ids: from the outside, "addressed" was unfalsifiable.
+    # The judgment stays with the next reviewer; what is enforced here is only that there is
+    # something to point AT.
+    quoted, review_url = _review_quote(existing, a.review, finding)
+    if quoted is None:
+        print(f"review-response: no review matching {a.review!r} is recorded on Issue #{a.issue}.\n"
+              f"  A response cannot answer a finding that was never written down. Record the "
+              f"review first (provisional / decide), then respond to it by its "
+              f"review_subject_id.", file=sys.stderr)
+        return 2
     body = "\n".join([
         f"### ↪ Review response — `{finding}` ({a.status})",
-        f"**Review:** `{a.review}`",
+        f"**Review:** `{a.review}`" + (f" — [the finding being answered]({review_url})"
+                                       if review_url else ""),
         f"**Responded by:** `{a.by}`",
+        # **Carry the finding, not just its id.** A reader of this comment alone could otherwise
+        # see only "SKEPTIC-001 (addressed)" and have no way to tell what was addressed.
+        "\n**The finding being answered:**\n" + quoted,
         "\n**Response:**\n" + response,
         "\n**Evidence:**\n" + evidence,
-        "\n次の独立 reviewer は、この対応と証拠を確認して自分の verdict に明記する。",
+        "\nThe next independent reviewer confirms this response and its evidence, and states the "
+        "conclusion in their own verdict.",
         marker,
     ])
     code, out = gh(["issue", "comment", str(a.issue), "--repo", a.repo, "--body", body])

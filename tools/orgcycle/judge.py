@@ -496,10 +496,11 @@ def cmd_verify(a):
         "demonstrates a safety, data-integrity or security problem, or that the work cannot be "
         "released, a finding outside the scope of the change must not stop the judgment — mark it "
         "`out_of_scope` and recommend a follow-up Issue.\n\n"
-        "To make the same finding a blocker again, state which of the reviewed head, the "
-        "evidence, or the residual risk has changed — at least one must have. Re-raising it with "
-        "nothing changed does not demand a new review round. This is not a rule for ignoring "
-        "something that was missed; it is a rule against rallying forever on the same evidence.")
+        "To make the same finding a blocker again, put its id in `prior_finding` and state which "
+        "of the reviewed head, the evidence, or the residual risk has changed — at least one must "
+        "have. Re-raising it with nothing changed does not demand a new review round. This is not "
+        "a rule for ignoring something that was missed; it is a rule against rallying forever on "
+        "the same evidence.")
     # `prior` (the full text of the gate's latest judgment) is already emitted by the judgment
     # history above. **Emit both and the same text appears twice** — measured, of the skeptic's
     # 457-line prompt, 26 lines of "one move away from 0013" and over 20 lines of "the maker's own
@@ -578,6 +579,16 @@ def cmd_verify(a):
     fields = [("verdict", f"exactly one of `{verdicts}`"),
               ("why", "what was weighed against what, and what decided it. Restating the verdict "
                       "does not count"),
+              # **Every blocking observation, separately.** An id buried in prose is invisible to
+              # the tools: nothing can count what is open, answer several at once, or tell a
+              # re-raised finding from a new one — which is what makes a rally feel endless.
+              ("findings", "**every finding, as its own entry** — `id` (GATE-001 / SKEPTIC-001, "
+                           "stable within this Issue), `claim` (specific enough for someone else "
+                           "to check), `evidence` (the command and output, or file and line), "
+                           "`blocks_admission` (does this alone withhold the verdict?), and "
+                           "`prior_finding` (the id you are re-raising, or null). A verdict that "
+                           "holds work back with no findings is not answerable; an admit may "
+                           "still list non-blocking ones"),
               ("evidence", "the commands actually run, and their **actual output** (failures "
                            "included)")]
     if role == "gate":
@@ -745,6 +756,12 @@ def cmd_verify(a):
 # **The dangerous shape is the one nobody notices.** Cut off at "MUST 2 was defended", it could be
 # read as a verdict and admitted — the thing this org keeps catching, "stating something unverified
 # as though it had been verified", arriving this time by way of **a truncated report**.
+# The verdicts that hold work back, and therefore owe an itemised reason. `park` is included: it
+# stops the work just as `reject` does, and "what would have to change to un-park it" is exactly
+# what the next round needs. `admit` / `survives` may still carry findings (a non-blocking
+# observation is worth recording) but are not required to.
+_WITHHOLDING = frozenset({"reject", "park", "refuted"})
+
 _INTAKE = {
     "skeptic": [
         ("verdict", r"\b(survives|refuted)\b", "the verdict is neither survives nor refuted"),
@@ -1101,6 +1118,43 @@ def cmd_intake(a):
             v = str(as_json.get(k) or "").strip()
             if k in dict((c[0], 1) for c in checks) and len(v) < 20 and (k, ) not in [(m[0],) for m in missing]:
                 missing.append((k, "構造化された返り値の該当欄が短すぎる（20文字未満）"))
+        # **A withholding verdict has to say what it is withholding for, item by item.** The id in
+        # the prose ("GATE-001") used to be the judge's own numbering, which the tools could not
+        # see — so nothing could count the findings, answer them in one pass, or tell a re-raised
+        # finding from a new one. That is what made a rally read as whack-a-mole: on
+        # domain-spec-notes #67, GATE-001..005 existed only inside `why`.
+        # **This does not judge.** It never asks whether a finding is correct, only that a verdict
+        # which holds work back is itemised enough for someone else to answer.
+        if str(as_json.get("verdict") or "").strip().lower() in _WITHHOLDING:
+            findings = as_json.get("findings")
+            if not isinstance(findings, list) or not findings:
+                missing.append(("findings", "this verdict holds work back but findings is "
+                                            "empty — return what must be fixed, item by item"))
+            else:
+                seen = set()
+                for index, finding in enumerate(findings):
+                    if not isinstance(finding, dict):
+                        missing.append(("findings", f"finding[{index}] is not an object"))
+                        continue
+                    fid = str(finding.get("id") or "").strip()
+                    if not re.fullmatch(r"[A-Z]+-[0-9]{3}", fid):
+                        missing.append(("findings", f"the id of finding[{index}] is not of the "
+                                                    f"form GATE-001: {fid!r}"))
+                    elif fid in seen:
+                        # A duplicate id makes a response ambiguous about which one it answered.
+                        missing.append(("findings", f"finding id {fid} is duplicated"))
+                    seen.add(fid)
+                    if len(str(finding.get("claim") or "").strip()) < 20:
+                        missing.append(("findings", f"the claim of finding[{index}] is too short — "
+                                                    f"it needs enough specificity for someone "
+                                                    f"else to check it"))
+                    if len(str(finding.get("evidence") or "").strip()) < 10:
+                        missing.append(("findings", f"finding[{index}] has no evidence (a command "
+                                                    f"and output, or a file and line)"))
+                if not any(isinstance(f, dict) and f.get("blocks_admission") for f in findings):
+                    # Otherwise the verdict withholds while every finding says it is not why.
+                    missing.append(("findings", "this verdict holds work back, yet not one "
+                                                "finding has blocks_admission true"))
         if role == "skeptic":
             mutations = as_json.get("mutations")
             if not isinstance(mutations, list):

@@ -1063,7 +1063,7 @@ def test_verify_scopes_blockers_and_repeated_findings():
     src = _cycle_src("judge")
     assert "The scope of judgment, and the discipline of a review rally" in src
     assert "handoff seam contract" in src
-    assert "state which of the reviewed head, the " in src
+    assert "put its id in `prior_finding` and state which " in src
     assert "recommend a follow-up Issue" in src
 
 
@@ -2832,3 +2832,70 @@ def test_integrate_plan_fails_closed_without_declared_base(tmp_path):
     code, out = run("org_cycle.py", "integrate", "--issue", "42", "--plan", cwd=str(org))
     assert code != 0, "統合先が宣言されていないのに integrate --plan が進んだ"
     assert "--base" in out and "integration_ref" in out, out
+
+
+# ── findings are first-class: a withholding verdict owes an itemised reason ──────────────────
+# The id in the prose ("GATE-001") used to be the judge's own numbering, invisible to the tools —
+# so nothing could count the findings, answer them in one pass, or tell a re-raised finding from
+# a new one. On domain-spec-notes #67, GATE-001..005 existed only inside `why`.
+
+def _gate_report(**kw):
+    base = {"verdict": "reject", "why": "The MUSTs are not met; see the findings below in full.",
+            "evidence": "make test: 10 passed; rg required_relations -> 0 hits",
+            "standard": "the four EARS on the Issue", "alternatives": None,
+            "risk": "none", "out_of_scope": []}
+    base.update(kw)
+    return json.dumps(base, ensure_ascii=False)
+
+
+def _finding(**kw):
+    base = {"id": "GATE-001", "claim": "required relations are not expressible in the template",
+            "evidence": "rg required_relations -> 0 hits", "blocks_admission": True,
+            "prior_finding": None}
+    base.update(kw)
+    return base
+
+
+def _intake(report, role="gate"):
+    return subprocess.run([sys.executable, str(TOOLS / "org_cycle.py"), "intake",
+                           "--issue", "11", "--role", role, "--report", "-"],
+                          input=report, capture_output=True, text=True, timeout=60)
+
+
+def test_intake_requires_findings_when_the_verdict_withholds():
+    """**A verdict that holds work back has to say what for, item by item.** Otherwise the next
+    round has only prose to work from, and re-raises whatever it re-reads."""
+    r = _intake(_gate_report())
+    assert r.returncode == 10, r.stdout + r.stderr
+    assert "findings" in r.stdout + r.stderr
+
+
+def test_intake_accepts_a_withholding_verdict_that_itemises():
+    assert _intake(_gate_report(findings=[_finding()])).returncode == 0
+
+
+def test_intake_does_not_demand_findings_from_an_admit():
+    """An admit withholds nothing, so it owes no itemisation — the check must not turn into
+    ceremony on the happy path."""
+    assert _intake(_gate_report(verdict="admit")).returncode == 0
+
+
+def test_intake_rejects_duplicate_finding_ids():
+    """A duplicate id makes a response ambiguous about which finding it answered."""
+    r = _intake(_gate_report(findings=[_finding(), _finding()]))
+    assert r.returncode == 10
+    assert "GATE-001" in r.stdout + r.stderr
+
+
+def test_intake_rejects_a_withholding_verdict_where_nothing_blocks():
+    """Otherwise the verdict holds the work while every finding says it is not the reason."""
+    r = _intake(_gate_report(findings=[_finding(blocks_admission=False)]))
+    assert r.returncode == 10
+    assert "blocks_admission" in r.stdout + r.stderr
+
+
+@pytest.mark.parametrize("bad", [{"id": "gate-1"}, {"claim": "too short"}, {"evidence": ""}])
+def test_intake_rejects_findings_that_cannot_be_acted_on(bad):
+    """An id that cannot be cited, a claim nobody can check, or a finding with no evidence is not
+    something the next round can answer."""
+    assert _intake(_gate_report(findings=[_finding(**bad)])).returncode == 10
