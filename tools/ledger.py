@@ -455,7 +455,7 @@ def _phase_admitted_for(ev, hist, phase):
     A deliverable with no parent still looks only at its own admission, exactly as before — its
     behaviour does not change."""
     target = ev["payload"].get("deliverable")
-    parent = ev["payload"].get("parent")          # the objective Issue /org-decompose writes onto the task番号
+    parent = ev["payload"].get("parent")          # the objective Issue number /org-decompose writes onto the task
     for e in hist:
         if e["class"] != "phase_admitted":
             continue
@@ -521,7 +521,7 @@ REQUIRES_PRIOR = {
         and e["payload"].get("subordinate") == ev["payload"].get("subordinate")
         for e in hist
     ),
-    # SSoT底上げ enforcement (docs/11 §4d): a cycle_completed is INVALID unless it STATES what it did to
+    # SSoT-raising enforcement (docs/11 §4d): a cycle_completed is INVALID unless it STATES what it did to
     # the domain model — either `updated` (it co-committed a convention / domain-model artifact) or
     # `none_asserted` (it explicitly claims this cycle established no new domain rule — a claim the
     # skeptic can refute). This is a payload-shape requirement, not a history lookup: it makes "forgot to
@@ -1137,7 +1137,7 @@ REQUIRES_PRIOR_WHY = {
     "cycle_completed": "a `domain_model` field — {updated: [ref]} if this cycle co-committed a "
                        "convention/domain-model artifact, or {none_asserted: <reason>} if it "
                        "established no new domain rule. A cycle cannot silently skip updating the "
-                       "domain model (SSoT底上げ, docs/11 §4d) — state it or the append is rejected.",
+                       "domain model (SSoT-raising, docs/11 §4d) — state it or the append is rejected.",
 }
 
 # ── views read `views:` in ledger-schema.yaml as the single source of truth ──────────────────
@@ -3414,10 +3414,10 @@ def cmd_verify(a):
                   f"schema**. What each event was validated against when written cannot be "
                   f"reproduced without that version of the schema.",
                   file=sys.stderr)
-        print(f"validation_assurance: validated:v{LEDGER_SCHEMA_VERSION} {validated} 件 / "
-              f"legacy_unvalidated {legacy} 件"
-              + ("\n  legacy は読めるが、schema 検証済みとしては扱わない"
-                 "（遡って拒否すると移行できない）。" if legacy else ""))
+        print(f"validation_assurance: validated:v{LEDGER_SCHEMA_VERSION} {validated} / "
+              f"legacy_unvalidated {legacy}"
+              + ("\n  legacy events are readable, but are not treated as schema-validated "
+                 "(refusing them retroactively would make migration impossible)." if legacy else ""))
     head = _read_head(a.root)
     if head["hash"] != prev:
         print(f"BROKEN: HEAD hash {head['hash'][:12]}… does not match chain tip {prev[:12]}…",
@@ -3432,7 +3432,7 @@ def cmd_view(a):
     (ledger-schema §views). Context packs may contain only views; this is how they're built."""
     views = _view_from()
     if a.view_id not in views:
-        known = ", ".join(sorted(views)) or "(ledger-schema.yaml が読めない)"
+        known = ", ".join(sorted(views)) or "(ledger-schema.yaml cannot be read)"
         print(f"view: unknown view '{a.view_id}'. known: {known}", file=sys.stderr)
         return 2
     classes = ["*"] if a.view_id in _ALL_CLASS_VIEWS else views[a.view_id]
@@ -3614,7 +3614,8 @@ def cmd_cat(a):
 
 
 def _banner():
-    """実行しているバージョンと cwd を stderr に1行（docs/11 — 古いパスの流用に気づくため）。"""
+    """One line on stderr giving the running version and cwd (docs/11 — so that reusing an old
+    path gets noticed)."""
     ver = "?"
     here = os.path.dirname(os.path.abspath(__file__))
     for c in (os.path.join(here, "..", ".claude-plugin", "plugin.json"),
@@ -3626,10 +3627,11 @@ def _banner():
             break
         except Exception:
             continue
-    # **機械可読な出力を汚さない。** stderr に書いていても、消費側が 2>&1 で混ぜると JSON が
-    # 壊れる（実地でテストが JSONDecodeError で落ちた）。view / census / digest は JSON を返す
-    # サブコマンドなので、`--json` の有無に関わらず黙る。人間向けの補助のために、機械が読む
-    # 出力を壊すのは筋が通らない。
+    # **Do not pollute machine-readable output.** Even written to stderr, a consumer merging with
+    # 2>&1 ends up with broken JSON (a test failed with JSONDecodeError in practice). view / census
+    # / digest are subcommands that return JSON, so they stay silent whether or not `--json` is
+    # given. Breaking the output a machine reads, for the sake of a convenience aimed at humans,
+    # does not add up.
     _MACHINE = ("view", "census", "digest", "cat")
     if (os.environ.get("ORG_QUIET") or "--json" in sys.argv
             or any(m in sys.argv[1:2] for m in _MACHINE)):
@@ -3643,25 +3645,30 @@ def main(argv):
     sub = p.add_subparsers(dest="cmd", required=True)
 
     q = sub.add_parser("append"); q.set_defaults(fn=cmd_append)
-    q.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)")
+    q.add_argument("root", nargs="?", help="ledger root (omitted: auto-discovered from the cwd — .orgforge/ledger)")
     q.add_argument("--actor", required=True)
     q.add_argument("--class", dest="cls", required=True)
     q.add_argument("--payload", required=True)
-    # **通常の append で時刻を指定させない。** 時刻は writer が付ける（順序を偽れないように）。
-    # 実時点を後から補う backfill だけが別経路で、**意図を名前に出す**。
+    # **The ordinary append does not let anyone set the time.** The writer stamps it (so the
+    # ordering cannot be faked). Backfilling a moment that already happened is the one separate
+    # path, and **its name states that intent**.
     q.add_argument("--backfill-ts", dest="ts", default=None, metavar="TS",
-                   help="実時点を後から補う場合の時刻（ISO8601 UTC）。通常は渡さない — "
-                        "時刻は writer が付ける。未来や遠い過去は拒否される")
+                   help="the time when filling in a moment that already happened (ISO8601 UTC). "
+                        "Not normally passed — the writer stamps the time. The future and the "
+                        "distant past are refused")
     q.add_argument("--ts", dest="ts_legacy", default=None, help=argparse.SUPPRESS)
-    # **judgment を記録するなら receipt を渡す。** この道具が検証し、identity fields を生成する。
-    # 環境変数の印は受け取らない — caller が立てられるものは証拠にならない。
+    # **To record a judgment, pass a receipt.** This tool verifies it and derives the identity
+    # fields. A marker in an environment variable is not accepted — anything the caller can set is
+    # not evidence.
     q.add_argument("--receipt", default=None,
-                   help="judge が署名した receipt（ファイルか JSON）。検証できたときだけ "
-                        "identity fields が生成される")
-    # cap 予約は writer 側の専用操作。**時刻の引数を定義しない** — cap 予約に backfill を
-    # 持ち込むと、窓の外に予約を置いて上限を迂回できる。
+                   help="a receipt signed by the judge (a file or JSON). The identity fields are "
+                        "derived only when it verifies")
+    # A cap reservation is a writer-only operation. **No time argument is defined** — carry
+    # backfill into a cap reservation and a reservation can be placed outside the window, evading
+    # the cap.
     rx = sub.add_parser("reserve-exposure",
-                        help="cap を検査して予約を1操作で書く（書けた判断だけが allow）")
+                        help="check the cap and write the reservation as one operation (only a "
+                             "decision that was written becomes an allow)")
     rx.add_argument("root", nargs="?", default=None)
     rx.add_argument("--dimension", required=True)
     rx.add_argument("--delta", type=float, required=True)
@@ -3669,55 +3676,63 @@ def main(argv):
     rx.add_argument("--actor", required=True)
     rx.add_argument("--window-since", dest="window_since")
     rx.add_argument("--caused-by", dest="caused_by")
-    # 冪等キー。**欠けていれば metered action を deny する。**
+    # The idempotency key. **If it is missing, the metered action is denied.**
     rx.add_argument("--session-id", dest="session_id", required=True)
     rx.add_argument("--tool-use-id", dest="tool_use_id", required=True)
     rx.add_argument("--rule", required=True)
     rx.set_defaults(fn=cmd_reserve_exposure)
-    # **2件の認証済み provisional から admission を生成する。** judge の receipt は存在しない
-    # （一致は判断ではなく事実の関数）ので、専用操作にする — generic append では
-    # 「receipt が無い」として拒否され、一致してもデッドロックする。
+    # **Derive an admission from two authenticated provisionals.** No judge's receipt exists
+    # (agreement is a function of a fact, not a judgment), so this is a dedicated operation — a
+    # generic append refuses it for having no receipt, and agreement deadlocks.
     da = sub.add_parser("derive-admission",
-                        help="2血統の一致から admission を生成する（writer 専用）")
+                        help="derive an admission from agreement across two lineages "
+                             "(writer-only)")
     da.add_argument("root", nargs="?", default=None)
     da.add_argument("--issue", required=True)
     da.add_argument("--event", required=True,
                     choices=("admission_decided", "refutation_attempted"))
     da.add_argument("--require-attested", dest="require_attested", action="store_true",
-                    help="claimed の判定からは生成しない")
+                    help="do not derive one from claimed judgments")
     da.set_defaults(fn=cmd_derive_admission)
-    # HALT。**writer 専用の操作。** 記録できなければ非ゼロで返す（呼び出し側は通さない）。
-    th = sub.add_parser("trip-halt", help="halt を発動する（ラッチ→台帳の順に書く）")
+    # HALT. **Writer-only operations.** If it cannot be recorded they return non-zero (and the
+    # caller must not let the action through).
+    th = sub.add_parser("trip-halt", help="trip the halt (writes the latch first, then the "
+                                          "ledger)")
     th.add_argument("root", nargs="?", default=None)
-    th.add_argument("--trigger", required=True, help="何が halt を引き起こしたか")
+    th.add_argument("--trigger", required=True, help="what caused the halt")
     th.add_argument("--scope", default="global", choices=("global", "role"))
-    th.add_argument("--reason", required=True, help="なぜ止めたのか（解除の判断に使う）")
+    th.add_argument("--reason", required=True, help="why it was stopped (used when deciding to "
+                                                    "release it)")
     th.add_argument("--tripped-by", dest="tripped_by", required=True)
     th.set_defaults(fn=cmd_trip_halt)
     rh = sub.add_parser("release-halt",
-                        help="halt を解除する（**独立した principal の非対称署名が必要**）")
+                        help="release the halt (**requires an asymmetric signature from an "
+                             "independent principal**)")
     rh.add_argument("root", nargs="?", default=None)
     rh.add_argument("--receipt", required=True,
-                    help="解除の receipt。may_release_halt を認可された **非対称** 鍵で署名し、"
-                         "halt の seq に束縛されていること")
-    rh.add_argument("--reason", required=True, help="なぜ解除してよいと判断したのか")
+                    help="the release receipt. It must be signed with an **asymmetric** key "
+                         "authorised for may_release_halt, and bound to the halt's seq")
+    rh.add_argument("--reason", required=True, help="why it was judged safe to release")
     rh.add_argument("--recovery-verified", dest="recovery_verified", required=True,
-                    help="**何を確かめて復旧したのか**（実行したコマンドと出力）")
+                    help="**what was checked to establish recovery** (the commands run and their "
+                         "output)")
     rh.set_defaults(fn=cmd_release_halt)
-    hs = sub.add_parser("halt-status", help="halt しているかを報告する（観測なので halt 中も通る）")
+    hs = sub.add_parser("halt-status", help="report whether it is halted (observation, so it "
+                                            "gets through during a halt)")
     hs.add_argument("root", nargs="?", default=None)
     hs.set_defaults(fn=cmd_halt_status)
     s = sub.add_parser("schema",
-                       help="org の schema とテンプレートの差分を診断する（--fix で埋める）")
+                       help="diagnose the difference between the org's schema and the template "
+                            "(--fix fills it in)")
     s.add_argument("root", nargs="?", default=None)
-    s.add_argument("--fix", action="store_true", help="足りないクラス／validation を追加する")
+    s.add_argument("--fix", action="store_true", help="add the missing classes / validation")
     s.set_defaults(fn=cmd_schema)
     q.add_argument("--natural-key", dest="natural_key",
                    help="idempotency key: if a prior event of this class carries the same key, "
                         "this append is a no-op (docs/11 §0 — replay/retry must count once)")
 
     sc = sub.add_parser("record-scheduled-check",
-                        help="scheduler checkの実行receiptを書く（writer専用）")
+                        help="write the receipt for a scheduler check run (writer-only)")
     sc.add_argument("root", nargs="?", default=None)
     sc.add_argument("--check-id", required=True)
     sc.add_argument("--scheduled-for-min", type=int, required=True)
@@ -3729,27 +3744,28 @@ def main(argv):
     sc.set_defaults(fn=cmd_record_scheduled_check)
 
     q = sub.add_parser("verify"); q.set_defaults(fn=cmd_verify)
-    q.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)")
+    q.add_argument("root", nargs="?", help="ledger root (omitted: auto-discovered from the cwd — .orgforge/ledger)")
 
     q = sub.add_parser("view"); q.set_defaults(fn=cmd_view)
-    q.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)"); q.add_argument("view_id")
+    q.add_argument("root", nargs="?", help="ledger root (omitted: auto-discovered from the cwd — .orgforge/ledger)"); q.add_argument("view_id")
     q.add_argument("--since"); q.add_argument("--until")
 
     q = sub.add_parser("census"); q.set_defaults(fn=cmd_census)
-    q.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)"); q.add_argument("--since"); q.add_argument("--until")
+    q.add_argument("root", nargs="?", help="ledger root (omitted: auto-discovered from the cwd — .orgforge/ledger)"); q.add_argument("--since"); q.add_argument("--until")
 
     q = sub.add_parser("digest"); q.set_defaults(fn=cmd_digest)
-    q.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)")
+    q.add_argument("root", nargs="?", help="ledger root (omitted: auto-discovered from the cwd — .orgforge/ledger)")
     q.add_argument("--window-since", dest="window_since")
     q.add_argument("--window-until", dest="window_until")
 
     q = sub.add_parser("cat"); q.set_defaults(fn=cmd_cat)
-    q.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)")
+    q.add_argument("root", nargs="?", help="ledger root (omitted: auto-discovered from the cwd — .orgforge/ledger)")
     q.add_argument("--class", dest="cls"); q.add_argument("--actor")
 
     a = p.parse_args(argv[1:])
     _banner()
-    # root は省略可能: 省略時はカレントから自動発見する（.envrc 不要 — tools/discover.py）
+    # root is optional: when omitted it is auto-discovered from the cwd (no .envrc needed —
+    # tools/discover.py)
     if hasattr(a, "root"):
         a.root = resolve_root(a.root)
     # A long-running judge can forget the installed plugin path and find an unrelated development
@@ -3763,7 +3779,7 @@ def main(argv):
             from organ_binding import BindingError, foreign_invocation_error
             mismatch = foreign_invocation_error(a.root, os.path.dirname(os.path.abspath(__file__)))
         except BindingError as exc:
-            print(f"ledger: installed-organ binding を検証できない: {exc}", file=sys.stderr)
+            print(f"ledger: cannot verify the installed-organ binding: {exc}", file=sys.stderr)
             return 12
         if mismatch:
             print(f"ledger: {mismatch}", file=sys.stderr)

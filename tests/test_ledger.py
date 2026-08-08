@@ -884,7 +884,7 @@ def test_legacy_events_remain_readable_but_unvalidated(tmp_path):
     (tmp_path / "HEAD").write_text(json.dumps({"seq": 1, "hash": ev["hash"]}), encoding="utf-8")
     code, out = run("ledger.py", "verify", str(tmp_path))
     assert code == 0, out
-    assert "legacy_unvalidated 1 件" in out
+    assert "legacy_unvalidated 1" in out
     # 続けて v1 を足せる（混在が壊れない）
     assert _app(tmp_path, payload={**_PR, "candidate_id": "c2"})[0] == 0
     assert run("ledger.py", "verify", str(tmp_path))[0] == 0
