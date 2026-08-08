@@ -790,12 +790,14 @@ def test_client_cannot_name_the_schema_version(tmp_path):
 
 
 def test_schema_id_in_payload_is_allowed_for_boundary_events(tmp_path):
-    """禁止は版を名指しする値だけ。schema_id は境界を記録するイベントが持って自然。
+    """Only a value that names a version is forbidden. schema_id is something an event recording
+    the boundary naturally carries.
 
-    禁止を広く取りすぎると記録したい事実が書けない（実際に epoch 記録が弾かれた）。
+    Draw the prohibition too widely and facts you want to record become unwritable (our own epoch
+    record was rejected that way).
     """
     code, out = _app(tmp_path, cls="schema_enforcement_started",
-                     payload={"schema_id": "orgforge-ledger", "note": "境界の記録"})
+                     payload={"schema_id": "orgforge-ledger", "note": "recording the boundary"})
     assert code == 0, out
 
 
@@ -843,7 +845,7 @@ def test_torn_line_is_not_auto_repaired(tmp_path):
     over a broken record."""
     assert _app(tmp_path)[0] == 0
     with open(tmp_path / "ledger.jsonl", "a", encoding="utf-8") as f:
-        f.write('{"seq": 2, "class": "progress_recorded"')     # 改行なし
+        f.write('{"seq": 2, "class": "progress_recorded"')     # no trailing newline
     code, out = _app(tmp_path)
     assert code == 4, out
     assert "not auto-repaired" in out
@@ -867,7 +869,7 @@ def test_same_natural_key_different_payload_is_refused(tmp_path):
     """Condition 9: the same key with different content is not a replay, so it must not be
     discarded as a no-op."""
     assert _app(tmp_path, extra=("--natural-key", "k1"))[0] == 0
-    assert _app(tmp_path, extra=("--natural-key", "k1"))[0] == 0        # 完全一致 → no-op
+    assert _app(tmp_path, extra=("--natural-key", "k1"))[0] == 0        # exact match → no-op
     assert len(_evs(tmp_path)) == 1
     code, out = _app(tmp_path, payload={**_PR, "fraction": 0.9},
                      extra=("--natural-key", "k1"))
@@ -887,7 +889,7 @@ def test_verify_reports_both_assurances_separately(tmp_path):
 def test_legacy_events_remain_readable_but_unvalidated(tmp_path):
     """Condition 5: pre-existing events without a version stay readable — never refuse
     retroactively."""
-    # legacy を手で書く（0.32.3 以前の形）
+    # write a legacy event by hand (the pre-0.32.3 shape)
     ev = {"id": "elegacy", "seq": 1, "ts": "UNSET", "actor": "w",
           "class": "progress_recorded", "payload": dict(_PR), "prev_hash": "GENESIS"}
     sys.path.insert(0, str(TOOLS))
@@ -899,43 +901,44 @@ def test_legacy_events_remain_readable_but_unvalidated(tmp_path):
     code, out = run("ledger.py", "verify", str(tmp_path))
     assert code == 0, out
     assert "legacy_unvalidated 1" in out
-    # 続けて v1 を足せる（混在が壊れない）
+    # a v1 event can still be appended after it (the mixture does not break)
     assert _app(tmp_path, payload={**_PR, "candidate_id": "c2"})[0] == 0
     assert run("ledger.py", "verify", str(tmp_path))[0] == 0
 
 
-# ══ 0.33.1 — Phase 0 の残件（検証軸の分離 / TOCTOU / ts / lock / skew）═════════
-# 監査が 0.33.0 で「実装した」と報告した条件のうち未達だったもの。**空の payload が通り、
-# --ts UNSET も通っていた。** 3軸に分けて閉じる。
+# ══ 0.33.1 — what Phase 0 still owed (separating the axes / TOCTOU / ts / lock / skew) ═══
+# The conditions an audit reported as "implemented" in 0.33.0 but which were not met. **An empty
+# payload passed, and so did --ts UNSET.** Closed by separating them into three axes.
 
 _ADM = {"deliverable": "42", "verdict": "admit"}
 
 
 def test_required_only_applies_to_declared_classes(tmp_path):
-    """軸1: required を宣言したクラスだけ必須 field を検証する。
+    """Axis 1: validate mandatory fields only for classes that declare `required`.
 
-    全クラスを一度に closed-world にすると、schema の乖離が「組織全体の記録停止」に変わる —
-    それは fail-closed ではなく、既知の移行不備による可用性事故である。
+    Making every class closed-world at once turns schema drift into "the whole organisation stops
+    recording" — which is not fail-closed but an availability incident caused by a known migration
+    gap.
     """
-    # required 未宣言のクラスは、空でも通る（既存 43 件を止めない）
+    # a class that declares no `required` passes even when empty (do not stop the existing 43)
     code, out = _app(tmp_path, "progress_recorded", {})
     assert code == 0, out
-    # 統制イベントは必須欠落で拒否
+    # a control event is refused when a mandatory field is missing
     code, out = _app(tmp_path, "admission_decided", {}, actor="gate")
     assert code == 2
     assert "missing required fields" in out
 
 
 def test_correlation_key_is_any_of_not_a_fixed_one(tmp_path):
-    """相関キーは deliverable / candidate_id / issue のどれか1つでよい。
+    """Any one of deliverable / candidate_id / issue suffices as the correlation key.
 
-    1つに固定すると正当な書き込みを弾く（実際に統制のテストを弾いた）。
+    Pin it to a single one and legitimate writes get rejected (it rejected the control's own tests).
     """
     for key in ("deliverable", "candidate_id", "issue"):
         code, out = _app(tmp_path, "admission_decided",
                          {key: "c1", "verdict": "admit", "gate": "g"}, actor=f"gate-{key}")
-        assert code == 0, f"{key} だけでは通らなかった: {out}"
-    # 1つも無ければ拒否
+        assert code == 0, f"{key} alone did not get through: {out}"
+    # refused when none of them is present
     code, out = _app(tmp_path, "admission_decided", {"verdict": "admit"}, actor="gate-none")
     assert code != 0
     assert "has no correlation key" in out or "cannot be identified" in out
@@ -948,7 +951,7 @@ def test_enum_and_type_are_checked_when_present(tmp_path):
     assert code == 2
     assert "is not an allowed value" in out
     code, out = _app(tmp_path, "correction",
-                     {"corrects": 5, "kind": "probe"}, actor="sup")     # list であるべき
+                     {"corrects": 5, "kind": "probe"}, actor="sup")     # ought to be a list
     assert code == 2
     assert "has the wrong type" in out
 
@@ -960,7 +963,7 @@ def test_undeclared_fields_warn_but_pass_except_in_strict_classes(tmp_path):
                      {**_ADM, "some_new_field": "x"}, actor="gate")
     assert code == 0, out
     assert "undeclared fields" in out
-    # verdict_provisional は additional_properties: false
+    # verdict_provisional is additional_properties: false
     code, out = _app(tmp_path, "verdict_provisional",
                      {"issue": 7, "deliverable": "7", "role": "gate",
                       "lineage": "same-harness", "verdict": "admit", "for_event":
@@ -976,9 +979,9 @@ def test_unset_timestamp_is_refused(tmp_path):
     assert code == 2
     assert "UNSET" in out
     code, out = _app(tmp_path, "progress_recorded", {}, extra=("--ts", "2026-07-30"))
-    assert code == 2, "日付だけの形も拒否されるべき"
-    # 正しい形は通る（hook が渡す経路。**固定日付を書かない** — 時間が経つと未来判定で
-    # 壊れる。実際にこのテストが 0.33.2 でそう壊れた）
+    assert code == 2, "a date-only form ought to be refused as well"
+    # the correct form passes (the path the hook uses). **Never hard-code a date** — as time
+    # passes it breaks on the future check, which is exactly how this test broke in 0.33.2
     import datetime as _dt
     recent = (_dt.datetime.now(_dt.timezone.utc)
               - _dt.timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -994,19 +997,20 @@ def test_schema_drift_is_reported_by_verify(tmp_path, monkeypatch):
                    + "\n  a_brand_new_class: { x }\n", encoding="utf-8")
     monkeypatch.setenv("ORG_LEDGER_SCHEMA", str(alt))
     code, out = run("ledger.py", "verify", str(tmp_path))
-    assert code == 0, out                      # 鎖は無事
-    assert "The format has been swapped" in out      # しかし drift は報告される
+    assert code == 0, out                      # the chain is intact
+    assert "The format has been swapped" in out      # but the drift is still reported
 
 
 def test_schema_skew_is_diagnosed_and_fixable(tmp_path):
-    """H8: org の schema がテンプレートより古いことを診断し、--fix で埋める。
+    """H8: diagnose that an org's schema is behind the template, and fill it in with --fix.
 
-    実測: ある org の schema は4クラス古く、うち2つ（correction 12件、asset_touched 3件）は
-    実データで使われていた。配らずに検査を入れれば、その org は訂正を書けなくなる。
+    Measured: one org's schema was four classes behind, and two of them (correction, 12 events;
+    asset_touched, 3) were in use in real data. Introduce the check without shipping the schema and
+    that org can no longer write a correction.
     """
     org = tmp_path / "org"; (org / ".orgforge" / "ledger").mkdir(parents=True)
     full = (TEMPLATE / "ledger-schema.yaml").read_text(encoding="utf-8")
-    # correction の宣言を削って「古い org」を作る
+    # remove the correction declaration to build an "old org"
     stale = re.sub(r"\n  correction:.*?(?=\n  [a-z_]+:)", "\n", full, count=1, flags=re.S)
     (org / "ledger-schema.yaml").write_text(stale, encoding="utf-8")
     (org / "constitution.yaml").write_text("enforcement: {}\n", encoding="utf-8")
@@ -1016,19 +1020,21 @@ def test_schema_skew_is_diagnosed_and_fixable(tmp_path):
     assert "correction" in out
     code, out = run("ledger.py", "schema", "--fix", cwd=str(org))
     assert code == 0, out
-    # **event_classes が2つになっていないこと** — YAML は後の定義で前を上書きし、
-    # クラス宣言が丸ごと消える（この修復の初版が実際にそれをやった）。
+    # **there must not be two event_classes** — YAML lets the later definition overwrite the
+    # earlier one, and the class declarations vanish wholesale (the first version of this repair
+    # did exactly that).
     fixed = (org / "ledger-schema.yaml").read_text(encoding="utf-8")
     assert fixed.count("\nevent_classes:") == 1
     import yaml
     assert "correction" in yaml.safe_load(fixed)["event_classes"]
-    assert run("ledger.py", "schema", cwd=str(org))[0] == 0      # 差分なしになる
+    assert run("ledger.py", "schema", cwd=str(org))[0] == 0      # now reports no difference
 
 
-# ══ 0.33.2 — Phase 0 の残件（lock の fail-open / ts の実在性 / H8 の nested）════
-# **0.33.1 で「lock は fail-closed」と CHANGELOG に書いたが、コードに ORG_LEDGER_ALLOW_UNLOCKED
-# は存在せず、self.error も設定されていなかった。** 置換が一致せず適用されていなかったのに、
-# 実測せずに達成と報告した。ロックの fail-closed は **故障注入で検査できなければ主張できない。**
+# ══ 0.33.2 — what Phase 0 still owed (the lock's fail-open / whether ts exists / H8 nested) ══
+# **0.33.1 wrote "the lock is fail-closed" into the CHANGELOG, while ORG_LEDGER_ALLOW_UNLOCKED did
+# not exist in the code and self.error was never set.** The replacement had not matched and so was
+# never applied — and it was reported as achieved without being measured. A lock's fail-closed
+# behaviour **cannot be claimed unless it can be tested by fault injection.**
 
 def test_lock_failure_refuses_the_append(tmp_path):
     """Under injected lock failure, it always stops non-zero."""
@@ -1039,7 +1045,7 @@ def test_lock_failure_refuses_the_append(tmp_path):
                        capture_output=True, text=True, env=env)
     assert r.returncode == 4, r.stdout + r.stderr
     assert "cannot lock the append" in (r.stdout + r.stderr)
-    assert not (tmp_path / "ledger.jsonl").exists(), "拒否したのに書いている"
+    assert not (tmp_path / "ledger.jsonl").exists(), "it refused, yet it wrote"
 
 
 def test_unlocked_escape_is_explicit_and_says_what_it_cannot_verify(tmp_path):
@@ -1095,32 +1101,33 @@ def test_unknown_validator_type_fails_closed(tmp_path, monkeypatch):
 
 
 def test_schema_diagnoses_nested_validation_gaps(tmp_path):
-    """H8: validation の **中身** の欠落も診断する。ブロックの有無だけでは足りない。
+    """H8: diagnose missing **contents** of validation too. Whether the block exists is not enough.
 
-    実測: org 側で verdict_provisional の required を削っても「差分なし」と判定した。
+    Measured: deleting verdict_provisional's required on the org side still reported "no
+    difference".
     """
     org = tmp_path / "org"; (org / ".orgforge" / "ledger").mkdir(parents=True)
     (org / "constitution.yaml").write_text("enforcement: {}\n", encoding="utf-8")
     full = (TEMPLATE / "ledger-schema.yaml").read_text(encoding="utf-8")
     stale = re.sub(r"\n    verdict_provisional:  \[role, lineage, verdict, for_event,\n[^\n]*\n",
                    "\n", full, count=1)
-    assert stale != full, "テストの前提が崩れている（required の行が見つからない）"
+    assert stale != full, "the test's premise has broken (the required line cannot be found)"
     (org / "ledger-schema.yaml").write_text(stale, encoding="utf-8")
 
     code, out = run("ledger.py", "schema", cwd=str(org))
     assert code == 1, out
     assert "missing validation rules" in out
     assert "verdict_provisional" in out
-    # --fix で埋まり、差分なしになる
+    # --fix fills it in, and it reports no difference
     assert run("ledger.py", "schema", "--fix", cwd=str(org))[0] == 0
     assert run("ledger.py", "schema", cwd=str(org))[0] == 0
-    # atomic write なので .tmp が残らない
+    # the write is atomic, so no .tmp is left behind
     assert not list(org.glob("*.tmp"))
 
 
-# ══ 0.33.3 — H8 修復器が org 所有の安全規則を消していた ═══════════════════════
-# validation ブロックを丸ごと差し替えていたので、org が自分で足した厳格規則が失われた。
-# **修復が org の安全側の設定を弱めるのは、修復ではなく退行である。**
+# ══ 0.33.3 — the H8 repairer was deleting safety rules the org owned ════════════════════════
+# It replaced the validation block wholesale, so the stricter rules an org had added itself were
+# lost. **A repair that weakens an org's safety-side settings is not a repair, it is a regression.**
 
 def _org_with_schema(tmp_path, mutate):
     org = tmp_path / "org"; (org / ".orgforge" / "ledger").mkdir(parents=True)
@@ -1142,9 +1149,9 @@ def test_fix_preserves_org_own_stricter_rules(tmp_path):
     import yaml
     d = yaml.safe_load((org / "ledger-schema.yaml").read_text(encoding="utf-8"))
     req = d["validation"]["required"]
-    assert req.get("progress_recorded") == ["milestone"], "org 独自の規則が消えた"
-    assert req.get("verdict_provisional"), "テンプレート由来の規則が復旧していない"
-    # **event_classes を壊していないこと** — 置換の範囲が広すぎると丸ごと消える
+    assert req.get("progress_recorded") == ["milestone"], "the org's own rule was deleted"
+    assert req.get("verdict_provisional"), "the rule from the template was not restored"
+    # **event_classes must not be damaged** — too wide a replacement range wipes it out entirely
     assert len(d["event_classes"]) >= 69
     assert set(d) >= {"envelope", "event_classes", "validation", "views", "triggers"}
 
@@ -1163,9 +1170,9 @@ def test_fix_preserves_org_added_list_elements(tmp_path):
 
 
 def test_conflicting_scalar_is_reported_not_overwritten(tmp_path):
-    """同じ path に違う値があるとき、自動で上書きせず conflict として報告する。
+    """Where the same path holds different values, report a conflict rather than overwriting.
 
-    org が意図して変えたのか、テンプレートが変わったのかは道具では判別できない。
+    The tool cannot tell whether the org changed it deliberately or the template moved on.
     """
     org = _org_with_schema(tmp_path, lambda t: t.replace(
         "correction:          { corrects: list, target_classes: list, target_issues: list }",
@@ -1176,14 +1183,15 @@ def test_conflicting_scalar_is_reported_not_overwritten(tmp_path):
     run("ledger.py", "schema", "--fix", cwd=str(org))
     import yaml
     v = yaml.safe_load((org / "ledger-schema.yaml").read_text(encoding="utf-8"))["validation"]
-    assert v["types"]["correction"]["corrects"] == "map", "org の値が上書きされた"
+    assert v["types"]["correction"]["corrects"] == "map", "the org's value was overwritten"
 
 
 def test_yaml_block_span_stops_at_the_next_top_level_key(tmp_path):
-    """ブロックの範囲は「インデントの無い次の行」で決める。
+    """A block's extent is decided by "the next line with no indentation".
 
-    正規表現で `\\nkey:\\n(?:(?:  |\\n).*\\n)*` と書くと、次のトップレベルキーの前にある
-    コメント行やその子行まで飲み込む。実際に validation の置換が event_classes を消した。
+    Written as the regex `\\nkey:\\n(?:(?:  |\\n).*\\n)*`, it swallows the comment lines before
+    the next top-level key and that block's children too. A replacement of validation did exactly
+    that and deleted event_classes.
     """
     sys.path.insert(0, str(TOOLS))
     import importlib
@@ -1197,12 +1205,14 @@ def test_yaml_block_span_stops_at_the_next_top_level_key(tmp_path):
     assert "# a top-level comment" not in got
 
 
-# ══ H3 — reserve-exposure: 書けた判断だけが allow になる ══════════════════════
-# 従来: organ が「集計 → 判断 → LEDGER-EVENT 印字」、hook が「その後 append（失敗は無視）」。
-#   1. 集計と判断が lock の外なので、並列の hook が同じ committed を読んで両方 allow できる
-#   2. append 失敗を無視するので、次の呼び出しが committed=0 を見る（cap が記憶を失う）
-#   3. hold は deny して終わるので、止めたことが残らない
-# reserve-exposure は lock の中で検査と予約を一操作にする。
+# ══ H3 — reserve-exposure: only a decision that was written becomes an allow ════════════════
+# Previously: the organ did "total up → judge → print LEDGER-EVENT" and the hook did "append
+# afterwards (ignoring failure)".
+#   1. the totalling and judging sit outside the lock, so parallel hooks read the same committed
+#      value and both allow
+#   2. an append failure is ignored, so the next call sees committed=0 (the cap loses its memory)
+#   3. a hold ends in a deny, so nothing records that it was stopped
+# reserve-exposure makes the check and the reservation one operation inside the lock.
 
 def _reserve(root, delta, cap, tu, sess="s1", rule="rm_guard", dim="destructive_ops",
              actor="system:org_hook", extra=()):
@@ -1243,7 +1253,7 @@ def test_concurrent_reservations_never_exceed_the_cap(tmp_path):
         codes = [f.result()[0] for f in futs]
     assert sorted(set(codes)) == [0, 10], codes
     allowed = sum(dl for _s, dc, dl in _decisions(tmp_path) if dc == "allow")
-    assert allowed == 5, f"allow の合計が cap を超えた: {allowed}"
+    assert allowed == 5, f"the allowed total exceeded the cap: {allowed}"
     assert codes.count(0) == 5
     assert run("ledger.py", "verify", str(tmp_path))[0] == 0
 
@@ -1254,15 +1264,15 @@ def test_replay_of_the_same_tool_use_is_idempotent(tmp_path):
     code, out = _reserve(tmp_path, 1, 3, "same")
     assert code == 0
     assert json.loads(out.splitlines()[0])["reason"] == "idempotent_replay"
-    assert len(_decisions(tmp_path)) == 1, "再実行が二重に記録された"
+    assert len(_decisions(tmp_path)) == 1, "a re-run was recorded twice"
 
 
 def test_idempotency_key_spans_session_rule_and_class(tmp_path):
     """`tool_use_id` alone cannot separate a different session or a different rule."""
     assert _reserve(tmp_path, 1, 9, "tu", sess="s1", rule="r1")[0] == 0
-    assert _reserve(tmp_path, 1, 9, "tu", sess="s2", rule="r1")[0] == 0   # 別 session
-    assert _reserve(tmp_path, 1, 9, "tu", sess="s1", rule="r2")[0] == 0   # 別 rule
-    assert len(_decisions(tmp_path)) == 3, "衝突して no-op になった"
+    assert _reserve(tmp_path, 1, 9, "tu", sess="s2", rule="r1")[0] == 0   # a different session
+    assert _reserve(tmp_path, 1, 9, "tu", sess="s1", rule="r2")[0] == 0   # a different rule
+    assert len(_decisions(tmp_path)) == 3, "they collided and became a no-op"
 
 
 @pytest.mark.parametrize("missing", ["session_id", "tool_use_id", "rule"])
@@ -1307,7 +1317,7 @@ def test_reserve_defines_no_timestamp_argument(tmp_path):
     code, out = run("ledger.py", "reserve-exposure", "--help")
     assert "--backfill-ts" not in out
     assert not re.search(r"(?m)^\s+--ts\b", out)
-    # 渡そうとしても受け付けない
+    # it is not accepted even when passed
     code, out = _reserve(tmp_path, 1, 9, "t0", extra=("--backfill-ts", "2026-07-01T00:00:00Z"))
     assert code != 0
     assert _decisions(tmp_path) == []
@@ -1320,7 +1330,7 @@ def test_reserve_does_not_take_committed_from_the_caller(tmp_path):
     _reserve(tmp_path, 2, 9, "t0")
     _reserve(tmp_path, 2, 9, "t1")
     d = _evs(tmp_path)[-1]["payload"]
-    assert d["committed_so_far"] == 2.0, "writer が数えていない"
+    assert d["committed_so_far"] == 2.0, "the writer is not doing the counting"
 
 
 def test_malformed_prior_exposure_denies(tmp_path):
@@ -1334,7 +1344,7 @@ def test_malformed_prior_exposure_denies(tmp_path):
     sys.path.insert(0, str(TOOLS))
     import importlib
     led = importlib.import_module("ledger")
-    ev["hash"] = led._hash("GENESIS", ev)          # 鎖は通るようにする
+    ev["hash"] = led._hash("GENESIS", ev)          # keep the chain intact
     p.write_text(json.dumps(ev, ensure_ascii=False) + "\n", encoding="utf-8")
     (tmp_path / "HEAD").write_text(json.dumps({"seq": 1, "hash": ev["hash"]}), encoding="utf-8")
     code, out = _reserve(tmp_path, 1, 9, "t1")
