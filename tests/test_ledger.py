@@ -588,7 +588,7 @@ def test_other_judge_cannot_void_a_judgment(tmp_path):
     target = _provisional_target(org, ledger, actor="gate")
     result = _correction_append(org, ledger, "skeptic", target["seq"])
     assert result.returncode == 3
-    assert "第三者 authority: supervisor" in result.stderr
+    assert "third-party authority declared by the constitution: supervisor" in result.stderr
 
 
 def test_declared_third_party_authority_can_void_judgment_with_audit_fields(tmp_path):
@@ -618,7 +618,7 @@ def test_declared_authority_actor_name_without_receipt_cannot_void_judgment(tmp_
     result = _correction_append(org, ledger, "supervisor", target["seq"])
     assert result.returncode == 3
     assert "no signed receipt" in result.stderr
-    assert "--actor の役割名だけ" in result.stderr
+    assert "A role name in --actor does not prove third-party status" in result.stderr
 
 
 def test_custom_judging_role_cannot_be_correction_authority_at_runtime(tmp_path):
@@ -635,7 +635,7 @@ def test_custom_judging_role_cannot_be_correction_authority_at_runtime(tmp_path)
     receipt = _correction_receipt(org, ledger, "review-lead", target["seq"])
     result = _correction_append(org, ledger, "review-lead", target["seq"], receipt=receipt)
     assert result.returncode == 3
-    assert "judge/review職務を持つ" in result.stderr
+    assert "holds a judge/review function" in result.stderr
 
 
 def test_missing_authority_policy_fails_closed_only_for_judgments(tmp_path):
@@ -643,7 +643,7 @@ def test_missing_authority_policy_fails_closed_only_for_judgments(tmp_path):
     target = _provisional_target(org, ledger, actor="gate")
     denied = _correction_append(org, ledger, "supervisor", target["seq"])
     assert denied.returncode == 3
-    assert "judgment_corrections が宣言されていない" in denied.stderr
+    assert "judgment_corrections is not declared" in denied.stderr
 
     # The judge role may still correct its own *non-judgment* probe/mistake. The restriction is on
     # authority-bearing judgments, not on append-only factual hygiene.

@@ -63,19 +63,21 @@ PHASE_ORDER = ["requirements", "design", "implement", "test", "integrate", "depl
 
 
 
-# 同じ仕事を指す識別子は2系統に分かれていた: 人間側 / decide / org_cycle の照合は
-# `deliverable` / `issue`、強制ロジック（requires_prior / DISTINCT_ACTOR）は
-# `candidate_id` / `claim_id`。同じものを指しているのに片方しか見ないため、
-# **運用では自己 admit も、存在しない deliverable の deploy も素通りした。**
-# 束ねて、どちらで書かれていても相関が取れるようにする。
+# The identifiers naming the same piece of work had split into two families: the human side,
+# `decide` and org_cycle matched on `deliverable` / `issue`, while the enforcement logic
+# (requires_prior / DISTINCT_ACTOR) matched on `candidate_id` / `claim_id`. They named the same
+# thing, but each side saw only one family — so **in operation both a self-admission and a deploy
+# of a non-existent deliverable went straight through.**
+# Bundle them, so the correlation holds whichever family it was written in.
 _CORRELATION_KEYS = ("candidate_id", "claim_id", "deliverable", "issue")
 
 
 def _correlation_ids(payload):
-    """その payload が名指ししている「仕事」の識別子すべて（正規化済みの集合）。
+    """Every identifier this payload uses to name a piece of work (as a normalised set).
 
-    どれか1つでも一致すれば同じ仕事とみなす。書き手がどのキーを使ったかに強制の有効性が
-    左右されてはいけない — 左右されると、キーを外した瞬間に統制が無言で消える。
+    A match on any one of them counts as the same work. Whether enforcement holds must not depend
+    on which key the writer happened to use — if it does, control disappears silently the moment
+    someone drops that key.
     """
     out = set()
     for k in _CORRELATION_KEYS:
@@ -85,13 +87,13 @@ def _correlation_ids(payload):
     return out
 
 
-# `pack_manifest_id: "issue-7"` / `contract_ref` は candidate_id と Issue 番号を繋ぐ唯一の橋。
-# 直接の共有 ID が無くても、この橋を辿れば同じ仕事だと分かる。
+# `pack_manifest_id: "issue-7"` / `contract_ref` are the only bridge between a candidate_id and
+# an Issue number. Even with no directly shared ID, following this bridge shows it is the same work.
 _ALIAS_KEYS = ("pack_manifest_id", "contract_ref", "spec_ref")
 
 
 def _alias_ids(payload):
-    """`issue-7` のような別名から Issue 番号を取り出す。"""
+    """Extract the Issue number out of an alias such as `issue-7`."""
     out = set()
     for k in _ALIAS_KEYS:
         v = payload.get(k)
@@ -106,13 +108,14 @@ def _alias_ids(payload):
 
 
 def _work_aliases(hist):
-    """台帳全体から「同じ仕事を指す識別子」の同値類を作る。
+    """Build the equivalence classes of "identifiers naming the same work" across the ledger.
 
-    実地では cycle_started が candidate_id しか持たず、判定側は deliverable で書かれるため、
-    直接比較では永久に相関しなかった（で maker が自分の を admit できた）。
-    橋は台帳の中にある — `cycle_started{candidate_id, pack_manifest_id:"issue-7"}` と
-    `candidate_submitted{candidate_id, contract_ref}` が両者を繋いでいる。
-    **人に同じキーで書かせるのではなく、既にある対応関係を辿る。**
+    In practice cycle_started carried only a candidate_id while the judging side was written with
+    deliverable, so a direct comparison never correlated them — which is how a maker came to admit
+    its own work. The bridge is already in the ledger:
+    `cycle_started{candidate_id, pack_manifest_id:"issue-7"}` and
+    `candidate_submitted{candidate_id, contract_ref}` connect the two.
+    **Rather than making people write the same key, follow the correspondence that already exists.**
     """
     parent = {}
 
@@ -138,10 +141,10 @@ def _work_aliases(hist):
 
 
 def _same_work(pa, pb, hist=None):
-    """2つの payload が同じ仕事を指すか。
+    """Do these two payloads name the same work?
 
-    共有する識別子が1つでもあれば True。無い場合でも、台帳が持つ別名の対応関係
-    （candidate_id ↔ issue-N）を辿って同じ仕事に行き着けば True。
+    True if they share even one identifier. If they share none, still True when the alias
+    correspondence held in the ledger (candidate_id ↔ issue-N) leads to the same work.
     """
     a, b = _correlation_ids(pa), _correlation_ids(pb)
     if a & b:
@@ -271,7 +274,7 @@ def _judgment_correction_policy():
     judges = enforcement.get("judges") if isinstance(enforcement, dict) else None
     policy = judges.get("judgment_corrections") if isinstance(judges, dict) else None
     if not isinstance(policy, dict):
-        return None, ("enforcement.judges.judgment_corrections が宣言されていない")
+        return None, ("enforcement.judges.judgment_corrections is not declared")
     roles = policy.get("authority_roles")
     if (not isinstance(roles, list) or not roles
             or any(not isinstance(role, str) or not role.strip() for role in roles)):
@@ -279,7 +282,7 @@ def _judgment_correction_policy():
     roles = tuple(dict.fromkeys(role.strip() for role in roles))
     judges_forbidden = sorted(set(roles) & {"gate", "skeptic"})
     if judges_forbidden:
-        return None, ("判定者を judgment correction authority にできない: "
+        return None, ("a judge cannot be the judgment correction authority: "
                       + ", ".join(judges_forbidden))
     root = _org_root()
     organization_path = os.path.join(root, "organization.yaml") if root else None
@@ -302,8 +305,8 @@ def _judgment_correction_policy():
             return None, f"judgment correction authority {role_id!r} is dormant"
         functions = set(role.get("functions") or [])
         if functions & {"judge", "review"}:
-            return None, (f"judgment correction authority {role_id!r} はjudge/review職務を持つ — "
-                          "第三者authorityではない")
+            return None, (f"judgment correction authority {role_id!r} holds a judge/review "
+                          "function — that is not a third-party authority")
     return {"authority_roles": roles}, None
 
 
@@ -328,8 +331,8 @@ def _annotate_correction(payload, hist):
     payload["target_issues"] = target_issues
     if (len(target_issues) == 1 and payload.get("issue") is not None
             and norm_issue(payload.get("issue")) != target_issues[0]):
-        return None, (f"correction.issue={payload.get('issue')!r} が対象イベントのIssue "
-                      f"{target_issues[0]!r} と一致しない")
+        return None, (f"correction.issue={payload.get('issue')!r} does not match the target "
+                      f"event's Issue {target_issues[0]!r}")
     if len(target_issues) == 1:
         payload["issue"] = target_issues[0]
     kind = payload.get("kind")
@@ -356,29 +359,28 @@ def _judgment_correction_violation(ev, judgments):
     policy, error = _judgment_correction_policy()
     if error:
         return (f"cannot determine the judgment correction authority — {error}.\n"
-                "  constitution.yaml に次を宣言し、org_lint を通すこと:\n"
+                "  Declare the following in constitution.yaml and pass org_lint:\n"
                 "    enforcement.judges.judgment_corrections.authority_roles: [supervisor]\n"
-                "  **判定できないなら judgment を無効化しない。**")
+                "  **If it cannot be determined, do not void the judgment.**")
     actor = str(ev.get("actor") or "")
     authority_role = str(payload.get("authority_role") or actor)
     if payload.get("authority_role") and authority_role != actor:
         return (f"authority_role={authority_role!r} does not match envelope actor={actor!r}. "
-                "代理の権限名を payload に書いてはいけない")
+                "a proxy authority name must not be written into the payload")
     if authority_role not in policy["authority_roles"]:
         return (f"actor {actor!r} is not authorized to make a judgment {kind}.\n"
-                f"  constitution が宣言する第三者 authority: "
+                f"  third-party authority declared by the constitution: "
                 f"{', '.join(policy['authority_roles'])}\n"
-                f"  対象 seq={payload.get('corrects')} / class={payload.get('target_classes')}。"
-                "judge 自身で空きを作らず、"
-                "authority へ handback すること。")
+                f"  targets seq={payload.get('corrects')} / class={payload.get('target_classes')}. "
+                "Do not clear the way yourself as the judge — hand back to the authority.")
 
     assurance = payload.get("identity_assurance")
     authority_principal = payload.get("decision_by")
     if assurance not in {"attested", "authenticated"} or not authority_principal:
         return (f"no signed receipt for judgment correction authority {authority_role!r}.\n"
                 f"  expected subject: {payload.get('authority_receipt_subject')}\n"
-                "  --actor の役割名だけでは第三者性を証明しない。authorityの鍵で署名し、"
-                "--receipt を渡すこと。")
+                "  A role name in --actor does not prove third-party status. Sign with the "
+                "authority's key and pass --receipt.")
 
     def principal(target):
         target_payload = target.get("payload") or {}
