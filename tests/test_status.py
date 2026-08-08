@@ -71,7 +71,7 @@ def test_reject_after_admit_clears_the_admit(tmp_path):
          "payload": {"issue": 11, "verdict": "reject"}},
     ])
     out = _status(led).stdout
-    assert "skeptic の記録が無い" not in out, f"reject 後も admit 扱いのまま: {out}"
+    assert "no skeptic record" not in out, f"reject 後も admit 扱いのまま: {out}"
     assert "rework 待ち" in out, f"reject されたまま放置されていることが見えない: {out}"
 
 
@@ -82,7 +82,7 @@ def test_admit_after_reject_counts_as_admit(tmp_path):
         {"seq": 2, "class": "admission_decided", "payload": {"issue": 11, "verdict": "admit"}},
     ])
     out = _status(led).stdout
-    assert "skeptic の記録が無い" in out, f"再 admit が admit として数えられていない: {out}"
+    assert "no skeptic record" in out, f"再 admit が admit として数えられていない: {out}"
 
 
 def test_risk_accepted_admit_not_counted_after_reject(tmp_path):
@@ -106,7 +106,7 @@ def test_voiding_superseded_correction_removes_admit_from_redline(tmp_path):
                      "reason": "skeptic refuted the admitted revision"}},
     ])
     out = _status(led).stdout
-    assert "skeptic の記録が無い" not in out, out
+    assert "no skeptic record" not in out, out
 
 
 def test_legacy_superseded_correction_remains_voiding_after_schema_migration(tmp_path):
@@ -118,7 +118,7 @@ def test_legacy_superseded_correction_remains_voiding_after_schema_migration(tmp
          "payload": {"corrects": [1], "kind": "superseded", "reason": "legacy correction"}},
     ])
     out = _status(led).stdout
-    assert "skeptic の記録が無い" not in out, out
+    assert "no skeptic record" not in out, out
 
 
 def test_provisional_skeptic_refutation_is_not_reported_as_missing(tmp_path):
@@ -132,5 +132,5 @@ def test_provisional_skeptic_refutation_is_not_reported_as_missing(tmp_path):
                      "review_subject_id": "subject-63", "reasoning_sha256": "digest-63"}},
     ])
     out = _status(led).stdout
-    assert "skeptic の記録が無い" not in out, out
+    assert "no skeptic record" not in out, out
     assert "skeptic が refuted" in out, out

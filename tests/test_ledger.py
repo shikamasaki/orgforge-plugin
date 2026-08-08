@@ -1,6 +1,7 @@
-"""台帳と統制 — phase の順序・冪等・自己承認拒否・識別子の相関。
+"""The ledger and its controls — phase ordering, idempotency, refusing self-approval, and
+correlating identifiers.
 
-ここが緩むと、判断の記録が「あるように見えて効いていない」状態になる。"""
+Let this slacken and the record of a judgment ends up present-looking but ineffective."""
 import argparse
 import hashlib
 import json
@@ -107,8 +108,8 @@ def test_phase_design_starts_after_requirements_admitted(tmp_path):
 # ── idempotency (docs/11 §0) — a natural-keyed event counts once under replay/retry ──
 def test_append_natural_key_is_idempotent(tmp_path):
     args = ("ledger.py", "append", str(tmp_path), "--actor", "h",
-            # exposure_budget_checked は writer 専用になったので generic append では書けない
-            # （0.34.1）。冪等性の検査は class に依存しないので、通常のクラスで行う。
+            # exposure_budget_checked became writer-only, so a generic append cannot write it
+            # (0.34.1). The idempotency check does not depend on the class, so use an ordinary one.
             "--class", "progress_recorded",
             "--payload", '{"role":"maker","candidate_id":"c1","phase":"implement"}',
             "--natural-key", "call-abc")
@@ -122,7 +123,8 @@ def test_append_natural_key_is_idempotent(tmp_path):
 
 
 def test_append_different_natural_keys_both_land(tmp_path):
-    # exposure_budget_checked は writer 専用（0.34.1）。冪等キーの検査は class に依存しない。
+    # exposure_budget_checked is writer-only (0.34.1). The idempotency-key check does not depend
+    # on the class.
     base = ("ledger.py", "append", str(tmp_path), "--actor", "h",
             "--class", "progress_recorded",
             "--payload", '{"role":"maker","candidate_id":"c1","phase":"implement"}')
@@ -251,15 +253,17 @@ def test_the_full_phase_chain_runs_when_each_phase_is_entered_and_admitted(tmp_p
     assert code == 0, out
 
 
-# ── views はスキーマを単一の情報源とする（docs/11 §0c の申し送り A-1）─────────
-# 以前は ledger.py に13件をハードコードしていたが、スキーマは26件を宣言していた。実害:
-# /org-work が parts_inventory を引けず起動せず、gate の context_pack 3件と skeptic の 2件が
-# すべて未実装で、SoD の checker が判断材料を取得できないのに org_lint は pass していた。
+# ── views take the schema as their single source of truth (handover A-1, docs/11 §0c) ────────
+# ledger.py used to hardcode 13 while the schema declared 26. What it cost: /org-work could not
+# fetch parts_inventory and failed to start; all three of the gate's context_pack views and both of
+# the skeptic's were unimplemented, so the SoD checker could not obtain the material it was to judge
+# by — and org_lint passed anyway.
 
 
-# ── phase の親継承（申し送り B-2）────────────────────────────────────────────
-# founding は objective 単位で requirements/design を admit するが、/org-work は task Issue 番号を
-# deliverable にする。別の文字列なので連鎖せず、指示どおり進めても task #1 が弾かれた。
+# ── inheriting a phase from the parent (handover B-2) ────────────────────────────────────────
+# founding admits requirements/design per objective, while /org-work uses the task Issue number as
+# the deliverable. Different strings, so nothing chained, and task #1 was rejected even when the
+# instructions had been followed exactly.
 def test_task_inherits_phase_admission_from_its_parent_objective(tmp_path):
     for phase in ("requirements", "design"):
         seed(tmp_path, "sup", "phase_started", {"deliverable": "1", "phase": phase, "role": "sup"})
@@ -273,9 +277,9 @@ def test_task_inherits_phase_admission_from_its_parent_objective(tmp_path):
     assert code == 0, out
 
 
-# ── 実地フィードバック: 識別子の揺れで admission を見失う ─────────────────
-# gate が deliverable に "settle()"（関数名）を書き、complete の照合が "8"（Issue番号）で
-# 探して「admission がまだ」と出た。記録は seq 96 に存在していた。
+# ── field report: a wobble in identifiers loses sight of an admission ────────────────────────
+# The gate wrote "settle()" (a function name) as the deliverable while complete looked it up by "8"
+# (the Issue number), and reported "no admission yet". The record was there, at seq 96.
 def test_admission_lookup_tolerates_identifier_drift(tmp_path):
     """Even when the deliverable is a function name, the payload's issue finds it — and when
     nothing matches, `near` names why."""
@@ -294,12 +298,14 @@ def test_admission_lookup_tolerates_identifier_drift(tmp_path):
     os.environ["ORG_LEDGER_ROOT"] = str(led)
     try:
         v, seq, _ = m._admission_for(8)
-        assert (v, seq) == ("admit", 96), f"関数名で記録された admission を見失った: {v} {seq}"
+        assert (v, seq) == ("admit", 96), \
+            f"lost sight of an admission recorded under a function name: {v} {seq}"
         v9, _, _ = m._admission_for(9)
-        assert v9 == "reject", "admit 以外の verdict を admit として扱ってはいけない"
+        assert v9 == "reject", "a verdict other than admit must never be treated as an admit"
         v11, seq11, near = m._admission_for(11)
         assert v11 is None and seq11 is None
-        assert near, "無いと言い切る前に、近い記録を原因究明の手がかりとして示すこと"
+        assert near, ("before declaring there is none, show the near-miss records as a lead for "
+                      "working out why")
     finally:
         os.environ.pop("ORG_LEDGER_ROOT", None)
 
@@ -315,7 +321,8 @@ def test_refuted_is_not_treated_as_survives(tmp_path):
     env = dict(os.environ, ORG_LEDGER_ROOT=str(led))
     p = subprocess.run([sys.executable, str(TOOLS / "org_cycle.py"), "integrate", "--issue", "9"],
                        capture_output=True, text=True, env=env, cwd=str(tmp_path), timeout=60)
-    assert p.returncode == 4, "refuted なのに統合の前提を満たしたと判定された"
+    assert p.returncode == 4, \
+        "judged to have met the precondition for integration despite being refuted"
 
 
 def test_status_flags_admit_without_refutation(tmp_path):
@@ -327,11 +334,11 @@ def test_status_flags_admit_without_refutation(tmp_path):
     p = subprocess.run([sys.executable, str(TOOLS / "status.py"), "status", str(led)],
                        capture_output=True, text=True, timeout=60)
     out = p.stdout + p.stderr
-    assert "skeptic の記録が無い" in out, out
+    assert "no skeptic record" in out, out
     assert out.startswith("RED"), out
 
 
-# ── 実地: log が Issue にだけ書き、台帳の progress_recorded が0件だった ──────
+# ── field report: the log wrote only to the Issue, and the ledger held zero progress_recorded ──
 def test_log_writes_progress_receipt_to_ledger(monkeypatch, tmp_path):
     """Seven entries on the Issue and zero in the ledger — /org-resume could not recover."""
     src = _gh_src()
@@ -344,10 +351,11 @@ def test_record_marks_backfilled():
     """A backfilled record must remain distinguishable from one written at the time."""
     src = _cycle_src()
     seg = src[src.index("def cmd_record"):]
-    assert '"backfilled": True' in seg, "backfill 印が無いと、後から足した記録が実時点と混ざる"
+    assert '"backfilled": True' in seg, \
+        "without the backfill mark, a record added later blends in with what happened at the time"
 
 
-# ── 実地: 相関キーが無いと統制が無言で無効になっていた（seq 204 / 205）───────
+# ── field report: with no correlation key, the control had silently stopped working (seq 204 / 205) ──
 
 
 def test_judgment_without_correlation_key_is_rejected(tmp_path):
@@ -355,24 +363,26 @@ def test_judgment_without_correlation_key_is_rejected(tmp_path):
     inert was itself invisible."""
     env = _led(tmp_path)
     p = _append(env, "maker1", "admission_decided", {"verdict": "admit"})
-    assert p.returncode != 0, "対象を特定できない判定が通った"
-    # 0.33.1 で schema 検証（require_any）が同じことを、より具体的に言うようになった —
-    # どのキーが要るかを挙げる。台帳側の相関キー検査も残っているので、どちらが先に拾っても
-    # 拒否される（二重の防御）。
+    assert p.returncode != 0, "a judgment whose subject cannot be identified was allowed"
+    # In 0.33.1 the schema validation (require_any) began saying the same thing more concretely —
+    # it lists which keys are needed. The ledger-side correlation-key check is still there too, so
+    # whichever catches it first, it is refused (defence in depth).
     assert "has no correlation key" in p.stderr or "cannot be identified" in p.stderr
 
 
 def test_self_admission_is_caught_when_written_as_deliverable(tmp_path):
-    """deliverable/issue で書いても自己 admit を検出する（seq 204 の再現）。
+    """Detect a self-admission even when written with deliverable/issue (reproducing seq 204).
 
-    強制側は candidate_id/claim_id しか見ておらず、人間側は deliverable/issue で書いていた。
-    識別子が2系統に分かれ、キーを変えた瞬間に統制が消えていた。
+    The enforcement side looked only at candidate_id/claim_id while the human side wrote
+    deliverable/issue. The identifiers had split into two families, and control disappeared the
+    moment someone switched key.
     """
     env = _led(tmp_path)
-    # **実地の形をそのまま使う。** 0.16.0 のテストは cycle_started に issue を入れていたため
-    # 直接の共有 ID があり、この穴を再現できていなかった（実際の cycle_started は
-    # candidate_id と pack_manifest_id しか持たない）。テストが本番と違う形を作ると、
-    # 「壊れる場所で検証していない」ことになる — #7 で学んだのと同じ失敗。
+    # **Use the shape that appears in the field, unchanged.** The 0.16.0 test put an issue into
+    # cycle_started, which gave it a directly shared ID and so failed to reproduce this hole (a real
+    # cycle_started carries only candidate_id and pack_manifest_id). A test that builds a different
+    # shape from production is a test that **does not check where the thing actually breaks** — the
+    # same failure we learned from in #7.
     _append(env, "maker1", "cycle_started",
             {"role": "maker1", "candidate_id": "cand-abc", "pack_manifest_id": "issue-7"})
     p = _append(env, "maker1", "admission_decided",

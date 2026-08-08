@@ -301,9 +301,9 @@ def cmd_status(a):
 
     unrefuted = {a for a in admits if a and a not in refutes and a not in provisional_refutes}
     if unrefuted:
-        red.append(f"admit 済みだが skeptic の記録が無い: {len(unrefuted)} 件"
-                   f"（{', '.join('#' + x for x in sorted(unrefuted)[:5])}）— "
-                   f"反証を経ずに統合される手前")
+        red.append(f"admitted but no skeptic record: {len(unrefuted)} "
+                   f"({', '.join('#' + x for x in sorted(unrefuted)[:5])}) — "
+                   f"one step away from being integrated without facing refutation")
 
     # 人間待ちの Issue は定義上 RED — 「あなたを待っている」ものが board の意味そのもの。
     # ledger には現れないので GitHub を見る（見られなければ黙って飛ばす。board は落とさない）。
