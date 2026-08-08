@@ -229,6 +229,69 @@ def _review_quote(issue_json, review, finding):
     return None, None
 
 
+def cmd_review_findings(a, gh=None):
+    """List the findings raised on an Issue and which of them have been answered.
+
+    **A rally you cannot count is a rally you cannot end.** Findings were only ever ids inside a
+    judge's prose, so nobody could say how many were open, which were answered, or which were the
+    same finding raised again — every round read as whack-a-mole because the tools could only see
+    one response at a time. With `findings` first-class in the verdict schema, the open set is a
+    fact rather than an impression.
+
+    Reports, does not judge: it never decides whether a response was adequate, only whether one was
+    recorded for each finding (docs/03 §6.5).
+    """
+    _gh = gh or globals()["gh"]
+    code, existing = _gh(["issue", "view", str(a.issue), "--repo", a.repo, "--json", "comments"])
+    if code != 0:
+        print(existing, file=sys.stderr)
+        return 3
+    try:
+        comments = (json.loads(existing) or {}).get("comments") or []
+    except Exception as exc:
+        print(f"review-findings: cannot read the comments on #{a.issue}: {exc}", file=sys.stderr)
+        return 3
+
+    raised, answered = {}, {}
+    for c in comments:
+        body = str(c.get("body") or "")
+        if "orgforge:review-response:" in body:
+            for fid in re.findall(r"orgforge:review-response:[^:]*:([A-Z]+-[0-9]{3}):(\w+)", body):
+                answered[fid[0]] = fid[1]
+            continue
+        for block in re.findall(r'"id"\s*:\s*"([A-Z]+-[0-9]{3})"[^}]*?"claim"\s*:\s*"(.*?)"',
+                                body, re.S):
+            raised.setdefault(block[0], block[1][:160])
+        # A judge that wrote its findings as prose still names them; count those too, so the
+        # report does not silently under-report on Issues that predate the structured schema.
+        for fid in re.findall(r"\b([A-Z]+-[0-9]{3})\b", body):
+            raised.setdefault(fid, "")
+
+    # An id answered but never raised means the finding lived only in a judge's prose, in a shape
+    # this cannot read — which is the very gap `findings` closes. Say so rather than reporting a
+    # tidy zero: "raised: 0, answered: 7" is not a clean sheet, it is a blind spot.
+    unraised = sorted(f for f in answered if f not in raised)
+    open_ids = sorted(f for f in raised if f not in answered)
+    print(json.dumps({"issue": a.issue,
+                      "raised": len(raised), "answered": len(answered), "open": len(open_ids),
+                      "answered_but_never_raised": unraised,
+                      "open_findings": [{"id": f, "claim": raised[f]} for f in open_ids],
+                      "answered_findings": [{"id": f, "status": s}
+                                            for f, s in sorted(answered.items())]},
+                     ensure_ascii=False, indent=2))
+    if unraised:
+        print(f"\n{len(unraised)} finding(s) have a response but no finding recorded on the Issue: "
+              f"{', '.join(unraised)}\n"
+              f"  These were raised as prose inside a verdict, so nothing can check what was "
+              f"answered. Judges emitting the structured `findings` array fixes this going "
+              f"forward.", file=sys.stderr)
+    if open_ids:
+        print(f"\n{len(open_ids)} finding(s) have no recorded response: {', '.join(open_ids)}\n"
+              f"  Answer each with `github_sync.py review-response --finding <id>`. An unanswered "
+              f"finding is what the next round re-raises.", file=sys.stderr)
+    return 0
+
+
 def _review_response(a, gh):
     finding = (a.finding or "").strip()
     response = (a.response or "").strip()

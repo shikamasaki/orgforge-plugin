@@ -101,8 +101,8 @@ from ghsync.backlog import (STAGES, cmd_claim, cmd_release, cmd_create, cmd_repa
                             cmd_ready, cmd_needs_human, cmd_split_check, cmd_candidate_id,
                             cmd_park, cmd_unpark)
 from ghsync._core import banner
-from ghsync.record import (cmd_log, cmd_decide, cmd_provisional, cmd_review_response,
-                           DECISIONS)
+from ghsync.record import (cmd_log, cmd_decide, cmd_provisional, cmd_review_findings,
+                           cmd_review_response, DECISIONS)
 from ghsync.branch import cmd_branch
 from ghsync.coverage import cmd_coverage_check
 
@@ -167,6 +167,12 @@ def main(argv):
     # lets the next reviewer say "this was answered, here is what changed" instead of raising it
     # fresh. Without it, agents/gate.md's "a finding may only block again if head/evidence/risk
     # changed" is a rule nobody can check (tatekae #170 ran 12 rounds partly on re-raised findings).
+    q = sub.add_parser("review-findings",
+                       help="report the findings raised on an Issue, and which are answered or "
+                            "still open")
+    q.add_argument("--repo", help="owner/name (discovered from the git remote origin if omitted)")
+    q.add_argument("--issue", required=True, type=int)
+
     q = sub.add_parser("review-response",
                        help="review finding への対応を Issue に追記し、別harnessが再確認できる形にする")
     q.add_argument("--repo", help="owner/name（省略時は git remote origin から自動発見）")
@@ -302,6 +308,7 @@ def main(argv):
             "coverage-check": cmd_coverage_check,
             "candidate-id": cmd_candidate_id, "decide": cmd_decide,
             "provisional": cmd_provisional,
+            "review-findings": cmd_review_findings,
             "review-response": cmd_review_response,
             "needs-human": cmd_needs_human}[a.cmd](a)
 

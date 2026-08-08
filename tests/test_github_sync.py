@@ -1720,3 +1720,39 @@ def test_review_response_does_not_quote_another_response_as_the_review(monkeypat
     rc = GS.cmd_review_response(_rr_ns(status="deferred"))
     assert rc == 2, "the only match was another response — that is not an anchor"
     assert "never written down" in capsys.readouterr().err
+
+
+# ── review-findings: a rally you cannot count is a rally you cannot end ──────────────────────
+# Findings used to be ids inside a judge's prose, so nothing could say how many were open or
+# which had been answered. Every round therefore read as whack-a-mole.
+
+_VERDICT_WITH_FINDINGS = (
+    '### verdict_provisional — `reject`\n'
+    '{"findings": [{"id": "GATE-001", "claim": "required relations are not expressible"},'
+    ' {"id": "GATE-002", "claim": "the standards ledger is incomplete"}]}')
+
+
+def test_review_findings_counts_what_is_still_open(monkeypatch, capsys):
+    answered = ("### ↪ Review response — `GATE-001` (addressed)\n"
+                "<!-- orgforge:review-response:abc:GATE-001:addressed -->")
+    fake = FakeGh(replies={"issue view": (0, _issue_with(_VERDICT_WITH_FINDINGS, answered))})
+    monkeypatch.setattr(GS, "gh", fake)
+    assert GS.cmd_review_findings(_ns(repo="o/r", issue=67)) == 0
+    captured = capsys.readouterr()
+    out = json.loads(captured.out)
+    assert (out["raised"], out["answered"], out["open"]) == (2, 1, 1)
+    assert [f["id"] for f in out["open_findings"]] == ["GATE-002"]
+    assert "GATE-002" in captured.err, "the open finding must be visible without reading JSON"
+
+
+def test_review_findings_reports_answers_to_findings_that_were_never_recorded(monkeypatch, capsys):
+    """**"raised: 0, answered: 7" is not a clean sheet, it is a blind spot.** That is the real
+    state of domain-spec-notes #67: the findings existed only as prose inside a verdict."""
+    answered = ("### ↪ Review response — `SKEPTIC-001` (addressed)\n"
+                "<!-- orgforge:review-response:abc:SKEPTIC-001:addressed -->")
+    fake = FakeGh(replies={"issue view": (0, _issue_with(answered))})
+    monkeypatch.setattr(GS, "gh", fake)
+    assert GS.cmd_review_findings(_ns(repo="o/r", issue=67)) == 0
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)["answered_but_never_raised"] == ["SKEPTIC-001"]
+    assert "no finding recorded" in captured.err

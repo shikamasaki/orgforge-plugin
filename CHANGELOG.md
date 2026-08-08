@@ -6,6 +6,30 @@ minor = new mechanisms/features, patch = fixes, major = breaking articulation ch
 Entries from 0.12.0 on are in English and follow Keep a Changelog headings; earlier entries
 predate that convention and are left as written. Design rationale lives in `docs/`, not here.
 
+## 2.10.0 — findings are first-class
+
+A review rally read as whack-a-mole because the tools could only ever see one finding at a time.
+The ids in a verdict (`GATE-001`, `SKEPTIC-002`) were the judge's own numbering inside the `why`
+prose, invisible to everything downstream: nothing could count what was open, answer several in one
+pass, or tell a re-raised finding from a new one. On domain-spec-notes #67, seven findings were
+answered while the Issue recorded none of them.
+
+### Added
+- `findings` in the gate and skeptic verdict schemas: `id`, `claim`, `evidence`,
+  `blocks_admission`, `prior_finding`. The judge prompt asks for it, and `agents/*.md`'s rule about
+  re-raising a finding now points at `prior_finding` — a field a machine can check.
+- `github-sync review-findings` reports what was raised, what was answered, and what is still open.
+  It also names ids that have a response but no recorded finding: `raised: 0, answered: 7` is not a
+  clean sheet, it is a blind spot.
+
+### Changed
+- `org_cycle intake` refuses a withholding verdict (`reject` / `park` / `refuted`) that itemises
+  nothing, carries a duplicate id, or where no finding sets `blocks_admission`. An `admit` owes no
+  itemisation, so the happy path is untouched.
+
+This is plumbing, not judgment: it never asks whether a finding is correct, only that a verdict
+holding work back is answerable by someone else (docs/03 §6.5).
+
 ## 2.9.3 — a review response has to point at the review
 
 ### Fixed

@@ -6,6 +6,7 @@
   "additionalProperties": false,
   "required": [
     "evidence",
+    "findings",
     "mutations",
     "out_of_scope",
     "risk",
@@ -88,6 +89,49 @@
     "risk": {
       "type": "string",
       "description": "排除しきれなかった失敗モード。無いなら「無い」と明示"
+    },
+    "findings": {
+      "type": "array",
+      "description": "Each finding, separately. The id is what a response and the next round point at, so a finding that is not listed here cannot be answered or tracked — put every blocking observation in, not a prose summary of them.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "claim",
+          "evidence",
+          "blocks_admission",
+          "prior_finding"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Z]+-[0-9]{3}$",
+            "description": "Stable within this Issue, e.g. GATE-001. A response cites it."
+          },
+          "claim": {
+            "type": "string",
+            "minLength": 20,
+            "description": "What is wrong, specifically enough to be checked by someone else."
+          },
+          "evidence": {
+            "type": "string",
+            "minLength": 10,
+            "description": "The command and output, or the file and line, that establishes it."
+          },
+          "blocks_admission": {
+            "type": "boolean",
+            "description": "Whether this alone withholds the verdict. False means it was worth saying but is not why the work is held."
+          },
+          "prior_finding": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The id of the earlier finding this re-raises, or null if new. Re-raising one unchanged does not warrant another round — state what changed."
+          }
+        }
+      }
     }
   }
 }
