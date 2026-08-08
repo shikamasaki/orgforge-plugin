@@ -1225,7 +1225,7 @@ def test_intake_catches_a_truncated_report():
                             "--issue", "27", "--role", role, "--report", report],
                            capture_output=True, text=True, timeout=60)
         assert p.returncode == 10, f"不完全な報告を通した: {report!r}"
-        assert "報告が不完全" in p.stderr
+        assert "the report is incomplete" in p.stderr
 
 
 def test_intake_passes_a_complete_report():
@@ -1355,7 +1355,7 @@ def test_intake_rejects_prose_mutation_claims(claim):
                              "verdict: survives。npm test → 60 passed。\n" + claim],
                             capture_output=True, text=True, timeout=60)
     assert result.returncode == 10
-    assert "構造化 JSON" in result.stderr
+    assert "structured JSON" in result.stderr
 
 
 # ── 0.29.0: CI を触る統合で job 構成を見せる ──────────────────────────────
@@ -1519,7 +1519,8 @@ def test_intake_rejects_unproven_mutations(mutation):
                              "--issue", "11", "--role", "skeptic", "--report", "-"],
                             input=report, capture_output=True, text=True, timeout=60)
     assert result.returncode == 10, result.stdout + result.stderr
-    assert any(word in (result.stdout + result.stderr) for word in ("適用", "復元"))
+    assert any(word in (result.stdout + result.stderr)
+               for word in ("post-apply", "post-restore", "confirmed to have applied"))
 
 
 @pytest.mark.parametrize("bad_mutations", [None, "all applied", {"applied": False}])
@@ -1675,8 +1676,9 @@ def test_recording_uses_the_same_adaptive_lineage_resolution(
 @pytest.mark.parametrize(
     "harness,expected",
     [
-        ("      gate: { cli: codex }", "claude / codex 両方"),
-        (_HARNESS_CFG.replace("cli: claude", "cli: codex"), "同じハーネスを2回"),
+        ("      gate: { cli: codex }", "a map for both claude and codex"),
+        (_HARNESS_CFG.replace("cli: claude", "cli: codex"),
+         "Running the same harness twice"),
     ],
 )
 def test_judge_lineage_fails_closed_on_invalid_cross_routing(
