@@ -2914,8 +2914,8 @@ def test_writerd_refuses_to_start_without_constitution():
     # 明示フラグを受けること
     assert '"--constitution"' in src, "--constitution を受けていない"
     # 導出できなければ起動しない（fail-closed）
-    assert "の constitution を決められない" in src
-    i_msg = src.index("の constitution を決められない")
+    assert "cannot determine the constitution for org" in src
+    i_msg = src.index("cannot determine the constitution for org")
     assert "return 2" in src[i_msg:i_msg + 900], "決められないのに起動している"
     # 子プロセスへ渡すのは **決まったパス** であって、推測ではない
     assert 'env["ORG_CONSTITUTION"] = con' in src
