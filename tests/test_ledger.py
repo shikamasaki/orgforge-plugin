@@ -2216,7 +2216,7 @@ def test_actor_alias_cannot_bypass_separation_of_duties(tmp_path):
     # 自己申告の actor では通らない
     r = app("gate-alias", {"deliverable": "7", "verdict": "admit", "gate": "g"})
     assert r.returncode == 3, r.stdout + r.stderr
-    assert "generic append では記録できない" in (r.stdout + r.stderr)
+    assert "cannot be recorded through a generic append" in (r.stdout + r.stderr)
     # **payload に書くだけでは通らない**（0.39.3 で塞いだ）
     r = app("gate-signer", {"deliverable": "7", "verdict": "admit", "gate": "g",
                             "identity_assurance": "attested", "decision_by": "gate-signer"})
@@ -2362,7 +2362,7 @@ def test_generic_append_cannot_record_a_judgment(tmp_path):
     org, led = _att_org(tmp_path)
     r = _att_append(org, led, "gate-alias", {"deliverable": "7", "verdict": "admit"})
     assert r.returncode == 3, r.stdout + r.stderr
-    assert "generic append では記録できない" in (r.stdout + r.stderr)
+    assert "cannot be recorded through a generic append" in (r.stdout + r.stderr)
 
 
 def test_the_verified_path_can_record(tmp_path):
