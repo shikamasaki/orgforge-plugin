@@ -1833,38 +1833,39 @@ def cmd_append(a):
     # evaluated. In practice, a maker using the same key as the gate's decision —
     # `admission_decided-11` — got its self-approval through as "already recorded", exit 0.
     # Idempotency exists to make a re-run safe; it is not a back door around control.
-    # **ここから書き込みまでを1つの critical section にする。** log を読む → seq を決める →
-    # 書く → HEAD を更新する、が分かれていると並列 append が同じ seq を計算する
-    # （実測: 12並列で12件すべて seq=1）。
+    # **From here to the write is one critical section.** Split `read the log → decide the seq →
+    # write → update HEAD` apart and parallel appends compute the same seq (measured: 12 in
+    # parallel, all 12 came out seq=1).
     os.makedirs(a.root, exist_ok=True)
     with _LedgerLock(a.root) as lk:
         if lk.error:
             print(f"append: {lk.error}", file=sys.stderr)
             return 4
-        # **schema は lock 内で1回だけ読む。** 検証と digest 取得が別々に読むと、その間に
-        # 差し替えられる（TOCTOU）。解析結果と digest を1つの snapshot にして両方に使う。
+        # **Read the schema exactly once, inside the lock.** If validation and digest collection
+        # read it separately, it can be swapped in between (TOCTOU). Make the parse result and the
+        # digest one snapshot and use that for both.
         snap, serr = load_schema_snapshot()
         if serr:
             print(f"append: {serr}\n"
-                  f"  schema の場所と PyYAML を確認すること。", file=sys.stderr)
+                  f"  Check where the schema is, and that PyYAML is available.", file=sys.stderr)
             return 2
-        # **receipt を検証して identity を生成する。** caller は receipt を渡せるだけで、
-        # identity fields を書くことはできない（上で拒否済み）。
+        # **Verify the receipt and derive the identity.** The caller can only hand over a
+        # receipt; it cannot write the identity fields (refused above).
         _ident = {}
         if a.cls != "correction":
             _ident, _ierr = _verify_receipt_for(a, payload, a.cls)
             if _ierr:
-                print(f"append: receipt を検証できない — {_ierr}\n"
-                      f"  **検証できない receipt では identity を生成しない。**",
+                print(f"append: cannot verify the receipt — {_ierr}\n"
+                      f"  **No identity is derived from a receipt that cannot be verified.**",
                       file=sys.stderr)
                 return 4
         if _ident:
             payload.update(_ident)
         elif a.cls in ("verdict_provisional", "admission_decided", "refutation_attempted",
                        "judges_disagreed", "adaptive_envelope_adopted"):
-            # **receipt が無いときも identity を記録する — ただし `claimed` として。**
-            # 欄が無いと「確かめた結果 claimed だった」のか「そもそも見ていない」のかを
-            # 区別できない。書き手が生成するので、caller は値を選べない。
+            # **Record an identity even with no receipt — but as `claimed`.**
+            # With the field absent there is no telling "we checked and it came out claimed" from
+            # "we never looked at all". The writer derives it, so the caller cannot pick the value.
             sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
             from identity import observed_recorder
             _rb, _ra = observed_recorder()
@@ -1872,27 +1873,29 @@ def cmd_append(a):
                             "identity_assurance": "claimed", "recorder_assurance": _ra,
                             "workload_isolation": "none"})
 
-        # 新規 append だけを検証する。既存イベントに遡って適用すると移行できない。
+        # Validate new appends only. Applying it retroactively to existing events would make
+        # migration impossible.
         bad, warns = validate_event(a.cls, payload, snap,
                                     writer_op=getattr(a, "writer_op", None))
         if bad:
             print(f"append: {bad}", file=sys.stderr)
             return 2
-        # **健全性の検査を先に置く。** `_read_events` は破損で例外を投げるので、そこに入る前に
-        # log を検査して、拒否理由を人が読める形で出す。トレースバックは「壊れている」ことを
-        # 伝える手段としては弱く、呼び出し側（hook / organ）も扱えない。
+        # **Put the soundness check first.** `_read_events` raises on corruption, so inspect the
+        # log before reaching it and state the reason for refusal in a form a person can read. A
+        # traceback is a weak way to convey "this is broken", and the caller (hook / organ) cannot
+        # act on one either.
         head, err = _head_from_log(a.root)
         if err:
-            print(f"append: log が健全でないので追記しない — {err}\n"
-                  f"  **壊れた記録の上に整合した HEAD を載せない。** 壊れていることが"
-                  f"分からなくなる。", file=sys.stderr)
+            print(f"append: the log is not sound, so nothing is appended — {err}\n"
+                  f"  **Never place a consistent HEAD on top of a broken record.** It makes the "
+                  f"breakage impossible to see.", file=sys.stderr)
             return 4
         hist = _read_events(a.root)
         cached = _read_head(a.root)
         if cached != head and cached != {"seq": 0, "hash": "GENESIS"}:
-            print(f"append: HEAD が log と食い違っていたので log から再構築した"
+            print(f"append: HEAD disagreed with the log, so it was rebuilt from the log"
                   f"（HEAD={cached.get('seq')} / log={head['seq']}）— "
-                  f"HEAD は cache なので log を正とする。", file=sys.stderr)
+                  f"HEAD is a cache, so the log is authoritative.", file=sys.stderr)
 
         if a.cls == "correction":
             judgments, correction_error = _annotate_correction(payload, hist)
@@ -1902,8 +1905,8 @@ def cmd_append(a):
             voids_judgment = bool(judgments and payload.get("kind") in
                                   VOIDING_CORRECTION_KINDS)
             if voids_judgment and not str(payload.get("reason") or "").strip():
-                print("append: correction rejected — judgmentを無効化するcorrectionには "
-                      "reason が必要", file=sys.stderr)
+                print("append: correction rejected — a correction that voids a judgment "
+                      "requires a reason", file=sys.stderr)
                 return 3
             if voids_judgment or getattr(a, "receipt", None):
                 reason_digest = hashlib.sha256(
@@ -1922,8 +1925,9 @@ def cmd_append(a):
                 _ident, _ierr = _verify_receipt_for(
                     a, payload, a.cls, receipt_expect=receipt_expect)
                 if _ierr:
-                    print(f"append: receipt を検証できない — {_ierr}\n"
-                          "  **別の対象・kind・理由へreceiptを再利用しない。**",
+                    print(f"append: cannot verify the receipt — {_ierr}\n"
+                          "  **A receipt is never reused for a different target, kind or "
+                          "reason.**",
                           file=sys.stderr)
                     return 4
                 if _ident:
@@ -1943,7 +1947,7 @@ def cmd_append(a):
                 return 2
             warns.extend(w for w in final_warns if w not in warns)
         for w in warns:
-            print(f"append: 注意 — {w}", file=sys.stderr)
+            print(f"append: note — {w}", file=sys.stderr)
 
         nk = getattr(a, "natural_key", None)
         if nk:
@@ -1951,21 +1955,23 @@ def cmd_append(a):
                 if e["class"] != a.cls or e.get("payload", {}).get("_nk") != nk:
                     continue
                 if e.get("actor") != a.actor:
-                    print(f"append: {a.cls} rejected — natural key {nk!r} は既に "
-                          f"actor {e.get('actor')!r} が seq={e['seq']} で使っている。\n"
-                          f"  別の actor が同じキーで書くのは再実行ではない。冪等 no-op で通すと、"
-                          f"自己承認や順序違反が『既に記録済み』として統制を素通りする"
-                          f"（実地で確認）。判定ごとに一意なキーを使うこと。", file=sys.stderr)
+                    print(f"append: {a.cls} rejected — natural key {nk!r} is already in use by "
+                          f"actor {e.get('actor')!r} at seq={e['seq']}.\n"
+                          f"  A different actor writing under the same key is not a re-run. Let it "
+                          f"through as an idempotent no-op and a self-approval or an ordering "
+                          f"violation walks past control as 'already recorded' (confirmed in "
+                          f"practice). Use a key unique to each judgment.", file=sys.stderr)
                     return 3
-                # **同じキー・同じ actor でも payload が違えば再実行ではない。**
+                # **Same key and same actor, but a different payload, is still not a re-run.**
                 prior_pl = {k: v for k, v in (e.get("payload") or {}).items() if k != "_nk"}
                 now_pl = {k: v for k, v in payload.items() if k != "_nk"}
                 if prior_pl != now_pl:
-                    print(f"append: {a.cls} rejected — natural key {nk!r} は seq={e['seq']} に"
-                          f"あるが、payload が違う。\n"
-                          f"  同じキーで中身の違うものを書くのは再実行ではない。"
-                          f"no-op で通すと、後から書いた内容が黙って捨てられる。\n"
-                          f"  差し替えるなら correction を追記してからにすること。",
+                    print(f"append: {a.cls} rejected — natural key {nk!r} exists at "
+                          f"seq={e['seq']}, but with a different payload.\n"
+                          f"  Writing different contents under the same key is not a re-run. "
+                          f"Let it through as a no-op and the later content is silently "
+                          f"discarded.\n"
+                          f"  To replace it, append a correction first.",
                           file=sys.stderr)
                     return 3
                 print(f"append: idempotent no-op — {a.cls} with natural key {nk!r} "
@@ -1977,11 +1983,13 @@ def cmd_append(a):
         eid = "e" + hashlib.sha256(
             f"{seq}:{a.cls}:{json.dumps(payload, sort_keys=True, ensure_ascii=False)}".encode()
         ).hexdigest()[:12]
-        # **ts は writer が付ける。** クライアントが決められるなら順序を偽れるので、cap の
-        # 時間窓を迂回できる。`--ts` は過去の記録を補う backfill のためだけに残し、
-        # **"UNSET" と不正な形は受け取らない** — 窓で絞る view や sensor が黙って落とす。
-        # `--ts` は 0.33.2 で `--backfill-ts` に分離した。旧名は受け取るが、**意図を確かめる** —
-        # 通常経路で時刻を指定できると、順序を偽って cap の時間窓を迂回できる。
+        # **The writer stamps ts.** If a client could decide it, it could fake the ordering and
+        # evade the cap's time window. `--ts` survives only for backfilling past records, and
+        # **"UNSET" and malformed values are not accepted** — a window-filtered view or sensor
+        # would silently drop them.
+        # `--ts` was split into `--backfill-ts` in 0.33.2. The old name is still accepted, but
+        # **the intent is confirmed** — being able to set the time on the ordinary path means being
+        # able to fake the ordering and evade the cap's window.
         given = a.ts or getattr(a, "ts_legacy", None)
         ts = given or _now_iso()
         if given:
@@ -1991,7 +1999,8 @@ def cmd_append(a):
                 return 2
         ev = {"id": eid, "seq": seq, "ts": ts, "actor": a.actor,
               "class": a.cls, "payload": payload,
-              # 検証結果を統制の判定に渡す。**台帳には書かない**（hash の直前で外す）。
+              # Hand the verification result to the control decision. **It is never written to
+              # the ledger** (removed just before the hash).
               "_verified_identity": _ident,
               "schema_id": "orgforge-ledger",
               "schema_version": LEDGER_SCHEMA_VERSION,
@@ -2042,10 +2051,10 @@ def cmd_append(a):
         if sod:
             print(f"append: {sod}", file=sys.stderr)
             return 3
-        ev.pop("_verified_identity", None)   # 内部の受け渡し用。記録には残さない
+        ev.pop("_verified_identity", None)   # internal hand-off only; it stays out of the record
         ev["hash"] = _hash(head["hash"], ev)
         log, headp = _paths(a.root)
-        # append → fsync(log) → HEAD を一時ファイルへ → atomic rename → fsync(dir)
+        # append → fsync(log) → HEAD to a temp file → atomic rename → fsync(dir)
         with open(log, "a", encoding="utf-8") as f:
             f.write(json.dumps(ev, ensure_ascii=False) + "\n")
             f.flush()
@@ -2103,17 +2112,17 @@ def cmd_record_scheduled_check(a):
 
 
 def _class_field_span(text, cls):
-    """`  <cls>: { ... }` の中身の span を返す。**波括弧の深さを数える** —
-    非貪欲な正規表現だと、値の中の `{...}` の最初の `}` を終端と誤認し、
-    修復が別の場所に入って **直ったように見えて直っていない**（Codex の指摘、実測で再現）。
-    見つからなければ None。"""
+    """Return the span of the contents of `  <cls>: { ... }`. **Count brace depth** — a non-greedy
+    regex mistakes the first `}` of a nested `{...}` for the end, so the repair lands somewhere else
+    and **looks fixed without being fixed** (raised by Codex, reproduced by measurement).
+    None if not found."""
     # field alignment uses a variable number of spaces before ``{``.  Requiring exactly one
     # meant repair worked for e.g. ``integration_admitted: {`` but silently skipped aligned
     # names such as ``verdict_provisional:  {`` and ``halt_tripped:         {``.
     m = re.search(rf"\n  {re.escape(cls)}:[ \t]*\{{", text)
     if not m:
         return None
-    i = m.end() - 1                     # 開き `{` の位置
+    i = m.end() - 1                     # position of the opening `{`
     depth = 0
     for j in range(i, len(text)):
         c = text[j]
@@ -2122,18 +2131,20 @@ def _class_field_span(text, cls):
         elif c == "}":
             depth -= 1
             if depth == 0:
-                return (i + 1, j)       # 中身だけの span
+                return (i + 1, j)       # the span of the contents alone
     return None
 
 
 def _yaml_block_span(text, key):
-    """トップレベルの `key:` ブロックの (start, end) を行境界で返す。無ければ None。
+    """Return (start, end) of a top-level `key:` block on line boundaries; None if absent.
 
-    正規表現で `\nkey:\n(?:(?:  |\n).*\n)*` と書くと、**次のトップレベルキーの前にある
-    コメント行や、そのブロックの子行まで飲み込む**。実際に validation の置換が
-    `event_classes:` を丸ごと消した（YAML が読めるので気づきにくい）。
+    Written as the regex `\nkey:\n(?:(?:  |\n).*\n)*`, it **swallows the comment lines sitting
+    before the next top-level key, and that block's child lines too**. A replacement of validation
+    did exactly that and deleted `event_classes:` entirely (hard to notice, since the YAML still
+    parses).
 
-    ブロックの終わりは「インデントの無い次の行」で決める — それが YAML の構造である。
+    The end of a block is decided by "the next line with no indentation" — that is what YAML's
+    structure actually says.
     """
     lines = text.split("\n")
     start = None
@@ -2147,7 +2158,7 @@ def _yaml_block_span(text, key):
     end = len(lines)
     for j in range(start + 1, len(lines)):
         l = lines[j]
-        if l and not l[0].isspace():          # 次のトップレベル（コメントも含む）
+        if l and not l[0].isspace():          # the next top level (comments included)
             end = j
             break
     off = lambda n: sum(len(x) + 1 for x in lines[:n])
@@ -2155,16 +2166,18 @@ def _yaml_block_span(text, key):
 
 
 def _deep_add(dst, src, path=""):
-    """`src` にあって `dst` に無いものだけを足す。**dst 独自のものは必ず残す。**
+    """Add only what is in `src` and missing from `dst`. **Whatever is unique to dst always
+    survives.**
 
-    設定の修復は「追加」でなければならない。ブロックごと置き換えると、org が自分で足した
-    厳格規則が消える — それは修復ではなく退行である（実測: org の
-    `required.progress_recorded: [milestone]` が置換で失われた）。
+    Repairing configuration must be ADDITIVE. Replace a block wholesale and the stricter rules the
+    org added itself disappear — that is not a repair, it is a regression (measured: an org's
+    `required.progress_recorded: [milestone]` was lost to a replacement).
 
-    同じ path に違う **スカラー値** があるときは、自動で上書きしない。org が意図して変えたのか、
-    テンプレートが変わったのかは道具では判別できないので、conflict として報告して人に決めさせる。
+    Where the same path holds a different **scalar**, do not overwrite automatically. The tool
+    cannot tell whether the org changed it deliberately or the template moved on, so it is reported
+    as a conflict for a person to settle.
 
-    返り値: (merged, conflicts)
+    Returns: (merged, conflicts)
     """
     conflicts = []
     if isinstance(dst, dict) and isinstance(src, dict):
@@ -2179,15 +2192,15 @@ def _deep_add(dst, src, path=""):
                 out[k], c = _deep_add(dv, sv, here)
                 conflicts += c
             elif isinstance(dv, list) and isinstance(sv, list):
-                # list は集合として足す（org が足した要素を落とさない）。順序はテンプレート優先。
+                # Merge lists as sets (never drop an element the org added). Template order wins.
                 out[k] = sv + [x for x in dv if x not in sv]
             elif dv != sv:
-                conflicts.append(f"{here}: org={dv!r} / テンプレート={sv!r}")
+                conflicts.append(f"{here}: org={dv!r} / template={sv!r}")
         return out, conflicts
     if isinstance(dst, list) and isinstance(src, list):
         return src + [x for x in dst if x not in src], conflicts
     if dst != src:
-        conflicts.append(f"{path}: org={dst!r} / テンプレート={src!r}")
+        conflicts.append(f"{path}: org={dst!r} / template={src!r}")
     return dst, conflicts
 
 

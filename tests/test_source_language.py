@@ -37,8 +37,8 @@ ROOTS = ("tools", "tests", "integrations/common")
 # Remaining debt, measured 2026-08-08. Lower these as files are translated; never raise one.
 # A file that is not listed here must contain no Japanese at all.
 BUDGET = {
-    "tools/ledger.py": 423,
-    "tests/test_ledger.py": 675,
+    "tools/ledger.py": 355,
+    "tests/test_ledger.py": 672,
     "tests/test_orgcycle.py": 589,
     "tests/test_hook.py": 447,
     "tools/orgcycle/judge.py": 373,
