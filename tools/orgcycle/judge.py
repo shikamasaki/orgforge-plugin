@@ -696,29 +696,32 @@ def cmd_verify(a):
         # the headless one on another harness (launched below). If either says reject/refuted, the
         # result is reject — fall to the stricter side, not to an AND. Measured (the authorisation
         # hole in #11, the missing Testing Library in #42):
-        # **2件とも厳しい側が正しかった**。多数決にすると 1:1 で決まらず、監督の裁量に戻る。
+        # **in both cases the stricter side was the right one**. Make it a majority vote and a 1:1
+        # cannot be settled, which hands the decision back to the supervisor's discretion.
         rc = _run_headless(role, a.issue, "\n".join(out), _hcfg, _schema, stable_organ)
         _headless_rc = rc
-        print(f"\n===== judge は2人いる（judges.lineage = cross-harness）=====\n"
-              f"  1. 同一ハーネスの {role} subagent — 上の材料をそのまま渡す\n"
-              f"  2. 別ハーネスの {role} — " +
-              ("上の JSON（stdout）が その判定である" if rc == 0
-               else "**起動できなかった。判定は得られていない**") + "\n"
-              f"  **片方でも {bad} なら {bad} として扱う。** 一致を要求する形なので、"
-              f"admit を記録するには両方の admit が要る（decide が検査する）。\n"
-              f"  判定が食い違ったら、食い違いそのものを記録すること —\n"
+        print(f"\n===== There are two judges (judges.lineage = cross-harness) =====\n"
+              f"  1. the {role} subagent on this harness — hand it the material above, verbatim\n"
+              f"  2. the {role} on another harness — " +
+              ("the JSON above (stdout) is its judgment" if rc == 0
+               else "**it could not be launched. No judgment was obtained**") + "\n"
+              f"  **If either one says {bad}, treat it as {bad}.** The shape requires agreement, "
+              f"so recording an admit takes an admit from both (decide checks this).\n"
+              f"  If the judgments disagree, record the disagreement itself —\n"
               f'    {_organ_command(stable_organ, "ledger")} append '
-              f"--class judges_disagreed --actor <あなたの役割> \\\n"
+              f"--class judges_disagreed --actor <your role> \\\n"
               f"      --payload '{{\"issue\": {a.issue}, \"role\": \"{role}\", "
               f"\"same_harness\": \"<verdict>\", \"cross_harness\": \"<verdict>\"}}'\n"
-              f"  （食い違いは異常ではなく**血統を分けた目的**である。消さずに数えること）",
+              f"  (a disagreement is not a malfunction — it is **the point of separating the "
+              f"lineages**. Do not erase it; count it)",
               file=sys.stderr)
 
-    print(f"— この出力を {role} subagent に渡すこと。本文に貼っても、ファイルに落として"
-          f"参照させてもよい\n"
-          f"  （seam ガードは本文に契約が無ければ、プロンプトが指すファイルを自分で読んで"
-          f"検証する）。\n"
-          f"配管はここまで。verdict / why / risk は {role} が決める。", file=sys.stderr)
+    print(f"— Hand this output to the {role} subagent. Paste it into the body, or write it to a "
+          f"file and reference that\n"
+          f"  (with no contract in the body, the seam guard reads the file the prompt points at "
+          f"and verifies it itself).\n"
+          f"The plumbing ends here. The verdict / why / risk are decided by {role}.",
+          file=sys.stderr)
     # **A cross-harness dispatch that failed must not exit 0.** `_run_headless` already diagnoses an
     # empty or malformed child result on stderr, but that diagnosis was discarded here: verify
     # returned 0 regardless, so a supervisor reading the exit code saw success, printed the handoff,
@@ -733,33 +736,35 @@ def cmd_verify(a):
 
 
 
-# 役割ごとに「報告が成果物の形になっている」ための必須要素。
-# **subagent の turn が作業の途中で終わる**ことがある（運用で短期間に複数回）。status は completed で
-# 返り、result は「Now the key attack:」のような宣言1文だけ。SendMessage で再開させると続きを
-# 実行して完走したので、agent が死んだのではなく報告が成果物の形になる前に turn が終わっている。
+# The elements a report must carry, per role, to count as a deliverable at all.
+# **A subagent's turn sometimes ends partway through the work** (several times in a short period, in
+# operation). The status comes back completed and the result is a single declarative sentence such
+# as "Now the key attack:". Resuming it with SendMessage carried on and ran to completion, so the
+# agent had not died — the turn ended before the report took the shape of a deliverable.
 #
-# **気づけない形が危ない。** 「MUST 2 は防がれました」で切れていたら、それを verdict として
-# 読んで admit しかねない — この org が繰り返し検出した「確かめていないことを確かめたかのように
-# 述べる」が、**報告の切断**という経路で起きる。
+# **The dangerous shape is the one nobody notices.** Cut off at "MUST 2 was defended", it could be
+# read as a verdict and admitted — the thing this org keeps catching, "stating something unverified
+# as though it had been verified", arriving this time by way of **a truncated report**.
 _INTAKE = {
     "skeptic": [
-        ("verdict", r"\b(survives|refuted)\b", "verdict が survives / refuted のどちらでもない"),
+        ("verdict", r"\b(survives|refuted)\b", "the verdict is neither survives nor refuted"),
         ("evidence", r"(npm |npx |git |psql|python3|node |pytest|exit=|passed|failed)",
-         "実際に走らせた痕跡（コマンド・出力）が無い"),
+         "there is no trace of anything actually being run (a command, its output)"),
     ],
     "gate": [
-        ("verdict", r"\b(admit|reject|park)\b", "verdict が admit / reject / park のどちらでもない"),
+        ("verdict", r"\b(admit|reject|park)\b", "the verdict is none of admit, reject or park"),
         ("evidence", r"(npm |npx |git |psql|python3|node |pytest|exit=|passed|failed)",
-         "実際に走らせた痕跡（コマンド・出力）が無い"),
+         "there is no trace of anything actually being run (a command, its output)"),
     ],
     "maker": [
-        ("commit", r"\b[0-9a-f]{7,40}\b", "コミットハッシュが無い"),
+        ("commit", r"\b[0-9a-f]{7,40}\b", "there is no commit hash"),
         ("dod", r"(npm |npx |pytest|passed|failed|Tests?\s)",
-         "DoD コマンドの実測出力が無い"),
+         "there is no measured output from the DoD command"),
     ],
 }
-# 作業の途中で切れた報告に出やすい語。**これ自体は根拠にしない** — 必須要素が揃っていれば、
-# 途中で "Now ..." と書いていても完走している。欠落と同時に出たときだけ確度が上がる。
+# Wording that tends to appear in a report cut off partway. **Never grounds on its own** — if the
+# required elements are all present, a "Now …" in the middle still means it ran to completion. It
+# only raises confidence when it coincides with something missing.
 _TRUNCATED = (r"^\s*(now|next|then)\b", r"(しましょう|します)。?\s*$",
               r"(let me|i'll|i will)\b.*:$", r":\s*$")
 

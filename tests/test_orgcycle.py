@@ -254,7 +254,7 @@ def test_verify_allows_passing_by_file_reference():
     """
     src = _cycle_src()
     seg = src[src.index("def cmd_verify"):]
-    assert "ファイルに落として" in seg and "参照させてもよい" in seg
+    assert "write it to a " in seg and "file and reference that" in seg
     assert "HELD" not in seg, "ファイル渡しが弾かれる前提の案内が残っている"
 
 
