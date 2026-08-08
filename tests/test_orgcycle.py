@@ -485,7 +485,7 @@ def test_verify_passes_rework_history_to_gate():
     """gate に過去の判定を渡す。渡さないと毎回「初回判定」として扱う。"""
     src = _cycle_src()
     seg = src[src.index("def cmd_verify"):]
-    assert "判定履歴" in seg and "回目の判定です" in seg
+    assert "Judgment history" in seg and "judgment number" in seg
     assert "再導出" in seg, "「前回の指摘が直ったか」だけを見る gate になってしまう"
 
 
@@ -1060,10 +1060,10 @@ def test_verify_asks_skeptic_for_out_of_scope_separately():
 def test_verify_scopes_blockers_and_repeated_findings():
     """gate の実行時材料が、変更契約外の無限ラリーを明示的に防ぐ。"""
     src = _cycle_src("judge")
-    assert "判定範囲とレビューラリーの規律" in src
-    assert "handoff の seam contract" in src
-    assert "reviewed head・根拠・残余リスク" in src
-    assert "follow-up Issue 化" in src
+    assert "The scope of judgment, and the discipline of a review rally" in src
+    assert "handoff seam contract" in src
+    assert "state which of the reviewed head, the " in src
+    assert "recommend a follow-up Issue" in src
 
 
 def test_spec_template_states_when_done():
