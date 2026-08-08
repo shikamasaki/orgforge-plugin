@@ -985,8 +985,8 @@ def test_show_reports_what_the_rounds_are_about():
 def test_verify_hands_the_unshot_areas_to_skeptic():
     """gate が「今回撃っていない」と書いた領域を skeptic に標的として渡す。"""
     src = _cycle_src("judge")
-    assert "撃っていない" in src and "Known risk accepted" in src
-    assert "標的候補" in src
+    assert "not probed this round" in src and "Known risk accepted" in src
+    assert "candidate targets" in src
 
 
 # ── 0.25.2: 指示と権限の食い違いを解消（subagent は記録しない）──────────────
@@ -1206,7 +1206,7 @@ def test_verify_still_hands_over_the_unshot_areas():
     src = _cycle_src("judge")
     seg = src[src.index("def cmd_verify"):]
     assert 'if role == "skeptic" and prior:' in seg
-    assert "標的候補" in seg
+    assert "candidate targets" in seg
 
 
 # ── 0.28.0: 報告の切断 / worktree 運用での --create / seam の案内 ────────────
@@ -1556,7 +1556,7 @@ def test_verify_prompt_requires_mutation_postconditions_and_restore():
     src = _cycle_src("judge")
     segment = src[src.index("def cmd_verify"):src.index("def _judge_lineage")]
     for phrase in ("baseline → mutate → postcondition → test → restore",
-                   "空振りした変異の GREEN は証拠ではない", "適用後状態", "未測定"):
+                   "A GREEN from a mutation that never landed is not ", "post-apply state", "unmeasured"):
         assert phrase in segment
 
 
