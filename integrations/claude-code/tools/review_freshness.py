@@ -106,18 +106,18 @@ def freshness_policy(constitution_path):
         with open(constitution_path, encoding="utf-8") as handle:
             doc = yaml.safe_load(handle) or {}
     except Exception as exc:
-        return False, False, f"constitution を読めない: {exc}"
+        return False, False, f"cannot read the constitution: {exc}"
     try:
         judges = ((doc.get("enforcement") or {}).get("judges") or {})
     except AttributeError:
-        return False, False, "enforcement.judges が map でない"
+        return False, False, "enforcement.judges is not a map"
     if not isinstance(judges, dict):
-        return False, False, "enforcement.judges が map でない"
+        return False, False, "enforcement.judges is not a map"
     if "require_current_integration_head" not in judges:
         return False, False, None
     value = judges["require_current_integration_head"]
     if not isinstance(value, bool):
-        return True, False, "require_current_integration_head が真偽値でない"
+        return True, False, "require_current_integration_head is not a boolean"
     return True, value, None
 
 
@@ -131,14 +131,14 @@ def integration_ref_policy(constitution_path):
             doc = yaml.safe_load(handle) or {}
         judges = ((doc.get("enforcement") or {}).get("judges") or {})
     except Exception as exc:
-        return False, None, f"constitution を読めない: {exc}"
+        return False, None, f"cannot read the constitution: {exc}"
     if not isinstance(judges, dict):
-        return False, None, "enforcement.judges が map でない"
+        return False, None, "enforcement.judges is not a map"
     if "integration_ref" not in judges:
         return False, None, None
     value = judges["integration_ref"]
     if not isinstance(value, str) or not value.strip():
-        return True, None, "integration_ref が空でない文字列でない"
+        return True, None, "integration_ref is not a non-empty string"
     return True, value.strip(), None
 
 
@@ -146,33 +146,33 @@ def descriptor_status(parts, cwd):
     """Re-resolve a descriptor and return a structured, fail-closed freshness result."""
     if not isinstance(parts, dict):
         return {"ok": False, "reason": "subject_descriptor_missing",
-                "detail": "review subject descriptor が無い"}
+                "detail": "there is no review subject descriptor"}
     expected = subject_digest(parts)
     supplied = str(parts.get("review_subject_id") or expected)
     if supplied != expected:
         return {"ok": False, "reason": "subject_descriptor_mismatch",
-                "detail": "descriptor の digest が review_subject_id と一致しない"}
+                "detail": "the descriptor digest does not match review_subject_id"}
     observed = integration_observation(cwd, parts.get("integration_ref"))
     relation = observed["integration_relation"]
     if relation == "unresolvable":
         return {"ok": False, "reason": "integration_ref_unresolvable",
-                "detail": f"統合先 {observed['integration_ref']} を解決できない", **observed}
+                "detail": f"cannot resolve the integration target {observed['integration_ref']}", **observed}
     if relation == "diverged":
         return {"ok": False, "reason": "integration_ref_diverged",
-                "detail": f"HEAD と統合先 {observed['integration_ref']} が分岐している", **observed}
+                "detail": f"HEAD has diverged from the integration target {observed['integration_ref']}", **observed}
     if observed["integration_head_sha"] != parts.get("integration_head_sha"):
         return {"ok": False, "reason": "integration_head_moved",
-                "detail": (f"統合先 {observed['integration_ref']} が判定後に移動した: "
+                "detail": (f"the integration target {observed['integration_ref']} moved after the judgment: "
                            f"{str(parts.get('integration_head_sha') or '')[:12]} → "
                            f"{observed['integration_head_sha'][:12]}"), **observed}
     if observed["base_sha"] != observed["integration_head_sha"]:
         return {"ok": False, "reason": "integration_base_stale",
-                "detail": (f"base は統合先より {observed.get('behind') or '?'} commit 遅れている "
+                "detail": (f"base is {observed.get('behind') or '?'} commit(s) behind the integration target "
                            f"({observed['base_sha'][:12]} != "
                            f"{observed['integration_head_sha'][:12]})"), **observed}
     if parts.get("base_sha") != observed["base_sha"]:
         return {"ok": False, "reason": "integration_base_changed",
-                "detail": "判定対象に束縛した base と現在の merge-base が一致しない", **observed}
+                "detail": "the base bound to the subject does not match the current merge-base", **observed}
     try:
         # Lazy import avoids a module cycle while `review_subject` itself is being assembled.
         from orgcycle._core import _worktree_tree_sha
@@ -181,13 +181,13 @@ def descriptor_status(parts, cwd):
         current_tree = ""
     if not current_tree:
         return {"ok": False, "reason": "reviewed_tree_unresolvable",
-                "detail": "現在の reviewed tree を再構成できない", **observed}
+                "detail": "the current reviewed tree cannot be reconstructed", **observed}
     if current_tree != parts.get("reviewed_tree_sha"):
         return {"ok": False, "reason": "reviewed_tree_changed",
-                "detail": ("判定後に reviewed tree が変わった: "
+                "detail": ("the reviewed tree changed after the judgment: "
                            f"{str(parts.get('reviewed_tree_sha') or '')[:12]} → "
-                           f"{current_tree[:12]}。新しい subject で再検証が必要"), **observed}
-    return {"ok": True, "reason": "current", "detail": "integration head と一致", **observed}
+                           f"{current_tree[:12]}. Re-verification under a new subject is required"), **observed}
+    return {"ok": True, "reason": "current", "detail": "matches the integration head", **observed}
 
 
 def _state_root(cwd):

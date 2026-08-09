@@ -381,7 +381,8 @@ def test_doctrine_propose_warns_on_incomplete_provenance():
                             "--claim", "x", "--source", "s", "--confidence", "0.5"],
                            capture_output=True, text=True, timeout=60)
         assert p.returncode == 0
-        assert "admit できない" in p.stderr, "admit で詰まることを propose 時点で言っていない"
+        assert "the gate cannot admit this" in p.stderr, \
+        "it does not say at propose time that admit will jam"
 
 
 def test_complete_proposes_learning_to_doctrine():
@@ -1030,7 +1031,7 @@ def test_repro_lint_admits_it_has_no_baseline():
     """
     src = (TOOLS / "repro_lint.py").read_text(encoding="utf-8")
     seg = src[src.index("HELD: {len(failed)} required artifact"):]
-    assert "baseline が無い" in seg and "判定していない" in seg
+    assert "There is no baseline" in seg and "has not been " in seg
     assert "if baseline is None:" in src
 
 
@@ -2230,9 +2231,9 @@ def test_judge_preflight_timeout_is_measured_and_stops(tmp_path, monkeypatch):
     ({"id": "shell", "command": "docker info", "timeout_seconds": 2}, "argv list"),
     ({"id": "unbounded", "command": ["true"]}, "timeout_seconds"),
     ({"id": "bad-scope", "command": ["true"], "timeout_seconds": 2,
-      "applies_to": {"labels": ["db"]}}, "未知の selector"),
+      "applies_to": {"labels": ["db"]}}, "unknown selector"),
     ({"id": "scope-typo", "command": ["true"], "timeout_seconds": 2,
-      "apply_to": {"issues": [36]}}, "未知の field"),
+      "apply_to": {"issues": [36]}}, "unknown field"),
 ])
 def test_judge_preflight_rejects_ambiguous_or_unbounded_contract(
         tmp_path, monkeypatch, probe, fragment):

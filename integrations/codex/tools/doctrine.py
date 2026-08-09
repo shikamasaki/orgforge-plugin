@@ -92,17 +92,18 @@ def cmd_propose(a):
     })
     _save(a.root, a.role, data)
     print(f"proposed pending claim {cid} for {a.role} (awaits gate admission)")
-    # propose は retrieved_at / review_by を省略できるのに admit はそれを必須にするので、
-    # 素直に使うと **admit の段階で必ず詰まる**。実地で doctrine が空のままだった一因なので、
-    # 詰まる前に、この場で言う（admit まで黙っていると、学びを差し出した側は理由を知れない）。
+    # propose lets retrieved_at / review_by be omitted while admit requires them, so used
+    # straightforwardly it **always jams at the admit step**. That is part of why doctrine stayed
+    # empty in the field, so it is said here, before the jam — stay silent until admit and whoever
+    # offered the learning never learns why.
     if not a.retrieved_at or not a.review_by:
         missing = " と ".join(x for x, v in
                               (("--retrieved-at", a.retrieved_at), ("--review-by", a.review_by))
                               if not v)
-        print(f"注意: {missing} が無い。このままでは gate が admit できない"
-              f"（provenance が不完全な doctrine は正典にしない — docs/06 §3）。\n"
-              f"  再 propose するか、admit の前に埋めること。TTL の無い doctrine は"
-              f"「いつまで信じてよいか」を誰も知らないまま残り続ける。", file=sys.stderr)
+        print(f"note: {missing} is absent, so the gate cannot admit this as it stands (doctrine "
+              f"with incomplete provenance does not become canon — docs/06 §3).\n"
+              f"  Propose it again, or fill it in before the admit. Doctrine with no TTL lingers "
+              f"with nobody knowing how long it may be believed.", file=sys.stderr)
     return 0
 
 
@@ -315,17 +316,18 @@ def main(argv):
     q.add_argument("--allow-orphans", dest="allow_orphans", action="store_true")
 
     a = p.parse_args(argv[1:])
-    # root は省略可能: 省略時は `.orgforge/doctrine` を発見する（tools/discover.py）。
-    # ここは ledger とは別のストアで、以前は `${ORG_CONVENTIONS_ROOT:-$ORG_LEDGER_ROOT}` の
-    # ようなフォールバックで ledger に混入していた — 監査記録に別種のデータが混ざるので誤り。
+    # root is optional: when omitted, `.orgforge/doctrine` is discovered (tools/discover.py).
+    # This is a separate store from the ledger. A fallback like
+    # `${ORG_CONVENTIONS_ROOT:-$ORG_LEDGER_ROOT}` used to let it bleed into the ledger — wrong,
+    # because it mixes a different kind of data into the audit record.
     if getattr(a, "root", None) is None:
         import os as _os
         sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
         import discover as _d
         a.root = _d._sub_root("doctrine")
         if not a.root:
-            print("doctrine の置き場が見つからない。org の中（.orgforge/ のあるディレクトリ）で "
-                  "実行するか、root を明示すること。", file=sys.stderr)
+            print("cannot find where doctrine lives. Run inside the org (a directory holding "
+                  ".orgforge/), or state the root explicitly.", file=sys.stderr)
             return 2
     return a.fn(a)
 

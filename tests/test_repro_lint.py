@@ -305,7 +305,7 @@ def test_baseline_makes_existing_failures_non_blocking(tmp_path):
     assert bc == 0 and "toolchain-pin" in bout
     code, out = run(tmp_path, "--phase", "implement")
     assert code == 0, out
-    assert "既知の負債" in out
+    assert "known debt" in out
 
 
 def test_a_new_failure_is_still_blocked_after_baseline(tmp_path):
@@ -323,7 +323,7 @@ def test_repaid_debt_is_reported_so_the_ratchet_can_tighten(tmp_path):
     (tmp_path / ".nvmrc").write_text("20\n", encoding="utf-8")   # 負債を1つ返済
     code, out = run(tmp_path, "--phase", "implement")
     assert code == 0
-    assert "返済済み" in out and "toolchain-pin" in out
+    assert "repaid" in out and "toolchain-pin" in out
 
 
 def test_retightened_baseline_blocks_a_regression_of_repaid_debt(tmp_path):
@@ -344,4 +344,4 @@ def test_baseline_warns_when_it_would_absorb_a_new_failure(tmp_path):
     (tmp_path / "app.test.ts").unlink()
     code, out = _baseline(tmp_path)
     assert code == 0
-    assert "新たに負債として追加" in out and "tests-present" in out
+    assert "newly added as debt" in out and "tests-present" in out
