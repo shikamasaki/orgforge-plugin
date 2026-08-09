@@ -282,7 +282,7 @@ def main(argv):
     sub = p.add_subparsers(dest="cmd", required=True)
 
     q = sub.add_parser("propose"); q.set_defaults(fn=cmd_propose)
-    q.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)"); q.add_argument("role")
+    q.add_argument("root", nargs="?", help="ledger root (omitted: auto-discovered from the cwd — .orgforge/ledger)"); q.add_argument("role")
     q.add_argument("--claim", required=True)
     q.add_argument("--source"); q.add_argument("--confidence", type=float)
     q.add_argument("--retrieved-at", dest="retrieved_at")
@@ -290,26 +290,26 @@ def main(argv):
     q.add_argument("--affects")
 
     q = sub.add_parser("admit"); q.set_defaults(fn=cmd_admit)
-    q.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)"); q.add_argument("role"); q.add_argument("claim_id")
+    q.add_argument("root", nargs="?", help="ledger root (omitted: auto-discovered from the cwd — .orgforge/ledger)"); q.add_argument("role"); q.add_argument("claim_id")
     q.add_argument("--by", required=True); q.add_argument("--at")
 
     q = sub.add_parser("reject"); q.set_defaults(fn=cmd_reject)
-    q.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)"); q.add_argument("role"); q.add_argument("claim_id")
+    q.add_argument("root", nargs="?", help="ledger root (omitted: auto-discovered from the cwd — .orgforge/ledger)"); q.add_argument("role"); q.add_argument("claim_id")
     q.add_argument("--by", required=True); q.add_argument("--reason", required=True)
 
     q = sub.add_parser("render"); q.set_defaults(fn=cmd_render)
-    q.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)"); q.add_argument("role")
+    q.add_argument("root", nargs="?", help="ledger root (omitted: auto-discovered from the cwd — .orgforge/ledger)"); q.add_argument("role")
     q.add_argument("--budget-tokens", dest="budget_tokens", type=int)
     q.add_argument("--now"); q.add_argument("--out")
 
     q = sub.add_parser("stale"); q.set_defaults(fn=cmd_stale)
-    q.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)"); q.add_argument("--now")
+    q.add_argument("root", nargs="?", help="ledger root (omitted: auto-discovered from the cwd — .orgforge/ledger)"); q.add_argument("--now")
 
     q = sub.add_parser("show"); q.set_defaults(fn=cmd_show)
-    q.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)"); q.add_argument("role")
+    q.add_argument("root", nargs="?", help="ledger root (omitted: auto-discovered from the cwd — .orgforge/ledger)"); q.add_argument("role")
 
     q = sub.add_parser("remap"); q.set_defaults(fn=cmd_remap)
-    q.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)")                                  # source doctrine store (old roles)
+    q.add_argument("root", nargs="?", help="ledger root (omitted: auto-discovered from the cwd — .orgforge/ledger)")                                  # source doctrine store (old roles)
     q.add_argument("--map", required=True)                  # JSON {old_role: new_role|[roles]}
     q.add_argument("--into")                                # dest store (default: same as root)
     q.add_argument("--allow-orphans", dest="allow_orphans", action="store_true")

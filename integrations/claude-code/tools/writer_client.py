@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""writer_client — writerd に台帳の書き込みを依頼する。
+"""writer_client — ask writerd to write to the ledger.
 
-**daemon が居なければ書けない。** それを「書けた」と読み替えないことが、この層の要点である。
+**With no daemon there is no write.** Never reinterpreting that as "written" is the point of this
+layer.
 """
 
 import json
@@ -15,10 +16,10 @@ from writerd import call          # noqa: E402
 def main(argv):
     if len(argv) < 2 or argv[1] in ("-h", "--help"):
         print(__doc__.strip() + "\n\n"
-              "  writer_client.py <op> [--org NAME] -- <ledger.py に渡す引数…>\n\n"
+              "  writer_client.py <op> [--org NAME] -- <the arguments to pass to ledger.py…>\n\n"
               "  op: append | record-scheduled-check | trip-halt | release-halt | "
               "reserve-exposure | halt-status | derive-admission\n"
-              "  **台帳のパスは渡せない** — writerd が org 名から決める。")
+              "  **The ledger path cannot be passed** — writerd decides it from the org name.")
         return 0
     op = argv[1]
     rest = argv[2:]
@@ -35,17 +36,20 @@ def main(argv):
                          ensure_ascii=False))
         return 4
     if op in ("reserve-exposure", "derive-admission"):
-        # **中の判断をそのまま出す。** hook は `decision` を読んで allow/deny を決めるので、
-        # RPC の封筒でくるむと読めなくなる（終了コードだけを信じる形に戻ってしまう）。
+        # **Emit the inner decision as-is.** The hook reads `decision` to settle allow/deny, so
+        # wrapping it in the RPC envelope makes it unreadable — back to trusting the exit code
+        # alone.
         sys.stdout.write(resp.get("stdout") or "")
         sys.stderr.write(resp.get("stderr") or "")
         if not resp.get("ok") and not (resp.get("stdout") or "").strip().startswith("{"):
-            # writer 自身が拒否した（RPC 層のエラー）。**判断が読めないなら通さない。**
+            # The writer itself refused (an RPC-layer error). **If the decision cannot be read,
+            # it does not pass.**
             print(json.dumps({"decision": "deny", "reason": resp.get("reason"),
                               "detail": resp.get("detail")}, ensure_ascii=False))
         return resp.get("exit_code", 4)
     if op == "halt-status":
-        # **hook が読む形で返す。** exit code（0/10）と stdout をそのまま透過させる。
+        # **Return it in the shape the hook reads.** The exit code (0/10) and stdout pass
+        # straight through.
         sys.stdout.write(resp.get("stdout") or "")
         sys.stderr.write(resp.get("stderr") or "")
         return resp.get("exit_code", 4)

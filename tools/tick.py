@@ -286,7 +286,7 @@ def main(argv):
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
     q = sub.add_parser("plan"); q.set_defaults(fn=cmd_plan)
-    q.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)"); q.add_argument("schedule_yaml")
+    q.add_argument("root", nargs="?", help="ledger root (omitted: auto-discovered from the cwd — .orgforge/ledger)"); q.add_argument("schedule_yaml")
     q.add_argument("--now-min", dest="now_min", type=int, required=True)
     q.add_argument("--night", action="store_true")
     q.add_argument("--verbose", action="store_true")

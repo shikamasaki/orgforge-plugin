@@ -24,8 +24,9 @@ import tempfile
 try:
     import yaml
 except ModuleNotFoundError:                                        # pragma: no cover - env guard
-    sys.exit("resilience_exercise: PyYAML が無いので exercise 定義を読めない。\n"
-             "  プラグインが使う interpreter へ入れること:\n"
+    sys.exit("resilience_exercise: PyYAML is missing, so the exercise definition cannot be "
+             "read.\n"
+             "  Install it into the interpreter the plugin uses:\n"
              "    python3 -m pip install pyyaml")
 
 HERE = Path(__file__).resolve().parent

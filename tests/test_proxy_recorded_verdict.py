@@ -59,6 +59,6 @@ def test_an_unreceipted_verdict_is_not_upgraded():
 def test_the_separation_the_ledger_depends_on_is_documented_here():
     """The next reader has to know why this line is not simply `a.by or a.role`."""
     block = SOURCE[:SOURCE.index('"decision_by": decision_by')]
-    block = block[block.rindex("# **3つの主体を分ける"):]
+    block = block[block.rindex("# **Three principals, kept apart (H1)."):]
     assert "self-correction" in block
     assert "#186" in block

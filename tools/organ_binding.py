@@ -176,7 +176,7 @@ def bind(org_root, tools_root, session_id=None):
     org_root = os.path.realpath(org_root)
     tools_root = os.path.realpath(tools_root)
     if not os.path.isfile(os.path.join(tools_root, "ledger.py")):
-        raise BindingError(f"tools root に ledger.py が無い: {tools_root}")
+        raise BindingError(f"there is no ledger.py in the tools root: {tools_root}")
     harness, version, plugin_root = _manifest(tools_root)
     session_id = str(session_id or os.environ.get("ORG_ORGAN_SESSION_ID") or uuid.uuid4().hex)
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}", session_id):
@@ -212,9 +212,9 @@ def _read_binding(path):
     except FileNotFoundError:
         return None
     except Exception as exc:
-        raise BindingError(f"installed-organ binding を読めない: {path}: {exc}") from exc
+        raise BindingError(f"cannot read the installed-organ binding: {path}: {exc}") from exc
     if not isinstance(record, dict) or record.get("schema") != SCHEMA:
-        raise BindingError(f"installed-organ binding の schema が不正: {path}")
+        raise BindingError(f"the installed-organ binding has an invalid schema: {path}")
     return record
 
 
@@ -265,7 +265,8 @@ def invocation(org_root, harness):
         return None
     launcher = os.path.realpath(str(record.get("launcher") or ""))
     if launcher != os.path.realpath(launcher_path(org_root, harness)) or not os.path.isfile(launcher):
-        raise BindingError("installed-organ launcher が binding と一致しない。session を再起動すること")
+        raise BindingError("the installed-organ launcher does not match the binding. Restart the "
+                           "session")
     return launcher
 
 
@@ -289,20 +290,21 @@ def foreign_invocation_error(ledger_root, current_tools):
         if os.path.realpath(str(record.get("tools_root") or "")) == observed:
             return None
     if os.environ.get("ORG_ALLOW_FOREIGN_ORGAN") == "1":
-        print("WARNING: ORG_ALLOW_FOREIGN_ORGAN=1 — installed-organ binding mismatch を明示的に"
-              " bypass した", file=sys.stderr)
+        print("WARNING: ORG_ALLOW_FOREIGN_ORGAN=1 — an installed-organ binding mismatch was "
+              "explicitly bypassed", file=sys.stderr)
         return None
     expected = ", ".join(sorted(
         f"{record.get('harness')}={os.path.realpath(str(record.get('tools_root') or ''))}"
         for record in records))
     launchers = ", ".join(sorted(str(record.get("launcher") or "") for record in records))
-    return ("この組織へ書き込もうとした organ は SessionStart が束縛した installed organ と"
-            "一致しない。\n"
+    return ("the organ attempting to write to this organization does not match the installed "
+            "organ that SessionStart bound.\n"
             f"  expected tools_root: {expected}\n"
             f"  observed tools_root: {observed}\n"
             f"  stable invocation: {launchers} <organ> ...\n"
-            "  plugin更新後ならホストsessionを再起動してbindingを更新すること。"
-            "意図的な開発checkoutなら ORG_ALLOW_FOREIGN_ORGAN=1 を同じコマンドに明示する。")
+            "  After a plugin update, restart the host session to refresh the binding. For a "
+            "deliberate development checkout, state ORG_ALLOW_FOREIGN_ORGAN=1 on the same "
+            "command.")
 
 
 def main(argv=None):

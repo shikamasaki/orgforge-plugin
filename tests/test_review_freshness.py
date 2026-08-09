@@ -121,7 +121,7 @@ def test_verify_reports_stale_diverged_and_unresolvable_targets(tmp_path):
                   "--phase", "implement", "--base", "main", "--print-subject",
                   "--subject-root", ".")
     assert result.returncode == 11
-    assert "diverged" in result.stderr or "分岐" in result.stderr
+    assert "diverged" in result.stderr
 
     missing = _org(tmp_path / "missing")
     _git(missing, "branch", "-D", "main")
@@ -129,7 +129,7 @@ def test_verify_reports_stale_diverged_and_unresolvable_targets(tmp_path):
                   "--phase", "implement", "--base", "main", "--print-subject",
                   "--subject-root", ".")
     assert result.returncode == 11
-    assert "unresolvable" in result.stderr or "解決できない" in result.stderr
+    assert "unresolvable" in result.stderr
 
 
 def test_strict_verify_uses_declared_ref_when_main_and_develop_both_exist(tmp_path):

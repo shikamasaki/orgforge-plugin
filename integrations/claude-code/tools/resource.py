@@ -158,18 +158,18 @@ def main(argv):
     sub = p.add_subparsers(dest="cmd", required=True)
 
     q = sub.add_parser("rank"); q.set_defaults(fn=cmd_rank)
-    q.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)"); q.add_argument("--objectives", required=True)
+    q.add_argument("root", nargs="?", help="ledger root (omitted: auto-discovered from the cwd — .orgforge/ledger)"); q.add_argument("--objectives", required=True)
     q.add_argument("--basis")
 
     q = sub.add_parser("reclaim"); q.set_defaults(fn=cmd_reclaim)
-    q.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)"); q.add_argument("--holder", required=True)
+    q.add_argument("root", nargs="?", help="ledger root (omitted: auto-discovered from the cwd — .orgforge/ledger)"); q.add_argument("--holder", required=True)
     q.add_argument("--resource", required=True)
     q.add_argument("--yield-threshold", dest="yield_threshold", type=float, default=0.5)
     q.add_argument("--idle-cycles", dest="idle_cycles", type=int, default=3)
     q.add_argument("--protected")
 
     q = sub.add_parser("authority"); q.set_defaults(fn=cmd_authority)
-    q.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)"); q.add_argument("--now-tick", dest="now_tick", type=int)
+    q.add_argument("root", nargs="?", help="ledger root (omitted: auto-discovered from the cwd — .orgforge/ledger)"); q.add_argument("--now-tick", dest="now_tick", type=int)
     q.add_argument("--ttl-ticks", dest="ttl_ticks", type=int, default=100)
     q.add_argument("--hard-cap-scope", dest="hard_cap_scope")
 

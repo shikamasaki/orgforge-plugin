@@ -1701,7 +1701,7 @@ def test_active_harness_rejects_ambiguous_nested_signals(monkeypatch):
     monkeypatch.delenv("ORGFORGE_ACTIVE_HARNESS", raising=False)
     monkeypatch.setenv("CLAUDECODE", "1")
     monkeypatch.setenv("CODEX_THREAD_ID", "thread-1")
-    with pytest.raises(SystemExit, match="同時"):
+    with pytest.raises(SystemExit, match="both Claude Code and Codex signals"):
         active_harness()
 
 

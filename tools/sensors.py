@@ -175,7 +175,7 @@ def main(argv):
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
     q = sub.add_parser("eval"); q.set_defaults(fn=cmd_eval)
-    q.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)"); q.add_argument("sensors_yaml")
+    q.add_argument("root", nargs="?", help="ledger root (omitted: auto-discovered from the cwd — .orgforge/ledger)"); q.add_argument("sensors_yaml")
     q.add_argument("--now"); q.add_argument("--only")
     a = p.parse_args(argv[1:])
     return a.fn(a)

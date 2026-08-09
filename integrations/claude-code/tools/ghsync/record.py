@@ -721,8 +721,9 @@ def cmd_provisional(a):
     payload = {"issue": a.issue, "deliverable": str(a.issue), "role": a.role,
                "lineage": a.lineage, "verdict": a.verdict, "for_event": event,
                "review_subject_id": a.subject, "reasoning_sha256": digest,
-               # **3つの主体を分ける（H1）。** decision_by は receipt からのみ。
-               # recorded_by は観測（代理記録を許す）。committed_by は writer が付ける。
+               # **Three principals, kept apart (H1).** decision_by comes only from a receipt;
+               # recorded_by is observed (proxy recording is allowed); committed_by is stamped by
+               # the writer.
                #
                # Falling back to the RECORDER here made a supervisor who proxy-recorded an
                # unavailable judge's result the decision principal of that verdict. The ledger then

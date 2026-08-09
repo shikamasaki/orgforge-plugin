@@ -170,10 +170,11 @@ def test_foreign_checkout_is_rejected_before_ledger_write(tmp_path):
     ledger = org / ".orgforge" / "ledger"
     payload = json.dumps({"maker": "miner", "candidate_id": "c1",
                           "contract_ref": "goal", "source": "self", "evidence": ["x"]})
-    # このテストだけは「明示が無い」状態を作る。conftest がテスト実行全体に
-    # ORG_ALLOW_FOREIGN_ORGAN=1 を敷いている（開発チェックアウトから回せるように）が、
-    # ここで検証したいのは *その明示が無いときに guard が実際に止めるか* なので、
-    # 継承ではなく明示的に取り除いた env で organ を起動する。
+    # This test alone constructs the state where nothing is stated explicitly. conftest lays
+    # ORG_ALLOW_FOREIGN_ORGAN=1 over the whole run (so the suite can be driven from a development
+    # checkout), but what is under test here is *whether the guard actually stops when that
+    # statement is absent* — so the organ is launched with an env it was explicitly removed from,
+    # rather than an inherited one.
     env = {k: v for k, v in os.environ.items() if k != "ORG_ALLOW_FOREIGN_ORGAN"}
     run = subprocess.run([
         sys.executable, str(TOOLS / "ledger.py"), "append", str(ledger),
@@ -271,8 +272,9 @@ def test_judge_prompt_uses_stable_launcher_not_a_tools_checkout(
     monkeypatch.setattr(judge, "review_subject",
                         lambda *args, **kwargs: ("a" * 64, {"issue": "37"}))
     monkeypatch.setattr(judge, "_run", lambda *args, **kwargs: (1, ""))
-    # #101: subject は Issue の worktree（か明示の --subject-root）から。この org に
-    # issue-37 の worktree は無いので明示する — このテストの主題は launcher の注入。
+    # #101: the subject comes from the Issue's worktree (or an explicit --subject-root). This org
+    # has no worktree for issue-37, so it is stated explicitly — what this test is about is the
+    # launcher injection.
     args = argparse.Namespace(issue=37, role="gate", phase="implement", print_subject=False,
                               subject_root=str(org))
     assert judge.cmd_verify(args) == 0
