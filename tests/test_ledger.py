@@ -589,7 +589,7 @@ def test_judge_cannot_void_its_own_judgment(tmp_path):
     target = _provisional_target(org, ledger, actor="gate")
     result = _correction_append(org, ledger, "gate", target["seq"])
     assert result.returncode == 3
-    assert "is not authorized" in result.stderr or "自分の判定" in result.stderr
+    assert "is not authorized" in result.stderr or "its own judgment" in result.stderr
     assert len((ledger / "ledger.jsonl").read_text().splitlines()) == 1
 
 
@@ -2009,7 +2009,7 @@ def test_socket_parent_must_not_be_world_writable(tmp_path, mode, expect):
     wd = importlib.import_module("writerd")
     parent = tmp_path / "p"; parent.mkdir()
     os.chmod(parent, mode)
-    os.environ["ORG_WRITER_TRUST_SELF"] = "1"      # 段階A（anchor が自分所有）
+    os.environ["ORG_WRITER_TRUST_SELF"] = "1"      # stage A (the anchor is self-owned)
     try:
         err = wd.check_socket_parent(str(parent / "writer.sock"))
         assert (err is None) is expect, err
@@ -2063,20 +2063,21 @@ def test_install_script_dry_run_changes_nothing(tmp_path):
     before = sorted(str(p.relative_to(tmp_path)) for p in tmp_path.rglob("*"))
     r = subprocess.run(["bash", str(TOOLS / "writer-install.sh"),
                         "--org-root", str(tmp_path), "--dry-run",
-                        # **daemon が使う python で PyYAML を検査する**ので、それが無い環境では
-                        # preflight が正しく止まる。ここでは「何も変えない」ことを見たいので、
-                        # 検査を通せる処理系を渡す（無ければ preflight で止まることを確かめる）。
+                        # **It checks PyYAML with the python the daemon uses**, so preflight
+                        # correctly stops where that is absent. What this wants to see is "nothing
+                        # changes", so an interpreter that passes the check is passed in (and where
+                        # there is none, that preflight stops is confirmed instead).
                         "--daemon-python", sys.executable],
                        capture_output=True, text=True)
     both = r.stdout + r.stderr
     if r.returncode != 0:
-        # preflight で止まった場合も **何も変えていない**ことが要件である
+        # Even where preflight stopped, the requirement is that **nothing changed**
         assert "PyYAML" in both, both
     else:
         assert "[dry-run]" in r.stdout
         assert "outside the threat model" in r.stdout   # it states the boundary
     assert sorted(str(p.relative_to(tmp_path))
-                  for p in tmp_path.rglob("*")) == before, "dry-run が何かを変えた"
+                  for p in tmp_path.rglob("*")) == before, "the dry-run changed something"
 
 
 def test_verify_script_refuses_to_run_as_root():
@@ -2086,26 +2087,29 @@ def test_verify_script_refuses_to_run_as_root():
     assert "as root everything succeeds" in src
 
 
-# ══ 0.39.1 — 監査が見つけた「installer が作る状態では動かない」9件 ═══════════
-# **設定を書いたことは、動くことではない。** --dry-run が exit 0 でも、その設定で daemon が
-# 起動しない／caller が接続できない／台帳が読めないなら、install は完了していない。
+# ══ 0.39.1 — the nine "it does not work in the state the installer creates" findings from the
+#    audit ══
+# **Having written the configuration is not the same as it working.** --dry-run exiting 0 means
+# nothing if, under that configuration, the daemon will not start, the caller cannot connect, or the
+# ledger cannot be read — the install is not complete.
 
 def test_stage_b_permissions_let_the_daemon_start(tmp_path):
-    """段階B の権限で **daemon が socket を作れる**こと。
+    """Under stage B's permissions, **the daemon must be able to create the socket**.
 
-    実測（監査）: root 所有 0755 の親には別 UID の daemon が bind できない
-    （`bind()` は親への書き込み権限を要求する）。0755 も 1770 も動かない。
-    したがって anchor（root 所有・caller が書けない）と leaf（writer 所有・bind できる）に分ける。
+    Measured (in an audit): a daemon under a different UID cannot bind under a root-owned 0755 parent
+    (`bind()` demands write permission on the parent). Neither 0755 nor 1770 works.
+    So the anchor (root-owned, unwritable by a caller) and the leaf (writer-owned, bindable) are
+    separate.
     """
     sys.path.insert(0, str(TOOLS))
     import importlib
     wd = importlib.import_module("writerd")
-    # **短いパスを使う。** AF_UNIX の上限（macOS 104 バイト）は pytest の tmp_path で超える。
+    # **Use a short path.** pytest's tmp_path exceeds the AF_UNIX limit (104 bytes on macOS).
     import tempfile as _tf
     anchor = pathlib.Path(_tf.mkdtemp(prefix="an", dir="/tmp")); leaf = anchor / "r"
     leaf.mkdir(parents=True)
     os.chmod(anchor, 0o755); os.chmod(leaf, 0o755)
-    # leaf は自分（= writer 役）の所有・他者書き込み不可 → **bind できる形**
+    # The leaf is owned by me (playing the writer) and unwritable by others → **a bindable shape**
     import socket as _s
     sk = _s.socket(_s.AF_UNIX, _s.SOCK_STREAM)
     try:
@@ -2113,10 +2117,10 @@ def test_stage_b_permissions_let_the_daemon_start(tmp_path):
         (leaf / "w.sock").unlink()
     finally:
         sk.close()
-    # anchor が root 所有でなければ段階B としては拒否される（このテストでは自分所有なので拒否）
+    # An anchor that is not root-owned is refused as stage B (self-owned here, so refused)
     err = wd.check_socket_parent(str(leaf / "w.sock"), require_root_owned=True)
     assert err and "anchor is not root-owned" in err
-    # leaf が他者から書けるなら拒否（other-write は段階A でも落ちる）
+    # A leaf writable by others is refused (other-write fails even in stage A)
     os.chmod(leaf, 0o777)
     err = wd.check_socket_parent(str(leaf / "w.sock"), require_root_owned=True)
     assert err and ("writable" in err)
@@ -2124,14 +2128,14 @@ def test_stage_b_permissions_let_the_daemon_start(tmp_path):
 
 
 def test_installer_uses_permissions_the_daemon_accepts():
-    """installer が書く mode と、writerd が受け付ける mode が一致していること。
+    """The mode the installer writes and the mode writerd accepts must match.
 
-    **この2つがずれていると、install は成功して daemon は起動しない。**
+    **Where the two diverge, the install succeeds and the daemon does not start.**
     """
     src = (TOOLS / "writer-install.sh").read_text(encoding="utf-8")
-    assert "chmod 0755 '${SOCK_PARENT}'" in src, "leaf が 0755 でない"
-    assert "chmod 0755 '${SOCK_ANCHOR}'" in src, "anchor が 0755 でない"
-    assert "chmod 1770" not in src, "1770 は writerd が拒否する"
+    assert "chmod 0755 '${SOCK_PARENT}'" in src, "the leaf is not 0755"
+    assert "chmod 0755 '${SOCK_ANCHOR}'" in src, "the anchor is not 0755"
+    assert "chmod 1770" not in src, "writerd refuses 1770"
     # An unreadable ledger breaks verify and projection alike (the authoritative data lives outside
     # the org tree)
     assert "chmod 750 '${AUTHORITATIVE}/ledger'" in src
@@ -2144,7 +2148,8 @@ def test_socket_is_connectable_by_a_caller(tmp_path):
     led, sock, proc = _wd_start(tmp_path)
     try:
         mode = os.stat(sock).st_mode & 0o777
-        assert mode & 0o066, f"socket が {oct(mode)} — 別 UID の caller が接続できない"
+        assert mode & 0o066, (
+            f"the socket is {oct(mode)} — a caller under a different UID cannot connect")
     finally:
         proc.terminate(); proc.wait(timeout=10)
 
@@ -2155,7 +2160,8 @@ def test_isolation_is_measured_not_flagged(tmp_path):
     import importlib
     wd = importlib.import_module("writerd")
     led = tmp_path / "l"; led.mkdir()
-    # 同一 UID・自分所有の親 → process_mediated（--require-root-owned を渡しても変わらない）
+    # Same UID, self-owned parent → process_mediated (passing --require-root-owned changes
+    # nothing)
     assert wd.measured_isolation(str(led / "w.sock"), [str(led)]) == "process_mediated"
 
 
@@ -2169,7 +2175,7 @@ def test_peer_uid_reaches_the_recorder(tmp_path, monkeypatch):
     monkeypatch.setenv("ORG_WRITER_PEER_PID", "999")
     who, assurance = ident.observed_recorder()
     assert who == "peer:uid=501,pid=999" and assurance == "observed"
-    # **decision_by には流れない** — 接続は判断の証拠ではない
+    # **It does not flow into decision_by** — a connection is not evidence of a judgment
     monkeypatch.delenv("ORG_WRITER_PEER_UID")
     who2, _ = ident.observed_recorder()
     assert who2 != who
@@ -2183,16 +2189,16 @@ def test_installer_stops_on_the_first_failure():
 
 
 def test_installer_checks_the_daemon_python_for_pyyaml():
-    """**daemon が使う python** で PyYAML を検査すること。
+    """PyYAML must be checked with **the python the daemon uses**.
 
-    利用者の python3 に入っていても、別 UID の daemon には見えない
-    （実測: PyYAML が ~/Library/Python にあり、PYTHONNOUSERSITE=1 で読めなかった）。
+    Present in the user's python3 or not, it is invisible to a daemon under a different UID
+    (measured: PyYAML was in ~/Library/Python and unreadable under PYTHONNOUSERSITE=1).
     """
     src = (TOOLS / "writer-install.sh").read_text(encoding="utf-8")
     assert "PYTHONNOUSERSITE=1" in src
     assert "${DAEMON_PYTHON}" in src
     assert "useless in ~/Library/Python" in src
-    # 実行可能な回避策を出すこと
+    # It must print a workaround that can actually be run
     assert "venv" in src and "break-system-packages" in src
 
 
@@ -2200,7 +2206,7 @@ def test_installer_copy_is_idempotent():
     """`cp -R src dst/src` creates tools/tools when re-run."""
     src = (TOOLS / "writer-install.sh").read_text(encoding="utf-8")
     assert "rm -rf '${INSTALL_DIR}/tools'" in src
-    assert "cp -R '$PLUGIN_DIR/tools/.'" in src, "末尾の /. が無いと入れ子になる"
+    assert "cp -R '$PLUGIN_DIR/tools/.'" in src, "without the trailing /. it nests"
 
 
 def test_verifier_does_not_damage_the_target():
@@ -2208,15 +2214,16 @@ def test_verifier_does_not_damage_the_target():
     rather than attempting a write."""
     src = (TOOLS / "writer-verify.sh").read_text(encoding="utf-8")
     for forbidden, why in (
-            ('{"forged":true}', "本番の台帳に行が残る"),
-            ("chmod 777 \"$LED\"", "本番の権限が変わる"),
-            ('printf \'#\' >> "$f"', "daemon の複製に行が残る"),
-            ('rm -f "$SOCK"', "daemon が止まる"),
-            ('mv "$PARENT"', "socket が消える"),
-            ("launchctl bootout", "daemon が止まる")):
-        assert forbidden not in src, f"破壊的な操作が残っている（{why}）: {forbidden}"
+            ('{"forged":true}', "a line would stay in the real ledger"),
+            ("chmod 777 \"$LED\"", "the real permissions would change"),
+            ('printf \'#\' >> "$f"', "a line would stay in the daemon's copy"),
+            ('rm -f "$SOCK"', "the daemon would stop"),
+            ('mv "$PARENT"', "the socket would disappear"),
+            ("launchctl bootout", "the daemon would stop")):
+        assert forbidden not in src, (
+            f"a destructive operation remains ({why}): {forbidden}")
     assert "Not one byte is written" in src
-    assert "--no-write" in src            # 副作用ゼロで回せる経路がある
+    assert "--no-write" in src            # there is a path that runs with zero side effects
 
 
 def test_verifier_checks_the_ledger_stays_readable():
@@ -2227,13 +2234,14 @@ def test_verifier_checks_the_ledger_stays_readable():
     assert "verify / board / projection will not run" in src
 
 
-# ══ 0.39.2 — 再監査が見つけた9件 ═══════════════════════════════════════════════
+# ══ 0.39.2 — the nine findings from the re-audit ════════════════════════════
 
 def test_actor_alias_cannot_bypass_separation_of_duties(tmp_path):
-    """**`--actor` を変えるだけで職務分離を回避できてはいけない。**
+    """**Changing `--actor` alone must not bypass the separation of duties.**
 
-    実測（監査）: maker 本人の自己 admit は拒否されるが、同じプロセスが `--actor gate-alias`
-    に変えると通り、鎖も intact だった。名乗りを変えられるなら、比較に意味が無い。
+    Measured (in an audit): a maker's own self-admit is refused, yet the same process passed by
+    changing to `--actor gate-alias`, with the chain intact. If the name can be changed, comparing
+    names means nothing.
     """
     org = tmp_path / "org"; led = org / ".orgforge" / "ledger"; led.mkdir(parents=True)
     import shutil as _sh
@@ -2248,16 +2256,16 @@ def test_actor_alias_cannot_bypass_separation_of_duties(tmp_path):
              "--payload", json.dumps(payload)],
             cwd=org, capture_output=True, text=True)
 
-    # 自己申告の actor では通らない
+    # A self-declared actor does not pass
     r = app("gate-alias", {"deliverable": "7", "verdict": "admit", "gate": "g"})
     assert r.returncode == 3, r.stdout + r.stderr
     assert "cannot be recorded through a generic append" in (r.stdout + r.stderr)
-    # **payload に書くだけでは通らない**（0.39.3 で塞いだ）
+    # **Writing it into the payload does not pass either** (closed at 0.39.3)
     r = app("gate-signer", {"deliverable": "7", "verdict": "admit", "gate": "g",
                             "identity_assurance": "attested", "decision_by": "gate-signer"})
     assert r.returncode == 2, r.stdout + r.stderr
-    # **receipt を渡す経路は test_the_verified_path_can_record が確かめる。**
-    # ここでは「名乗りだけでは通らない」ことに集中する。
+    # **The path that passes a receipt is confirmed by test_the_verified_path_can_record.**
+    # This one concentrates on "a name alone does not pass".
 
 
 def test_attested_enforcement_defaults_off(tmp_path):
@@ -2275,13 +2283,14 @@ def test_attested_enforcement_defaults_off(tmp_path):
 
 
 def test_stage_b_socket_parent_must_be_bindable(tmp_path):
-    """**daemon が socket を作れる形であること。** root 所有 0755 では bind できない。
+    """**The shape must let the daemon create the socket.** A root-owned 0755 cannot be bound.
 
-    実測（監査）: `bind()` は親への書き込み権限を要求する。0755 も 1770 も動かない —
-    前者は daemon が作れず、後者は writerd が拒否する。anchor / leaf に分ける。
+    Measured (in an audit): `bind()` demands write permission on the parent. Neither 0755 nor 1770
+    works — under the first the daemon cannot create it, and the second writerd refuses. The anchor
+    and the leaf are separate.
     """
     import socket as _s
-    # root 所有 0755 に別 UID（自分）が bind できないこと
+    # A different UID (me) must not be able to bind under a root-owned 0755
     for d in ("/usr/local", "/Library/LaunchDaemons"):
         if not os.path.isdir(d) or os.stat(d).st_uid != 0:
             continue
@@ -2289,12 +2298,12 @@ def test_stage_b_socket_parent_must_be_bindable(tmp_path):
         try:
             sk.bind(os.path.join(d, f"t-{os.getpid()}.sock"))
             os.unlink(os.path.join(d, f"t-{os.getpid()}.sock"))
-            assert False, f"{d} に bind できてしまった（テストの前提が崩れている）"
+            assert False, f"binding under {d} succeeded (this test's premise has broken)"
         except PermissionError:
             pass
         finally:
             sk.close()
-    # installer は anchor（root）と leaf（writer）を分けること
+    # The installer must separate the anchor (root) from the leaf (writer)
     src = (TOOLS / "writer-install.sh").read_text(encoding="utf-8")
     assert "SOCK_ANCHOR=" in src and "SOCK_PARENT=" in src
     assert "chown '${SERVICE_USER}:${SERVICE_GROUP}' '${SOCK_PARENT}'" in src
@@ -2306,7 +2315,7 @@ def test_writerd_pins_the_schema(tmp_path):
     src = (TOOLS / "writerd.py").read_text(encoding="utf-8")
     assert 'env["ORG_LEDGER_SCHEMA"] = self.schema' in src
     assert '"--schema"' in src
-    # installer が root 所有の設定から渡すこと
+    # The installer must pass it from a root-owned configuration
     isrc = (TOOLS / "writer-install.sh").read_text(encoding="utf-8")
     assert "--schema" in isrc
 
@@ -2322,10 +2331,11 @@ def test_isolation_compares_the_peer_uid(tmp_path):
 
 
 def test_writer_isolation_does_not_become_judge_isolation():
-    """**同じ writer UID は judge 同士の隔離を証明しない。**
+    """**One writer UID proves nothing about isolation between judges.**
 
-    実測（監査）: writer の隔離値が judge の workload_isolation に入り、別 signer なら
-    distinct_workload へ昇格していた。judge は writer とは別のプロセスで動く。
+    Measured (in an audit): the writer's isolation value entered the judge's workload_isolation and,
+    with a different signer, was promoted to distinct_workload. A judge runs in a different process
+    from the writer.
     """
     src = (TOOLS / "identity.py").read_text(encoding="utf-8")
     assert '"writer_isolation": os.environ.get("ORG_WRITER_ISOLATION")' in src
@@ -2356,9 +2366,9 @@ def test_installer_does_not_overwrite_the_original_owner():
     assert 'it can never go back to the caller' in src
 
 
-# ══ 0.39.3 — 第2再監査の7件 ═══════════════════════════════════════════════════
-# **私が前回入れた「強制」は、payload に2つの文字列を書くだけで回避でき、しかも
-# 私のテストがそれを正常系として固定していた。** 書けるものを検査に使ってはいけない。
+# ══ 0.39.3 — the seven findings from the second re-audit ════════════════════
+# **The "enforcement" added last time could be bypassed by writing two strings into the payload —
+# and the tests pinned that as the happy path.** Never use something writable as a check.
 
 def _att_org(tmp_path, enforce="true"):
     org = tmp_path / "org"; led = org / ".orgforge" / "ledger"; led.mkdir(parents=True)
@@ -2377,10 +2387,11 @@ def _att_append(org, led, actor, payload, env=None):
 
 
 def test_payload_cannot_forge_identity_fields(tmp_path):
-    """**書けるものを検査に使ってはいけない。**
+    """**Never use something writable as a check.**
 
-    実測（監査）: `identity_assurance: attested` と `decision_by` を payload に書くだけで
-    admit が通り、鎖も intact だった。**前回の私のテストがこれを正常系として固定していた。**
+    Measured (in an audit): writing `identity_assurance: attested` and `decision_by` into the payload
+    was enough for an admit to pass, with the chain intact. **The previous tests pinned that as the
+    happy path.**
     """
     org, led = _att_org(tmp_path)
     r = _att_append(org, led, "forged",
@@ -2401,21 +2412,22 @@ def test_generic_append_cannot_record_a_judgment(tmp_path):
 
 
 def test_the_verified_path_can_record(tmp_path):
-    """**receipt を渡した経路だけが書ける。** 止まるだけでは運用できない。
+    """**Only the path that passed a receipt can write.** An org that merely stops cannot be
+    operated.
 
-    0.39.4 で `ORG_IDENTITY_VERIFIED` は廃止した — caller が立てられる印は証拠にならない
-    （実測: その環境変数を足すだけで偽の identity が通った）。receipt そのものを渡させ、
-    書き手が検証する。
+    0.39.4 abolished `ORG_IDENTITY_VERIFIED` — a marker the caller can set is not evidence (measured:
+    merely adding that environment variable let a forged identity through). The receipt itself is
+    passed, and the writer verifies it.
     """
     org, led = _att_org(tmp_path)
-    # 環境変数では通らない
+    # An environment variable does not pass
     env = dict(os.environ, ORG_IDENTITY_VERIFIED="1")
     r = _att_append(org, led, "gate-signer",
                     {"deliverable": "7", "verdict": "admit",
                      "identity_assurance": "attested", "decision_by": "gate-signer"}, env=env)
     assert r.returncode == 2, r.stdout + r.stderr
 
-    # receipt を渡せば通る
+    # Passing a receipt does pass
     trust = org / ".orgforge" / "trust"; trust.mkdir(parents=True, exist_ok=True)
     tenv = dict(os.environ, ORG_TRUST_STORE=str(trust / "keys.json"))
     subprocess.run([sys.executable, str(TOOLS / "identity.py"), "keygen", "--key-id", "k1",
@@ -2444,36 +2456,37 @@ def test_the_verified_path_can_record(tmp_path):
 
 
 @pytest.mark.parametrize("body,why", [
-    ("enforcement: [broken yaml\n", "構文が壊れている"),
-    ("enforcement: not-a-map\n", "enforcement が map でない"),
-    ("enforcement:\n  judges: 42\n", "judges が map でない"),
-    ("enforcement:\n  judges:\n    require_attested_identity: maybe\n", "真偽値でない"),
+    ("enforcement: [broken yaml\n", "the syntax is broken"),
+    ("enforcement: not-a-map\n", "enforcement is not a map"),
+    ("enforcement:\n  judges: 42\n", "judges is not a map"),
+    ("enforcement:\n  judges:\n    require_attested_identity: maybe\n", "not a boolean"),
 ])
 def test_unreadable_config_fails_closed(tmp_path, body, why):
-    """**設定を読めないことを「強制なし」と読み替えない。**
+    """**"The configuration cannot be read" is never rewritten as "there is no enforcement".**
 
-    実測（監査）: 破損した constitution で強制が黙って消えた（破損前 exit 3 → 破損後 exit 0）。
-    有効にしていた org が、ファイルが壊れた瞬間に無防備になってはいけない。
+    Measured (in an audit): a corrupted constitution made the enforcement vanish silently (exit 3
+    before corruption, exit 0 after). An org that had it enabled must not become defenceless the
+    moment a file breaks.
     """
     org, led = _att_org(tmp_path)
     (org / "constitution.yaml").write_text(body, encoding="utf-8")
     r = _att_append(org, led, "gate-alias", {"deliverable": "7", "verdict": "admit"})
-    assert r.returncode != 0, f"{why}: 通ってしまった\n{r.stdout}{r.stderr}"
+    assert r.returncode != 0, f"{why}: it passed\n{r.stdout}{r.stderr}"
     assert not (led / "ledger.jsonl").exists() or \
         not (led / "ledger.jsonl").read_text(encoding="utf-8").strip()
 
 
 def test_judge_workload_is_covered_by_the_signature(tmp_path):
-    """**独立性の評価に使う値は、署名が覆わなければならない。**
+    """**The values used to assess independence must be covered by the signature.**
 
-    実測（監査）: `judge_workload` が署名の外にあり、**署名後に `separate_host` を足しても
-    検証が通った**。
+    Measured (in an audit): `judge_workload` sat outside the signature, and **adding `separate_host`
+    after signing still verified**.
     """
     sys.path.insert(0, str(TOOLS))
     import importlib
     ident = importlib.import_module("identity")
     assert "judge_workload" in ident._RECEIPT_BOUND
-    assert ident.PROTOCOL_VERSION >= 2       # 形式が変わったので版を上げる
+    assert ident.PROTOCOL_VERSION >= 2       # the format changed, so the version rises
 
     store = tmp_path / "keys.json"
     env = dict(os.environ, ORG_TRUST_STORE=str(store))
@@ -2509,15 +2522,15 @@ def test_nonces_survive_a_daemon_restart(tmp_path):
     path = tmp_path / "nonces.json"
     s1 = wd._NonceStore(str(path))
     assert s1.check_and_add("abc123") is True
-    s2 = wd._NonceStore(str(path))          # 「再起動」
+    s2 = wd._NonceStore(str(path))          # a "restart"
     assert s2.check_and_add("abc123") is False
 
 
 def test_client_accepts_a_writer_owned_leaf(tmp_path):
-    """**installer が作る leaf を client が拒否してはいけない。**
+    """**The client must not refuse the leaf the installer creates.**
 
-    実測（監査）: installer が leaf を writer 所有にする一方、client が「root か自分」しか
-    許さず、**正規の書き込み経路がゼロ**になっていた。
+    Measured (in an audit): the installer made the leaf writer-owned while the client allowed only
+    "root or me", leaving **zero legitimate write paths**.
     """
     sys.path.insert(0, str(TOOLS))
     import importlib
@@ -2525,8 +2538,8 @@ def test_client_accepts_a_writer_owned_leaf(tmp_path):
     import tempfile as _tf
     anchor = pathlib.Path(_tf.mkdtemp(prefix="an", dir="/tmp")); leaf = anchor / "r"
     leaf.mkdir(); os.chmod(anchor, 0o755); os.chmod(leaf, 0o755)
-    # 所有者は自分だが、client の検査は「誰が差し替えられるか」を見る（所有者を問わない）
-    # 段階A では anchor が自分所有になる。**信頼境界ではない**ので明示が要る。
+    # The owner is me, but the client's check reads "who can replace it" (regardless of owner).
+    # In stage A the anchor is self-owned. **That is not a trust boundary**, so it must be stated.
     os.environ["ORG_WRITER_TRUST_SELF"] = "1"
     try:
         assert wd.check_socket_parent(str(leaf / "w.sock")) is None
@@ -2534,7 +2547,7 @@ def test_client_accepts_a_writer_owned_leaf(tmp_path):
         assert wd.check_socket_parent(str(leaf / "w.sock")) is not None
     finally:
         os.environ.pop("ORG_WRITER_TRUST_SELF", None)
-    # 明示しなければ、caller 所有の anchor は拒否される
+    # Without stating it, a caller-owned anchor is refused
     os.chmod(leaf, 0o755)
     err = wd.check_socket_parent(str(leaf / "w.sock"))
     assert err and "owned by the caller itself" in err
@@ -2553,7 +2566,7 @@ def test_authoritative_data_lives_outside_the_org_tree():
     assert "AUTHORITATIVE=" in src
     assert "Outside the org tree" in src
     assert "ln -s '${AUTHORITATIVE}/ledger'" in src
-    # daemon には実体のパスを渡す
+    # The daemon is given the real path
     assert "default=${AUTHORITATIVE}/ledger" in src
 
 
@@ -2561,10 +2574,10 @@ def test_installer_and_verifier_agree_on_the_socket():
     """If the paths disagree, the verifier inspects a socket that does not exist."""
     isrc = (TOOLS / "writer-install.sh").read_text(encoding="utf-8")
     vsrc = (TOOLS / "writer-verify.sh").read_text(encoding="utf-8")
-    # 0.39.5 で org ごとの namespace になった（固定パスを共有すると 2 org 目で壊れる）。
+    # 0.39.5 made the namespace per-org (sharing one fixed path breaks at the second org).
     assert 'SOCK_PARENT="/usr/local/var/orgforge/run/${ORG_NAME}"' in isrc
     assert '/usr/local/var/orgforge/run/${ORG_NAME}/writer.sock' in vsrc
-    # verifier は leaf に root 所有を期待しない（writer 所有が正しい）
+    # The verifier does not expect a root-owned leaf (writer-owned is correct)
     assert 'the leaf is owned by $POWNER (not by me)' in vsrc
 
 
@@ -2575,9 +2588,10 @@ def test_pyyaml_guidance_prefers_a_root_owned_venv():
     assert "is not advised" in src
 
 
-# ══ 0.39.5 束A — judgment boundary ═══════════════════════════════════════════
-# receipt を org/ledger/issue/class/subject/phase/verdict/digests に完全束縛し、
-# joint は writer の専用操作で生成する（receipt 不在でデッドロックさせない）。
+# ══ 0.39.5 bundle A — the judgment boundary ═════════════════════════════════
+# The receipt is bound completely to org/ledger/issue/class/subject/phase/verdict/digests, and the
+# joint is generated by a dedicated writer operation (so the absence of a receipt cannot deadlock
+# it).
 
 def _A_org(tmp_path, attested="true"):
     org = tmp_path / "org"
@@ -2655,14 +2669,14 @@ def test_A_success_a_bound_receipt_records(tmp_path):
 
 
 @pytest.mark.parametrize("field,value,why", [
-    ("issue", "9", "別 issue への再利用"),
-    ("event_class", "refutation_attempted", "別クラスへの再利用"),
-    ("subject", "rev-B", "別の対象"),
-    ("verdict", "reject", "別の結論"),
-    ("lineage", "cross-harness", "別の血統"),
-    ("org_id", "some-other-org", "別 org"),
-    ("ledger_id", "some-other-ledger", "別台帳"),
-    ("digest", "different-digest", "別の理由"),
+    ("issue", "9", "reuse against a different issue"),
+    ("event_class", "refutation_attempted", "reuse against a different class"),
+    ("subject", "rev-B", "a different subject"),
+    ("verdict", "reject", "a different conclusion"),
+    ("lineage", "cross-harness", "a different lineage"),
+    ("org_id", "some-other-org", "a different org"),
+    ("ledger_id", "some-other-ledger", "a different ledger"),
+    ("digest", "different-digest", "a different reason"),
 ])
 def test_A_refuse_receipt_reuse(tmp_path, field, value, why):
     """Refusal: **if any bound field differs, the receipt cannot be replayed.**"""
@@ -2670,16 +2684,17 @@ def test_A_refuse_receipt_reuse(tmp_path, field, value, why):
     _A_key(org, "k1", "gate-signer")
     rc = _A_receipt(org, "k1", **{field: value})
     r = _A_append(org, led, rc, dict(_A_PL))
-    assert r.returncode == 4, f"{why}: 通ってしまった\n{r.stdout}{r.stderr}"
+    assert r.returncode == 4, f"{why}: it passed\n{r.stdout}{r.stderr}"
     assert not (led / "ledger.jsonl").exists() or \
         not (led / "ledger.jsonl").read_text(encoding="utf-8").strip()
 
 
 def test_A_joint_does_not_deadlock_without_a_receipt(tmp_path):
-    """**joint に judge の receipt は存在しない。** それでも生成できること。
+    """**No judge receipt exists for a joint.** It must still be generable.
 
-    一致は判断ではなく事実の関数なので、`require_attested_identity` の下でも
-    専用操作で生成できなければ、一致しても admission を作れないデッドロックになる。
+    Agreement is a function of fact rather than a judgment, so unless a dedicated operation can
+    generate it even under `require_attested_identity`, agreement still cannot produce an admission —
+    a deadlock.
     """
     org, led = _A_org(tmp_path)
     _A_key(org, "k1", "gate-signer"); _A_key(org, "k2", "skeptic-signer")
@@ -2755,7 +2770,7 @@ def test_A_control_without_enforcement_a_plain_append_works(tmp_path):
     assert r.returncode == 3
 
 
-# ══ 0.39.5 束B — runtime trust boundary ══════════════════════════════════════
+# ══ 0.39.5 bundle B — the runtime trust boundary ════════════════════════════
 
 def test_B_hook_never_relaxes_trust():
     """**The hook does not relax trust.** The control side never sets
@@ -2814,7 +2829,7 @@ def test_B_rpc_reservation_needs_exit0_and_allow():
     src = (REPO / "integrations" / "common" / "org_hook.py").read_text(encoding="utf-8")
     assert 'is_reservation = argv[:2] in (["ledger.py", "reserve-exposure"],' in src
     assert '["writer_client.py", "reserve-exposure"])' in src
-    # client は中の判断をそのまま透過させる（封筒でくるまない）
+    # The client passes the judgment inside through as-is (it does not wrap it in an envelope)
     csrc = (TOOLS / "writer_client.py").read_text(encoding="utf-8")
     assert 'if op in ("reserve-exposure", "derive-admission")' in csrc
 
@@ -2822,31 +2837,35 @@ def test_B_rpc_reservation_needs_exit0_and_allow():
 def test_B_control_ghsync_writes_through_rpc():
     """Control: where writerd runs, ghsync goes over RPC as well — a direct call exits 4."""
     src = (TOOLS / "ghsync" / "record.py").read_text(encoding="utf-8")
-    assert src.count("writer_client.py") >= 3, "統制の書き込みが RPC に統一されていない"
+    assert src.count("writer_client.py") >= 3, (
+        "the controls' writes are not unified onto the RPC")
     assert 'os.environ.get("ORG_WRITER_SOCKET")' in src
 
 
-# ══ 0.39.5 束C — stage B lifecycle ═══════════════════════════════════════════
+# ══ 0.39.5 bundle C — the stage B lifecycle ═════════════════════════════════
 
 def test_C_namespace_contract_is_shared():
     """The installer and the verifier must derive the namespace by **the same rule**."""
     isrc = (TOOLS / "writer-install.sh").read_text(encoding="utf-8")
     vsrc = (TOOLS / "writer-verify.sh").read_text(encoding="utf-8")
     rule = 'shasum -a 256 | cut -c1-12'
-    assert rule in isrc and rule in vsrc, "namespace の決め方が食い違う"
+    assert rule in isrc and rule in vsrc, "they decide the namespace differently"
     for s, name in ((isrc, "installer"), (vsrc, "verifier")):
         assert "/usr/local/var/orgforge/orgs/${ORG_NAME}" in s or \
-               '/usr/local/var/orgforge/orgs/${ORG_NAME}"' in s, f"{name} の権威パスが違う"
-        assert "com.orgforge.writerd.${ORG_NAME}" in s, f"{name} の Label が違う"
+               '/usr/local/var/orgforge/orgs/${ORG_NAME}"' in s, (
+                   f"{name}'s authoritative path differs")
+        assert "com.orgforge.writerd.${ORG_NAME}" in s, f"{name}'s Label differs"
 
 
 def test_C_uninstall_order_is_explicit():
-    """**順序が安全性である。** daemon停止 → 隣に staging → 検証 → atomic 置換 → 所有者復元。
+    """**The order is the safety.** Stop the daemon → stage alongside → verify → swap atomically →
+    restore ownership.
 
-    以前この test は log の文言の並び順を見ていたが、**文言は実装の証拠にならない**。
-    正しい順序で print しながら危険な順序で実行するコードは、その test を通る。
-    ここでは「symlink を消すより前に staging へコピーしている」という
-    実際の危険性を決める性質を見る（実測: cp 失敗 → 再実行で唯一の写しが消えた）。
+    This test used to read the order of the log's wording, but **wording is not evidence of an
+    implementation**. Code that prints in the right order while executing in the dangerous one passes
+    such a test.
+    It now reads the property that actually decides the danger: "the copy to staging happens before
+    the symlink is removed" (measured: a failed cp, then a re-run, lost the only copy).
     """
     src = (TOOLS / "writer-install.sh").read_text(encoding="utf-8")
     i_stop = src.index("① stopped the LaunchDaemon (confirmed stopped)")
@@ -2855,12 +2874,13 @@ def test_C_uninstall_order_is_explicit():
     i_rm = src.index('''run "rm -f '${cur}'"''')
     i_mv = src.index('''run "mv '${staged}' '${cur}'"''')
     i_own = src.index("④ restored the ownership to")
-    # 停止 → staging 作成 → コピー → **そのあとで** symlink 削除 → atomic 置換 → chown
-    assert i_stop < i_stage < i_copy < i_rm < i_mv < i_own, "uninstall の順序が違う"
+    # stop → create staging → copy → **only then** remove the symlink → swap atomically → chown
+    assert i_stop < i_stage < i_copy < i_rm < i_mv < i_own, "the uninstall order is wrong"
     assert "Without stopping first, the writer writes mid-restore" in src
-    # 復元できなかったら権威データを消さない
-    # `:-1`（未設定なら「復元済み」扱い）は **消してよい側に倒れる既定**だった。
-    # org root が消えるとループごと飛んで未設定になり、権威データを消していた。
+    # Where the restore failed, the authoritative data is not removed
+    # `:-1` (unset treated as "restored") was **a default falling on the side of deletion**.
+    # A vanished org root skipped the whole loop, left it unset, and the authoritative data was
+    # deleted.
     assert 'if [ "${RESTORE_OK}" = 0 ]; then' in src
     assert "**The authoritative data and the backup are kept**" in src
 
@@ -2871,7 +2891,7 @@ def test_C_uninstall_keeps_shared_things_while_other_orgs_remain():
     assert "REMAINING=" in src
     assert ('${REMAINING} other org(s) remain, so the shared code and the service UID are kept'
             in src)
-    # 消すのは this org のものだけ
+    # Only what belongs to this org is removed
     assert ("removed this org's (${ORG_NAME}) socket, authoritative data, backup, and "
             "configuration") in src
 
@@ -2900,81 +2920,85 @@ def test_C_dry_run_changes_nothing_and_states_the_boundary(tmp_path):
     else:
         assert "outside the threat model" in r.stdout
     assert sorted(str(p.relative_to(tmp_path))
-                  for p in tmp_path.rglob("*")) == before, "dry-run が何かを変えた"
+                  for p in tmp_path.rglob("*")) == before, "the dry-run changed something"
 
 
-# ══ 0.39.6 — Codex 再レビューで見つかった2件 ═══════════════════════════════════
+# ══ 0.39.6 — the two findings from Codex's re-review ════════════════════════
 
 def test_writerd_refuses_to_start_without_constitution():
-    """**宣言の在り処が分からないまま、書き込みを受け付けない。**
+    """**No write is accepted while where the declarations live is unknown.**
 
-    daemon は org の外で動く。installer は台帳を
-    /usr/local/var/orgforge/orgs/<ns>/ledger に置くので、「台帳の親の親が org root」
-    という導出は Stage B では成立しない。導出に失敗したまま起動すると
-    require_attested_identity が子プロセスに届かず、**未認証 admission が通っていた**。
+    The daemon runs outside the org. The installer puts the ledger at
+    /usr/local/var/orgforge/orgs/<ns>/ledger, so the derivation "the ledger's grandparent is the org
+    root" does not hold in Stage B. Starting with that derivation failed left
+    require_attested_identity out of reach of the child process, and **unauthenticated admissions
+    passed**.
     """
     src = (TOOLS / "writerd.py").read_text(encoding="utf-8")
-    # 明示フラグを受けること
-    assert '"--constitution"' in src, "--constitution を受けていない"
-    # 導出できなければ起動しない（fail-closed）
+    # It must accept the explicit flag
+    assert '"--constitution"' in src, "it does not accept --constitution"
+    # Where it cannot be derived, it does not start (fail-closed)
     assert "cannot determine the constitution for org" in src
     i_msg = src.index("cannot determine the constitution for org")
-    assert "return 2" in src[i_msg:i_msg + 900], "決められないのに起動している"
-    # 子プロセスへ渡すのは **決まったパス** であって、推測ではない
+    assert "return 2" in src[i_msg:i_msg + 900], "it starts although it cannot decide"
+    # What is passed to the child process is **the settled path**, not a guess
     assert 'env["ORG_CONSTITUTION"] = con' in src
 
 
 def test_installer_pins_constitution_root_owned():
-    """**検査の入力を、検査される側が書けてはいけない。**
+    """**Whoever is checked must not be able to write the check's input.**
 
-    constitution には宣言（require_attested_identity）が入っている。caller が書ける場所に
-    置いたままだと、caller が宣言を偽にして強制を消せる。root 所有で固定し、明示的に渡す。
+    The constitution holds the declarations (require_attested_identity). Left somewhere the caller
+    can write, the caller can set a declaration to false and erase the enforcement. It is pinned
+    root-owned and passed explicitly.
     """
     src = (TOOLS / "writer-install.sh").read_text(encoding="utf-8")
     assert "${AUTHORITATIVE}/constitution.yaml" in src
     assert "chown root:wheel '${AUTHORITATIVE}/constitution.yaml'" in src
     assert "--constitution</string><string>default=${AUTHORITATIVE}/constitution.yaml" in src
-    # 宣言が無ければ install しない
+    # With no declarations, it does not install
     assert "**Do not run the writer with no declarations.**" in src
 
 
 def test_uninstall_does_not_treat_missing_symlink_as_done():
     """**The absence of a symlink must never be read as "already restored".**
 
-    caller は自分の org tree を動かせる（.orgforge を rename するなど）。すると symlink が
-    消え、権威側だけが唯一の最新の写しになる。そこで復元を飛ばすと、⑤ がそれを消す
-    = 永続データ損失（Codex が実測で指摘した経路）。
+    A caller can move its own org tree (renaming .orgforge, say). The symlink then disappears and the
+    authoritative side becomes the only up-to-date copy. Skipping the restore there has ⑤ delete it =
+    permanent data loss (a path Codex raised by measurement).
     """
     src = (TOOLS / "writer-install.sh").read_text(encoding="utf-8")
-    # 素の `|| continue` で済ませていないこと
-    assert '[ -L "${cur}" ] || continue' not in src, "symlink 不在を無条件に飛ばしている"
+    # It must not settle for a bare `|| continue`
+    assert '[ -L "${cur}" ] || continue' not in src, (
+        "the absence of a symlink is skipped unconditionally")
     assert '**The absence of a symlink must never be read as "already restored".**' in src
-    # 実体が在るときだけ飛ばす
-    # 「実体が在れば飛ばす」は variant 4 で危険と分かったので、**digest が一致したときだけ**
-    # 飛ばす形に変わっている（[[test_uninstall_does_not_trust_a_planted_directory]]）。
+    # It is skipped only where real content exists
+    # "Skip where real content exists" proved dangerous in variant 4, so it now skips **only where
+    # the digest matches** ([[test_uninstall_does_not_trust_a_planted_directory]]).
     i = src.index('if [ ! -L "${cur}" ] && [ -e "${cur}" ]; then')
     seg = src[i:i + 1400]
     assert "continue" in seg and 'shasum -a 256' in seg
-    # 権威側に実体が在るなら復元を試みる
+    # Where the authoritative side holds real content, a restore is attempted
     assert "**a restore is attempted rather than a deletion**" in src
 
 
 def test_uninstall_defaults_to_not_restored():
-    """**既定は「復元していない」。** 消してよいのは、戻したと確かめられたときだけ。
+    """**The default is "not restored".** Deletion is allowed only once the restore is confirmed.
 
-    復元ループは `if [ -d "$ROOTP" ]` の中で RESTORE_OK=1 を立てていた。org root が
-    移動・消失するとループに入らず、`${RESTORE_OK:-1}` が既定 1（=消してよい）に評価され、
-    **権威側にしか無い最新データを消していた**（Codex が実測で指摘した3つ目の変種）。
+    The restore loop raised RESTORE_OK=1 inside `if [ -d "$ROOTP" ]`. A moved or vanished org root
+    never entered the loop, `${RESTORE_OK:-1}` evaluated to its default of 1 (= safe to delete), and
+    **the only up-to-date data, on the authoritative side, was deleted** (the third variant Codex
+    raised by measurement).
     """
     src = (TOOLS / "writer-install.sh").read_text(encoding="utf-8")
     i_default = src.index("  RESTORE_OK=0\n")
     i_loop = src.index('if [ -n "$ROOTP" ] && [ -d "$ROOTP" ]; then')
-    # 既定 0 は、ループの **外側かつ手前** で立っていること
-    assert i_default < i_loop, "RESTORE_OK の既定がループより後にある"
-    # `:-1`（既定 1 = 消してよい）に戻っていないこと
-    assert '"${RESTORE_OK:-1}"' not in src, "既定が 1（消してよい）に戻っている"
+    # The default of 0 must be set **outside the loop and before it**
+    assert i_default < i_loop, "RESTORE_OK's default comes after the loop"
+    # It must not have gone back to `:-1` (default 1 = safe to delete)
+    assert '"${RESTORE_OK:-1}"' not in src, "the default is back to 1 (safe to delete)"
     assert 'if [ "${RESTORE_OK}" = 0 ]; then' in src
-    # org root が無いときは理由を言う
+    # Where there is no org root, it states why
     assert ("it was moved or deleted. **Data that exists only on the authoritative side is not "
             "removed.**") in src
 
@@ -2982,38 +3006,44 @@ def test_uninstall_defaults_to_not_restored():
 def test_uninstall_does_not_trust_a_planted_directory():
     """**"It is there" must never be read as "it was restored".**
 
-    caller は symlink の代わりに自分の偽の実体を置ける。それを「復元済み」と認めると、
-    ⑤ が権威側の最新版を消し、org 側には caller が置いた古い中身だけが残る。
-    飛ばしてよいのは「権威側に何も無い」か「中身が一致する」ときだけ。
-    （Codex が指摘した4つ目の変種。実測で権威データが消えることを確認した。）
+    A caller can plant its own fake content in place of the symlink. Accepting that as "restored" has
+    ⑤ delete the authoritative side's latest version, leaving the org side with only the stale content
+    the caller planted.
+    It may be skipped only where "the authoritative side holds nothing" or "the content matches".
+    (The fourth variant Codex raised. That the authoritative data is deleted was confirmed by
+    measurement.)
     """
     src = (TOOLS / "writer-install.sh").read_text(encoding="utf-8")
-    # 「在れば飛ばす」に戻っていないこと
+    # It must not have gone back to "skip where it exists"
     assert 'if [ -e "${cur}" ]; then\n          continue' not in src, \
-        "実体が在るだけで復元済みと認めている"
+        "the mere existence of real content is accepted as restored"
     assert '**"It is there" must never be read as "it was restored".**' in src
-    # 中身を数えてから判断すること
+    # The content must be counted before deciding
     i = src.index('if [ ! -L "${cur}" ] && [ -e "${cur}" ]; then')
     seg = src[i:i + 1400]
-    # **数は caller が合わせられる。** ファイル数の一致を「同じ中身」と読んではいけない
-    # （実測: 数だけ揃えた偽物で権威側の最新版が消せた）。digest で比べること。
-    assert 'shasum -a 256' in seg, "中身の digest ではなくファイル数で判断している"
+    # **A caller can match the count.** A matching file count must never be read as "the same
+    # content" (measured: a forgery matching only the count could delete the authoritative side's
+    # latest version). Compare by digest.
+    assert 'shasum -a 256' in seg, "it decides by file count rather than a digest of the content"
     assert '"${d_s}" = "${d_c}"' in seg
-    # **名前だけでは足りない。** 同名の dir と symlink は名前が同じなので、
-    # 名前だけを digest に入れると同一と誤認する（実測で確認）。種別と向き先まで入れること。
-    assert "type=%HT link=%Y" in seg, "種別と symlink の向き先が digest に入っていない"
-    # 食い違うなら権威側を消さずに退避する
+    # **Names alone are not enough.** A dir and a symlink of the same name share that name, so a
+    # digest over names alone misidentifies them as the same (confirmed by measurement). The type and
+    # the target go in too.
+    assert "type=%HT link=%Y" in seg, (
+        "the type and the symlink's target are not in the digest")
+    # Where they diverge, it is set aside without deleting the authoritative side
     assert '**\\"it is there\\" is not read as \\"it was restored\\"**' in src
     assert "${cur}.found-$$" in src
 
 
 def test_writer_verify_completes_under_foreign_locale():
-    """**検証器が locale で落ちてはいけない。**
+    """**The verifier must not fail on locale.**
 
-    `$` の直後に全角文字があると shell が変数名の一部として読み、`set -u` で落ちる。
-    一度 8箇所を直したが **1箇所残っていた**（`"$（無い）: $f"`）。しかも落ちる位置が
-    検査の途中なので、**その先の11項目が一度も走らないまま「完了」に見えていた**。
-    文字列 grep では見落とすので、**実際に走らせて完走を確かめる**。
+    A full-width character directly after `$` is read by the shell as part of a variable name, and
+    `set -u` fails. Eight places were fixed once and **one remained** (`"$（無い）: $f"`). Because it
+    failed partway through the checks, **the eleven items beyond it never ran while it looked
+    "complete"**.
+    A string grep would miss it, so **it is actually run and confirmed to reach the end**.
     """
     import subprocess, tempfile, os
     verify = str(TOOLS / "writer-verify.sh")
@@ -3024,23 +3054,23 @@ def test_writer_verify_completes_under_foreign_locale():
             r = subprocess.run(["bash", verify, "--org-root", d],
                                capture_output=True, text=True, env=env, timeout=120)
             out = r.stdout + r.stderr
-            assert "unbound variable" not in out, f"{loc} で落ちた:\n{out[-400:]}"
-            # 途中で死んでいないこと（最後の見出しまで到達している）
+            assert "unbound variable" not in out, f"it failed under {loc}:\n{out[-400:]}"
+            # It must not have died partway (it reaches the final heading)
             assert "passed" in out or "failed" in out, \
-                f"{loc} で最後まで到達していない:\n{out[-400:]}"
+                f"it does not reach the end under {loc}:\n{out[-400:]}"
 
 
 def test_verify_never_calls_unmeasured_a_pass():
-    """**測っていないものを「測って通った」と書かない。**
+    """**What was not measured is never written up as "measured and passed".**
 
-    `--no-write` は書き込み検査を飛ばすが、飛ばした項目は PASS にも FAIL にも
-    入らなかったため、FAIL=0 のまま
-    「すべて実測で通った。separate_uid を主張してよい」と出て exit 0 していた。
-    **「不合格 0」は「全部確かめた」ではない**（Codex が指摘し、実測で確認した）。
+    `--no-write` skips the write checks, and the skipped items entered neither PASS nor FAIL, so with
+    FAIL=0 it printed "everything passed by measurement; separate_uid may be claimed" and exited 0.
+    **"Zero failures" is not "everything was confirmed"** (Codex raised it, and it was confirmed by
+    measurement).
     """
     import subprocess, tempfile, os
     src = (TOOLS / "writer-verify.sh").read_text(encoding="utf-8")
-    assert "SKIPPED" in src, "飛ばした検査を数えていない"
+    assert "SKIPPED" in src, "the skipped checks are not counted"
     i = src.index("printf '  passed %d / failed %d / unmeasured %d")
     tail = src[i:]
 
@@ -3049,94 +3079,98 @@ def test_verify_never_calls_unmeasured_a_pass():
         open(path, "w").write(f"PASS={p}; FAIL={f}; SKIPPED={s}\n" + tail)
         return subprocess.run(["bash", path], capture_output=True, text=True, timeout=60)
 
-    # 未測定があるなら、合格と言ってはいけない
+    # Where anything is unmeasured, it must not say it passed
     r = run(3, 0, 1)
-    assert r.returncode != 0, "未測定があるのに exit 0（偽の合格）"
+    assert r.returncode != 0, "exit 0 with items unmeasured (a false pass)"
     assert "Do not claim separate_uid" in r.stdout
 
-    # 全部測って全部通ったなら、従来どおり合格できる（デッドロックさせない）
+    # With everything measured and everything passing, it can still pass (no deadlock)
     r2 = run(14, 0, 0)
-    assert r2.returncode == 0, f"全部通ったのに合格にならない: {r2.stdout}"
+    assert r2.returncode == 0, f"everything passed yet it does not pass: {r2.stdout}"
     assert "separate_uid" in r2.stdout and "may be claimed" in r2.stdout
 
-    # 不合格があるなら当然だめ
+    # With a failure it must of course not pass
     r3 = run(10, 1, 0)
     assert r3.returncode != 0
 
 
 def test_service_account_requires_free_uid_and_gid():
-    """**uid が空いていても gid が埋まっていることがある。**
+    """**A free uid can still have its gid taken.**
 
-    同じ番号を UniqueID と PrimaryGroupID の両方に使うので、gid だけ既存だと
-    **writer の group を他人と共有する** ことになり、group 権限で台帳へ届く経路ができる。
-    このマシンの実測では 395-400 が「uid 空き / gid 使用中」だった。
+    The same number is used as both UniqueID and PrimaryGroupID, so an existing gid means **the
+    writer's group is shared with someone else**, opening a path to the ledger through group
+    permissions. Measured on this machine, 395-400 were "uid free / gid in use".
     """
     src = (TOOLS / "writer-install.sh").read_text(encoding="utf-8")
     i = src.index("NEXT_UID=\"\"")
     seg = src[i:i + 700]
     assert "dscl . -search /Users UniqueID" in seg
     assert "dscl . -search /Groups PrimaryGroupID" in seg, \
-        "gid の空きを確かめずに番号を選んでいる"
+        "it picks a number without confirming the gid is free"
     assert "as **both** a uid and a gid" in src
 
 
 def test_install_keeps_two_copies_until_symlink_is_made():
-    """**install が途中で落ちても、台帳はどこかに必ず残る。**
+    """**However far into the install it fails, the ledger always survives somewhere.**
 
-    `cp -R` → `mv`(元を .pre-writer に退避) → `ln -s` の順なので、
-    どの時点で落ちても最低1箇所、cp 後は2箇所に実体がある。**mv で移し始めない。**
+    The order is `cp -R` → `mv` (setting the original aside as .pre-writer) → `ln -s`, so at any
+    point of failure the content exists in at least one place, and after the cp in two. **It never
+    begins by moving.**
     """
     src = (TOOLS / "writer-install.sh").read_text(encoding="utf-8")
     i_cp = src.index("""run "cp -R '${ORG_ROOT}/.orgforge/ledger/.' '${AUTHORITATIVE}/ledger/'\"""")
     i_mv = src.index("""run "mv '${ORG_ROOT}/.orgforge/ledger' '${ORG_ROOT}/.orgforge/ledger.pre-writer'\"""")
     i_ln = src.index("""run "ln -s '${AUTHORITATIVE}/ledger' '${ORG_ROOT}/.orgforge/ledger'\"""")
-    assert i_cp < i_mv < i_ln, "コピーより先に移動・symlink を作っている"
-    # 元を消さずに退避すること
+    assert i_cp < i_mv < i_ln, "it moves or symlinks before copying"
+    # The original is set aside rather than removed
     assert ".pre-writer" in src and "**it is not removed**" in src
 
 
 def test_schema_fix_repairs_existing_class_fields(tmp_path):
-    """**snapshot が読むのは `fields:` であって validation ではない。**
+    """**What snapshot reads is `fields:`, not validation.**
 
-    `--fix` は「足りないクラスを足す」だけで、**既存クラスの field 不足を直さなかった**。
-    すると validation を直しても snapshot は古い形で固定され続け、正規の
-    `reserve-exposure` が schema_rejected で拒否される = 全 metered 操作のデッドロック。
-    実測: 実 org (tatekae) が正にこの状態で、`--fix` を通しても直らなかった。
+    `--fix` only "adds the missing classes" and **never fixed a missing field on an existing class**.
+    So even with validation fixed, snapshot stayed pinned to the old shape and a legitimate
+    `reserve-exposure` was refused with schema_rejected = every metered operation deadlocked.
+    Measured: a real org (tatekae) was in exactly this state, and running `--fix` did not fix it.
     """
     import subprocess, sys, shutil
     org = tmp_path / "org"
     (org / ".orgforge" / "ledger").mkdir(parents=True)
     schema = (TEMPLATE / "ledger-schema.yaml").read_text(encoding="utf-8")
-    # 実 org と同じ壊し方: fields 行から idempotency 4 field を落とす
+    # Break it the way the real org was broken: drop the four idempotency fields from the fields
+    # line
     broken = schema.replace(
         "actor_role, decision: allow|hold, caused_by_event,\n"
         "                             session_id, tool_use_id, rule, request_digest }",
         "actor_role, decision: allow|hold, caused_by_event }")
-    assert broken != schema, "テストの壊し方がテンプレートと合っていない"
+    assert broken != schema, "this test's way of breaking it no longer matches the template"
     (org / "ledger-schema.yaml").write_text(broken, encoding="utf-8")
 
     led = str(org / ".orgforge" / "ledger")
-    # 壊れた状態では予約が拒否される
+    # In the broken state a reservation is refused
     r = subprocess.run([sys.executable, str(TOOLS / "ledger.py"), "reserve-exposure", led,
                         "--dimension", "destructive_ops", "--delta", "1", "--cap", "50",
                         "--actor", "p", "--session-id", "s", "--tool-use-id", "t",
                         "--rule", "blast_radius"],
                        capture_output=True, text=True, cwd=str(org), timeout=60)
-    assert "schema_rejected" in r.stdout, f"壊れた schema で拒否されない: {r.stdout[:200]}"
+    assert "schema_rejected" in r.stdout, (
+        f"a broken schema does not refuse it: {r.stdout[:200]}")
 
-    # --fix したら通るようになること（= 修復経路が実際に機能する）
+    # After --fix it must pass (= the repair path actually works)
     subprocess.run([sys.executable, str(TOOLS / "ledger.py"), "schema", "--fix", led],
                    capture_output=True, text=True, cwd=str(org), timeout=60)
     fixed = (org / "ledger-schema.yaml").read_text(encoding="utf-8")
     for f in ("session_id", "tool_use_id", "rule", "request_digest"):
         assert f in fixed.split("exposure_budget_checked: {")[1][:400], \
-            f"--fix が {f} を fields に足していない"
+            f"--fix does not add {f} to fields"
     r2 = subprocess.run([sys.executable, str(TOOLS / "ledger.py"), "reserve-exposure", led,
                          "--dimension", "destructive_ops", "--delta", "1", "--cap", "50",
                          "--actor", "p", "--session-id", "s", "--tool-use-id", "t2",
                          "--rule", "blast_radius"],
                         capture_output=True, text=True, cwd=str(org), timeout=60)
-    assert "schema_rejected" not in r2.stdout, f"--fix 後も拒否される: {r2.stdout[:200]}"
+    assert "schema_rejected" not in r2.stdout, (
+        f"it is still refused after --fix: {r2.stdout[:200]}")
     assert '"reason": "reserved"' in r2.stdout or '"decision"' in r2.stdout
 
 
@@ -3163,7 +3197,7 @@ def test_schema_fix_repairs_fields_after_inline_comments_and_unblocks_provisiona
         r"                          writer_isolation,\n"
         r"                          signer_id, key_id(?:, risk_accepted)?,\n")
     broken, substitutions = block.subn("", schema, count=1)
-    assert substitutions == 1, "テストの壊し方がテンプレートと合っていない"
+    assert substitutions == 1, "this test's way of breaking it no longer matches the template"
     (org / "ledger-schema.yaml").write_text(broken, encoding="utf-8")
     led = str(org / ".orgforge" / "ledger")
 
@@ -3171,8 +3205,10 @@ def test_schema_fix_repairs_fields_after_inline_comments_and_unblocks_provisiona
         [sys.executable, str(TOOLS / "github_sync.py"), "provisional",
          "--issue", "9999", "--role", "skeptic", "--lineage", "cross-harness",
          "--verdict", "survives", "--subject", "obs008-subject",
-         "--why", "別血統で対象を独立に再導出し、既知の反証経路と境界条件をすべて確認したが、具体的な反例は成立しなかった。",
-         "--evidence", "隔離した一時orgで実コマンドを実行した出力",
+         "--why", "re-derived the subject independently under the other lineage and checked every "
+                  "known refutation path and boundary condition, and no concrete counterexample "
+                  "held.",
+         "--evidence", "the output of running the real commands in an isolated temporary org",
          "--by", "skeptic"],
         capture_output=True, text=True, cwd=str(org), timeout=60)
     assert before.returncode != 0
@@ -3193,8 +3229,10 @@ def test_schema_fix_repairs_fields_after_inline_comments_and_unblocks_provisiona
         [sys.executable, str(TOOLS / "github_sync.py"), "provisional",
          "--issue", "9999", "--role", "skeptic", "--lineage", "cross-harness",
          "--verdict", "survives", "--subject", "obs008-subject",
-         "--why", "別血統で対象を独立に再導出し、既知の反証経路と境界条件をすべて確認したが、具体的な反例は成立しなかった。",
-         "--evidence", "隔離した一時orgで実コマンドを実行した出力",
+         "--why", "re-derived the subject independently under the other lineage and checked every "
+                  "known refutation path and boundary condition, and no concrete counterexample "
+                  "held.",
+         "--evidence", "the output of running the real commands in an isolated temporary org",
          "--by", "skeptic"],
         capture_output=True, text=True, cwd=str(org), timeout=60)
     assert after.returncode == 0, after.stdout + after.stderr
@@ -3217,9 +3255,11 @@ def test_provisional_risk_is_declared_and_persisted(tmp_path):
         [sys.executable, str(TOOLS / "github_sync.py"), "provisional",
          "--issue", "9999", "--role", "skeptic", "--lineage", "cross-harness",
          "--verdict", "survives", "--subject", "obs008-risk-subject",
-         "--why", "別血統で対象を独立に再導出し、既知の反証経路と境界条件をすべて確認したが、具体的な反例は成立しなかった。",
-         "--evidence", "隔離した一時orgで実コマンドを実行した出力",
-         "--risk", "残余リスクを確認済み", "--by", "skeptic"],
+         "--why", "re-derived the subject independently under the other lineage and checked every "
+                  "known refutation path and boundary condition, and no concrete counterexample "
+                  "held.",
+         "--evidence", "the output of running the real commands in an isolated temporary org",
+         "--risk", "the residual risk was confirmed", "--by", "skeptic"],
         capture_output=True, text=True, cwd=str(org), timeout=60)
     assert result.returncode == 0, result.stdout + result.stderr
     events = [json.loads(line) for line in
@@ -3230,18 +3270,18 @@ def test_provisional_risk_is_declared_and_persisted(tmp_path):
 
 
 def test_template_schema_declares_fields_in_both_places():
-    """**同じことを2箇所で宣言している。片方だけ直すと、静かに壊れる。**
+    """**The same thing is declared in two places. Fix one and it breaks quietly.**
 
-    schema はクラスの field を2箇所で宣言する:
-      - `validation.required` … 検証規則
-      - `event_classes` の `fields:` … **snapshot が読む方**
-    snapshot は後者を固定するので、`validation` だけ新しくしても効かない。
-    実測: 実 org tatekae がこの状態で、**全 metered 操作がデッドロック**していた
-    （`reserve-exposure` が schema_rejected）。しかも `schema --fix` は
-    「差分なし — この org の schema は最新である」と表示していた。
+    The schema declares a class's fields in two places:
+      - `validation.required` … the validation rules
+      - `event_classes`' `fields:` … **what snapshot reads**
+    snapshot pins the latter, so bringing only `validation` up to date has no effect.
+    Measured: the real org tatekae was in this state and **every metered operation deadlocked**
+    (`reserve-exposure` returning schema_rejected). And `schema --fix` displayed "no difference —
+    this org's schema is up to date".
 
-    ここでは **テンプレート自身の2箇所が食い違わない**ことを守る。
-    片方だけ編集した瞬間に落ちるので、org へ配られる前に気づける。
+    This guards that **the template's own two places do not diverge**. It fails the moment one is
+    edited alone, so it is noticed before anything reaches an org.
     """
     import yaml
     txt = (TEMPLATE / "ledger-schema.yaml").read_text(encoding="utf-8")
@@ -3253,22 +3293,22 @@ def test_template_schema_declares_fields_in_both_places():
     for cls, req in required.items():
         declared = fields.get(cls)
         if declared is None:
-            continue                     # fields 側に無いクラスはここでは見ない
+            continue                     # a class absent from fields is out of scope here
         missing = [f for f in req if f not in declared]
         if missing:
             drift[cls] = missing
     assert not drift, (
-        "validation.required にあって event_classes の fields: に無い field がある。\n"
-        "**snapshot は fields: を読むので、これは実 org をデッドロックさせる。**\n"
+        "a field is in validation.required but not in event_classes' fields:.\n"
+        "**snapshot reads fields:, so this deadlocks a real org.**\n"
         f"{drift}")
 
 
 def test_schema_fix_counts_braces_not_first_close(tmp_path):
-    """**非貪欲な正規表現は、値の中の `{...}` の最初の `}` を終端と誤認する。**
+    """**A non-greedy regex mistakes the first `}` inside a `{...}` value for the terminator.**
 
-    そうなると修復が別の場所に入り、YAML は健全なまま **直っていない** —
-    「直したように見えて直っていない」という、今夜いちばん多く踏んだ形になる。
-    （Codex が静的に指摘し、実測で再現した。）
+    The repair then lands somewhere else, and the YAML stays sound while **nothing is fixed** — the
+    "it looks fixed and is not" shape that was stepped on most often tonight.
+    (Codex raised it by static reading, and it reproduced by measurement.)
     """
     import subprocess, sys, yaml
     tpl = (TEMPLATE / "ledger-schema.yaml").read_text(encoding="utf-8")
@@ -3276,7 +3316,7 @@ def test_schema_fix_counts_braces_not_first_close(tmp_path):
         "actor_role, decision: allow|hold, caused_by_event,\n"
         "                             session_id, tool_use_id, rule, request_digest }",
         "actor_role, decision: allow|hold, caused_by_event, nested: {a} }")
-    assert broken != tpl, "テストの壊し方がテンプレートと合っていない"
+    assert broken != tpl, "this test's way of breaking it no longer matches the template"
     org = tmp_path / "org"
     (org / ".orgforge" / "ledger").mkdir(parents=True)
     (org / "ledger-schema.yaml").write_text(broken, encoding="utf-8")
@@ -3285,26 +3325,28 @@ def test_schema_fix_counts_braces_not_first_close(tmp_path):
     subprocess.run([sys.executable, str(TOOLS / "ledger.py"), "schema", "--fix", led],
                    capture_output=True, text=True, cwd=str(org), timeout=60)
     out = (org / "ledger-schema.yaml").read_text(encoding="utf-8")
-    yaml.safe_load(out)                      # YAML が壊れていないこと
+    yaml.safe_load(out)                      # the YAML must not be broken
     r = subprocess.run([sys.executable, str(TOOLS / "ledger.py"), "reserve-exposure", led,
                         "--dimension", "destructive_ops", "--delta", "1", "--cap", "50",
                         "--actor", "p", "--session-id", "s", "--tool-use-id", "t",
                         "--rule", "blast_radius"],
                        capture_output=True, text=True, cwd=str(org), timeout=60)
     assert "schema_rejected" not in r.stdout, (
-        "ネストした {} があると修復が効いていない（最初の } を終端と誤認）:\n" + r.stdout[:300])
+        "with a nested {} the repair does not take effect (the first } is mistaken for the "
+        "terminator):\n" + r.stdout[:300])
 
 
 def test_every_bound_field_actually_binds():
-    """**18項目すべてが本当に束縛されているか。**
+    """**Are all eighteen items genuinely bound?**
 
-    既存の再利用テストは 8 項目（org/ledger/issue/class/subject/digest/verdict/lineage）
-    しか見ていなかった。残り10項目（`signer_id` `key_id` `role` `phase` `receipt_id`
-    `issued_at` `protocol_version` `schema_version` `reasoning_sha256` `judge_workload`）は
-    **束縛されていると書いてあるだけで、一度も測っていなかった**。
+    The existing reuse tests read only eight (org/ledger/issue/class/subject/digest/verdict/lineage).
+    The remaining ten (`signer_id`, `key_id`, `role`, `phase`, `receipt_id`, `issued_at`,
+    `protocol_version`, `schema_version`, `reasoning_sha256`, `judge_workload`) were **written up as
+    bound and never once measured**.
 
-    `_RECEIPT_BOUND` に足した項目が実際には署名に入っていない、という食い違いは
-    静かに起きる（署名は通り、検証も通る）。ここで全項目を機械的に確かめる。
+    The divergence where an item added to `_RECEIPT_BOUND` is not actually in the signature happens
+    quietly (the signing passes, and so does the verification). Every item is checked mechanically
+    here.
     """
     import sys as _sys
     _sys.path.insert(0, str(TOOLS))
@@ -3330,12 +3372,13 @@ def test_every_bound_field_actually_binds():
     store = {"keys": {"k1": {"secret": secret, "signer_id": "gate-signer"}}}
 
     who, _assurance, err = identity.verify_receipt(signed, dict(expect), store)
-    assert err is None and who == "gate-signer", f"正規の receipt が通らない: {err}"
+    assert err is None and who == "gate-signer", f"a legitimate receipt does not pass: {err}"
 
-    # **検査の対象を、検査される側の宣言から取ってはいけない。**
-    # `_RECEIPT_BOUND` を回すと、そこから項目を消した瞬間に「検査しない」ことになり、
-    # テストは通ってしまう（実測: signer_id を外しても通った）。
-    # 守るべき項目は **ここに固定で書く**。増減は意図的な変更としてこの一覧を直す。
+    # **Never take what to check from the declaration of whoever is checked.**
+    # Iterating `_RECEIPT_BOUND` means that deleting an item from it becomes "do not check it", and
+    # the test still passes (measured: removing signer_id passed).
+    # The items to protect are **written here, fixed**. Adding or removing one is a deliberate change
+    # to this list.
     MUST_BIND = [
         "event_class", "issue", "issued_at", "judge_workload", "key_id", "ledger_id",
         "lineage", "org_id", "phase", "protocol_version", "reasoning_sha256",
@@ -3343,7 +3386,7 @@ def test_every_bound_field_actually_binds():
         "schema_version", "signer_id", "verdict",
     ]
     assert set(MUST_BIND) <= set(identity._RECEIPT_BOUND), (
-        "束縛すべき項目が _RECEIPT_BOUND から外された: "
+        "an item that must be bound was removed from _RECEIPT_BOUND: "
         + str(sorted(set(MUST_BIND) - set(identity._RECEIPT_BOUND))))
 
     unbound = []
@@ -3355,19 +3398,19 @@ def test_every_bound_field_actually_binds():
         if e is None:
             unbound.append(f)
     assert not unbound, (
-        "束縛されていると宣言されているのに、書き換えても検証が通る項目がある。\n"
-        "**署名が守っていない項目は、束縛されていない。** " + str(unbound))
+        "an item declared as bound still verifies after being rewritten.\n"
+        "**An item the signature does not protect is not bound.** " + str(unbound))
 
 
 def test_proxy_recording_separates_decider_from_recorder(tmp_path):
-    """**G2 項目3: 決めた者と記録した者は別に扱う。**
+    """**G2 item 3: who decided and who recorded are handled separately.**
 
-    `decision_by` は **receipt の署名者から**、`recorded_by` は **観測から**来る。
-    代理で記録しても「自分が決めた」ことにはできない — これが職務分離の土台である。
+    `decision_by` comes **from the receipt's signer**, `recorded_by` **from observation**. Recording
+    by proxy cannot make it "I decided" — that is the foundation of the separation of duties.
 
-    実測（この test が最初）: `decision_by='gate-signer'`（attested）に対し
-    `recorded_by='unknown'`（recorder_assurance='claimed'）と、
-    **確かさの度合いが別々に記録される**。
+    Measured (this test was the first): against `decision_by='gate-signer'` (attested),
+    `recorded_by='unknown'` (recorder_assurance='claimed') — **the degrees of certainty are recorded
+    separately**.
     """
     import json, os, subprocess, sys, secrets
     org = tmp_path / "org"
@@ -3385,8 +3428,9 @@ def test_proxy_recording_separates_decider_from_recorder(tmp_path):
 
     sys.path.insert(0, str(TOOLS))
     from ghsync.record import _reasoning_digest
-    # **org の中で解決させる。** org_id は org の実体から導出されるので、
-    # 外から呼ぶと解決できない（cwd に依存する）。実際の経路と同じ場所で計算する。
+    # **Let it resolve inside the org.** org_id derives from the org's own substance, so calling
+    # from outside cannot resolve it (it depends on the cwd). It is computed where the real path
+    # computes it.
     _idr = subprocess.run(
         [sys.executable, "-c",
          "import sys;sys.path.insert(0,%r);import ledger;"
@@ -3396,7 +3440,8 @@ def test_proxy_recording_separates_decider_from_recorder(tmp_path):
     assert _idr.returncode == 0, _idr.stdout + _idr.stderr
     org_id, ledger_id = _idr.stdout.strip().split("|")
 
-    why = "受入基準を実測で確認した。並列でcapを超えず、故障注入でallowにならない。"
+    why = ("confirmed the acceptance criteria by measurement. It does not exceed the cap under "
+           "parallelism, and fault injection does not turn it into an allow.")
     ev = "592 passed"
     digest = _reasoning_digest(why, ev, None, None, None)
     env = dict(os.environ, ORG_SIGNING_SECRET=secret, ORG_LEDGER_ROOT=led)
@@ -3426,16 +3471,18 @@ def test_proxy_recording_separates_decider_from_recorder(tmp_path):
         e = json.loads(line)
         if e.get("class") == "verdict_provisional":
             ev_rec = e
-    assert ev_rec, "verdict_provisional が記録されていない"
+    assert ev_rec, "verdict_provisional was not recorded"
 
     def g(k):
         return ev_rec.get(k, (ev_rec.get("payload") or {}).get(k))
 
-    assert g("decision_by") == "gate-signer", f"decision_by が signer でない: {g('decision_by')}"
+    assert g("decision_by") == "gate-signer", (
+        f"decision_by is not the signer: {g('decision_by')}")
     assert g("identity_assurance") == "attested", g("identity_assurance")
-    # **記録者は観測であって、自称ではない。** 決めた者と同じ値になってはいけない。
+    # **The recorder comes from observation, not from a self-declaration.** It must not equal
+    # whoever decided.
     assert g("recorded_by") != g("decision_by"), \
-        "recorded_by が decision_by と同じ — 代理記録が自称になっている"
+        "recorded_by equals decision_by — a proxy recording has become a self-declaration"
     assert g("recorder_assurance") == "claimed", g("recorder_assurance")
 
 
@@ -3444,10 +3491,10 @@ def test_proxy_recording_separates_decider_from_recorder(tmp_path):
     (("k2", "cross-harness"), ("k1", "same-harness")),
 ])
 def test_A_joint_works_in_both_orders(tmp_path, order):
-    """**G2 項目2: 両順序。** どちらの血統が先に判定しても joint は1件だけ生成される。
+    """**G2 item 2: both orders.** Whichever lineage judges first, exactly one joint is generated.
 
-    順序に依存すると、**先に書いた側が勝つ**ことになり、独立性の意味が薄れる。
-    handoff が「両順序」を要求しているのはそのためである。
+    Depending on the order means **whoever wrote first wins**, which dilutes what independence means.
+    That is why the handoff demands both orders.
     """
     org, led = _A_org(tmp_path)
     _A_key(org, "k1", "gate-signer"); _A_key(org, "k2", "skeptic-signer")
@@ -3464,13 +3511,14 @@ def test_A_joint_works_in_both_orders(tmp_path, order):
     assert d["ok"] and d["reviewer_independence"] == "distinct_signer"
     adm = [json.loads(l) for l in (led / "ledger.jsonl").read_text(encoding="utf-8").splitlines()
            if l.strip() and json.loads(l)["class"] == "admission_decided"]
-    assert len(adm) == 1, f"順序 {order} で admission が {len(adm)} 件"
+    assert len(adm) == 1, f"order {order} produced {len(adm)} admission(s)"
 
 
 def test_A_joint_is_not_created_twice(tmp_path):
-    """**2回目の derive で admission が増えない。** 一致は事実なので、何度数えても1件。
+    """**A second derive does not add an admission.** Agreement is a fact, so counting it any number
+    of times gives one.
 
-    増えるなら、同じ一致から複数の admission を作れる（二重計上）。
+    If it grew, several admissions could be produced from one agreement (double counting).
     """
     org, led = _A_org(tmp_path)
     _A_key(org, "k1", "gate-signer"); _A_key(org, "k2", "skeptic-signer")
@@ -3484,14 +3532,15 @@ def test_A_joint_is_not_created_twice(tmp_path):
                        cwd=org, capture_output=True, text=True, env=_A_env(org))
     adm = [l for l in (led / "ledger.jsonl").read_text(encoding="utf-8").splitlines()
            if l.strip() and json.loads(l)["class"] == "admission_decided"]
-    assert len(adm) == 1, f"derive を2回呼ぶと admission が {len(adm)} 件になった（二重計上）"
+    assert len(adm) == 1, (
+        f"calling derive twice produced {len(adm)} admission(s) (double counting)")
 
 
 def test_A_refutation_joint_is_not_created_twice(tmp_path):
-    """skeptic側も同じ一致からjointを1件だけ生成する。
+    """The skeptic side also generates exactly one joint from one agreement.
 
-    冪等ガードが ``admission_decided`` に固定されると、同一のsurvives pairを再派生する
-    たびに ``refutation_attempted`` が増え、1つの反証結果を複数件として数えてしまう。
+    With the idempotency guard pinned to ``admission_decided``, re-deriving the same survives pair
+    grows ``refutation_attempted`` each time, counting one refutation result as several.
     """
     org, led = _A_org(tmp_path)
     _A_key(org, "k1", "gate-signer"); _A_key(org, "k2", "skeptic-signer")
@@ -3515,7 +3564,8 @@ def test_A_refutation_joint_is_not_created_twice(tmp_path):
     joints = [json.loads(line) for line in (led / "ledger.jsonl").read_text(
         encoding="utf-8").splitlines()
         if line.strip() and json.loads(line)["class"] == "refutation_attempted"]
-    assert len(joints) == 1, f"deriveを2回呼ぶとrefutation jointが{len(joints)}件になった"
+    assert len(joints) == 1, (
+        f"calling derive twice produced {len(joints)} refutation joint(s)")
 
 
 def test_A_refutation_joint_allows_a_new_review_subject(tmp_path):
@@ -3552,21 +3602,21 @@ def test_A_joint_needs_only_one_provisional_to_hold(tmp_path):
                         str(led), "--issue", "7", "--event", "admission_decided",
                         "--require-attested"],
                        cwd=org, capture_output=True, text=True, env=_A_env(org))
-    assert r.returncode != 0, "1件の provisional だけで admission ができた"
+    assert r.returncode != 0, "one provisional alone produced an admission"
     adm = [l for l in (led / "ledger.jsonl").read_text(encoding="utf-8").splitlines()
            if l.strip() and json.loads(l)["class"] == "admission_decided"]
     assert not adm
 
 
 def test_derive_admission_also_requires_the_writer_path(tmp_path):
-    """**G2 項目6: 単一 writer は、全部の経路が通って初めて成り立つ。**
+    """**G2 item 6: a single writer holds only once every path goes through it.**
 
-    `append` / `reserve-exposure` / `trip-halt` / `release-halt` は writer 経由を
-    要求していたのに、**`derive-admission` だけ直接書けていた**（実測: writer 稼働中に
-    台帳が 2 → 3 件に増えた）。しかもここが書くのは `admission_decided` ——
-    最も強い権限の記録である。
+    `append`, `reserve-exposure`, `trip-halt`, and `release-halt` all demanded going through the
+    writer, while **`derive-admission` alone could write directly** (measured: the ledger grew from
+    two rows to three with the writer running). And what it writes is `admission_decided` — the
+    record carrying the strongest authority.
 
-    「経路は1つ」という保証は、**1つでも抜け道があれば無い**のと同じ。
+    A guarantee that "there is one path" **does not exist if even one way around it does**.
     """
     import json, os, subprocess, sys, time, signal
     org = tmp_path / "org"
@@ -3588,14 +3638,14 @@ def test_derive_admission_also_requires_the_writer_path(tmp_path):
             capture_output=True, text=True, cwd=str(org), env=env0, timeout=60)
         assert r.returncode == 0, r.stdout + r.stderr
 
-    # **AF_UNIX のパス長制限（macOS で 104 byte）。** pytest の tmp_path は長すぎるので、
-    # socket だけは短い場所に作る（このセッションで何度も踏んだ制約）。
+    # **The AF_UNIX path length limit (104 bytes on macOS).** pytest's tmp_path is too long, so the
+    # socket alone is created somewhere short (a constraint stepped on repeatedly this session).
     import tempfile as _tf
     _short = _tf.mkdtemp(prefix="og")
     os.chmod(_short, 0o755)
     parent = os.path.join(_short, "r"); os.makedirs(parent); os.chmod(parent, 0o755)
     sock = os.path.join(parent, "w.sock")
-    assert len(sock) < 100, f"socket path が長すぎる: {len(sock)}"
+    assert len(sock) < 100, f"the socket path is too long: {len(sock)}"
     p = subprocess.Popen(
         [sys.executable, str(TOOLS / "writerd.py"), "serve", "--org", f"default={led}",
          "--constitution", "default=" + str(org / "constitution.yaml"),
@@ -3609,21 +3659,22 @@ def test_derive_admission_also_requires_the_writer_path(tmp_path):
         if not os.path.exists(sock):
             p.terminate()
             _o, _e = p.communicate(timeout=10)
-            raise AssertionError("writerd が起動しない:\n" +
+            raise AssertionError("writerd does not start:\n" +
                                  (_e or b"").decode("utf-8", "replace")[-500:])
         n = lambda: sum(1 for _ in open(os.path.join(led, "ledger.jsonl")))
         cenv = dict(env0, ORG_WRITER_SOCKET=sock)
 
-        # ① 直接呼びは拒否され、**台帳が増えない**
+        # ① a direct call is refused, and **the ledger does not grow**
         before = n()
         r = subprocess.run(
             [sys.executable, str(TOOLS / "ledger.py"), "derive-admission", led,
              "--issue", "7", "--event", "admission_decided"],
             capture_output=True, text=True, cwd=str(org), env=cenv, timeout=60)
-        assert n() == before, "writer を迂回して直接書けた（単一 writer が破れている）"
+        assert n() == before, (
+            "it wrote directly, bypassing the writer (the single writer is broken)")
         assert r.returncode != 0
 
-        # ② **RPC 経由なら通る**（拒否できるだけで通せない、にはしない）
+        # ② **through the RPC it passes** (it must not only be able to refuse)
         r2 = subprocess.run(
             [sys.executable, str(TOOLS / "writer_client.py"), "derive-admission", "--",
              "--issue", "7", "--event", "admission_decided"],
@@ -3635,7 +3686,7 @@ def test_derive_admission_also_requires_the_writer_path(tmp_path):
                 _o, _e = p.communicate(timeout=10)
                 _err = (_e or b"").decode("utf-8", "replace")[-600:]
             raise AssertionError(
-                f"RPC 経由でも通らない（デッドロック）daemon生存={alive}\n"
+                f"it does not pass even through the RPC (a deadlock). daemon alive={alive}\n"
                 + r2.stdout + r2.stderr + "\n--- daemon stderr ---\n" + _err)
     finally:
         p.send_signal(signal.SIGTERM)
@@ -3692,9 +3743,9 @@ def _AA_adm(led, event="admission_decided"):
 
 
 def test_already_admitted_keys_on_subject_not_just_issue(tmp_path):
-    """**判定の同一性は subject が決める。** issue だけを鍵にすると、
-    同じ issue の **別リビジョンを二度と admit できない**（実測でそうなった）。
-    `review_subject_id` があるのは、まさにこれを区別するためである。
+    """**The subject decides a judgment's identity.** Keying on the issue alone makes **a different
+    revision of the same issue impossible to admit ever again** (which is what happened).
+    `review_subject_id` exists precisely to tell them apart.
     """
     org, led = _AA_org(tmp_path)
     for lin in ("same-harness", "cross-harness"):
@@ -3703,15 +3754,16 @@ def test_already_admitted_keys_on_subject_not_just_issue(tmp_path):
     for lin in ("same-harness", "cross-harness"):
         _AA_prov(org, led, "7", lin, "S2")
     r = _AA_derive(org, led, "7")
-    assert r.returncode == 0, f"別 subject が admit できない（デッドロック）: {r.stdout}"
+    assert r.returncode == 0, (
+        f"a different subject cannot be admitted (a deadlock): {r.stdout}")
     assert len(_AA_adm(led)) == 2
 
 
 def test_corrected_admission_does_not_block_forever(tmp_path):
-    """**訂正できない統制は、間違えたら詰む統制である。**
+    """**A control that cannot be corrected is a control that traps you once you err.**
 
-    superseded にした admission を「既にある」と数えると、対象を差し替えても
-    二度と admit できない（Codex が静的読解で指摘、実測で成立）。
+    Counting a superseded admission as "already there" makes it impossible to admit ever again, even
+    after the subject is replaced (Codex raised it by static reading; it held by measurement).
     """
     org, led = _AA_org(tmp_path)
     for lin in ("same-harness", "cross-harness"):
@@ -3719,19 +3771,20 @@ def test_corrected_admission_does_not_block_forever(tmp_path):
     assert _AA_derive(org, led, "7").returncode == 0
     seq = _AA_adm(led)[0]["seq"]
     receipt = _correction_receipt(org, pathlib.Path(led), "ceo", seq, issue="7",
-                                  reason="対象が差し替わったので取り消す")
+                                  reason="the subject was replaced, so this is withdrawn")
     r = subprocess.run(
         [sys.executable, str(TOOLS / "ledger.py"), "append", led, "--actor", "ceo",
          "--class", "correction",
          "--payload", json.dumps({"corrects": [seq], "kind": "superseded",
-                                  "reason": "対象が差し替わったので取り消す"}),
+                                  "reason": "the subject was replaced, so this is withdrawn"}),
          "--receipt", str(receipt)],
         capture_output=True, text=True, cwd=str(org), env=_AA_ENV, timeout=60)
     assert r.returncode == 0, r.stdout + r.stderr
     for lin in ("same-harness", "cross-harness"):
         _AA_prov(org, led, "7", lin, "S1")
     r2 = _AA_derive(org, led, "7")
-    assert r2.returncode == 0, f"訂正後も admit できない（デッドロック）: {r2.stdout}"
+    assert r2.returncode == 0, (
+        f"it still cannot be admitted after the correction (a deadlock): {r2.stdout}")
 
 
 def test_corrected_refutation_joint_does_not_block_forever(tmp_path):
@@ -3743,12 +3796,12 @@ def test_corrected_refutation_joint_does_not_block_forever(tmp_path):
     assert _AA_derive(org, led, "7", "refutation_attempted").returncode == 0
     seq = _AA_adm(led, "refutation_attempted")[0]["seq"]
     receipt = _correction_receipt(org, pathlib.Path(led), "ceo", seq, issue="7",
-                                  reason="反証jointを取り消して再派生する")
+                                  reason="withdraw the refutation joint and re-derive it")
     corrected = subprocess.run(
         [sys.executable, str(TOOLS / "ledger.py"), "append", led, "--actor", "ceo",
          "--class", "correction",
          "--payload", json.dumps({"corrects": [seq], "kind": "superseded",
-                                  "reason": "反証jointを取り消して再派生する"}),
+                                  "reason": "withdraw the refutation joint and re-derive it"}),
          "--receipt", str(receipt)],
         capture_output=True, text=True, cwd=str(org), env=_AA_ENV, timeout=60)
     assert corrected.returncode == 0, corrected.stdout + corrected.stderr
@@ -3758,8 +3811,8 @@ def test_corrected_refutation_joint_does_not_block_forever(tmp_path):
 
 
 def test_issue_notation_does_not_split_the_dedupe(tmp_path):
-    """`7` / `#7` / `007` は同じ issue。表記の違いで二重計上になってはいけない
-    （実測: `007` を admit したあと `7` で2件目ができた）。"""
+    """`7`, `#7`, and `007` are the same issue. A difference in notation must never double-count it
+    (measured: after admitting `007`, a second one was produced with `7`)."""
     org, led = _AA_org(tmp_path)
     for lin in ("same-harness", "cross-harness"):
         assert _AA_prov(org, led, "007", lin, "S1").returncode == 0
@@ -3767,44 +3820,46 @@ def test_issue_notation_does_not_split_the_dedupe(tmp_path):
     for lin in ("same-harness", "cross-harness"):
         _AA_prov(org, led, "7", lin, "S1")
     _AA_derive(org, led, "7")
-    assert len(_AA_adm(led)) == 1, "表記ゆれで二重計上した"
+    assert len(_AA_adm(led)) == 1, "a notation difference double-counted it"
 
 
 def test_issue_normalization_is_the_same_everywhere(tmp_path):
-    """**比べる場所ごとに違う正規化をしてはいけない。**
+    """**The normalisation must not differ from one comparison site to another.**
 
-    issue の比較が3箇所で食い違っていた（`lstrip("#")` だけの場所と、
-    先頭ゼロまで落とす場所）。その結果、**provisional が `007` で呼び出しが `7`**
-    だと「判定が足りない」と言われ、揃っているのに admission を作れなかった
-    （Codex が静的読解で指摘、実測で成立）。
+    The issue comparison diverged across three places (some doing only `lstrip("#")`, others also
+    dropping leading zeros). As a result, **a provisional of `007` with a call of `7`** was told "a
+    judgment is missing" and could not produce an admission although both were present (Codex raised
+    it by static reading; it held by measurement).
 
-    同じものを同じと判定できないなら、鍵として使えない。`norm_issue` に統一した。
+    Something that cannot decide the same thing is the same cannot serve as a key. It is unified onto
+    `norm_issue`.
     """
     import importlib.util
     spec = importlib.util.spec_from_file_location("ledger_ni", str(TOOLS / "ledger.py"))
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)
 
-    # 同じ issue として扱うべきもの
+    # What should be treated as the same issue
     for a, b in (("7", "#7"), ("7", "007"), ("#7", "007"), (" 7 ", "7"), (7, "7")):
-        assert m.norm_issue(a) == m.norm_issue(b), f"{a!r} と {b!r} が別扱い"
-    # 別の issue として扱うべきもの
+        assert m.norm_issue(a) == m.norm_issue(b), f"{a!r} and {b!r} are treated as different"
+    # What should be treated as different issues
     for a, b in (("10", "100"), ("7", "70"), ("1", "11"), ("7", "7a"), ("12", "21")):
-        assert m.norm_issue(a) != m.norm_issue(b), f"{a!r} と {b!r} が同一扱い"
-    # _same_deliverable も同じ規則で動くこと（phase chain 全体がこれを使う）
+        assert m.norm_issue(a) != m.norm_issue(b), f"{a!r} and {b!r} are treated as the same"
+    # _same_deliverable must run by the same rule (the whole phase chain uses it)
     assert m._same_deliverable("007", "#7")
     assert not m._same_deliverable("10", "100")
 
-    # 実際の経路: provisional が 007、derive が 7 でも admission ができる
+    # The real path: a provisional of 007 and a derive of 7 still produce an admission
     org, led = _AA_org(tmp_path)
     for lin in ("same-harness", "cross-harness"):
         assert _AA_prov(org, led, "007", lin, "S1").returncode == 0
     r = _AA_derive(org, led, "7")
-    assert r.returncode == 0, f"表記が違うだけで admission が作れない: {r.stdout}"
+    assert r.returncode == 0, (
+        f"a mere difference in notation prevents an admission: {r.stdout}")
     assert len(_AA_adm(led)) == 1
 
 
-# ══ B1: attestation は caller flag で無効化できてはいけない ═══════════════════
+# ══ B1: attestation must not be disabled by a caller flag ══════════════════
 
 def _B1_org(tmp_path, attested="true"):
     org = tmp_path / "b1org"
@@ -3847,32 +3902,34 @@ def _B1_adm(led):
 
 
 def test_B1_authenticated_mode_refuses_receiptless_provisional(tmp_path):
-    """**authenticated mode では receipt 無しの judgment を記録できない。**
+    """**Under authenticated mode a judgment with no receipt cannot be recorded.**
 
-    `require_attested_identity: true` は「判断の主体を確かめる」宣言である。
-    receipt 無しの `verdict_provisional` が書けるなら、その宣言は効いていない。
+    `require_attested_identity: true` declares "confirm the judging principal". If a
+    `verdict_provisional` with no receipt can be written, that declaration is not in effect.
     """
     org, led = _B1_org(tmp_path)
     r = _B1_append(org, led, "same-harness")
     assert r.returncode != 0, (
-        "authenticated mode で receipt 無しの verdict_provisional が記録できた\n"
+        "a verdict_provisional with no receipt was recorded under authenticated mode\n"
         + r.stdout + r.stderr)
 
 
 def test_B1_caller_flag_cannot_disable_attestation(tmp_path):
-    """**強制するかどうかを caller に尋ねてはいけない。**
+    """**Never ask the caller whether to enforce.**
 
-    `--require-attested` を省略すると claimed な provisional 2件から
-    joint admission が作れた（実測）。**検査される側が強制を外せる**形である。
+    Omitting `--require-attested` let a joint admission be produced from two claimed provisionals
+    (measured). That is the shape where **whoever is checked can switch the enforcement off**.
     """
     org, led = _B1_org(tmp_path)
-    # 宣言が効いていれば、そもそも provisional が書けない。
-    # 万一書けても、flag の有無で admission の可否が変わってはいけない。
+    # With the declaration in effect, a provisional cannot be written in the first place.
+    # And even if one could, the presence of a flag must not change whether an admission is
+    # possible.
     for lin in ("same-harness", "cross-harness"):
         _B1_append(org, led, lin)
-    r = _B1_derive(org, led)                      # flag を省略
+    r = _B1_derive(org, led)                      # the flag is omitted
     assert not _B1_adm(led), (
-        "flag を省略すると claimed から admission が作れた（未認証 admission）\n"
+        "omitting the flag produced an admission from claimed ones (an unauthenticated "
+        "admission)\n"
         + r.stdout + r.stderr)
 
 
@@ -3883,39 +3940,41 @@ def test_B1_control_unattested_org_still_works(tmp_path):
         r = _B1_append(org, led, lin)
         assert r.returncode == 0, r.stdout + r.stderr
     r = _B1_derive(org, led)
-    assert r.returncode == 0, f"宣言していない org で joint が作れない: {r.stdout}{r.stderr}"
+    assert r.returncode == 0, (
+        f"a joint cannot be produced in an org that declared nothing: {r.stdout}{r.stderr}")
     assert len(_B1_adm(led)) == 1
 
 
-# ══ B2: Stage B で trust store が writerd へ届くこと ═════════════════════════
+# ══ B2: the trust store must reach writerd in Stage B ══════════════════════
 
 def test_B2_writerd_accepts_explicit_trust_flag():
-    """**trust store は明示的に渡す。** daemon は org の外（cwd=/）で動くので、
-    探索では見つからない。`--trust NAME=PATH` で固定できなければ、
-    installer は正しい receipt を検証させる手段を持たない。"""
+    """**The trust store is passed explicitly.** The daemon runs outside the org (cwd=/), so a
+    search will not find it. Without being able to pin it with `--trust NAME=PATH`, the installer has
+    no means of having a correct receipt verified."""
     r = subprocess.run([sys.executable, str(TOOLS / "writerd.py"), "serve", "--help"],
                        capture_output=True, text=True, timeout=60)
     assert "--trust" in r.stdout, (
-        "writerd に --trust が無い。installer が authoritative trust を渡せない\n" + r.stdout)
+        "writerd has no --trust. The installer cannot pass the authoritative trust\n" + r.stdout)
 
 
 def test_B2_installer_passes_trust_to_the_daemon():
-    """**installer が渡さなければ、daemon は永久に検証できない。**
+    """**Unless the installer passes it, the daemon can never verify anything.**
 
-    installer は trust を ${AUTHORITATIVE}/trust へ移し、org 側を .pre-writer に改名する。
-    それなのに plist が trust を渡していなかったため、**正しく署名された receipt も
-    すべて拒否される**（実測: cwd=/ で trust store が見つからない）。
+    The installer moves trust to ${AUTHORITATIVE}/trust and renames the org side to .pre-writer. The
+    plist was not passing trust, so **even correctly signed receipts were all refused** (measured:
+    with cwd=/ the trust store is not found).
     """
     src = (TOOLS / "writer-install.sh").read_text(encoding="utf-8")
     args = re.findall(r"<string>(--[a-z-]+)</string>", src)
     assert "--trust" in args, (
-        "plist が writerd に trust を渡していない。渡している引数: " + ", ".join(sorted(set(args))))
+        "the plist does not pass trust to writerd. The arguments it passes: "
+        + ", ".join(sorted(set(args))))
     assert "${AUTHORITATIVE}/trust" in src
 
 
 def test_B2_child_env_gets_the_trust_store(tmp_path):
-    """**子プロセス（ledger.py）に ORG_TRUST_STORE が届くこと。**
-    届かなければ receipt を検証できず、認証済みの記録が一切残せない。"""
+    """**ORG_TRUST_STORE must reach the child process (ledger.py).**
+    Without it no receipt can be verified and not one authenticated record can be left."""
     import importlib.util
     spec = importlib.util.spec_from_file_location("writerd_b2", str(TOOLS / "writerd.py"))
     m = importlib.util.module_from_spec(spec)
@@ -3929,14 +3988,14 @@ def test_B2_child_env_gets_the_trust_store(tmp_path):
     w.trust = str(trust)
     env = w._child_env("default") if hasattr(w, "_child_env") else None
     if env is None:
-        # 実装が private な作り方をしている場合は、少なくとも trust を保持していること
+        # Where the implementation builds it privately, it must at least retain trust
         assert w.trust == str(trust)
     else:
         assert env.get("ORG_TRUST_STORE") == str(trust), (
-            "子 env に ORG_TRUST_STORE が入っていない: " + repr(env.get("ORG_TRUST_STORE")))
+            "the child env has no ORG_TRUST_STORE: " + repr(env.get("ORG_TRUST_STORE")))
 
 
-# ══ B4: cross-harness org で単独署名の direct admission を作らせない ═════════
+# ══ B4: no singly-signed direct admission in a cross-harness org ═══════════
 
 def _B4_org(tmp_path, lineage="cross-harness", name="b4org"):
     import secrets as _sec
@@ -4002,17 +4061,18 @@ def _B4_count(led, cls):
 
 
 def test_B4_cross_harness_refuses_single_signer_direct_admission(tmp_path):
-    """**二血統を要求する org で、1枚の receipt から admission を作れてはいけない。**
+    """**In an org demanding two lineages, one receipt must not produce an admission.**
 
-    実測: cross-harness org で有効な receipt 1枚を generic append すると
-    `admission_decided` が直接1件記録された。joint 派生の経路が在っても、
-    **それを通らなくても書けるなら、二血統は強制されていない。**
+    Measured: a generic append of one valid receipt in a cross-harness org recorded one
+    `admission_decided` directly. A joint-derivation path may exist, but **if it can be written
+    without going through that path, two lineages are not enforced.**
     """
     org, led, secret = _B4_org(tmp_path)
     rc = _B4_receipt(org, led, secret, "admission_decided", "admit")
     r = _B4_direct(org, led, secret, rc, "admission_decided", "admit")
     assert _B4_count(led, "admission_decided") == 0, (
-        "単独署名の direct admission が通った（二血統の迂回）\n" + r.stdout + r.stderr)
+        "a singly-signed direct admission passed (bypassing the two lineages)\n"
+        + r.stdout + r.stderr)
 
 
 def test_B4_cross_harness_refuses_single_signer_survives(tmp_path):
@@ -4022,19 +4082,19 @@ def test_B4_cross_harness_refuses_single_signer_survives(tmp_path):
     rc = _B4_receipt(org, led, secret, "refutation_attempted", "survives")
     r = _B4_direct(org, led, secret, rc, "refutation_attempted", "survives")
     assert _B4_count(led, "refutation_attempted") == 0, (
-        "単独署名の direct survives が通った\n" + r.stdout + r.stderr)
+        "a singly-signed direct survives passed\n" + r.stdout + r.stderr)
 
 
 def test_B4_negative_verdicts_still_recordable(tmp_path):
-    """**control: reject / park / refuted の意味は変えない。**
+    """**control: the meaning of reject / park / refuted does not change.**
 
-    否定的な判断は単独でも記録できてよい（通さない方向は独立性を要さない）。
-    ここを一緒に止めると、判定を記録する手段が無くなる。
+    A negative judgment may be recorded alone (the direction that withholds needs no independence).
+    Stopping this alongside the rest leaves no means of recording a judgment at all.
     """
     org, led, secret = _B4_org(tmp_path)
     rc = _B4_receipt(org, led, secret, "admission_decided", "reject")
     r = _B4_direct(org, led, secret, rc, "admission_decided", "reject")
-    assert r.returncode == 0, f"reject が記録できない（止めすぎ）: {r.stdout}{r.stderr}"
+    assert r.returncode == 0, f"a reject cannot be recorded (over-blocking): {r.stdout}{r.stderr}"
     assert _B4_count(led, "admission_decided") == 1
 
 
@@ -4043,15 +4103,18 @@ def test_B4_same_harness_org_unaffected(tmp_path):
     org, led, secret = _B4_org(tmp_path, lineage="same-harness", name="b4same")
     rc = _B4_receipt(org, led, secret, "admission_decided", "admit", lineage="same-harness")
     r = _B4_direct(org, led, secret, rc, "admission_decided", "admit", lineage="same-harness")
-    assert r.returncode == 0, f"same-harness org で admit できない: {r.stdout}{r.stderr}"
+    assert r.returncode == 0, (
+        f"an admit is impossible in a same-harness org: {r.stdout}{r.stderr}")
     assert _B4_count(led, "admission_decided") == 1
 
 
-# ── #102 / OBS-050: work_in_progress は「統合済み」「開始が void された」候補を残さない ────
-# Tatekae 実測: `integration_admitted: pass` ×2 と Issue CLOSED を持つ候補が4日間 WIP 枠を
-# 占有し続け、attention の selected と食い違った。完了判定が cycle_completed の1クラスだけ
-# だったため。integrate の記録は candidate_id を持たず `issue` を持つので、台帳の別名橋
-# （cycle_started.pack_manifest_id "issue-N" ↔ integration_admitted.issue）で相関する。
+# ── #102 / OBS-050: work_in_progress keeps neither integrated candidates nor ones whose start was
+#    voided ──
+# Measured on Tatekae: a candidate holding two `integration_admitted: pass` records and a CLOSED
+# Issue occupied a WIP slot for four days, diverging from attention's selected. The cause was that
+# completion was decided from the single class cycle_completed. An integrate record carries no
+# candidate_id but does carry `issue`, so they correlate through the ledger's alias bridge
+# (cycle_started.pack_manifest_id "issue-N" ↔ integration_admitted.issue).
 
 def _wip(root):
     code, out = run("ledger.py", "view", str(root), "work_in_progress")
@@ -4060,8 +4123,9 @@ def _wip(root):
 
 
 def test_wip_drops_candidate_whose_issue_was_integrated(tmp_path):
-    # 実地の形をそのまま使う: cycle_started は candidate_id + pack_manifest_id だけを持ち、
-    # integration_admitted（ship.py / ghsync の emitter）は issue だけを持つ — 直接の共有 ID は無い。
+    # Use the field's own shape: cycle_started carries only candidate_id + pack_manifest_id, and
+    # integration_admitted (ship.py / the ghsync emitter) carries only issue — they share no ID
+    # directly.
     seed(tmp_path, "eng", "cycle_started",
          {"role": "eng", "candidate_id": "cand-5ca3e595a9c4", "pack_manifest_id": "issue-9"},
          ts="2026-07-16T01:00:00Z")
@@ -4071,11 +4135,11 @@ def test_wip_drops_candidate_whose_issue_was_integrated(tmp_path):
           "verdict": "pass", "admitter": "supervisor"},
          ts="2026-07-16T02:00:00Z")
     ids = [w["candidate_id"] for w in _wip(tmp_path)]
-    assert ids == [], f"統合済み候補が WIP 枠を占有し続けた: {ids}"
+    assert ids == [], f"an integrated candidate kept occupying a WIP slot: {ids}"
 
 
 def test_wip_keeps_candidate_when_integration_is_for_another_issue(tmp_path):
-    # control: 別 Issue の統合で他人の枠を消さない
+    # control: integrating another Issue does not clear someone else's slot
     seed(tmp_path, "eng", "cycle_started",
          {"role": "eng", "candidate_id": "cand-a", "pack_manifest_id": "issue-9"},
          ts="2026-07-16T01:00:00Z")
@@ -4084,11 +4148,11 @@ def test_wip_keeps_candidate_when_integration_is_for_another_issue(tmp_path):
           "admitter": "supervisor"},
          ts="2026-07-16T02:00:00Z")
     ids = [w["candidate_id"] for w in _wip(tmp_path)]
-    assert ids == ["cand-a"], f"無関係な統合が候補を消した: {ids}"
+    assert ids == ["cand-a"], f"an unrelated integration cleared a candidate: {ids}"
 
 
 def test_wip_ignores_failed_integration(tmp_path):
-    # verdict: fail は完了ではない — 統合が落ちた仕事はまだ進行中
+    # verdict: a fail is not completion — work whose integration failed is still in progress
     seed(tmp_path, "eng", "cycle_started",
          {"role": "eng", "candidate_id": "cand-a", "pack_manifest_id": "issue-9"},
          ts="2026-07-16T01:00:00Z")
@@ -4097,12 +4161,14 @@ def test_wip_ignores_failed_integration(tmp_path):
           "admitter": "supervisor"},
          ts="2026-07-16T02:00:00Z")
     ids = [w["candidate_id"] for w in _wip(tmp_path)]
-    assert ids == ["cand-a"], f"fail の統合が完了扱いになった: {ids}"
+    assert ids == ["cand-a"], f"a failed integration was treated as completion: {ids}"
 
 
 def test_wip_drops_candidate_whose_start_was_voided_by_correction(tmp_path):
-    # 開始そのものが correction（voids 効果）で無効化されたら、その cycle は存在しなかった扱い。
-    # semantics は derive-admission と同じ voided_seqs（OBS-042: 第3の correction 意味論を作らない）。
+    # Where the start itself was voided by a correction (the voids effect), that cycle is treated as
+    # never having existed.
+    # The semantics are the same voided_seqs as derive-admission (OBS-042: do not create a third
+    # correction semantics).
     seed(tmp_path, "eng", "cycle_started",
          {"role": "eng", "candidate_id": "cand-a", "pack_manifest_id": "issue-9"},
          ts="2026-07-16T01:00:00Z")   # seq=1
@@ -4111,11 +4177,11 @@ def test_wip_drops_candidate_whose_start_was_voided_by_correction(tmp_path):
           "corrected_by": "eng"},
          ts="2026-07-16T02:00:00Z")
     ids = [w["candidate_id"] for w in _wip(tmp_path)]
-    assert ids == [], f"void された開始が WIP に残った: {ids}"
+    assert ids == [], f"a voided start remained in WIP: {ids}"
 
 
 def test_wip_backfill_correction_does_not_complete(tmp_path):
-    # control: records_backfill は対象を消さない — 補記で仕事が「完了」してはならない
+    # control: records_backfill clears nothing — an addendum must never "complete" work
     seed(tmp_path, "eng", "cycle_started",
          {"role": "eng", "candidate_id": "cand-a", "pack_manifest_id": "issue-9"},
          ts="2026-07-16T01:00:00Z")   # seq=1
@@ -4124,11 +4190,12 @@ def test_wip_backfill_correction_does_not_complete(tmp_path):
           "corrected_by": "eng"},
          ts="2026-07-16T02:00:00Z")
     ids = [w["candidate_id"] for w in _wip(tmp_path)]
-    assert ids == ["cand-a"], f"backfill が開始を消した: {ids}"
+    assert ids == ["cand-a"], f"a backfill cleared a start: {ids}"
 
 
 def test_wip_plain_started_still_appears_with_latest_checkpoint(tmp_path):
-    # 後方互換: 進行中の候補は従来どおり最新 checkpoint 付きで、同じキー形で出る
+    # Backward compatible: a candidate in progress still appears with its latest checkpoint, under
+    # the same key shape
     seed(tmp_path, "eng", "cycle_started",
          {"role": "eng", "candidate_id": "cand-a", "pack_manifest_id": "issue-9"},
          ts="2026-07-16T01:00:00Z")
@@ -4146,7 +4213,7 @@ def test_wip_plain_started_still_appears_with_latest_checkpoint(tmp_path):
     assert [w["candidate_id"] for w in wip] == ["cand-a"]
     w = wip[0]
     assert set(w) == {"candidate_id", "role", "started_seq", "progress"}, (
-        f"出力キーが変わった（/org-resume と SessionStart が読む）: {sorted(w)}")
+        f"the output keys changed (/org-resume and SessionStart read them): {sorted(w)}")
     assert w["role"] == "eng" and w["started_seq"] == 1
     assert w["progress"]["next_step"] == "regen bundles"
     assert abs(w["progress"]["fraction"] - 0.7) < 1e-9
@@ -4178,13 +4245,14 @@ def test_wip_restarted_candidate_is_not_hidden_by_older_completion(tmp_path):
 
 
 def test_wip_rework_candidate_started_after_integration_stays_visible(tmp_path):
-    # skeptic 反証（rework-after-integration）: 統合済み Issue が標準の rework 経路で再開され、
-    # NEW cycle_started が integration_admitted: pass より「後」に来る。統合は自分より前の
-    # 開始しか完了させない（temporal）— さもなくば /org-resume が生きている rework を
-    # 沈黙で回収する。
+    # The skeptic's refutation (rework-after-integration): an integrated Issue is restarted through
+    # the standard rework path, and the NEW cycle_started comes *after* the
+    # `integration_admitted: pass`. An integration completes only starts that precede it (temporal) —
+    # otherwise /org-resume silently reclaims a live rework.
     seed(tmp_path, "eng", "cycle_started",
          {"role": "eng", "candidate_id": "cand-old", "pack_manifest_id": "issue-9"},
-         ts="2026-07-16T01:00:00Z")   # seq=1 — 統合前の開始（これは消えるべき）
+         ts="2026-07-16T01:00:00Z")   # seq=1 — a start before the integration (this should
+                                      # clear)
     seed(tmp_path, "eng", "cycle_completed",
          {"role": "eng", "candidate_id": "cand-old", "outputs": []},
          ts="2026-07-16T02:00:00Z")   # seq=2
@@ -4195,7 +4263,7 @@ def test_wip_rework_candidate_started_after_integration_stays_visible(tmp_path):
          ts="2026-07-16T03:00:00Z")   # seq=3
     seed(tmp_path, "eng", "cycle_started",
          {"role": "eng", "candidate_id": "cand-rework", "pack_manifest_id": "issue-9"},
-         ts="2026-07-16T04:00:00Z")   # seq=4 — 統合「後」の rework 開始（生きている）
+         ts="2026-07-16T04:00:00Z")   # seq=4 — a rework started *after* the integration (live)
     seed(tmp_path, "eng", "progress_recorded",
          {"role": "eng", "candidate_id": "cand-rework", "fraction": 0.4, "phase": "impl",
           "done_so_far": "regression repro'd", "next_step": "temporal integration arm",
@@ -4204,35 +4272,36 @@ def test_wip_rework_candidate_started_after_integration_stays_visible(tmp_path):
     wip = _wip(tmp_path)
     ids = [w["candidate_id"] for w in wip]
     assert ids == ["cand-rework"], (
-        f"統合後に始まった rework 候補が回収の沈黙に落ちた（または旧候補が復活した）: {ids}")
+        f"a rework candidate started after the integration fell into the silence of reclamation "
+        f"(or an old candidate came back): {ids}")
     assert wip[0]["progress"]["fraction"] == pytest.approx(0.4)
     assert wip[0]["progress"]["next_step"] == "temporal integration arm"
 
 
 def test_wip_pre_integration_start_still_drops_after_temporal_arm(tmp_path):
-    # control: OBS-050 本体（pass が開始より後）は temporal 化しても直ったまま
+    # control: OBS-050 itself (a pass after the start) stays fixed under the temporal rule
     seed(tmp_path, "eng", "cycle_started",
          {"role": "eng", "candidate_id": "cand-5ca3e595a9c4", "pack_manifest_id": "issue-9"},
          ts="2026-07-16T01:00:00Z")   # seq=1
     seed(tmp_path, "supervisor", "integration_admitted",
          {"integration_branch": "develop", "issue": 9, "verdict": "pass",
           "admitter": "supervisor"},
-         ts="2026-07-16T02:00:00Z")   # seq=2 > 1 → 完了扱い
+         ts="2026-07-16T02:00:00Z")   # seq=2 > 1 → treated as completed
     assert _wip(tmp_path) == []
 
 
-# ── #102 rework #2（skeptic C3/C2）: 完了の判断は cycle 単位であって issue 単位ではない ──
+# ── #102 rework #2 (skeptic C3/C2): completion is decided per cycle, not per issue ──
 
 def test_wip_c3_live_sibling_survives_candidate_scoped_integration(tmp_path):
-    # C3: 同一 Issue の並行 sibling（cycle.py --agent の fan-out）。cand-P が完了・統合されても、
-    # 統合より前に始まっていた LIVE の cand-Q は残る — 新形式の integration_admitted は
-    # candidate_id を運ぶので、消えるのは名指しされた候補だけ。
+    # C3: parallel siblings on one Issue (the fan-out of cycle.py --agent). Even where cand-P
+    # completes and integrates, the LIVE cand-Q that began before the integration remains — the new
+    # integration_admitted form carries candidate_id, so only the named candidate clears.
     seed(tmp_path, "eng-p", "cycle_started",
          {"role": "eng-p", "candidate_id": "cand-P", "pack_manifest_id": "issue-9"},
          ts="2026-07-16T01:00:00Z")   # seq=1
     seed(tmp_path, "eng-q", "cycle_started",
          {"role": "eng-q", "candidate_id": "cand-Q", "pack_manifest_id": "issue-9"},
-         ts="2026-07-16T01:30:00Z")   # seq=2 — 統合より前に始まった sibling
+         ts="2026-07-16T01:30:00Z")   # seq=2 — a sibling begun before the integration
     seed(tmp_path, "eng-q", "progress_recorded",
          {"role": "eng-q", "candidate_id": "cand-Q", "fraction": 0.5, "phase": "impl",
           "done_so_far": "half", "next_step": "finish", "blocked_by": None, "artifacts": []},
@@ -4244,16 +4313,17 @@ def test_wip_c3_live_sibling_survives_candidate_scoped_integration(tmp_path):
          {"integration_branch": "develop", "deliverables": ["9"], "issue": 9,
           "candidate_id": "cand-P", "integration_subject_sha": "a" * 40,
           "combined_ci_ref": "pytest -q", "verdict": "pass", "admitter": "supervisor"},
-         ts="2026-07-16T04:00:00Z")   # seq=5 > cand-Q の開始
+         ts="2026-07-16T04:00:00Z")   # seq=5 > cand-Q's start
     ids = [w["candidate_id"] for w in _wip(tmp_path)]
     assert ids == ["cand-Q"], (
-        f"sibling cand-P の統合が LIVE の cand-Q を巻き添えにした（/org-resume が沈黙する）: {ids}")
+        f"integrating the sibling cand-P took the LIVE cand-Q with it (/org-resume goes silent): "
+        f"{ids}")
 
 
 def test_wip_c2_backfilled_integration_receipt_does_not_kill_later_rework(tmp_path):
-    # C2: --backfill-ts で1日「前」の時刻を持つ統合 receipt（seq は後）。legacy 形式
-    # （candidate_id 無し）でも、時間順は ts で比較する — backfill された過去の統合が
-    # それより後に始まった rework を殺してはならない。
+    # C2: an integration receipt whose --backfill-ts puts it a day *earlier* (with a later seq).
+    # Even in the legacy form (no candidate_id), chronological order is compared by ts — a backfilled
+    # past integration must not kill a rework that began after it.
     seed(tmp_path, "eng", "cycle_started",
          {"role": "eng", "candidate_id": "cand-old", "pack_manifest_id": "issue-9"},
          ts="2026-07-16T01:00:00Z")   # seq=1
@@ -4262,38 +4332,42 @@ def test_wip_c2_backfilled_integration_receipt_does_not_kill_later_rework(tmp_pa
          ts="2026-07-16T02:00:00Z")   # seq=2
     seed(tmp_path, "eng", "cycle_started",
          {"role": "eng", "candidate_id": "cand-B", "pack_manifest_id": "issue-9"},
-         ts="2026-07-17T10:00:00Z")   # seq=3 — rework の開始（統合の実時点より1日後）
+         ts="2026-07-17T10:00:00Z")   # seq=3 — the rework's start (a day after the integration's
+                                      # real time)
     seed(tmp_path, "eng", "progress_recorded",
          {"role": "eng", "candidate_id": "cand-B", "fraction": 0.4, "phase": "impl",
           "done_so_far": "rework going", "next_step": "keep going", "blocked_by": None,
           "artifacts": []},
          ts="2026-07-17T11:00:00Z")
-    # 本物の --backfill-ts CLI で、rework 開始より1日前の実時点を後から補う（legacy 形式）
+    # Fill in a real time a day before the rework's start, after the fact, through the real
+    # --backfill-ts CLI (the legacy form)
     code, out = run("ledger.py", "append", str(tmp_path), "--actor", "supervisor",
                     "--class", "integration_admitted",
                     "--payload", json.dumps(
                         {"integration_branch": "develop", "issue": 9, "verdict": "pass",
                          "admitter": "supervisor"}),
-                    "--backfill-ts", "2026-07-16T12:00:00Z")   # seq=5, ts は seq3 より前
+                    "--backfill-ts", "2026-07-16T12:00:00Z")   # seq=5, ts before seq3's
     assert code == 0, out
     ids = [w["candidate_id"] for w in _wip(tmp_path)]
     assert ids == ["cand-B"], (
-        f"backfill された統合 receipt（ts が前・seq が後）が rework を殺した: {ids}")
+        f"a backfilled integration receipt (earlier ts, later seq) killed a rework: {ids}")
 
 
 def test_wip_candidate_scoped_integration_finishes_exactly_its_candidate(tmp_path):
-    # 新形式: candidate_id を運ぶ統合は、名指しした候補「だけ」を完了させる。
-    # 統合の後に始まった同一 Issue の rework も、時系列比較なしで無事。
+    # The new form: an integration carrying candidate_id completes *only* the candidate it names.
+    # A rework on the same Issue begun after the integration also survives, with no chronological
+    # comparison needed.
     seed(tmp_path, "eng", "cycle_started",
          {"role": "eng", "candidate_id": "cand-P", "pack_manifest_id": "issue-9"},
          ts="2026-07-16T01:00:00Z")   # seq=1
     seed(tmp_path, "supervisor", "integration_admitted",
          {"integration_branch": "develop", "issue": 9, "candidate_id": "cand-P",
           "verdict": "pass", "admitter": "supervisor"},
-         ts="2026-07-16T02:00:00Z")   # seq=2 → cand-P だけが完了
+         ts="2026-07-16T02:00:00Z")   # seq=2 → only cand-P completes
     seed(tmp_path, "eng", "cycle_started",
          {"role": "eng", "candidate_id": "cand-R", "pack_manifest_id": "issue-9"},
-         ts="2026-07-16T03:00:00Z")   # seq=3 — 統合後の rework
+         ts="2026-07-16T03:00:00Z")   # seq=3 — a rework after the integration
     wip = _wip(tmp_path)
     ids = [w["candidate_id"] for w in wip]
-    assert ids == ["cand-R"], f"名指しの統合が正確に1候補だけを消していない: {ids}"
+    assert ids == ["cand-R"], (
+        f"a named integration did not clear exactly one candidate: {ids}")
