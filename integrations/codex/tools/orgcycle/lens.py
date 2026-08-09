@@ -1,53 +1,57 @@
-"""判定の**観点**を、判定の前に確定させる（judge に導出させない）。
+"""Fix the **lens** of a judgment before the judgment (never have the judge derive it).
 
-## 状態: **未接続**（2.3.0 では verify から呼んでいない）
+## Status: **not wired up** (2.3.0 does not call this from verify)
 
-手書きの観点3項目では -25% が出たが、**この module が自動生成した観点では再現しなかった**
-（下の表の最後の2行）。項目数を3件に絞っても 59.0s → 100.9s と改善しない。手書きとの差が
-どこにあるのかを説明できていない以上、効果不明のものを配信経路に入れない。
+Three hand-written lens items produced -25%, but **the lens this module generates automatically did
+not reproduce it** (the last two rows of the table below). Narrowing to three items does not help
+either: 59.0s → 100.9s. Until the difference from the hand-written version can be explained,
+something of unknown effect does not go into the delivery path.
 
-残しているのは実測記録に価値があるからで、接続するのは差が説明できてからにする。
-「速くなるはず」で入れると、後から遅さの原因を探すときに疑う対象が増える。
+It is kept because the measurements are worth having; wiring it up waits until the difference can be
+explained. Add it on "it should be faster" and the next hunt for slowness has one more suspect.
 
-## なぜ要るか（実測）
+## Why it is needed (measured)
 
-judge に渡す材料には SPEC も憲章も入っているが、「**この Issue で具体的にどこを見るか**」
-だけが無い。だから judge は毎回ゼロから確認範囲を組み立てる — それが判定時間の大半を占める。
+The material handed to a judge holds the SPEC and the charter, but not **where specifically to look
+for this Issue**. So the judge assembles the scope of its checks from nothing every time — and that
+is most of the judging time.
 
-同一材料・同一モデル（gpt-5.6-terra / medium）で3回ずつ計測した中央値:
+Medians over three runs each, same material, same model (gpt-5.6-terra / medium):
 
-| 渡したもの | 中央値 |
-|---|---|
-| 現状（憲章＋SPEC のみ） | 104.8 s |
-| **具体的な観点を渡す** | **78.6 s（-25%）** |
-| 「MUST から観点を導け」と手順だけ渡す | 96.5 s（-8%） |
-| acceptance を10件すべて展開して渡す | 116.0 s（**遅化**） |
+| what was handed over | median |
+| --- | --- |
+| as it stands (charter + SPEC only) | 104.8 s |
+| **a concrete lens** | **78.6 s (-25%)** |
+| only the procedure, "derive the lens from the MUSTs" | 96.5 s (-8%) |
+| all ten acceptance criteria, expanded | 116.0 s (**slower**) |
 
-最後の行が効く量を決めている。**観点は「絞られている」ことが条件**であり、数を並べると
-削減どころか仕事を増やす。だから `max_items` の既定は 3 — 手書きで -25% を出したのと
-同じ規模に合わせている。ここを増やすと効果が反転する。
+That last row decides how much of this is safe. **A lens works on the condition that it is
+narrowed**; line up more of them and it adds work rather than removing it. So `max_items` defaults
+to 3 — the same scale as the hand-written version that produced -25%. Raise it and the effect
+inverts.
 
-**手順を渡しても効かない**（導出作業を judge にやらせるだけ）。効くのは観点そのもの。
-だから観点は「先に確定している」必要があり、それを人が毎回書くと Issue ごとにブレるので、
-ここで **機械的に組み立てる**。
+**Handing over the procedure does not work** (it merely makes the judge do the deriving). What works
+is the lens itself. So the lens has to be settled beforehand — and since a person writing it each
+time varies by Issue, it is **assembled mechanically** here.
 
-## 越えない線（docs/03 §6.5）
+## The line this does not cross (docs/03 §6.5)
 
-**合否条件は書かない。** 実測では「この3コマンドの出力だけで判定せよ、他の考慮は不要」まで
-厳格化すると 26.2 s（-69%）まで落ちたが、**placebo 実装を admit した**（文言は満たすが意図を
-裏切る実装を、規則が「他の考慮は不要」と命じたために見逃した）。速いのは考えることを
-やめさせたからで、それは gate の消滅である。
+**It never writes the pass condition.** Measured, tightening as far as "judge on the output of these
+three commands alone, no other consideration is needed" fell to 26.2 s (-69%) — and **admitted a
+placebo implementation** (one that satisfies the wording while betraying the intent, missed because
+the rule commanded that no other consideration was needed). It was fast because it had stopped the
+thinking, and that is the disappearance of the gate.
 
-だからここが書くのは **「どこを・どの順で見るか」だけ**。「何をもって pass とするか」は
-書かない。判定は judge のもの。
+So what is written here is **only where to look, and in what order**. What counts as a pass is not
+written. The judgment belongs to the judge.
 
-## 3層（この順に具体的になる）
+## Three layers (increasingly specific)
 
-1. **phase 既定** — フェーズによって確かめるものは変わる（requirements で CI green を
-   求めても意味が無く、deploy で EARS 構文を見ても遅い）
-2. **変更された seam / contract** — Issue #175 の受け入れ基準。触れていない領域を
-   毎回 re-review すると、往復のたびに CI が回り LLM も回る
-3. **SPEC の Acceptance** — 1件ずつ、最小の観測を1つ
+1. **phase defaults** — what is worth confirming differs by phase (asking for CI green at
+   requirements is meaningless; checking EARS syntax at deploy is late)
+2. **the seams / contracts that changed** — the acceptance criterion of Issue #175. Re-reviewing
+   untouched territory every time spins CI and the model on every round trip
+3. **the SPEC's acceptance criteria** — one at a time, one minimal observation each
 """
 
 from __future__ import annotations
@@ -55,53 +59,60 @@ from __future__ import annotations
 import re
 
 
-# ── 1. phase 既定 ────────────────────────────────────────────────────────────
-# 「そのフェーズで**確かめる価値があるもの**」だけを置く。合否は書かない。
-# docs/11 の非スキップ相のフェーズ名に合わせる。
+# ── 1. phase defaults ───────────────────────────────────────────────────────
+# Only **what is worth confirming in that phase** goes here. The pass condition is never written.
+# The phase names match the non-skippable phases of docs/11.
 _PHASE_LENS = {
     "requirements": [
-        "各 acceptance criterion が EARS の5型のいずれかで書かれ、**テスト可能**か"
-        "（「認証が動く」のような散文は、それ自体が差し戻しの理由）",
-        "Intent が org の telos に接続しているか（指標ではなく目的として）",
+        "whether each acceptance criterion is written in one of the five EARS forms and is "
+        "**testable** (prose such as \"authentication works\" is itself grounds for a send-back)",
+        "whether the Intent connects to the org's telos (as a purpose, not a metric)",
     ],
     "design": [
-        "seam contract の `provides` が**名前の付いた形**（signature / schema / table）で"
-        "書かれ、下流が推測せず結線できるか",
-        "`boundary (NOT mine)` が明示され、並行 maker が同じものを作らないか",
+        "whether the seam contract's `provides` is written in **a named form** (a signature, a "
+        "schema, a table) so that downstream can wire up without guessing",
+        "whether `boundary (NOT mine)` is stated, so parallel makers do not build the same "
+        "thing",
     ],
     "implement": [
-        "SPEC の DoD command（あれば）を**実際に走らせ**、その実出力を evidence にする",
-        "各 acceptance criterion に対応する観測が1つずつ存在するか",
+        "**actually running** the SPEC's DoD command (where there is one) and making its real "
+        "output the evidence",
+        "whether one observation exists for each acceptance criterion",
     ],
     "test": [
-        "テストが**実際に RED になることが示されているか**（通ることしか示していない"
-        "テストは、何も守っていない可能性がある）",
-        "異常系・境界が acceptance の範囲で覆われているか",
+        "whether a test is shown **to actually go RED** (a test shown only to pass may be "
+        "guarding nothing)",
+        "whether the error paths and boundaries are covered within the scope of the acceptance "
+        "criteria",
     ],
     "integrate": [
-        "変更された seam contract に対し、**下流の消費側が壊れていないか**",
-        "統合先 ref に対する差分が、この Issue の範囲に収まっているか",
+        "whether **the downstream consumers are unbroken** against the seam contracts that "
+        "changed",
+        "whether the diff against the integration ref stays within this Issue's scope",
     ],
     "deploy": [
-        "committed CI workflow が clean clone から green か（**この相ではこれが荷重**）",
-        "reproducibility の機械バー（repro_lint）が HOLD していないか",
+        "whether the committed CI workflow is green from a clean clone (**in this phase, that "
+        "carries the weight**)",
+        "whether the mechanical bar for reproducibility (repro_lint) is holding",
     ],
     "operate": [
-        "退行時に戻せる形（rollback / feature flag）があるか",
-        "観測できる形（ログ・メトリクス）が伴っているか",
+        "whether there is a way back on a regression (a rollback, a feature flag)",
+        "whether it comes with a way to observe it (logs, metrics)",
     ],
 }
 
-# EARS の5型。acceptance が構文として検証可能かを **見る観点** として使う（判定はしない）。
+# The five EARS forms. Used as **a lens on** whether an acceptance criterion is syntactically
+# verifiable (it does not judge).
 _EARS = re.compile(r"\b(?:WHEN|WHILE|IF|WHERE|THE\s+system\s+SHALL|SHALL)\b", re.I)
 
 
 def _acceptance_lines(spec_text):
-    """SPEC 本文から acceptance / MUST の各行を拾う。
+    """Collect the acceptance / MUST lines from a SPEC body.
 
-    実運用の Issue は `## Acceptance` / `## MUST` / `## Required change` など見出しが揺れる。
-    見出し語を固定しすぎると 0 件になり観点が空になるので、受け入れ基準らしい見出しを
-    広めに拾い、その下の箇条書き・番号付きを対象にする。
+    Real Issues vary in their headings — `## Acceptance`, `## MUST`, `## Required change`. Fix the
+    heading words too tightly and this returns zero, leaving the lens empty, so headings that look
+    like acceptance criteria are matched broadly and the bullets or numbered items beneath them are
+    the target.
     """
     if not spec_text:
         return []
@@ -117,49 +128,52 @@ def _acceptance_lines(spec_text):
         if not inside or not s:
             continue
         if re.match(r"^(?:[-*+]|\d+[.)])\s+", s):
-            # チェックボックスと箇条書き記号を落として本文だけにする
+            # Drop the checkbox and the bullet marker, leaving the text
             out.append(re.sub(r"^(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s*)?", "", s))
     return out
 
 
 def build_lens(phase, spec_text, changed_seams=None, max_items=3):
-    """judge へ渡す「確認の観点」節を組み立てて返す（無ければ None）。
+    """Assemble and return the "lens" section handed to the judge (None if there is none).
 
-    judge に導出させない。**判定もしない** — 見る順序を与えるだけ。
+    The judge never derives it. **It does not judge either** — it only gives an order to look in.
     """
     phase_key = (phase or "implement").strip().lower()
     lines = []
 
     defaults = _PHASE_LENS.get(phase_key)
     if defaults:
-        lines.append(f"### この相（{phase_key}）で確かめるもの")
+        lines.append(f"### What to confirm in this phase ({phase_key})")
         lines.extend(f"- {d}" for d in defaults)
 
     seams = [s for s in (changed_seams or []) if s]
     if seams:
-        lines.append("\n### 変更された seam / contract（ここに結び付く所見だけが blocker）")
+        lines.append("\n### The seams / contracts that changed (only a finding tied to these "
+                     "blocks)")
         lines.extend(f"- `{s}`" for s in seams[:max_items])
-        lines.append("- 上記に触れていない領域は、今回 **re-review しない**。"
-                     "所見があれば `out_of_scope` として別記する。")
+        lines.append("- Territory the above does not touch is **not re-reviewed** this round. A "
+                     "finding there is recorded separately as `out_of_scope`.")
 
     accepts = _acceptance_lines(spec_text)
     if accepts:
         shown = accepts[:max_items]
-        lines.append(f"\n### 再導出する acceptance（{len(accepts)} 件。1件ずつ順に）")
+        lines.append(f"\n### Acceptance criteria to re-derive ({len(accepts)}, one at a time)")
         for i, a in enumerate(shown, 1):
-            mark = "" if _EARS.search(a) else "  ※ EARS 構文でない（テスト可能性を確認せよ）"
+            mark = "" if _EARS.search(a) else "  ← not EARS syntax (confirm it is testable)"
             lines.append(f"{i}. {a[:220]}{mark}")
         if len(accepts) > len(shown):
-            lines.append(f"（残り {len(accepts) - len(shown)} 件は SPEC 本文を参照）")
-        lines.append("- 各件につき **最小の観測を1つ**選び、実際に走らせ、実出力を evidence に貼る。")
-        lines.append("- 文言は満たすが意図を裏切る実装（placebo）でも同じ出力になるなら、"
-                     "観測を1つ足す。**ここは省略しない。**")
+            lines.append(f"(for the remaining {len(accepts) - len(shown)}, see the SPEC body)")
+        lines.append("- For each, choose **one minimal observation**, actually run it, and paste "
+                     "the real output as evidence.")
+        lines.append("- If an implementation that satisfies the wording while betraying the "
+                     "intent (a placebo) would produce the same output, add one more observation. "
+                     "**This is never skipped.**")
 
     if not lines:
         return None
-    return ("\n## 確認の観点（判定の前に確定済み。探索はここから始めよ）\n"
+    return ("\n## The lens (settled before the judgment — begin the search here)\n"
             + "\n".join(lines)
-            + "\n\n> これは**どこを見るか**であって、**何をもって pass とするか**ではない。"
-              "合否は上の憲章と SPEC に照らしてあなたが決める。"
-              "観点に無い領域でも、安全性・データ完全性・セキュリティ・リリース不能を"
-              "具体的に示すものは blocker にしてよい。\n")
+            + "\n\n> This is **where to look**, not **what counts as a pass**. You settle that "
+              "against the charter and the SPEC above. Even in territory the lens does not name, "
+              "anything that concretely demonstrates a safety, data-integrity or security problem, "
+              "or that it cannot be released, may be made a blocker.\n")
