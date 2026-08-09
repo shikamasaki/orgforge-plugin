@@ -3189,11 +3189,11 @@ def test_schema_fix_repairs_fields_after_inline_comments_and_unblocks_provisiona
         "enforcement:\n  judges:\n    lineage: cross-harness\n", encoding="utf-8")
     schema = (TEMPLATE / "ledger-schema.yaml").read_text(encoding="utf-8")
     block = re.compile(
-        r"                          # phase は receipt の束縛に入る（どの段階の判定か）\n"
+        r"                          # phase enters the receipt's binding \(which stage judged it\)\n"
         r"                          phase,\n"
         r"                          decision_by, recorded_by, committed_by,\n"
         r"                          identity_assurance, recorder_assurance, workload_isolation,\n"
-        r"                          # \*\*writer の隔離は judge の隔離ではない。\*\* 欄を分ける（0.39.2）。\n"
+        r"                          # \*\*the writer's isolation is not the judge's.\*\* Separate fields \(0.39.2\).\n"
         r"                          writer_isolation,\n"
         r"                          signer_id, key_id(?:, risk_accepted)?,\n")
     broken, substitutions = block.subn("", schema, count=1)

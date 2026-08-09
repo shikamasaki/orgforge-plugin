@@ -1110,8 +1110,8 @@ def test_verify_scopes_blockers_and_repeated_findings():
 def test_spec_template_states_when_done():
     """完了の判定を spec 側に書く — maker / gate / skeptic の3者が同じ条件を見る。"""
     body = (TOOLS.parent / "template" / "SPEC.md").read_text(encoding="utf-8")
-    assert "完了の判定" in body
-    assert "別 Issue にする" in body
+    assert "The judgment of done" in body
+    assert "becomes another one" in body
 
 
 def test_show_warns_on_repeated_rework_but_not_on_many_rounds():

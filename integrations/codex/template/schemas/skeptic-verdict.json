@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "skeptic の判定",
-  "description": "role-settings.yaml の skeptic.output（json_schema）を Codex の --output-schema に写したもの。構造化して返させることで、報告が作業の途中で切れても欠落が機械的に分かる（org_cycle intake と同じ狙いを、返り値の側で満たす）。 Structured Outputs の制約により、properties の全キーが required に入る（任意項目は null を許す）。",
+  "title": "the skeptic's verdict",
+  "description": "role-settings.yaml's skeptic.output (json_schema), mapped onto Codex's --output-schema. Demanding a structured return makes an omission mechanically visible even where the report is cut off mid-work (the same aim as org_cycle intake, met on the return side). Structured Outputs requires every key in properties to appear in required (optional fields allow null).",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -20,21 +20,21 @@
         "survives",
         "refuted"
       ],
-      "description": "MUST に対する反証の結果。範囲外の欠陥は verdict に数えない"
+      "description": "The result of refuting against the MUSTs. A defect outside their scope does not count toward the verdict"
     },
     "why": {
       "type": "string",
       "minLength": 40,
-      "description": "構成した具体的なシナリオと、押したときに何が起きたか。survives でも「誰にとって、どの条件で壊れうるか」を書く"
+      "description": "The concrete scenario constructed and what happened when it was pushed. Even on survives, write for whom and under what condition it could break"
     },
     "evidence": {
       "type": "string",
       "minLength": 20,
-      "description": "実際に走らせた／読んだもの。コマンドと実出力"
+      "description": "What was actually run or read. The commands and their real output"
     },
     "mutations": {
       "type": "array",
-      "description": "適用後状態を実測できたミューテーション。適用失敗は evidence/risk に未測定として残す",
+      "description": "The mutations whose post-application state could be measured. A failed application is left in evidence/risk as unmeasured",
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -49,26 +49,26 @@
         "properties": {
           "what": {
             "type": "string",
-            "description": "何をどう壊したか"
+            "description": "What was broken, and how"
           },
           "detected": {
             "type": "boolean",
-            "description": "既存のテストが検出したか"
+            "description": "Whether an existing test detected it"
           },
           "applied": {
             "type": "boolean",
             "const": true,
-            "description": "変異後の状態を読み返し、意図した変化が実際に成立したことを確認したか。false の試行は mutations に含めず evidence/risk に未測定として残す"
+            "description": "Whether the post-mutation state was read back and the intended change confirmed to have actually taken. An attempt that is false is not included in mutations but left in evidence/risk as unmeasured"
           },
           "postcondition": {
             "type": "string",
             "minLength": 10,
-            "description": "変異が成立したことを示す、適用後状態の読取コマンドと実出力"
+            "description": "The read command and real output of the post-application state, showing the mutation took"
           },
           "restore_postcondition": {
             "type": "string",
             "minLength": 10,
-            "description": "復元後に元の状態へ戻ったことを示す読取コマンドと実出力"
+            "description": "The read command and real output showing the original state was restored"
           },
           "note": {
             "type": [
@@ -81,14 +81,14 @@
     },
     "out_of_scope": {
       "type": "array",
-      "description": "MUST の範囲外で見つけた欠陥。verdict には数えず「Issue 化を推奨」として返す。無ければ空配列",
+      "description": "A defect found outside the MUSTs' scope. It does not count toward the verdict; return it as \"recommended as its own Issue\". An empty array where there is none",
       "items": {
         "type": "string"
       }
     },
     "risk": {
       "type": "string",
-      "description": "排除しきれなかった失敗モード。無いなら「無い」と明示"
+      "description": "A failure mode that could not be ruled out. Where there is none, say so explicitly"
     },
     "findings": {
       "type": "array",
