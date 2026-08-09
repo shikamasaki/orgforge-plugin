@@ -72,10 +72,10 @@ import sys
 try:
     import yaml
 except ModuleNotFoundError:                                        # pragma: no cover - env guard
-    # 裸の ImportError の traceback を見せない。組織の lint が動かない理由が
-    # 「依存が入っていない」ことなら、そう言えば直せる。
-    sys.exit("org_lint: PyYAML が無いので organization.yaml を読めない。\n"
-             "  プラグインが使う interpreter へ入れること:\n"
+    # Do not show a bare ImportError traceback. If the reason the org's lint will not run is "a
+    # dependency is not installed", saying so is what lets someone fix it.
+    sys.exit("org_lint: PyYAML is missing, so organization.yaml cannot be read.\n"
+             "  Install it into the interpreter the plugin uses:\n"
              "    python3 -m pip install pyyaml")
 
 VALID_REGIMES = {"organic", "mechanistic"}
@@ -963,17 +963,19 @@ def lint_org_against_schema(org, views, triggers, lint):
     universal = set((org.get("information_flow", {}) or {}).get("universal_pack_items",
                                                                  ["intent_block", "doctrine"]))
 
-    # VW — スキーマが定義したビューを、実際にツールが引けるか。
-    # これが無いと lint は「articulation は整合している」と GREEN を出しながら、実行時に
-    # context_pack が1つも引けないという状態を通してしまう。実地でそれが起きた:
-    # gate の context_pack 3件と skeptic の 2件がすべて未実装で、SoD の checker が
-    # 判断材料を取得できないのに lint は pass していた。**articulation と実装の乖離を
-    # 検出できないことが穴の本体**なので、ここで閉じる。
+    # VW — can the tool actually fetch the views the schema defines?
+    # Without this, lint reports GREEN for "the articulation is coherent" while letting through a
+    # state where not one context_pack can be fetched at runtime. That happened in the field: all
+    # three of the gate's context_pack views and both of the skeptic's were unimplemented, and the
+    # SoD checker could not obtain what it was to judge by — yet lint passed.
+    # **The hole is the inability to detect drift between articulation and implementation**, so it
+    # is closed here.
     _unresolvable = _views_not_implemented(views)
     for vid in _unresolvable:
-        lint.fail("VW", f"ledger-schema が定義するビュー '{vid}' を ledger.py が引けない — "
-                        f"これを context_pack に持つロールは実行時に判断材料を取得できない。"
-                        f"スキーマと実装の乖離であって、articulation の問題ではない")
+        lint.fail("VW", f"ledger.py cannot fetch the view '{vid}' that ledger-schema defines — a "
+                        f"role carrying it in its context_pack cannot obtain what it judges by at "
+                        f"runtime. This is drift between the schema and the implementation, not a "
+                        f"problem of articulation")
     for r in org.get("roles", []):
         rid = r.get("id", "?")
         for item in r.get("context_pack", []) or []:
@@ -1234,19 +1236,20 @@ def lint_schedule(sched, ls, sn, lint):
 
 
 def _views_not_implemented(schema_views):
-    """スキーマの views のうち、ledger.py が引けないものを返す。
+    """Return the schema's views that ledger.py cannot fetch.
 
-    ledger.py はスキーマの `views:` を読むので通常は空になる。空でないなら、スキーマが壊れて
-    いるか ledger.py が読めていないかで、どちらも実行時に context_pack が引けない状態を意味する。"""
+    ledger.py reads the schema's `views:`, so this is normally empty. A non-empty result means
+    either the schema is broken or ledger.py is not reading it — both of which mean context_pack
+    cannot be fetched at runtime."""
     try:
         here = os.path.dirname(os.path.abspath(__file__))
         sys.path.insert(0, here)
         import ledger
         impl = set(ledger._view_from())
     except Exception:
-        return []          # ledger.py を読めない環境では黙って飛ばす（lint 自体は落とさない）
+        return []          # where ledger.py cannot be read, skip quietly (do not fail the lint)
     if not impl:
-        return []          # スキーマが読めていない場合はここでは判定しない
+        return []          # if the schema is not being read, this is not the place to decide
     return sorted(set(schema_views) - impl)
 
 

@@ -613,35 +613,41 @@ def cmd_check(a):
                 mark = "–"
             tag = "" if r["required"] else "  (not required at this phase)"
             if r["accepted_debt"] and not r["ok"]:
-                tag += "  ← 既知の負債（採用時に記録済み）"
+                tag += "  ← known debt (recorded at adoption)"
             print(f"  {mark} {r['artifact']}: {r['detail']}{tag}")
         if debt_repaid:
-            print(f"\n返済済み: {', '.join(debt_repaid)} — baseline から外して締め直すこと "
-                  f"(`repro_lint baseline <repo>` を再実行) — 直した項目が再び緩まないようにする。")
+            print(f"\nrepaid: {', '.join(debt_repaid)} — drop them from the baseline and tighten "
+                  f"again (re-run `repro_lint baseline <repo>`), so what was fixed cannot slacken "
+                  f"back.")
         if debt_still_open:
-            print(f"\n残る既知の負債 ({len(debt_still_open)}): {', '.join(debt_still_open)} — "
-                  f"ブロックはしないが、これは期限のない免除ではない。返済すること。")
+            print(f"\nknown debt still open ({len(debt_still_open)}): "
+                  f"{', '.join(debt_still_open)} — it does not block, but this is not an exemption "
+                  f"without end. Repay it.")
         if failed:
             print(f"\nHELD: {len(failed)} required artifact(s) missing for the {phase} gate: "
                   f"{', '.join(failed)}.", end="")
             if baseline is None:
-                # **baseline を読んでいないのに「baseline に無い」と断定してはいけない。**
-                # 実地で gate がこの断定を額面どおり受け取り、既存の負債を「この変更による
-                # 悪化」と読んで判定を止めた（対象の Issue は、まさにその2件を緑にする作業
-                # だった）。道具が見ていない領域について、道具は黙るのではなく
-                # 「見ていない」と言うべきである — そう言えば gate は正しく動ける。
+                # **Never assert "not in the baseline" without having read the baseline.**
+                # In the field a gate took that assertion at face value, read pre-existing debt as
+                # "a regression from this change", and stopped the judgment — while the Issue in
+                # question was the work of turning those very two green. About a region the tool
+                # has not looked at, the tool should say **"I have not looked"** rather than stay
+                # silent — say that and the gate can act correctly.
                 bp = getattr(a, "baseline", None) or os.path.join(a.repo, BASELINE_FILE)
-                print(f"\n  **baseline が無い**（探した先: {bp}）ので、"
-                      f"**この変更による悪化か、採用前からの既存の負債かは判定していない。**\n"
-                      f"  判定に使うなら、まず基準を取ること: `repro_lint.py baseline {a.repo}`\n"
-                      f"  （既存リポジトリに後付けした org は、採用時点の失敗を"
-                      f"「既知の負債」として記録してから締める — docs/11 §4e の drain-then-ratchet）")
+                print(f"\n  **There is no baseline** (looked in: {bp}), so **whether this is a "
+                      f"regression from this change or debt that predates adoption has not been "
+                      f"decided.**\n"
+                      f"  To use this in a judgment, take the reference first: "
+                      f"`repro_lint.py baseline {a.repo}`\n"
+                      f"  (an org retrofitted onto an existing repository records the failures "
+                      f"present at adoption as \"known debt\" and only then tightens — the "
+                      f"drain-then-ratchet of docs/11 §4e)")
             else:
-                print(f" これらは baseline に無い＝この変更で新たに悪化した、"
-                      f"または最初から満たすべきもの。(docs/11 §4a)")
+                print(f" These are not in the baseline — either newly broken by this change, or "
+                      f"something that should have been met from the start. (docs/11 §4a)")
         else:
-            print(f"\nOK: {phase} ゲートに必要な成果物は揃っている"
-                  + ("（既知の負債を除く）。" if debt_still_open else "。"))
+            print(f"\nOK: the artifacts the {phase} gate needs are all present"
+                  + (" (known debt aside)." if debt_still_open else "."))
     return 10 if failed else 0
 
 
@@ -664,17 +670,21 @@ def cmd_baseline(a):
     os.makedirs(os.path.dirname(out), exist_ok=True)
     with open(out, "w", encoding="utf-8") as f:
         json.dump({"accepted_debt": sorted(failing),
-                   "note": "採用時点で失敗していた項目＝既知の負債。新たな失敗はブロックされる。"
-                           "返済したら再実行して締め直すこと（docs/11 §4e drain-then-ratchet）。"},
+                   "note": "what was failing at adoption is the known debt. A new failure is "
+                           "blocked. Once repaid, re-run to tighten again (docs/11 §4e "
+                           "drain-then-ratchet)."},
                   f, ensure_ascii=False, indent=2)
         f.write("\n")
-    print(f"baseline を記録: {out}")
-    print(f"  既知の負債 {len(failing)}件: {', '.join(failing) or '(なし — 最初から全項目green)'}")
+    print(f"baseline recorded: {out}")
+    print(f"  known debt, {len(failing)}: "
+          f"{', '.join(failing) or '(none — every item was green from the start)'}")
     if repaid:
-        print(f"  返済されて外れた: {', '.join(repaid)} — 以降これらは再び失敗するとブロックされる")
+        print(f"  repaid and dropped: {', '.join(repaid)} — from here on, failing them again "
+              f"blocks")
     if prior and new_debt:
-        print(f"  ⚠ 新たに負債として追加: {', '.join(new_debt)} — これは「壊した」を「許容する」に"
-              f"書き換える操作。意図的でなければ baseline ではなく修正で対応すること。")
+        print(f"  ⚠ newly added as debt: {', '.join(new_debt)} — this operation rewrites \"broke "
+              f"it\" into \"tolerated\". Unless that is deliberate, answer it with a fix rather "
+              f"than a baseline.")
     return 0
 
 
