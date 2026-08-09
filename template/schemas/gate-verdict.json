@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "gate の判定",
-  "description": "role-settings.yaml の gate.output（json_schema）を Codex の --output-schema に写したもの。 Structured Outputs の制約により、properties の全キーが required に入る（任意項目は null を許す）。",
+  "title": "the gate's verdict",
+  "description": "role-settings.yaml's gate.output (json_schema), mapped onto Codex's --output-schema. Structured Outputs requires every key in properties to appear in required (optional fields allow null).",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -26,31 +26,31 @@
     "why": {
       "type": "string",
       "minLength": 40,
-      "description": "何を天秤にかけ、何が決め手になったか。verdict の言い換えは不可"
+      "description": "What was weighed, and what decided it. A paraphrase of the verdict is not accepted"
     },
     "evidence": {
       "type": "string",
       "minLength": 20,
-      "description": "実際に走らせたコマンドと、その実出力（失敗も含む）。admit には必須"
+      "description": "The commands actually run and their real output, failures included. Required for an admit"
     },
     "standard": {
       "type": "string",
-      "description": "適用した基準（SPEC の MUST / seam contract / 機械バー）"
+      "description": "The standard applied (the SPEC's MUSTs, the seam contract, the machine bar)"
     },
     "alternatives": {
       "type": [
         "string",
         "null"
       ],
-      "description": "採らなかった選択肢と、その理由"
+      "description": "The options not taken, and why"
     },
     "risk": {
       "type": "string",
-      "description": "承知の上で残す穴。無いなら「無い」と明示"
+      "description": "A hole knowingly left open. Where there is none, say so explicitly"
     },
     "out_of_scope": {
       "type": "array",
-      "description": "MUST の範囲外で見つけた欠陥。reject の根拠にせず「Issue 化を推奨」として返す",
+      "description": "A defect found outside the MUSTs' scope. Do not make it grounds for a reject; return it as \"recommended as its own Issue\"",
       "items": {
         "type": "string"
       }

@@ -36,7 +36,7 @@ humans — an org founded on a proxy is Goodhart-doomed from birth (THEORY.md, O
 
 Sketch the target system's architecture from the RFP *first*. Then draw departments and
 their communication paths to mirror that architecture (docs/04 §3). Write it to
-**`ARCHITECTURE.md`** — that exact name (docs/11 §0a): it is the whole-system design (全体設計書),
+**`ARCHITECTURE.md`** — that exact name (docs/11 §0a): it is the whole-system design,
 the standing shape every later task is carved out of, and the decomposition step reads it *by name*
 to source each task's seam contract. Checklist:
 

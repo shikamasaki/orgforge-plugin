@@ -70,7 +70,7 @@ delegated:
                                                            # surprise as "defined" to keep admitting
 
 # ── Tier 2: CHARTER (approval queue) — agents propose, humans decide ──────────
-# Inspired by the written-proposal aspect of 稟議 (ringi): agents propose in writing with
+# Inspired by the written-proposal aspect of ringi: agents propose in writing with
 # diagnosis + diff + expected effect; one accountable human adjudicates. No consensus round.
 charter:
   items:
@@ -156,7 +156,7 @@ escalation:
 # environments, and final authority over irreversible effects.
 invariants:
   - ledger_append_only: true
-  - no_knowledge_outside_ledger: true          # the anti-person-dependence (属人化) invariant
+  - no_knowledge_outside_ledger: true          # the invariant against person-dependence
                                                # (docs/02 §5 — enforced by discipline + audit)
   - control_never_dormant_while_exploring: true
   - maker_never_own_checker: true
@@ -306,69 +306,78 @@ mandate_precedence:
 # only as a DEV OVERRIDE (a developer's laptop may loosen a cap locally, but the shipped org's gate
 # regime is what is written here and ledgered). no_agent_writes_this_file covers this block too.
 enforcement:
-  # ── ドメインに触れる仕事の territory（人が見る面を決める）───────────────
+  # ── the territory of work that touches the domain (deciding the surface a human reads) ──
   #
-  # 人と AI の接触面を **ドメインモデル / ユースケース / 認可規則** に置くための宣言。
-  # そこに触れる Issue は、起票の時点でこの3つを書いていないと maker に渡らない
-  # （github_sync split-check / ready）。実装してから「何を作るはずだったか」を思い出す
-  # 順序を禁じる — SSoT は code + ドメインモデルであって、後付けの申告ではない。
+  # The declaration that puts the contact surface between a human and the AI on **the domain
+  # model, the use cases, and the authorization rules**. An Issue touching that territory does not
+  # reach a maker unless all three are written at filing time (github_sync split-check / ready).
+  # It forbids the order of implementing first and then remembering what was to be built — the
+  # SSoT is code plus the domain model, not a declaration made after the fact.
   #
-  # **プラグインはパスを推測しない。** `src/domain/` に置くか `app/models/` に置くかは
-  # プロジェクトの選択で、当てにいくと別レイアウトの org で誤検知する（実測: 稼働中の org
-  # だけでも src/domain/ · src/usecase/ · src/db/ · supabase/migrations/ が併存していた）。
-  # ここに書かれた prefix にだけ効く。**空なら検査は動かない**（宣言しない自由は残す）。
+  # **The plugin does not guess paths.** Whether the domain layer sits in `src/domain/` or
+  # `app/models/` is the project's choice, and guessing produces false positives in an org with a
+  # different layout (measured: among running orgs alone, src/domain/, src/usecase/, src/db/, and
+  # supabase/migrations/ coexisted).
+  # It applies only to the prefixes written here. **Empty means the check does not run** (the
+  # freedom not to declare is left intact).
   #
-  # 認可規則をここに含めるのは、それが技術的セキュリティではなく **ドメインの一部**
-  # だから。「誰が誰の支出を見てよいか」はライブラリでは決まらない。実地では、12件の
-  # MUST のうち認可を定めたのが2件で、その1件が「あだ名」（装飾的なテキスト列）だった —
-  # 金額・支払者・債務の向き・グループ所有権は無防備のまま通っていた。
+  # Authorization rules belong here because they are **part of the domain**, not technical
+  # security. "Who may see whose expenses" is not decided by a library. In the field, two of
+  # twelve MUSTs set authorization and one of those two was about the nickname (a decorative text
+  # column) — the amount, the payer, the direction of the debt, and group ownership all passed
+  # undefended.
   domain_surface:
-    # ここに触れる Issue は SPEC にドメインモデル / ユースケース / 認可規則が要る。
-    paths: []            # 例: ["src/domain/", "src/usecase/", "src/db/", "supabase/migrations/"]
-    # 宣言を求める節。org が減らしてよい（増やすのは SPEC.md の節を足してから）。
+    # An Issue touching these needs a domain model, use cases, and authorization rules in its SPEC.
+    paths: []            # e.g. ["src/domain/", "src/usecase/", "src/db/", "supabase/migrations/"]
+    # The sections a declaration is required for. An org may reduce this (to add one, first add the
+    # section to SPEC.md).
     require: [domain_model, use_case, authorization]
 
-  # ── judge の血統（スイスチーズ層）─────────────────────────────────────
-  # 「1つの銀の弾丸を求めるより、複数のモデルを組み合わせた方がうまくいく」— 同じ base model の
-  # checker は maker と同じ盲点を共有する（docs/03 §3）。role-settings.yaml は skeptic に
-  # `model_family: family-B` を宣言しているが、**同一ハーネスの subagent では inherit** に
-  # なるので、宣言だけでは血統が分かれない。
+  # ── the judges' lineage (the Swiss-cheese layers) ─────────────────────
+  # "Combining several models works better than looking for one silver bullet" — a checker on the
+  # same base model shares the maker's blind spots (docs/03 §3). role-settings.yaml declares
+  # `model_family: family-B` for the skeptic, but **a subagent in the same harness inherits**, so
+  # the declaration alone does not separate the lineage.
   #
-  # 既定は `same-harness` — 起動しているエージェントの中だけで回す。別ハーネスの契約・CLI・
-  # 認証を前提にすると、持っていない環境で org が回らなくなる。**層を増やすのは選択であって
-  # 前提ではない。**
+  # The default is `same-harness` — run it entirely inside the agent that is already running.
+  # Presupposing another harness's subscription, CLI, and credentials stops the org from running
+  # anywhere that lacks them. **Adding a layer is a choice, not a premise.**
   judges:
     lineage: adaptive       # same-harness | cross-harness | adaptive
-                            #   same-harness: gate も skeptic も起動中のエージェントで回す
-                            #   cross-harness: 下の harness 指定に従って別ハーネスで回す。
-                            #   adaptive: 実行中の製品を検出し、反対側が利用可能なら cross、
-                            #     無ければ同じ製品内の pseudo same-harness へ明示的に縮退する。
-    # cross-harness で使う secondary 側の設定。両方向を必ず宣言する。`model` と
-    # `effort` はここが唯一の実行時設定面で、org-cycle verify が headless judge に
-    # そのまま渡す。未指定なら各ハーネスの既定を使う。
+                            #   same-harness: run both gate and skeptic in the running agent
+                            #   cross-harness: run them in another harness, per the harness
+                            #     settings below.
+                            #   adaptive: detect the running product; use cross where the other
+                            #     side is available, and otherwise degrade explicitly to a pseudo
+                            #     same-harness within the same product.
+    # The secondary-side settings used under cross-harness. Always declare both directions. `model`
+    # and `effort` have their only runtime configuration surface here, and org-cycle verify passes
+    # them to the headless judge as-is. Unspecified, each harness's own default applies.
     #
-    # 標準は gpt-5.6-terra / medium: 高速寄りだが、judge の品質は構造化 verdict、
-    # 独立血統、機械的 preflight にも支えられる。より深い検討が必要な組織だけ
-    # role ごとに `model` / `effort` を上げる。
+    # The standard is gpt-5.6-terra / medium: on the fast side, but a judge's quality also rests on
+    # the structured verdict, the independent lineage, and the mechanical preflight. Only an org
+    # needing deeper deliberation raises `model` / `effort` per role.
     harness:
       claude:
-        # Claude Code の高速寄り標準。CLI alias を使うため、利用可能な最新Sonnetへ追随する。
+        # Claude Code's fast-side standard. It uses a CLI alias, so it follows the latest available
+        # Sonnet.
         gate: { cli: claude, model: sonnet, effort: medium }
         skeptic: { cli: claude, model: sonnet, effort: medium }
       codex:
         gate: { cli: codex, model: gpt-5.6-terra, effort: medium }
         skeptic: { cli: codex, model: gpt-5.6-terra, effort: medium }
-    # judge は書き込みを持たない。別ハーネスで回す場合も read-only で走らせる —
-    # そのハーネスのガードレールが未検証でも、書けないなら安全側に倒れる。
+    # A judge holds no write access. Run it read-only even in another harness — with that harness's
+    # guardrails unverified, being unable to write still falls on the safe side.
     read_only: true
-    # 統制の中核（admission_decided / refutation_attempted）に、**署名 receipt 由来の
-    # identity** を要求するか。**既定は false。**
+    # Whether the core of the controls (admission_decided / refutation_attempted) requires
+    # **an identity derived from a signed receipt**. **The default is false.**
     #
-    # false のとき、`--actor` を変えるだけで職務分離を回避できる（実測: maker 本人の自己
-    # admit は拒否されるが、同じプロセスが別名を名乗ると通り、鎖も intact だった）。
-    # true にすれば塞がるが、**receipt を持たない既存の運用は全部止まる** — 鍵を配り、
-    # judge が署名を出せるようになってから true にすること。
-    # 段階的に移行できるようにするための既定であって、false が安全という意味ではない。
+    # While false, changing `--actor` alone bypasses the separation of duties (measured: a maker's
+    # own self-admit is refused, yet the same process passed under another name, with the chain
+    # intact).
+    # Setting true closes it, but **every existing deployment without receipts stops** — distribute
+    # the keys and get the judges signing before setting it true.
+    # The default exists to make a staged migration possible; it does not mean false is safe.
     require_attested_identity: false
     # Positive judgments are valid only while the observed integration target still equals their
     # merge-base. `verify` records ref/head/base and `derive-admission` resolves it again immediately
@@ -399,13 +408,15 @@ enforcement:
       #
       # The second role does not have to act often — it has to exist before it is needed.
       authority_roles: [supervisor]
-    # judge を発注する前の組織固有 environment preflight。空なら何も実行しない。
-    # command は shell 文字列ではなく argv list、timeout_seconds は必須。実行結果は exit code・
-    # elapsed_ms・stdout/stderr として judge の evidence に渡る。特定 daemon の名前から状態を
-    # 推測しない。applies_to の各 selector は AND、list 内は OR。省略した selector は全件一致。
-    # Issue/phase 固有の runtime probe には必ず scope を書き、無関係な仕事へ継承させない。
+    # An org-specific environment preflight, run before commissioning a judge. Empty runs nothing.
+    # command is an argv list rather than a shell string, and timeout_seconds is required. The
+    # results reach the judge's evidence as the exit code, elapsed_ms, and stdout/stderr. Do not
+    # infer state from the name of a particular daemon. Each selector in applies_to is ANDed and
+    # the entries within a list are ORed; an omitted selector matches everything.
+    # Always give an Issue- or phase-specific runtime probe a scope, so it is not inherited by
+    # unrelated work.
     preflights: []
-    # 例:
+    # e.g.:
     # preflights:
     #   - id: local-database
     #     command: [python3, scripts/check_local_database.py]

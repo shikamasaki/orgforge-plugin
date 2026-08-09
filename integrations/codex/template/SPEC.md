@@ -20,9 +20,10 @@
 > the headings into a new task Issue and fill them. It is not itself a spec, and it is not committed
 > per-deliverable anywhere.
 >
-> **記入言語 / fill-in language:** write the *content* in the org's `output_language`
-> (`constitution.yaml`; e.g. `ja` → 日本語で記入). The section headings below may stay as-is; only the
-> filled-in prose follows the setting, so the CEO reads the spec in their language.
+> **Fill-in language:** write the *content* in the org's `output_language` (`constitution.yaml`;
+> e.g. `ja` means the content is filled in in Japanese). The section headings below may stay as-is;
+> only the filled-in prose follows the setting, so the CEO reads the spec in their language.
+> The example values in this template are shown in Japanese for exactly that reason.
 
 ## Deliverable
 `<one line: what is being built>` — owner role: `<role id>` · contract_ref: `<objective/contract id>` · est: `<S/M/L>`
@@ -71,25 +72,25 @@
 > cost tracks the domain, not the volume of generated code. That is the only review that survives an
 > agent writing ten times more code.
 
-## ドメインモデル / Domain model (the vocabulary and invariants this deliverable touches)
+## Domain model (the vocabulary and invariants this deliverable touches)
 - **Entity:** `<Expense(id, payer: UserId, amount: Money, shares: Share[])>`
-- **不変条件 / invariant:** `<sum(shares.amount) == amount — 例外なし>`
-- **この Issue で変わるもの / what this Issue changes:** `<Expense に remainder_recipients: UserId[] を追加>`
-- **変えないもの / what it must not change:** `<既存の money/split 不変条件>`
+- **invariant:** `<sum(shares.amount) == amount — 例外なし>`
+- **what this Issue changes:** `<Expense に remainder_recipients: UserId[] を追加>`
+- **what it must not change:** `<既存の money/split 不変条件>`
 
-## ユースケースシナリオ / Use-case scenarios (who does what, and what results)
-- **主 / main:** `<支出者が3人グループに¥100を均等割りする → 34/33/33 に分かれ、余り1円の受領者が記録される>`
-- **代替 / alternate:** `<余りが出ない → 受領者は空>`
-- **失敗 / failure:** `<グループ外の利用者が登録を試みる → 拒否され、理由が伝わる>`
+## Use-case scenarios (who does what, and what results)
+- **main:** `<支出者が3人グループに¥100を均等割りする → 34/33/33 に分かれ、余り1円の受領者が記録される>`
+- **alternate:** `<余りが出ない → 受領者は空>`
+- **failure:** `<グループ外の利用者が登録を試みる → 拒否され、理由が伝わる>`
 
-## 認可規則 / Authorization (who is protected from whom)
-> **ドメインの一部であって、技術的セキュリティではない。** 「誰が誰の支出を見てよいか」は
-> ライブラリでは決まらない。ここが薄いと、守られるのは装飾的な項目だけになる — 実地では
-> 12件の MUST のうち認可を定めたのは2件で、その1件が「あだ名」だった。金額・支払者・
-> 債務の向き・グループ所有権は無防備のまま通っていた。
-- **守る資産 / assets protected:** `<金額 / 支払者 / 債務の向き / グループ所有権>`
-- **規則 / rules (EARS):** `<IF 非メンバーが支出を登録する THEN THE system SHALL 拒否する>`
-- **守らないもの / deliberately unprotected:** `<あだ名 — 装飾的で、漏れても損害が無い>`
+## Authorization (who is protected from whom)
+> **This is part of the domain, not technical security.** "Who may see whose expenses" is not
+> decided by a library. Where this is thin, the only things protected are the decorative ones — in
+> the field, two of twelve MUSTs set authorization and one of those two was about the nickname. The
+> amount, the payer, the direction of the debt, and group ownership all passed undefended.
+- **assets protected:** `<金額 / 支払者 / 債務の向き / グループ所有権>`
+- **rules (EARS):** `<IF 非メンバーが支出を登録する THEN THE system SHALL 拒否する>`
+- **deliberately unprotected:** `<あだ名 — 装飾的で、漏れても損害が無い>`
 
 ## Seam contract (what this deliverable OUTPUTS that other deliverables integrate to)
 > The four things a delegated task needs so parallel makers don't duplicate or collide (Anthropic
@@ -101,7 +102,8 @@
   anything with logic (math, a state machine), one example is worth ten MUST bullets and is a free
   self-test a stranger uses to confirm they read the intent right>`
 - **depends_on:** `<#Issue · required state (admitted/merged) · the exact seam I consume from it — a
-  link the maker clicks and a state they check, not prose. "領域A" alone doesn't tell them if it's ready.>`
+  link the maker clicks and a state they check, not prose. A bare area name doesn't tell them if
+  it's ready.>`
 - **owns:** `<the files/territory this deliverable writes — for concurrent-write safety>`
 - **boundary (NOT mine):** `<the adjacent work this deliverable must NOT touch — the sibling that owns
   it. Explicit boundaries are what stop two parallel makers from building the same thing differently.>`
@@ -113,25 +115,29 @@
   pass — the SAME command the gate uses — e.g. `cd app && npm test`. "19 tests pass" is not runnable; a
   command is.>`
 - `<the concrete test/evidence that proves each MUST — e.g. "an 11th join is rejected at the cap">`
-- **placebo（MUST の文言は満たすが、意図を裏切る実装の例）:** `<例: remainder_recipients を
-  常に空配列で返す — 型も MUST の文言も満たすが、余りの行方が記録されない>`
-- **null（本物の利用者なら拒否する出力の例）:** `<例: 余りが2円出たのに受領者が1件しか
+- **placebo (an implementation meeting the MUSTs' wording while betraying their intent):**
+  `<例: remainder_recipients を常に空配列で返す — 型も MUST の文言も満たすが、余りの行方が
+  記録されない>`
+- **null (an output a real user would reject):** `<例: 余りが2円出たのに受領者が1件しか
   記録されない — 金額は合うが、誰が多く負担したか分からない>`
 
-> **意図は言語化しきれないが、「これは違う」の例は書ける。** 反例を SPEC に置くのは、
-> 意図のうち機械が確かめられる部分を最大にするため。gate は「その placebo を入れたら
-> あなたのテストは赤くなるか」を実際に試せる — 判定者の想像に頼らず、Issue に書かれた
-> 事実に対して検査できる。
+> **Intent cannot be written whole, but an example of "this is not it" can be.** The
+> counterexamples sit in the SPEC to maximise the part of the intent a machine can confirm. The
+> gate can actually try "does your test go red if I put that placebo in" — checking against a fact
+> written on the Issue rather than against a judge's imagination.
 >
-> 反例が無いと、gate は placebo を毎回自分で発明することになり、周回ごとに厳しさが変わる。
-> WAI/WAD の乖離（MUST は全部満たしているのに求めていたものと違う）が一番痛いのはここで、
-> **仕様に書かれていない意図は、どれだけ賢いモデルでも復元できない。**
+> Without them the gate invents the placebo itself every round, and the strictness shifts from
+> round to round. The WAI/WAD gap (every MUST satisfied while the result differs from what was
+> wanted) hurts most here, and **intent that is not written in the specification cannot be
+> reconstructed by any model, however capable.**
 
-- **完了の判定:** 上の MUST が RED→GREEN になった時点で完了とする。**着手後に見つかった
-  範囲外の欠陥は、この Issue で直さず別 Issue にする。** 直すべきものが増え続ける Issue は、
-  gate が毎回「どこを見るか」から始めることになり、収束しない — 実地では8周 rework した Issue の
-  4回目以降の発見が、すべてこの MUST に書かれていないものだった。範囲外の欠陥は skeptic が
-  「Issue 化を推奨」として返し、スコープを切るかどうかは監督が決める（`agents/skeptic.md`）。
+- **The judgment of done:** done once the MUSTs above go RED→GREEN. **A defect found after
+  starting that falls outside the scope is not fixed in this Issue but becomes another one.** An
+  Issue whose list of things to fix keeps growing has the gate beginning every round with "where do
+  I look", and it does not converge — in the field, every finding from the fourth round onward of
+  an Issue that reworked eight times was absent from these MUSTs. The skeptic returns an
+  out-of-scope defect as "recommended as its own Issue", and the supervisor decides whether to cut
+  the scope (`agents/skeptic.md`).
 - Reproducibility (docs/11 §4a): the deliverable's repo must clone-and-run the same (lockfile,
   pinned toolchain, one-command setup+test, idempotent migrations, `.env.example`, green CI) — the
   gate runs `repro_lint` against it.
@@ -139,14 +145,16 @@
   tests and confirm it fails; then restore. A test that passes against broken code does not exist, and
   with no human reading the diff nothing else will notice — an agent writing tests to satisfy a coverage
   bar produces exactly this. Record the red output in the work log (`log --result`), not just the green.
-- **その検査が「鳴らない場合」を1つ書く。** `<この検証が、対象が壊れているのに通ってしまう
-  条件を1つ挙げる — 例「Supabase が落ちていると 46 件が skip され、RLS の穴があっても green」>`
-  テストを RED にできても、**その検査が対象に届いていない**ことは起こる。実地の #9 は13周
-  かかったが、その多くは実装ではなく検査側の欠陥だった: テストが `sw.ts` を一度も実行して
-  いなかった／警報が条件分岐で構造的に鳴らなかった／ミューテーション実行器が構文エラーを
-  SURVIVED と誤読した／ブラウザ検査が「offline.html でないこと」しか見ていなかった。
-  いずれも「テストは書いてある・green である」を満たしている。**書けないなら、その検査は
-  まだ何を見ているか分かっていない。**
+- **Write one case in which that check does not fire.** `<name one condition under which this
+  verification passes although the subject is broken — 例「Supabase が落ちていると 46 件が skip
+  され、RLS の穴があっても green」>`
+  Being able to turn a test RED does not stop **the check from failing to reach its subject**. #9
+  in the field took thirteen rounds, and most of them were defects on the checking side rather than
+  the implementation: the test never once executed `sw.ts`; the alarm was structurally unable to
+  fire because of a conditional; the mutation runner misread a syntax error as SURVIVED; the
+  browser check only read "it is not offline.html".
+  Every one of them satisfies "the test is written, and it is green". **If you cannot write this,
+  you do not yet know what that check is looking at.**
 - **Pass environment dependencies as arguments** — the clock, the home directory, the **platform**, the
   filesystem root. Not `process.platform` read deep inside a function, but a parameter. This is what
   makes platform and time-dependent behaviour testable *without* that platform, and it is why the
@@ -166,7 +174,8 @@
 ## Out of scope (explicitly deferred, so "done" is unambiguous)
 - `<what this deliverable does NOT do>`
 - `<and what already FAILED here — the dead ends a fresh maker must not re-derive (from the org's
-  nearby_deaths). e.g. "PayPay recipient-prefill URLは存在しない — API決済は構造的に不可、金額コピー導線で行く">`
+  nearby_deaths). e.g. "there is no PayPay recipient-prefill URL — API payment is structurally
+  impossible, so we go with a copy-the-amount flow">`
 
 ## Trailers (machine traceability — keep these last, verbatim)
 ```

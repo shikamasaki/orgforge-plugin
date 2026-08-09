@@ -7,7 +7,7 @@
 # The registrar (an LLM agent, organization.yaml) OWNS this file: it edits the cadences to set
 # the org's own schedule; the lint + tick.py are the guardrail that keeps its edits R0-safe and
 # night-safe, and — critically — that a due check which did NOT run is DETECTED, never silently
-# skipped ("起動するはずだった" must become an escalated fact, not an excuse — docs/05 §5.6).
+# skipped ("it should have fired" must become an escalated fact, not an excuse — docs/05 §5.6).
 #
 # Cadence vocabulary is the EXISTING one (organization.yaml loop.cadence, sensors.yaml):
 #   every_<n>_min | every_<n>_hours   — clock-triggered (level)

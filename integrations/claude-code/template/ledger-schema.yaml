@@ -26,52 +26,64 @@ envelope:
     verification: external_watchdog_replays_hash_chain   # docs/05 §2.4, docs/08 §5
 
 # ── Event classes: the org's complete factual vocabulary ────────────────────
-# ── 検証の軸（Writer Phase 0 / 0.33.1）─────────────────────────────────────
-# **3つを分けて扱う。** 全クラスを一度に closed-world にすると、schema の乖離が
-# 「組織全体の記録停止」に変わる — それは fail-closed ではなく、既知の移行不備による
-# 可用性事故である。
+# ── the axes of validation (Writer Phase 0 / 0.33.1) ────────────────────────
+# **Three are kept apart.** Making every class closed-world at once turns a schema divergence into
+# "the whole org stops recording" — that is not fail-closed but an availability incident caused by
+# a known migration gap.
 #
-#   # ── Identity: 3つの主体と、4つの独立した保証軸（H1）─────────────────────────
-# **`actor` は3つの概念を混ぜていた。** 判断した主体、記録した主体、確定した主体は別物である。
-# 監督が gate の判定を代理で記録する運用（実際の運用形）では、観測される actor は常に監督に
-# なるので、`actor` 同士を比べる職務分離は「監督が監督を承認していない」しか言えなくなる。
+#   # ── Identity: three principals, and four independent axes of assurance (H1) ──
+# **`actor` mixed three concepts.** Who judged, who recorded, and who committed are different
+# things. Where a supervisor proxy-records a gate's judgment (the shape operation actually takes),
+# the observed actor is always the supervisor, so a separation of duties comparing `actor` values
+# can only say "the supervisor did not approve the supervisor".
 #
-#   decision_by    判断を形成した principal。**署名 receipt からのみ確定する。**
-#                  CLI の自己申告では設定できない — 申告できるなら、誰の判断とでも言える。
-#   recorded_by    判断を転記・提出した principal。hook / session から **観測** する。
-#                  代理記録を許す（judge が直接 append する必要は無い）。
-#   committed_by   台帳に確定させた writer の principal。**隔離された writer が自分で付ける。**
+#   decision_by    the principal that formed the judgment. **Settled only from a signed receipt.**
+#                  It cannot be set by a self-declaration on the CLI — anything declarable can be
+#                  claimed as anyone's judgment.
+#   recorded_by    the principal that transcribed and submitted it. **Observed** from the hook /
+#                  session. Proxy recording is allowed (a judge need not append directly).
+#   committed_by   the principal of the writer that committed it to the ledger. **The isolated
+#                  writer sets this itself.**
 #
-# **職務分離は `decision_by` 同士だけを比べる。** `recorded_by` を比べてはいけない —
-# 代理記録では常に同じ主体になるので、比べると正当な運用が全て違反になる。
+# **The separation of duties compares `decision_by` values only.** Never compare `recorded_by` —
+# under proxy recording it is always the same principal, so comparing it makes every legitimate
+# operation a violation.
 #
-# ## 保証は単一の強弱値ではない
+# ## Assurance is not a single strong/weak value
 #
-# 4つを別の軸として持つ。潰すと「署名されているから独立している」という誤読を生む —
-# **同じ process、あるいは同じ鍵が両方の血統を作れるなら、独立レビューではない。**
+# Four are held as separate axes. Collapsing them invites the misreading "it is signed, therefore
+# it is independent" — **if one process, or one key, can produce both lineages, it is not
+# independent review.**
 identity:
   assurance_axes:
     identity_assurance:    [claimed, observed, attested, authenticated]
     recorder_assurance:    [claimed, observed]
     workload_isolation:    [none, separate_process, separate_uid, separate_host]
     reviewer_independence: [same_signer, distinct_signer, distinct_workload]
-  # Compatibility Mode: decision_by は receipt が無ければ `claimed` のまま。
-  #   → 独立レビューが **行われた証拠**にはなるが、**独立性の強制には使えない**。
-  # Authenticated Mode: 隔離 writer + 限定された経路 + 鍵の保護 + principal ごとの認可が
-  #   揃って初めて `authenticated` と呼ぶ。**別プロセスで問い合わせることは信頼境界ではない** —
-  #   同じ利用者が writer や鍵を差し替えられる限り、認証済みではない。
-  legacy_actor: claimed    # 0.36.x 以前の `actor` は claimed 属性として保持し、昇格させない
+  # Compatibility Mode: without a receipt, decision_by stays `claimed`.
+  #   → it is **evidence that independent review happened**, but **cannot be used to enforce
+  #     independence**.
+  # Authenticated Mode: only an isolated writer, a limited path, protected keys, and per-principal
+  #   authorization together earn the name `authenticated`. **Asking in a separate process is not a
+  #   trust boundary** — as long as the same user can replace the writer or the keys, it is not
+  #   authenticated.
+  legacy_actor: claimed    # an `actor` from before 0.36.x is kept as a claimed attribute and never
+                           # promoted
 
-#     required: [..]                  宣言したクラスだけ、必須 field の欠落を拒否
-#     <field>: a|b|c                  宣言済み field は **存在する場合に** enum / 型を検証
-#     additional_properties: false    厳格化したいクラスだけ、未宣言 field を拒否
+#     required: [..]                  refuse a missing required field, for declared classes only
+#     <field>: a|b|c                  validate a declared field's enum / type **where it is
+#                                     present**
+#     additional_properties: false    refuse an undeclared field, for the classes to be tightened
 #
-# 未宣言 field は既定で許可し、census に記録する（乖離を見えるようにするが止めない）。
-# 統制イベント（admission / verdict / cap 予約）は最初から厳格側に置く。
-# `progress_recorded` は実態が宣言と乖離しているので、**実態を schema に反映してから**
-# 別の migration で厳格化する（実データ43件中 fraction は0件、宣言に無い milestone が38件）。
+# An undeclared field is allowed by default and recorded in the census (the divergence is made
+# visible without stopping anything).
+# The control events (admission / verdict / cap reservation) sit on the strict side from the start.
+# `progress_recorded`'s reality diverges from its declaration, so it is tightened in a separate
+# migration **after the reality is reflected into the schema** (of 43 real rows, fraction appeared
+# 0 times and an undeclared milestone 38 times).
 #
-# required は **実データを数えて決めている** — 宣言が実態と違えば、検査は嘘になる。
+# required is **decided by counting real data** — a declaration at odds with reality makes the check
+# a lie.
 validation:
   required:
     admission_decided:    [verdict]
@@ -123,10 +135,11 @@ validation:
                            session_id]
     scheduled_check_completed: [check_id, scheduled_for_min, execution_id, result, exit_code,
                                 command_sha256, plugin_version]
-  # **相関キーはどれか1つあればよい。** deliverable / candidate_id / claim_id / issue はどれも
-  # 正当な相関キーで（`_same_work` が union-find で束ねる）、どれを使うかは経路によって違う。
-  # 1つに固定すると正当な書き込みを弾く（実際に統制のテストを弾いた）。
-  # **1つも無い判定は拒否する** — 何についての判定か分からない記録は、検査に使えない。
+  # **Any one correlation key is enough.** deliverable, candidate_id, claim_id, and issue are all
+  # legitimate correlation keys (`_same_work` unions them), and which is used depends on the path.
+  # Fixing on one rejects legitimate writes (it actually rejected the controls' own tests).
+  # **A judgment carrying none is refused** — a record that does not say what it judges cannot be
+  # used in a check.
   require_any:
     admission_decided:    [deliverable, candidate_id, issue]
     refutation_attempted: [deliverable, claim_id, candidate_id, issue]
@@ -135,7 +148,8 @@ validation:
     phase_started:        [deliverable, candidate_id]
     phase_admitted:       [deliverable, candidate_id]
     result_deployed:      [deliverable, claim_id, candidate_id, issue]
-  # 未宣言 field を拒否するクラス（closed world）。統制の中核だけに絞る。
+  # The classes that refuse an undeclared field (closed world). Narrowed to the core of the
+  # controls.
   additional_properties_false: [verdict_provisional, judges_disagreed, exposure_budget_checked,
                                 halt_tripped, halt_released, goal_started, goal_progressed,
                                 goal_paused, goal_blocker_observed, goal_blocked, goal_resumed,
@@ -147,17 +161,19 @@ validation:
                                 operational_escalated, artifact_tainted,
                                 recovery_probe_recorded, artifact_revalidated,
                                 scheduled_check_completed]
-  # **writer 専用のクラス。** generic append では書けない。
+  # **Writer-only classes.** A generic append cannot write them.
   #
-  # 上限の予約を通常の append で書ける状態は、上限そのものを無効化する — 実測で
-  # `delta_requested: -100` を append したあと、cap=5 に対して delta=50 が allow され、
-  # 鎖も intact だった。**検査に使う記録は、検査する側だけが書ける**必要がある。
+  # A state where a cap reservation can be written by an ordinary append voids the cap itself —
+  # measured: after appending `delta_requested: -100`, a delta of 50 was allowed against a cap of 5,
+  # with the chain intact. **A record used in a check must be writable only by whoever checks.**
   #
-  # これは identity の認証ではない（H1 は別問題）。同じ UID なら writer を騙れる。
-  # ただし「通常の append 経路で偶然にも意図的にも書けてしまう」ことは、これで塞がる。
+  # This is not identity authentication (H1 is a separate problem). Under the same UID one can still
+  # impersonate the writer.
+  # What it does close is "it can be written through the ordinary append path, by accident or
+  # design".
   writer_only: [exposure_budget_checked, halt_tripped, halt_released,
                 scheduled_check_completed]
-  # enum。**存在する場合に**検証する（欠けているかは required が見る）。
+  # enums. Validated **where present** (whether one is missing is required's business).
   enums:
     verdict_provisional:
       role:    [gate, skeptic]
@@ -166,17 +182,20 @@ validation:
       verdict: [admit, reject, park]
     refutation_attempted:
       verdict: [refuted, survives]
-      # 死因の「根」の分類（Issue #104 / OBS-052）。再発検出（learning.py repeats）は
-      # 文字列完全一致では同根の言い換えを素通りするため、**記録時に閉じた語彙で分類**する。
-      # 語彙は tools/learning.py の DEATH_ROOTS と同一でなければならない（テストが突き合わせる）:
-      #   placebo_test           検査が本番経路を測っていない（テスト硬化・placebo テスト）
-      #   declaration_drift      宣言と実装が乖離した
-      #   integration_base_moved 統合先が動いて前提が崩れた
-      #   self_written_premise   検査される当事者が検査の前提を書ける
-      #   other                  上記のどれでもない（自由文 cause で根を補足すること）。
-      #                          **other は判別する根ではない** — 検出器は root グループを
-      #                          形成せず、文字列一致にフォールバックする（無関係な死2件を
-      #                          「根は同じ」と escalate しないため）
+      # The "root" class of a cause of death (Issue #104 / OBS-052). Recurrence detection
+      # (learning.py repeats) walks past a same-root rewording under a whole-string match, so it is
+      # **classified with a closed vocabulary at recording time**.
+      # The vocabulary must be identical to DEATH_ROOTS in tools/learning.py (a test reconciles
+      # them):
+      #   placebo_test           the check does not measure the real path (test hardening, a
+      #                          placebo test)
+      #   declaration_drift      the declaration and the implementation diverged
+      #   integration_base_moved the integration target moved and the premise broke
+      #   self_written_premise   whoever is checked can write the check's premise
+      #   other                  none of the above (supplement the root in the free-text cause).
+      #                          **other is not a discriminating root** — the detector forms no
+      #                          root group for it and falls back to string matching (so two
+      #                          unrelated deaths are never escalated as "the same root")
       root: [placebo_test, declaration_drift, integration_base_moved,
              self_written_premise, other]
     result_retired:
@@ -195,7 +214,7 @@ validation:
       assurance: [reported, observed]
     scheduled_check_completed:
       result: [ok, escalate]
-  # 型。同上、存在する場合に検証する。
+  # types. As above, validated where present.
   types:
     correction:          { corrects: list, target_classes: list, target_issues: list }
     admission_decided:   { from_seqs: list, agreed_by: list }
@@ -234,40 +253,48 @@ event_classes:
   # /clear). Stamped at each milestone of a cycle: how far (0..1 or a phase label), what was just done,
   # the concrete next step, and any blocker. work_in_progress reads the LATEST per candidate; /org-resume
   # replays it to continue exactly where the cycle stopped. This is the backlog's memory of "how far".
-  # bypass_declared: **道具を迂回したことの記録**。organ を通さずに同じ状態変更を行う経路
-  # （保護ブランチへの直接マージなど）は hook が hold するが、壊れたときに詰まるので明示の
-  # 宣言（`ORG_ALLOW_MANUAL_MERGE=1`）で通せる。**その宣言自体をここに残す** — 記録に残らない
-  # 迂回を許すと、宣言が常用されて迂回が見えないまま高速化する。塞げないことを記録する形。
+  # bypass_declared: **the record that a tool was bypassed.** A path making the same state change
+  # without going through an organ (a direct merge into a protected branch, say) is held by the
+  # hook, but that would trap you when something breaks, so an explicit declaration
+  # (`ORG_ALLOW_MANUAL_MERGE=1`) lets it through. **The declaration itself is left here** —
+  # allowing an unrecorded bypass makes the declaration routine, and bypassing then accelerates out
+  # of sight. It is the shape of recording what cannot be blocked.
   bypass_declared:      { what, command, declared_by }   # GUARD-BYPASS
 
-  # asset_touched: **本番資産への変更**。exposure_budget_checked はローカルのファイル操作を
-  # 数えるが、リモート DB への DDL・本番の権限変更・インフラ操作は数えていない。実際には
-  # 後者のほうが危険で、しかも取り消しにコストがかかる。実地では本番 DB にマイグレーション
-  # 2本と権限の revoke が入ったのに、台帳には何も残らなかった — 「あの revoke は誰の権限で
-  # 入ったのか」が後から辿れない状態。
-  #   target     : 何に対してか（"supabase:<project>", "gcp:<project>/<service>" など）
+  # asset_touched: **a change to a production asset.** exposure_budget_checked counts local file
+  # operations but counts neither DDL against a remote DB, a production privilege change, nor an
+  # infrastructure operation. The latter are in fact the more dangerous, and cost more to undo. In
+  # the field two migrations and a privilege revoke went into the production DB while nothing was
+  # left in the ledger — a state where "under whose authority did that revoke go in" cannot be
+  # traced afterwards.
+  #   target     : against what ("supabase:<project>", "gcp:<project>/<service>", …)
   #   op         : apply_migration / revoke / grant / drop / deploy / scale …
-  #   reversible : 戻せるか。false なら、戻せないことを承知で入れたという記録になる
-  #   authority  : 誰の権限で入れたか（issue-N の一部 / CEO の明示指示 / 自己判断）
+  #   reversible : whether it can be undone. false records that it went in knowing it cannot
+  #   authority  : under whose authority (part of issue-N / an explicit CEO instruction / its own
+  #                judgment)
   asset_touched:        { target, op, name, reversible: bool, authority, issue,
                           rollback }   # PRODUCTION-ASSET
 
-  # public_surface_declared: このサイクルで**外に晒した面**。cycle_completed の domain_model は
-  # 「領域規則を決めたか」を問うが、「何を外に晒したか」は誰も見ていなかった。認可ホールは
-  # 「関数を1つ足した」ところから生まれる（実地の join_group がまさにそれ）。
+  # public_surface_declared: **the surface exposed outward** in this cycle. cycle_completed's
+  # domain_model asks "was a domain rule settled", while nobody was reading "what was exposed".
+  # An authorization hole is born where "one function was added" (join_group in the field was
+  # exactly that).
   #   surfaces: [{kind: db_function|endpoint|export|env, name, exposure, authz}]
   public_surface_declared: { role, issue, surfaces: [ {kind, name, exposure, authz} ],
                              none_asserted }   # ATTACK-SURFACE
 
-  # correction: 追記型の台帳では過去を消せないので、誤って書かれた／検証目的で書かれた
-  # イベントを「無効」と宣言するのはこのイベントの仕事。自由記述の note では機械が読めず、
-  # status / learning が除外できない（実地でプローブ4件が実判定として数えられ、board が
-  # 現実と食い違った）。corrects で対象の seq を、kind で理由の型を構造化して指す。
-  #   kind: probe        — 仕様検証のために書いたもので、実際の判定ではない
-  #         mistake      — 誤って書いた（対象・値の取り違え）
-  #         backfill     — 後から実時点の記録を補ったもの（対象が実判定であることは変わらない）
-  #         superseded   — 後続の判定で置き換わった
-  # 訂正そのものも追記なので、訂正の訂正も可能。誰が無効化したかは actor に残る。
+  # correction: an append-only ledger cannot erase the past, so declaring an event "void" — one
+  # written by mistake, or written for verification — is this event's job. A free-text note is
+  # unreadable by machine, and status and learning cannot exclude it (in the field four probes were
+  # counted as real judgments and the board diverged from reality). It points at the target seq
+  # through corrects and the kind of reason through kind, both structured.
+  #   kind: probe        — written to verify the specification; not a real judgment
+  #         mistake      — written in error (the wrong subject or value)
+  #         backfill     — filling in a record at its real time afterwards (the subject is still a
+  #                        real judgment)
+  #         superseded   — replaced by a later judgment
+  # A correction is itself an append, so a correction can be corrected. Who voided it stays in
+  # actor.
   correction:           { corrects: [seq], kind: probe|mistake|backfill|superseded, reason,
                           corrected_by, authority_role, authority_principal, authority_assurance,
                           authority_receipt_subject,
@@ -277,30 +304,35 @@ event_classes:
                           workload_isolation, writer_isolation, signer_id, key_id }
                           # LEDGER-CORRECTION
 
-  # ── 判定クラス（`github_sync decide` が受け付けるもの）───────────────────────
-  # **これらは実運用で書かれていたが、schema に宣言が無かった。** Writer Phase 0 の
-  # 「宣言の無いクラスは書けない」検査を入れたときに露見した（実データに design_decided 5件、
-  # rework_requested 23件）。宣言の無いクラスは projection にも sensor にも乗らないので、
-  # 書いても読まれない — `show` の rework 警告が沈黙した一因でもある。
-  # 形は実データに合わせている。**宣言が実態と違えば、検査は嘘になる。**
+  # ── the judgment classes (what `github_sync decide` accepts) ─────────────
+  # **These were being written in real operation while the schema declared none of them.** It came
+  # to light when Writer Phase 0's "an undeclared class cannot be written" check went in (the real
+  # data held 5 design_decided and 23 rework_requested rows). An undeclared class rides on neither
+  # a projection nor a sensor, so writing it leaves it unread — part of why `show`'s rework warning
+  # went silent.
+  # The shape follows the real data. **A declaration at odds with reality makes the check a lie.**
   design_decided:       { issue, deliverable, verdict, reasoning_sha256 }
   rework_requested:     { issue, deliverable, verdict, reasoning_sha256, phase, role,
                           candidate_id, requester, evidence_ref, reason, from_verdict, to_role, round,
                           risk_accepted,
-                          root: "死因の根の分類（validation.enums 参照、任意）— Issue #104" }
+                          root: "the root class of the cause of death (see validation.enums;
+                                 optional) — Issue #104" }
   scope_decided:        { issue, deliverable, verdict, reasoning_sha256, phase, in_scope,
                           out_of_scope, reason }
   tradeoff_decided:     { issue, deliverable, verdict, reasoning_sha256, chosen, rejected, reason }
   deploy_decided:       { issue, deliverable, verdict, reasoning_sha256, phase }
 
-  # ── writer / schema の境界（Writer Phase 0）─────────────────────────────────
-  # **規範的な判定根拠は各イベントの envelope の `schema_version`** であって、この記録ではない。
-  # これは観測可能性のための補助 — 「いつから検証が効いているか」を人が1行で読めるようにする。
-  # この記録が欠けても、各イベントの version から検証可能であることが条件（B は任意、A が規範）。
+  # ── the writer / schema boundary (Writer Phase 0) ────────────────────────
+  # **The normative basis is each event's envelope `schema_version`**, not this record.
+  # This is an aid to observability — it lets a human read "since when has validation been in
+  # effect" off one line.
+  # The condition is that verification remains possible from each event's version even if this
+  # record is missing (B is optional; A is normative).
   #
-  # 2つの保証を混ぜないこと。**schema が検証済みかと、actor が認証済みかは独立した性質である**:
+  # Do not mix the two assurances. **Whether the schema is validated and whether the actor is
+  # authenticated are independent properties**:
   #   validation_assurance:  legacy_unvalidated | validated:v1
-  #   identity_assurance:    claimed | observed | attested | authenticated   ← 未着手
+  #   identity_assurance:    claimed | observed | attested | authenticated   ← not started
   schema_enforcement_started: { schema_id, first_validated_seq, note,
                           authority: "informational — the normative record of which validator
                                       applies is each event's own envelope schema_version" }
@@ -377,7 +409,8 @@ event_classes:
   # reused: the reusable_modules/parts this cycle PULLED FROM instead of re-authoring (docs/12 §5 #7).
   # Recorded so reuse is a visible, auditable fact ("I can see reuse happened, and how much it saved"),
   # not an invisible discipline — the factory compounds only if reuse actually fires.
-  # domain_model: the SSoT底上げ enforcement (docs/11 §4d). A cycle that produced code but touched no
+  # domain_model: the enforcement that raises the SSoT floor (docs/11 §4d). A cycle that produced
+  # code but touched no
   # domain model silently lets the context base rot (the co-commit discipline, docs/12 §3.3). So a
   # cycle_completed MUST state it, like exceptions_none_asserted: either it references the
   # convention_adopted / domain-model artifact this cycle co-committed, OR it explicitly asserts none was
@@ -388,24 +421,28 @@ event_classes:
                           reused: [ref], views_referenced: [view_id], accountable_supervisor,
                           domain_model: {updated: [ref], none_asserted: reason} }   # exactly one of updated / none_asserted
   heartbeat:            { component, invariants_hold: bool }
-  # HALT。**writer 専用**（validation.writer_only）— `ledger.py trip-halt` だけが書ける。
+  # HALT. **Writer-only** (validation.writer_only) — only `ledger.py trip-halt` can write it.
   #
-  # halt は「警告」ではなく「止まっている状態」である。したがって:
-  #   - hook は **毎回** 台帳を読んで active な halt を確かめ、gated action を deny する
-  #     （宣言ではなく記録で止める。宣言を読むだけなら、宣言を消せば動いてしまう）
-  #   - **halt を永続化できなかった呼び出しは、その呼び出し自体を deny する。**
-  #     「記録できないなら宣言しない」は記録としては正しいが、制御としては fail-open になる
-  #   - 第二経路として `<ledger-root>/HALT` ラッチを置く。台帳が読めなくても止まる。
-  #     **正常な halt_released だけがラッチを消せる** — 手で消しても台帳の halt が残るので
-  #     hook は止め続ける（ラッチは台帳の代わりではなく、台帳が読めないときの保険である）
-  #   - 復旧のために **観測・検証・安全な修復** は通す（すべて deny だと復旧できない）。
-  #     通常の作業は止める
+  # A halt is not a "warning" but the state of being stopped. Therefore:
+  #   - the hook reads the ledger **every time**, confirms an active halt, and denies a gated
+  #     action (it stops on the record, not on a declaration; reading only a declaration means
+  #     deleting the declaration starts things again)
+  #   - **a call that could not persist the halt is itself denied.**
+  #     "Do not declare what cannot be recorded" is correct as recording and fail-open as control
+  #   - a `<ledger-root>/HALT` latch sits as a second path. It stops things even when the ledger
+  #     cannot be read.
+  #     **Only a proper halt_released can remove the latch** — removing it by hand leaves the halt
+  #     in the ledger, so the hook keeps stopping things (the latch is not a substitute for the
+  #     ledger but insurance for when the ledger cannot be read)
+  #   - **observation, verification, and safe repair** pass, so that recovery is possible (denying
+  #     everything makes recovery impossible). Ordinary work is stopped
   #
-  # scope: global = org 全体。role = その役の行為だけ（H4a では global のみ実装）。
+  # scope: global = the whole org. role = that role's acts only (H4a implements global only).
   halt_tripped:         { trigger, scope: global|role, reason, tripped_by, latch_written }
-  # 解除。**H4a では実装しない** — trip した主体と独立した承認が要り、それは identity の
-  # 認証（H1）に依存する。ここで「誰が解除してよいか」を actor の自己申告で決めると、
-  # 止めた本人が黙って解除できる。宣言だけ先に置き、書ける操作は H4b で足す。
+  # The release. **Not implemented in H4a** — it needs an approval independent of whoever tripped
+  # it, and that depends on identity authentication (H1). Deciding "who may release" here from an
+  # actor's self-declaration would let whoever stopped it release it silently. The declaration goes
+  # in first; the writable operation is added in H4b.
   halt_released:        { releases_seq, reason, released_by, recovery_verified, tripped_by,
                           identity_assurance, recorded_by, recorder_assurance,
                           signer_id, key_id,
@@ -445,15 +482,17 @@ event_classes:
                           distinct_actor: "actor != the actor of cycle_started/cycle_completed for this candidate" }
   refutation_attempted: { skeptic, claim_id, verdict: refuted|survives, checklist_ref, issue,
                           reasoning_sha256, lineage,
-                          root: "死因の根の分類（validation.enums 参照、任意、refuted のとき）— Issue #104",
+                          root: "the root class of the cause of death (see validation.enums;
+                                 optional, on refuted) — Issue #104",
                           distinct_actor: "actor != the maker's and != the admitting gate's" }
-  # ── 判断の receipt（H1）─────────────────────────────────────────────────────
-  # judge が自分の判断に署名したもの。**監督はこれを運ぶだけ**で、判断者の identity は失われない。
-  # したがって「代理記録」と「認証」は両立する — 必要なのは judge による直接の追記ではなく、
-  # **改変不能な判断 receipt** である。
+  # ── the judgment receipt (H1) ────────────────────────────────────────────
+  # A judge's signature over its own judgment. **The supervisor only carries it**, and the judge's
+  # identity is not lost.
+  # So "proxy recording" and "authentication" coexist — what is needed is not a direct append by
+  # the judge but **a judgment receipt that cannot be altered**.
   #
-  # receipt は下の全てを束縛する。**別の org・別の subject・別の血統への再利用は拒否する** —
-  # 束縛していない値は、後から差し替えられる。
+  # The receipt binds everything below. **Reuse against another org, another subject, or another
+  # lineage is refused** — a value that is not bound can be swapped afterwards.
   judgment_receipt:     { receipt_id, org_id, ledger_id, review_subject_id,
                           issue, role, phase, lineage, verdict,
                           requirements_digest, reasoning_sha256,
@@ -470,21 +509,24 @@ event_classes:
   judge_key_registered: { key_id, signer_id, public_key_digest, role, lineage,
                           registered_by, registration_reason }
 
-  # ── judge の血統（スイスチーズ層。docs/03 §3, docs/11）──────────────────────
-  # 同一ハーネスの subagent は親のモデルを継ぐので、`role-settings.yaml` が別系統を宣言しても
-  # 血統は分かれない。constitution の `enforcement.judges.lineage: cross-harness` を宣言した org は
-  # judge を2人走らせ、**一致だけが admission を生成する**。
+  # ── the judges' lineage (the Swiss-cheese layers. docs/03 §3, docs/11) ───
+  # A subagent in the same harness inherits the parent's model, so declaring a different family in
+  # `role-settings.yaml` does not separate the lineage. An org that declares
+  # `enforcement.judges.lineage: cross-harness` in its constitution runs two judges, and
+  # **only agreement generates an admission**.
   #
-  # そのため admit/survives は **直接 append できない**。各血統の判定を verdict_provisional として
-  # 置き、2件が一致した時点で道具が admission_decided{lineage: joint} を組み立てる。段2で verdict を
-  # 作るのは配管であって判断ではない（一致という事実の関数）。**不一致なら道具は admit を作れない。**
+  # So admit/survives **cannot be appended directly**. Each lineage's judgment is placed as a
+  # verdict_provisional, and once the two agree the tool assembles
+  # admission_decided{lineage: joint}. Producing the verdict at stage 2 is plumbing, not judgment
+  # (a function of the fact of agreement). **Where they disagree the tool cannot produce an
+  # admit.**
   verdict_provisional:  { role: gate|skeptic, lineage: same-harness|cross-harness,
                           verdict, for_event, issue, deliverable, reasoning_sha256, reasoning_ref,
-                          # phase は receipt の束縛に入る（どの段階の判定か）
+                          # phase enters the receipt's binding (which stage judged it)
                           phase,
                           decision_by, recorded_by, committed_by,
                           identity_assurance, recorder_assurance, workload_isolation,
-                          # **writer の隔離は judge の隔離ではない。** 欄を分ける（0.39.2）。
+                          # **the writer's isolation is not the judge's.** Separate fields (0.39.2).
                           writer_isolation,
                           signer_id, key_id, risk_accepted,
 
@@ -507,7 +549,7 @@ event_classes:
                           same_harness: verdict, cross_harness: verdict,
                           decision_by, recorded_by, committed_by,
                           identity_assurance, recorder_assurance, workload_isolation,
-                          # **writer の隔離は judge の隔離ではない。** 欄を分ける（0.39.2）。
+                          # **the writer's isolation is not the judge's.** Separate fields (0.39.2).
                           writer_isolation,
                           signer_id, key_id,
 
@@ -522,9 +564,9 @@ event_classes:
   # The existing test→integrate→deploy gate (result_deployed requires survives) and design→implement conformance
   # (conformance_reviewed) are the two hardest phase boundaries, already enforced below; these two
   # events extend the identical mechanism to the earlier boundaries.
-  # parent（任意）: task の deliverable に対する親 objective。founding は objective 単位で
-  # requirements/design を admit するので、task はここを辿って親の admit を継承する。
-  # 無ければ自分の admit だけを見る（従来どおり）。
+  # parent (optional): the parent objective of a task's deliverable. A founding admits
+  # requirements/design per objective, so a task follows this to inherit the parent's admit.
+  # Without one it reads only its own admit (as before).
   phase_started:        { deliverable, parent, phase: requirements|design|implement|test|integrate|deploy|operate, role,
                           requires_prior: "phase_admitted{deliverable==deliverable, phase==prior(phase), verdict==pass} (∅ for requirements)" }
   phase_admitted:       { deliverable, phase: requirements|design|implement|test|integrate|deploy|operate,
@@ -548,9 +590,10 @@ event_classes:
   result_deployed:      { candidate_id, net_effect_ref, observed_outcome,
                           requires_prior: "refutation_attempted{claim_id==candidate_id, verdict==survives}" }
   result_retired:       { candidate_id, cause, observed_outcome,
-                          root: "死因の根の分類（validation.enums 参照、任意）。自由文 cause の
-                                 言い換えを再発検出（learning.py repeats）が素通りしないための
-                                 記録時分類（Issue #104 / OBS-052）" }
+                          root: "the root class of the cause of death (see validation.enums;
+                                 optional). A classification made at recording time so that a
+                                 rewording of the free-text cause does not walk past recurrence
+                                 detection (learning.py repeats) (Issue #104 / OBS-052)" }
   # structure (Organ 7 / moves)
   sensor_reading:       { sensor, value, window, inputs_ref }
   move_executed:        { move_id, tier, diff_ref, precondition_evidence: [sensor_reading.id], lint_report_ref }
@@ -576,12 +619,13 @@ event_classes:
   # operating events (docs/05) — the recurring checks a 24/7 unattended org needs beyond
   # founding. Each obeys reconcile-by-exception: the silent path emits the event as an audit
   # breadcrumb; only the exception routes up. §2.1–2.3 have running code (tools/guardrails.py).
-  # BLAST-RADIUS-CAP。**writer 専用**（validation.writer_only）— `reserve-exposure` だけが書ける。
-  # 通常の append で書けると、負の曝露を1件入れるだけで上限が無効になる。
-  # session_id / tool_use_id / rule / request_digest は冪等性のためのもの:
-  #   キーは (session_id, tool_use_id, rule, class) の canonical tuple の hash
-  #   request_digest は要求内容（dimension/delta/cap/window/actor）の digest —
-  #   **同じキーで内容が違う要求は再実行ではない**ので、conflict として拒否する
+  # BLAST-RADIUS-CAP. **Writer-only** (validation.writer_only) — only `reserve-exposure` can write
+  # it. Writable by an ordinary append, one negative exposure row would void the cap.
+  # session_id / tool_use_id / rule / request_digest exist for idempotency:
+  #   the key is the hash of the canonical tuple (session_id, tool_use_id, rule, class)
+  #   request_digest is a digest of the request's content (dimension/delta/cap/window/actor) —
+  #   **a request with the same key and different content is not a re-run**, so it is refused as a
+  #   conflict
   exposure_budget_checked: { window_id, dimension, committed_so_far, delta_requested, cap,
                              actor_role, decision: allow|hold, caused_by_event,
                              session_id, tool_use_id, rule, request_digest }

@@ -1,150 +1,165 @@
-# REQUIREMENTS — 要求記述のテンプレート（`/org-found` が `REQUIREMENTS.md` として書く）
+# REQUIREMENTS — the template for writing requirements (`/org-found` writes it as `REQUIREMENTS.md`)
 
-> **これはテンプレート（節の骨格）であり、それ自体が要求ではない。** `/org-found` は受け取った
-> ブリーフをこの構造に整形して org 根の `REQUIREMENTS.md` に書く。`org_lint` が必須節の欠落と
-> 文の書き方を機械検査する（docs/11 §0a / §0b）。
+> **This is a template — the skeleton of the sections — and is not itself a set of requirements.**
+> `/org-found` shapes the brief it received onto this structure and writes it to `REQUIREMENTS.md` at
+> the org root. `org_lint` mechanically checks for missing required sections and for how the
+> statements are written (docs/11 §0a / §0b).
 >
-> **なぜ「RFP」ではないのか:** RFP (Request for Proposal) は**調達文書**で、外部の競合ベンダーに
-> 提案を求め、比較評価して契約相手を選ぶためのもの。中核は評価基準・配点・提案書式指定・契約条項
-> であり、自社開発では機能しない。ここで書いているのは ISO/IEC/IEEE 29148:2018 の
-> **StRS (Stakeholder Requirements Specification)** に相当する — 発注側の視点でニーズを記述し、
-> まだ解に踏み込んでいない文書。RFP から借りる価値があるのは「評価基準を事前に文書化する」規律
-> だけで、それは本テンプレートでは受入基準（§4）と成功基準（§5）が担っている。
+> **Why this is not an "RFP":** an RFP (Request for Proposal) is a **procurement document**, meant to
+> solicit proposals from competing external vendors, evaluate them comparatively, and select a party
+> to contract with. Its core is the evaluation criteria, the scoring, the required proposal format,
+> and the contract terms — none of which function for in-house development. What is written here
+> corresponds to ISO/IEC/IEEE 29148:2018's **StRS (Stakeholder Requirements Specification)** — a
+> document describing needs from the commissioning side, before stepping into a solution. The one
+> thing worth borrowing from an RFP is the discipline of documenting the evaluation criteria in
+> advance, and in this template that is carried by the acceptance criteria (§4) and the success
+> criteria (§5).
 >
-> **準拠の宣言:** ISO/IEC/IEEE 29148:2018 の **tailored conformance**（同規格 §4.5.2 が正式に
-> 認める適合形態）。SRS の全20条項（§9.6）は採らない — `Memory constraints` や
-> `Site adaptation requirements` は組込み・防衛向けの条項で、小規模プロダクトでは空欄が並ぶだけ
-> になり、**空欄の節がある文書は読まれなくなり、やがて更新されなくなる**。採るのは §5.2.4（構文
-> 規約）、§5.2.5（個々の要求の特性）、§5.2.6（集合の特性）、§5.2.7（避けるべき語）の4条項。
+> **Declared conformance:** **tailored conformance** to ISO/IEC/IEEE 29148:2018 (the form of
+> conformance that standard's §4.5.2 formally recognises). Not all twenty SRS clauses (§9.6) are
+> adopted — `Memory constraints` and `Site adaptation requirements` are clauses for embedded and
+> defence work, and in a small product they would only line up empty fields, and **a document with
+> empty sections stops being read and eventually stops being updated**. The four adopted are §5.2.4
+> (syntactic rules), §5.2.5 (the characteristics of each requirement), §5.2.6 (the characteristics of
+> the set), and §5.2.7 (the words to avoid).
 
 ---
 
-## 1. Why — なぜ作るのか
+## 1. Why — why is this being built
 
-`<顧客視点で1段落。「誰の、どんな状況の、何が変わるのか」。技術ではなく結果を書く。>`
+`<one paragraph from the customer's point of view. "For whom, in what situation, what changes."
+Write the outcome, not the technology.>`
 
-> Amazon の PR-FAQ に倣い、**すでに世に出ているかのように書く**。ここが1段落に収まらない場合、
-> 顧客価値が固まっていない兆候なので、要求を書く前に戻ること。
+> After Amazon's PR-FAQ, **write it as though it were already out in the world**. If this does not
+> fit in one paragraph, that is a sign the customer value is not settled, so go back before writing
+> any requirements.
 
-**目的（一文）:** `<この org が存在する理由。メトリクスではなく結果。>`
+**Purpose (one sentence):** `<why this org exists. An outcome, not a metric.>`
 
 ## 2. Goals / Non-Goals
 
 **Goals:**
-- `<達成すべきこと>`
+- `<what is to be achieved>`
 
-**Non-Goals（やらないと明示する）:**
-- `<やらないこと。なぜやらないかも書く>`
+**Non-Goals (stated explicitly as not being done):**
+- `<what will not be done. Write why, too>`
 
-> Google の Design Doc 由来。**Non-Goals はスコープクリープを止める最も安価な装置**であり、
-> 「書いていない＝やらない」ではなく「書いてある＝やらないと決めた」にすることで、後から
-> 「これも要るのでは」を再燃させない。EXCLUDE（§7）との違い: Non-Goals はこのプロダクトの
-> 方向性として持たないもの、EXCLUDE は今回のリリースから外すもの。
+> From Google's Design Doc. **Non-Goals are the cheapest device there is for stopping scope creep**:
+> making it "it is written down that we decided not to" rather than "it is not written, so we are not
+> doing it" keeps "surely we need this too" from reigniting later. The difference from EXCLUDE (§7):
+> a Non-Goal is something this product does not hold as a direction, while an EXCLUDE is something
+> left out of this release.
 
-## 3. Requirements — 要求（EARS 記法・FR-001 で採番）
+## 3. Requirements — in EARS notation, numbered FR-001
 
-> **EARS の6パターンのいずれかで書く**（Alistair Mavin, Rolls-Royce。Airbus / NASA / Bosch /
-> Intel / Siemens が採用）。ruleset は「前提条件は0個以上、**トリガーは最大1つ**、システム名は
-> 1つ、応答は1つ以上」。トリガーが最大1つという制約が、**要求の粒度を構文レベルで強制する**。
+> **Write each in one of the six EARS patterns** (Alistair Mavin, Rolls-Royce; adopted by Airbus,
+> NASA, Bosch, Intel, and Siemens). The ruleset is "zero or more preconditions, **at most one
+> trigger**, one system name, one or more responses". The constraint of at most one trigger is what
+> **enforces the granularity of a requirement at the syntactic level**.
 >
-> | パターン | テンプレート |
+> | pattern | template |
 > |---|---|
-> | Ubiquitous（常時） | `The <システム> shall <応答>` |
-> | State Driven（状態駆動） | `While <前提条件>, the <システム> shall <応答>` |
-> | Event Driven（事象駆動） | `When <トリガー>, the <システム> shall <応答>` |
-> | Optional Feature | `Where <機能が含まれる場合>, the <システム> shall <応答>` |
-> | Unwanted Behaviour | `If <トリガー>, then the <システム> shall <応答>` |
-> | Complex（複合） | `While <前提>, When <トリガー>, the <システム> shall <応答>` |
+> | Ubiquitous | `The <system> shall <response>` |
+> | State Driven | `While <precondition>, the <system> shall <response>` |
+> | Event Driven | `When <trigger>, the <system> shall <response>` |
+> | Optional Feature | `Where <the feature is included>, the <system> shall <response>` |
+> | Unwanted Behaviour | `If <trigger>, then the <system> shall <response>` |
+> | Complex | `While <precondition>, When <trigger>, the <system> shall <response>` |
 >
-> **日本語で書く場合**も構文は保つ:「〜のとき、システムは〜すること」。29148 §5.2.4 NOTE 2 は
-> ユーザーストーリー形式も許容しているが、**AIエージェントが実装する文脈では EARS を使う** —
-> 曖昧語が構文レベルで排除され、誤解釈が激減するため。
+> **Written in Japanese** the syntax still holds: 「〜のとき、システムは〜すること」. 29148 §5.2.4
+> NOTE 2 also permits the user-story form, but **in a context where an AI agent implements it, use
+> EARS** — vague words are excluded at the syntactic level and misinterpretation drops sharply.
 >
-> **キーワード規約（29148 §5.2.4）:** `shall`＝要求（必須）/ `will`＝事実・将来の宣言（拘束しない）
-> / `should`＝選好（要求ではない）/ `may`＝許容。**`must` は使わない**（要求と誤解される）。
+> **The keyword convention (29148 §5.2.4):** `shall` = a requirement (mandatory) / `will` = a fact or
+> a declaration about the future (not binding) / `should` = a preference (not a requirement) /
+> `may` = permission. **Do not use `must`** (it is mistaken for a requirement).
 
-| ID | 要求（EARS） | 根拠 |
+| ID | requirement (EARS) | rationale |
 |---|---|---|
-| FR-001 | `<When ... the system shall ...>` | `<なぜ必要か>` |
+| FR-001 | `<When ... the system shall ...>` | `<why it is needed>` |
 
-> **曖昧な箇所は推測で埋めず `[NEEDS CLARIFICATION: 何が不明か]` と明示する**（GitHub Spec Kit
-> 由来）。エージェントが推測で実装するのが最大の失敗モードであり、未解決のまま残っていれば
-> lint が落とす。
+> **Do not fill an ambiguity with a guess — state it as `[NEEDS CLARIFICATION: what is unclear]`**
+> (from GitHub Spec Kit). An agent implementing on a guess is the largest failure mode, and the lint
+> fails on any left unresolved.
 
-## 4. Acceptance — 受入基準（Given-When-Then）
+## 4. Acceptance — acceptance criteria (Given-When-Then)
 
-> 各要求に対し、**実装前に**検証シナリオを書く。Gherkin（Cucumber 公式仕様）の記法を借用する
-> が、ツールチェーンの導入は任意。これが RFP から借りるべき唯一の本質 —「評価基準を事前に
-> 文書化する」ことの、自社開発における翻訳。
+> For each requirement, write the verification scenario **before implementing**. The notation is
+> borrowed from Gherkin (Cucumber's official specification), though adopting its toolchain is
+> optional. This is the one essential thing worth borrowing from an RFP — the in-house translation of
+> "document the evaluation criteria in advance".
 
 ```
 FR-001:
-  Given <前提>
-  When  <操作>
-  Then  <観測可能な結果>
+  Given <the precondition>
+  When  <the action>
+  Then  <the observable result>
 ```
 
-## 5. Success Criteria — 成功基準（SC-001 で採番）
+## 5. Success Criteria — numbered SC-001
 
-> **技術非依存かつ定量的**であること（Spec Kit 由来）。「速い」ではなく「95パーセンタイルで
-> 200ms 以内」。実装方法に言及しない。
+> They must be **technology-independent and quantitative** (from Spec Kit). Not "fast" but "within
+> 200ms at the 95th percentile". Do not mention the implementation.
 
-| ID | 成功基準 |
+| ID | success criterion |
 |---|---|
-| SC-001 | `<定量的・技術非依存>` |
+| SC-001 | `<quantitative, technology-independent>` |
 
-## 6. Constraints / Non-Functional — 制約と非機能要求
+## 6. Constraints / Non-Functional
 
-> ISO/IEC 25010:2023 の9特性（Functional suitability / Performance efficiency / Compatibility /
-> **Interaction capability**（旧 Usability）/ Reliability / Security / Maintainability /
-> **Flexibility**（旧 Portability）/ **Safety**（2023 で新設））を**一度なぞって、該当するものだけ
-> 書く**。全特性を埋めるのは過剰。決済や個人情報を扱うなら Safety と Security は必ず見ること。
+> **Go once through** ISO/IEC 25010:2023's nine characteristics (Functional suitability / Performance
+> efficiency / Compatibility / **Interaction capability** (formerly Usability) / Reliability /
+> Security / Maintainability / **Flexibility** (formerly Portability) / **Safety** (new in 2023))
+> **and write only those that apply**. Filling in every characteristic is excessive. Where payments
+> or personal data are handled, always look at Safety and Security.
 
-- `<制約>`
+- `<constraint>`
 
 ## 7. Out of Scope / Assumptions / Open Questions
 
-**Out of Scope（今回やらない）:**
+**Out of Scope (not this time):**
 
-| 除外するもの | 理由 |
+| what is excluded | why |
 |---|---|
-| `<X>` | `<なぜ外すか。既知の失敗なら「既知の死。再調査しないこと」と明記>` |
+| `<X>` | `<why it is left out. Where it is a known failure, say so: "a known death. Do not investigate again">` |
 
-> **既知の死を書き残すことが最も価値がある。** 「調べたが構造的に不可能だった」を書いておかないと、
-> 別のエージェントが同じ調査を再実行して同じ結論に到達し、時間を溶かす。
+> **Writing down a known death is the most valuable thing here.** Without "it was investigated and
+> found structurally impossible" on record, another agent re-runs the same investigation, reaches the
+> same conclusion, and dissolves the time.
 
-**Assumptions（前提。崩れたら要求が変わる）:**
-- `<前提>`
+**Assumptions (premises; if one breaks, the requirements change):**
+- `<premise>`
 
-**Open Questions（未決。実装前に決める必要がある）:**
-- `<問い>`
+**Open Questions (undecided; must be settled before implementing):**
+- `<question>`
 
 ---
 
-## 付録: レビューチェックリスト（29148 §5.2.5 / §5.2.6 / §5.2.7）
+## Appendix: the review checklist (29148 §5.2.5 / §5.2.6 / §5.2.7)
 
-`org_lint` が機械検査するものと、人が見るものの両方を含む。
+This contains both what `org_lint` checks mechanically and what a human reads.
 
-**個々の要求（§5.2.5 — 9特性）:**
-Necessary（必要）/ Appropriate（抽象度が適切、設計を不要に制約しない）/ Unambiguous（一意に
-解釈できる）/ Complete（他を見ずに理解できる）/ **Singular（単一の能力のみ)** / Feasible（実現
-可能）/ **Verifiable（検証可能）** / Correct（元のニーズの正確な表現）/ Conforming（テンプレートに従う）
+**Each requirement (§5.2.5 — nine characteristics):**
+Necessary / Appropriate (the level of abstraction fits; it does not needlessly constrain the design)
+/ Unambiguous (interpretable in exactly one way) / Complete (understandable without reading
+elsewhere) / **Singular (one capability only)** / Feasible / **Verifiable** / Correct (an accurate
+expression of the original need) / Conforming (follows the template)
 
-**要求の集合（§5.2.6 — 5特性):**
-Complete（TBD/TBS/TBR を含まない）/ Consistent（矛盾・重複がなく、単位と用語が統一）/ Feasible
-（"affordable" を含む）/ Comprehensible / Able to be validated
+**The set of requirements (§5.2.6 — five characteristics):**
+Complete (contains no TBD/TBS/TBR) / Consistent (no contradiction or duplication; units and terms
+unified) / Feasible (including "affordable") / Comprehensible / Able to be validated
 
-**避けるべき語（§5.2.7 — lint が落とす）:**
+**The words to avoid (§5.2.7 — the lint fails on these):**
 
-| 種類 | 例 |
+| kind | examples |
 |---|---|
-| 最上級 | best, most, 最高の, 最適な |
-| 主観語 | user friendly, easy to use, cost effective, 使いやすい, 分かりやすい |
-| 曖昧な代名詞 | it, this, that（何を指すか不明な場合） |
-| 曖昧な副詞・形容詞 | almost always, significant, minimal, ほぼ, 十分に, 適切に |
-| 曖昧な接続 | `and/or`, および/または |
-| 非検証語 | provide support, but not limited to, as a minimum, 等をサポートする |
-| 比較句 | better than, より良い |
-| 抜け穴 | if possible, as appropriate, 可能であれば, 必要に応じて |
-| 全称語 | all, always, never, every, すべて, 常に, 決して |
-| 不完全な参照 | 版数・日付のない外部文書参照 |
+| superlative | best, most, 最高の, 最適な |
+| subjective | user friendly, easy to use, cost effective, 使いやすい, 分かりやすい |
+| vague pronoun | it, this, that (where what it refers to is unclear) |
+| vague adverb or adjective | almost always, significant, minimal, ほぼ, 十分に, 適切に |
+| vague conjunction | `and/or`, および/または |
+| unverifiable | provide support, but not limited to, as a minimum, 等をサポートする |
+| comparative | better than, より良い |
+| loophole | if possible, as appropriate, 可能であれば, 必要に応じて |
+| universal | all, always, never, every, すべて, 常に, 決して |
+| incomplete reference | a reference to an external document with no version or date |
