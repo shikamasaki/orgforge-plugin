@@ -1,7 +1,7 @@
-"""サイクルの開始と完了 — begin / complete / plan。
+"""Starting and completing a cycle — begin / complete / plan.
 
-配管（claim → spec_delegated → phase_started → cycle_started → log → stage）と、
-完了時の問い返し（ドメインモデル・新しい公開面）を持つ。"""
+It holds the plumbing (claim → spec_delegated → phase_started → cycle_started → log → stage) and
+the questions asked back at completion (the domain model, and any newly exposed surface)."""
 
 import json
 import os
@@ -31,14 +31,15 @@ from ._core import (
 
 
 def _steps_begin(a, parent, cid):
-    """begin が打つイベント列。(ラベル, 実行関数) の並び — plan はこれを印字するだけ。"""
+    """The sequence of events begin types. A list of (label, function) — plan merely prints it."""
     phase = a.phase or "implement"
     agent = a.agent or a.role
-    repo_args = []          # --repo は github_sync が discovery するので渡さない
+    repo_args = []          # --repo is not passed: github_sync discovers it
     return [
-        # 6: 何を選んだかの記録は配管（選ぶこと自体は判断だが、選んだ結果を残すのは機械の仕事）。
-        # 実地では6件着手して attention_allocated が1件しか無く、選択の履歴が追えなかった。
-        (f"attention_allocated（#{a.issue} を選択）",
+        # 6: recording what was chosen is plumbing (choosing is a judgment, but leaving the result
+        # of the choice is the machine's job). In the field six were started while only one
+        # attention_allocated existed, so the history of the choices could not be followed.
+        (f"attention_allocated (chose #{a.issue})",
          lambda: _ledger("append", "--actor", a.role, "--class", "attention_allocated",
                          "--natural-key", f"attn-{a.issue}-{cid}",
                          "--payload", json.dumps(
@@ -46,11 +47,12 @@ def _steps_begin(a, parent, cid):
                               "selected": [{"candidate_id": cid, "objective": parent or "",
                                             "source": "mandate"}],
                               "deferred": [],
-                              "reason": a.why or f"#{a.issue} に着手（begin）"},
+                              "reason": a.why or f"starting #{a.issue} (begin)"},
                              ensure_ascii=False))),
         (f"claim #{a.issue} as {agent}",
          lambda: _gh_sync("claim", "--issue", str(a.issue), "--agent", agent, *repo_args)),
-        *([(f"worktree .orgforge/wt/issue-{a.issue} を用意（並列 maker の物理分離）",
+        *([(f"prepare the worktree .orgforge/wt/issue-{a.issue} (physical separation for parallel "
+            f"makers)",
             lambda: _gh_sync("branch", "--issue", str(a.issue), "--worktree",
                              *(["--base", a.base] if getattr(a, "base", None) else [])))]
           if not getattr(a, "no_worktree", False) else []),
@@ -75,13 +77,14 @@ def _steps_begin(a, parent, cid):
                          "--payload", json.dumps({"role": agent, "candidate_id": cid,
                                                   "pack_manifest_id": f"issue-{a.issue}"},
                                                  ensure_ascii=False))),
-        # ツールが知っている事実は人に書かせない（B）。実地で私が書いた 276 字には、
-        # ブランチ名も worktree のパスも入っていなかったが、org_cycle は両方知っていた。
+        # Never make a human write a fact the tool already knows (B). In the field the 276
+        # characters I wrote carried neither the branch name nor the worktree path, while org_cycle
+        # knew both.
         (f"log cycle_started → #{a.issue}",
          lambda: _gh_sync("log", "--issue", str(a.issue), "--event", "cycle_started",
                           "--phase", phase, "--event-id", f"start-{cid}",
                           "--detail",
-                          f"{agent} が着手（parent #{parent or '-'} を継承 / "
+                          f"{agent} started (inheriting parent #{parent or '-'} / "
                           f"candidate_id `{cid}` / phase `{phase}`）",
                           "--command",
                           f"python3 org_cycle.py begin --role {a.role} --issue {a.issue} "
@@ -90,12 +93,12 @@ def _steps_begin(a, parent, cid):
                           f"claim: {agent}\n"
                           f"branch: {_branch_for(a.issue)}\n"
                           f"worktree: "
-                          + ("(なし — --no-worktree)" if getattr(a, "no_worktree", False)
+                          + ("(none — --no-worktree)" if getattr(a, "no_worktree", False)
                              else f".orgforge/wt/issue-{a.issue}/")
                           + f"\nparent: #{parent or '-'}\ncandidate_id: {cid}",
                           "--files", f".orgforge/wt/issue-{a.issue}/",
                           "--next-step",
-                          f"仕様は #{a.issue} 本文。完了したら "
+                          f"The specification is the body of #{a.issue}. Once done, "
                           f"`org_cycle.py complete --issue {a.issue} ...` → handback → verify")),
         (f"stage #{a.issue} → in-progress",
          lambda: _gh_sync("stage", "--issue", str(a.issue), "--stage", "in-progress")),
@@ -116,11 +119,11 @@ def _steps_complete(a, cid):
         (f"log cycle_completed → #{a.issue}",
          lambda: _gh_sync("log", "--issue", str(a.issue), "--event", "cycle_completed",
                           "--event-id", f"done-{cid}", "--detail", a.outputs,
-                          "--command", a.command or "(--command で DoD コマンドを渡すこと)",
-                          "--result", a.result or "(--result に実出力を貼ること)",
+                          "--command", a.command or "(pass the DoD command with --command)",
+                          "--result", a.result or "(paste the real output into --result)",
                           *(["--files", a.files] if getattr(a, "files", None) else []),
                           "--next-step",
-                          f"`org_cycle.py handback --issue {a.issue}` で PR → "
+                          f"`org_cycle.py handback --issue {a.issue}` for the PR → "
                           f"verify（gate → skeptic）→ integrate")),
         (f"release claim on #{a.issue}",
          lambda: _gh_sync("release", "--issue", str(a.issue), "--agent", agent)),
@@ -130,9 +133,10 @@ def _steps_complete(a, cid):
 def _readiness(issue):
     """Look, before starting, at whether it should really begin. **It does not stop — it shows.**
 
-    begin は無条件に開始していた。依存が rework 中でも、前提の人間タスクが残っていても
-    始まる。github_sync ready は Issue 番号の依存しか見ておらず、rework 中の依存も
-    needs-human も見ていない。判断は人がするが、材料が無ければ判断のしようがない。
+    begin used to start unconditionally. It starts even where a dependency is mid-rework, even where
+    a prerequisite human task remains. github_sync ready reads only Issue-number dependencies and
+    sees neither a dependency in rework nor needs-human. The judgment is a human's, but there is
+    nothing to judge from without the material.
     """
     warns = []
     _, body = _issue_body(issue)
@@ -149,32 +153,33 @@ def _readiness(issue):
             except Exception:
                 pass
         if av == "reject":
-            warns.append(f"#{dep}（{title[:34]}）は gate が reject して rework 中")
+            warns.append(f"#{dep} ({title[:34]}) was rejected by the gate and is in rework")
         elif state == "OPEN" and av != "admit":
-            warns.append(f"#{dep}（{title[:34]}）はまだ完了していない")
+            warns.append(f"#{dep} ({title[:34]}) is not finished yet")
         if "orgforge:needs-human" in labels:
-            warns.append(f"#{dep} は人間の作業待ち（needs-human）")
+            warns.append(f"#{dep} is waiting on a human (needs-human)")
 
-    # 自分自身に needs-human が付いていないか / 未解決の人間タスクが無いか
+    # Does this Issue itself carry needs-human, and is any human task still unresolved?
     code, out = _raw(["gh", "issue", "list", "--state", "open",
                       "--label", "orgforge:needs-human", "--json", "number,title", "--limit", "5"]
                      + (["--repo", _repo()] if _repo() else []))
     if code == 0:
         try:
             for h in json.loads(out or "[]"):
-                warns.append(f"人間の作業待ち: #{h['number']} {h['title'][:44]}")
+                warns.append(f"waiting on a human: #{h['number']} {h['title'][:44]}")
         except Exception:
             pass
     return warns
 
 
 def _new_exports(issue, base="develop"):
-    """このサイクルで新規に生えた公開型 / エクスポートを列挙する。
+    """List the public types / exports that newly grew in this cycle.
 
-    3: domain_model は必須だが `--domain-model-none "理由"` で常に通るので、書く側が none を
-    選べば形骸化する。実地では「純粋関数の追加のみ」と書かれたサイクルが Balance / Transfer /
-    SettleResult という型＝ユビキタス言語を実際に作っていた。**判定はしない** — 素通りを
-    させないために、反証材料を目の前に置くだけ。潰すか説明するかは役割が決める。
+    3: domain_model is required, but `--domain-model-none "<reason>"` always passes, so it becomes a
+    formality the moment the writer picks none. In the field a cycle written up as "only pure
+    functions added" had actually created the types Balance / Transfer / SettleResult — that is,
+    ubiquitous language. **It does not judge** — it merely puts the refuting material in front of
+    whoever writes, so nothing walks past. Killing it or explaining it is the role's call.
     """
     br = _branch_for(issue)
     code, out = _raw(["git", "diff", f"{base}...{br}", "--unified=0"])
@@ -194,9 +199,10 @@ def _new_exports(issue, base="develop"):
     return hits
 
 
-# 外に晒される面のパターン。SQL / TS / Python の代表的な公開の形だけを見る。
-# 完全な検出は目的ではない — **見落としを人に問い返す**のが目的なので、拾いすぎるより
-# 「これは公開面ではないか」と聞ける程度で足りる。
+# Patterns for a surface exposed outward. Only the representative public shapes of SQL, TS, and
+# Python are read. Complete detection is not the aim — the aim is **to ask a human back about an
+# oversight**, so being able to ask "isn't this a public surface?" is enough, and picking up too much
+# is worse.
 _SURFACE_PATTERNS = (
     (r"create\s+(?:or\s+replace\s+)?function\s+([\w.]+)", "db_function"),
     (r"grant\s+[\w\s,]+\s+on\s+[\w.]*\s*([\w.]+)\s+to\s+(\w+)", "grant"),
@@ -207,18 +213,21 @@ _SURFACE_PATTERNS = (
 
 
 def _new_public_surfaces(issue, base="develop"):
-    """このサイクルで新しく増えた公開面。**判定はしない — 問い返すだけ。**
+    """The public surface newly added in this cycle. **It does not judge — it asks back.**
 
-    認可ホールは「関数を1つ足した」ところから生まれる。実地の join_group がまさにそれで、
-    SECURITY DEFINER を1つ増やしたことが誰にも機械的に見えていなかった。
+    An authorization hole is born where "one function was added". join_group in the field was exactly
+    that: nothing made it mechanically visible to anyone that one more SECURITY DEFINER had
+    appeared.
     """
     br = _branch_for(issue)
     code, out = _raw(["git", "diff", f"{base}...{br}", "--unified=0"])
     if code != 0:
         return []
-    # **worktree の未コミット分も見る。** 実地では add_member_by_creator（SECURITY DEFINER）が
-    # 本番 DB には適用済みなのにコミットされておらず、`base...branch` の差分に出なかった。
-    # 「まだコミットしていないから公開面ではない」は成り立たない — 本番には既に在る。
+    # **The worktree's uncommitted content is read too.** In the field add_member_by_creator (a
+    # SECURITY DEFINER) had been applied to the production DB while remaining uncommitted, so it did
+    # not appear in the `base...branch` diff.
+    # "It is not a public surface because it is not committed yet" does not hold — it is already in
+    # production.
     wt = os.path.join(os.getcwd(), ".orgforge", "wt", f"issue-{issue}")
     if os.path.isdir(wt):
         c2, o2 = _raw(["git", "-C", wt, "diff", base, "--unified=0"])
@@ -243,9 +252,10 @@ def _new_public_surfaces(issue, base="develop"):
     definer_ctx = False
     skip = False
     for line in out.split("\n"):
-        # どのファイルの差分かを追う。テスト・型定義・設定は公開面ではない —
-        # 拾いすぎると **肝心の1件が埋もれる**（実地で add_member_by_creator が
-        # テストヘルパ10件に埋もれた。それでは問い返しの意味が無い）。
+        # Track which file each diff belongs to. Tests, type definitions, and configuration are not
+        # public surface — picking up too much **buries the one that matters** (in the field
+        # add_member_by_creator was buried under ten test helpers, which defeats the point of asking
+        # back).
         if line.startswith("+++ "):
             f = line[4:].strip().lstrip("b/")
             skip = bool(re.search(r"(^|/)(tests?|__tests__|spec)/|\.(test|spec)\.|"
@@ -268,9 +278,9 @@ def _new_public_surfaces(issue, base="develop"):
             seen.add(key)
             found.append({"kind": kind, "name": name, "note": ""})
 
-    # SECURITY DEFINER は**関数ごと**に判定する。ファイル単位のフラグだと、定義が
-    # 後ろに来た関数（実地の add_member_by_creator）が印なしになって下位に沈み、
-    # まさに確認してほしい1件が埋もれる。
+    # SECURITY DEFINER is decided **per function**. A file-level flag leaves a function defined
+    # later (add_member_by_creator in the field) unmarked, so it sinks down the list and the very one
+    # that needs looking at is buried.
     added = "\n".join(l for l in out.split("\n") if l.startswith("+"))
     for s in found:
         if s["kind"] != "db_function":
@@ -281,18 +291,19 @@ def _new_public_surfaces(issue, base="develop"):
             s["note"] = "SECURITY DEFINER"
         if re.search(r"grant\s+execute\s+on\s+function\s+" + re.escape(s["name"]),
                      added, re.I):
-            s["note"] = (s["note"] + " / grant 済み").strip(" /")
+            s["note"] = (s["note"] + " / granted").strip(" /")
 
-    # 危険な順に。SECURITY DEFINER と grant は呼び手の権限を超えるので最上位。
+    # In order of danger. SECURITY DEFINER and grant exceed the caller's privileges, so they come
+    # first.
     rank = {"db_function": 0, "grant": 1, "rls_policy": 2, "endpoint": 3, "export": 4}
     found.sort(key=lambda s: (0 if s["note"] else 1, rank.get(s["kind"], 9)))
     return found
 
 
 def _cleanup_worktree(issue):
-    """4: begin が作った worktree を片付ける。18 Issue 回せば18個残り、次に同じ Issue を
-    触ったとき古いツリーを掴む。**未コミットの変更があれば消さない** — 消えて困るものが
-    あるかは、こちらが判断してよいことではない。"""
+    """4: clean up the worktree begin created. Run eighteen Issues and eighteen are left behind, and
+    touching the same Issue next time grabs the stale tree. **Nothing with uncommitted changes is
+    removed** — whether something would be missed is not this side's call to make."""
     root = os.getcwd()
     wt = os.path.join(root, ".orgforge", "wt", f"issue-{issue}")
     if not os.path.isdir(wt):
@@ -300,17 +311,18 @@ def _cleanup_worktree(issue):
     code, out = _raw(["git", "-C", wt, "status", "--porcelain"])
     if code == 0 and out.strip():
         return (f"the worktree was kept: {wt}\n"
-                f"  未コミットの変更がある（{len(out.strip().split(chr(10)))} 件）。"
-                f"確認してから `git worktree remove` すること。")
+                f"  it carries uncommitted changes ({len(out.strip().split(chr(10)))}). "
+                f"Look at them, then `git worktree remove`.")
     code, out = _raw(["git", "worktree", "remove", wt])
     if code != 0:
-        return f"worktree を消せなかった: {wt}（{out.strip()[:80]}）"
-    return f"worktree を片付けた: .orgforge/wt/issue-{issue}"
+        return f"could not remove the worktree: {wt} ({out.strip()[:80]})"
+    return f"cleaned up the worktree: .orgforge/wt/issue-{issue}"
 
 
 def cmd_begin(a):
-    # worktree の base は constitution の integration_ref から解決する（OBS-053 / #106）。
-    # 台帳に書く前に決める — 決まらないまま claim だけ積むと、fail-closed が半端になる。
+    # The worktree's base resolves from the constitution's integration_ref (OBS-053 / #106).
+    # It is decided before anything is written to the ledger — stacking claims while it stays
+    # undecided leaves the fail-closed half-done.
     if not getattr(a, "no_worktree", False):
         base, base_err = resolve_integration_base(getattr(a, "base", None))
         if base_err:
@@ -324,7 +336,8 @@ def cmd_begin(a):
         for w in warns:
             print(f"  ⚠ {w}", file=sys.stderr)
         print("  — these do NOT stop you. Proceed knowingly and it runs as-is.\n"
-              "     前提が崩れたまま作ったものは、後で gate が拒否する側に回る。\n",
+              "     What is built on a broken premise ends up on the side the gate rejects "
+              "later.\n",
               file=sys.stderr)
     parent = a.parent or resolve_parent(a.issue)
     cid = a.candidate_id or _candidate_id(a.issue)
@@ -350,39 +363,42 @@ def cmd_begin(a):
 def cmd_complete(a):
     if not (a.domain_model_updated or a.domain_model_none):
         print("either --domain-model-updated or --domain-model-none is required.\n"
-              "docs/11 §4d: cycle_completed は「このサイクルがドメインモデルに何をしたか」を"
-              "述べない限り台帳が拒否する。何も確立しなかったなら、その理由を書くこと"
-              "（skeptic が反証できる主張になる）。", file=sys.stderr)
+              "docs/11 §4d: the ledger refuses cycle_completed unless it states what this cycle "
+              "did to the domain model. Where nothing was established, write why (it becomes a "
+              "claim the skeptic can refute).", file=sys.stderr)
         return 2
-    # 公開面/語彙の検出は**助言**の経路 — constitution が統合先を宣言していればそれを使い、
-    # 宣言の無い legacy org では従来どおり develop を試す（diff が取れなければ従来どおり沈黙）。
-    # complete 自体を fail-closed にはしない（#106 が要求するのは統合先を消費する4経路）。
+    # Detecting public surface and vocabulary is an **advisory** path — where the constitution
+    # declares the integration target it is used, and in a legacy org with no declaration develop is
+    # tried as before (staying silent as before where no diff can be taken).
+    # complete itself is not made fail-closed (what #106 requires are the four paths that consume the
+    # integration target).
     _diff_base, _ = resolve_integration_base(None)
     surfaces = _new_public_surfaces(a.issue, base=_diff_base or "develop")
     if surfaces and not (a.new_surface or a.new_surface_none):
-        print(f"⚠ この変更で新しく公開された面がある（#{a.issue}）:", file=sys.stderr)
+        print(f"⚠ this change newly exposes a surface (#{a.issue}):", file=sys.stderr)
         for s in surfaces[:10]:
             print(f"    {s['kind']}: {s['name']}"
                   + (f"  ⟨{s['note']}⟩" if s["note"] else ""), file=sys.stderr)
-        print("  **認可ホールは「関数を1つ足した」ところから生まれる。**\n"
-              "  誰が呼べるのか / 呼ばれたら何ができるのかを確認したうえで、\n"
-              "  --new-surface \"<面>: <誰が呼べるか / 何ができるか>\" で申告すること。\n"
-              "  公開面ではないと判断するなら --new-surface-none \"<理由>\"。\n"
-              "  申告は gate に渡り、台帳にも残る。", file=sys.stderr)
+        print("  **An authorization hole is born where \"one function was added\".**\n"
+              "  Confirm who can call it and what can be done once it is called, then\n"
+              "  declare it with --new-surface \"<surface>: <who can call it / what it can do>\".\n"
+              "  If you judge it not to be a public surface, --new-surface-none \"<reason>\".\n"
+              "  The declaration reaches the gate and stays in the ledger.", file=sys.stderr)
         return 2
 
     if a.domain_model_none:
-        # 素通りをさせない: 「規則を定めていない」と書いたサイクルが、実は語彙を作っていないか。
+        # Let nothing walk past: has a cycle written up as "it settled no rule" in fact created
+        # vocabulary?
         ex = _new_exports(a.issue, base=_diff_base or "develop")
         if ex:
-            print(f"確認: none_asserted だが、このサイクルで {len(ex)} 個の公開シンボルが増えている:",
+            print(f"check: none_asserted, yet this cycle added {len(ex)} public symbol(s):",
                   file=sys.stderr)
             for kind, name in ex[:12]:
                 print(f"    {kind} {name}", file=sys.stderr)
-            print("これらは領域の語彙（ユビキタス言語）ではないか。語彙なら "
-                  "--domain-model-updated で記録すること。\n"
-                  "語彙ではないと判断するなら、そのまま進めてよい — **判定はあなたの仕事**で、"
-                  "ここは素通りを防ぐための問い返しにすぎない。\n", file=sys.stderr)
+            print("Are these the domain's vocabulary (ubiquitous language)? If they are, record "
+                  "them with --domain-model-updated.\n"
+                  "If you judge that they are not, carry on — **the judgment is yours**, and this is "
+                  "only a question asked back so nothing walks past.\n", file=sys.stderr)
 
     cid = a.candidate_id or _candidate_id(a.issue)
     if a.new_surface or a.new_surface_none:
@@ -395,28 +411,32 @@ def cmd_complete(a):
                      "none_asserted": a.new_surface_none or ""}, ensure_ascii=False))
     rc = _execute(_steps_complete(a, cid), f"complete #{a.issue} ({a.role})")
     if rc == 0 and a.learned:
-        # 3: doctrine の蓄積経路がサイクルに繋がっておらず、doctrine/ も conventions/ も空だった。
-        # 実地では同じ失敗を3回繰り返した知見（「性質のテストは壊れる場所で検証しないと無意味」）が
-        # あり、doctrine に入っていれば止まったはず。docs/06 は「蓄積した失敗こそ最も価値ある
-        # context」と書いているのに、蓄積の口がどこにも開いていなかった。
-        # **propose まで。admit は gate の仕事**（自分の学びを自分で正典にできない）。
+        # 3: the path by which doctrine accumulates was not connected to the cycle, and both
+        # doctrine/ and conventions/ were empty. In the field a learning from repeating the same
+        # failure three times ("a property test is meaningless unless it verifies at the place that
+        # breaks") existed and would have stopped it had it been in doctrine. docs/06 writes that
+        # accumulated failure is the most valuable context there is, yet no mouth for accumulating it
+        # was open anywhere.
+        # **Only as far as propose. The admit is the gate's job** (nobody canonises their own
+        # learning).
         code, out = _run([os.path.join(HERE, "doctrine.py"), "propose",
                           _sub("doctrine"), a.agent or a.role,
                           "--claim", a.learned,
                           "--source", f"issue-{a.issue}",
                           "--confidence", str(a.confidence),
-                          # provenance を埋めないと gate が admit できず、学びは pending の
-                          # まま死ぬ。日付は配管が知っているので人に打たせない。
+                          # Without provenance filled in, the gate cannot admit and the learning
+                          # dies pending. The plumbing knows the date, so no human types it.
                           "--retrieved-at", _today(),
                           "--review-by", _plus_days(a.review_days),
                           *(["--affects", a.affects] if a.affects else [])])
         if code == 0:
-            print(f"  doctrine に propose した（admit は gate）: {out.strip()[:100]}")
+            print(f"  proposed to doctrine (the admit is the gate's): {out.strip()[:100]}")
         else:
-            print(f"  doctrine への propose に失敗: {out.strip()[:120]}", file=sys.stderr)
+            print(f"  the propose to doctrine failed: {out.strip()[:120]}", file=sys.stderr)
     elif rc == 0:
-        print(f"\n  ヒント: このサイクルで「次も効く学び」があれば --learned で残すこと。"
-              f"doctrine に入らない学びは次の Issue に渡らない（実地で同じ失敗を3回繰り返した）。")
+        print(f"\n  hint: where this cycle produced a learning that will hold next time, leave it "
+              f"with --learned. A learning that never enters doctrine does not reach the next Issue "
+              f"(in the field the same failure was repeated three times).")
     if rc == 0:
         msg = _cleanup_worktree(a.issue)
         if msg:
@@ -424,46 +444,52 @@ def cmd_complete(a):
         verdict, seq, near = _admission_for(a.issue)
         rv, rseq, _ = _refutation_for(a.issue)
         if verdict == "admit" and rv == "survives":
-            print(f"\nNEXT: gate admit（seq {seq}）· skeptic survives（seq {rseq}）。統合できる:\n"
+            print(f"\nNEXT: gate admit (seq {seq}) · skeptic survives (seq {rseq}). It can be "
+                  f"integrated:\n"
                   f"  python3 org_cycle.py integrate --issue {a.issue}")
         elif verdict == "admit" and rv == "refuted":
-            print(f"\nNEXT: skeptic が refuted（seq {rseq}）。統合してはいけない —"
-                  f" 反証に対処してから再度 verify にかけること。")
+            print(f"\nNEXT: the skeptic refuted it (seq {rseq}). It must not be integrated — answer "
+                  f"the refutation, then put it through verify again.")
         elif verdict == "admit":
-            print(f"\nNEXT: #{a.issue} は gate が admit 済み（seq {seq}）。次は skeptic:\n"
+            print(f"\nNEXT: the gate has admitted #{a.issue} (seq {seq}). The skeptic is next:\n"
                   f"  python3 org_cycle.py verify --issue {a.issue} --role skeptic")
         elif verdict:
-            print(f"\nNEXT: gate の判定は `{verdict}`（seq {seq}）。admit ではないので、"
-                  f"指摘に対処してから再度 verify にかけること。")
+            print(f"\nNEXT: the gate's verdict is `{verdict}` (seq {seq}). It is not an admit, so "
+                  f"answer what it raised and put it through verify again.")
         else:
-            print(f"\nNEXT: gate の admission がまだ:\n"
+            print(f"\nNEXT: the gate's admission is still missing:\n"
                   f"  python3 org_cycle.py verify --issue {a.issue} --role gate\n"
-                  f"maker は自分の仕事を admit できない（台帳が拒否する）。")
-            # 「無い」と言い切る前に、取り違えの可能性を示す。実地で deliverable に関数名が
-            # 入っていて、記録はあるのに「まだ」と出た。原因が即分かる形で出す。
+                  f"A maker cannot admit its own work (the ledger refuses it).")
+            # Before declaring "there is none", show that it may have been mistaken for something
+            # else. In the field a function name sat in deliverable, so it printed "still missing"
+            # while the record existed. This prints it in a form where the cause is immediate.
             if near:
                 s, d, i = near[-1]
-                print(f"（近い記録: seq {s} に admission_decided があるが "
-                      f"deliverable={d!r} / issue={i!r} で #{a.issue} と一致しない。"
-                      f"gate が Issue 番号以外の識別子で記録した可能性がある）", file=sys.stderr)
+                print(f"(a close record: seq {s} holds an admission_decided, but with "
+                      f"deliverable={d!r} / issue={i!r} it does not match #{a.issue}. The gate may "
+                      f"have recorded it under an identifier other than the Issue number)",
+                      file=sys.stderr)
     return rc
 
 
 def cmd_plan(a):
-    """何も実行せず、打つイベント列だけを印字する。"""
-    # plan こそ「打つ前に見る」場所なので、着手前の確認はここにも出す。
+    """Run nothing; print only the sequence of events that would be typed."""
+    # plan is precisely the place for "look before you type", so the pre-start checks appear here
+    # too.
     for w in ([] if getattr(a, "no_check", False) else _readiness(a.issue)):
         print(f"  ⚠ {w}", file=sys.stderr)
-    # plan は実行しないので止めない。ただし begin が fail-closed になることは予告する（#106）。
+    # plan runs nothing, so it does not stop. It does forewarn that begin will fail closed (#106).
     base, base_err = resolve_integration_base(getattr(a, "base", None))
     if base_err:
-        print(f"  ⚠ begin は worktree base を決められず失敗する:\n{base_err}", file=sys.stderr)
+        print(f"  ⚠ begin cannot decide the worktree base and will fail:\n{base_err}",
+              file=sys.stderr)
     else:
         a.base = base
     parent = a.parent or resolve_parent(a.issue)
     cid = a.candidate_id or _candidate_id(a.issue)
-    print(f"# begin #{a.issue} ({a.role}) — parent=#{parent or '(解決できず)'} candidate_id={cid}")
+    print(f"# begin #{a.issue} ({a.role}) — parent=#{parent or '(unresolved)'} "
+          f"candidate_id={cid}")
     for i, (desc, _) in enumerate(_steps_begin(a, parent, cid), 1):
         print(f"  {i}. {desc}")
-    print(f"\n# complete #{a.issue} — 実行時に --outputs と domain_model が要る")
+    print(f"\n# complete #{a.issue} — running it needs --outputs and domain_model")
     return 0

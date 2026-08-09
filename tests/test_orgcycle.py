@@ -771,11 +771,11 @@ def test_integrate_records_and_merges_immutable_subject_sha():
 
 
 def test_surface_detection_ranks_security_definer_first():
-    """SECURITY DEFINER は関数ごとに判定する。ファイル単位だと肝心の1件が沈む。"""
+    """SECURITY DEFINER is decided per function. Per file, the one that matters sinks."""
     src = _cycle_src()
     seg = src[src.index("def _new_public_surfaces"):]
-    assert "関数ごと" in seg, "ファイル単位のフラグに戻っている"
-    assert "grant 済み" in seg
+    assert "per function" in seg, "it has gone back to a file-level flag"
+    assert "granted" in seg
 
 
 def test_surface_detection_skips_test_files():
@@ -786,11 +786,12 @@ def test_surface_detection_skips_test_files():
 
 
 def test_complete_blocks_until_surfaces_declared(tmp_path):
-    """公開面が増えたら、申告するまで complete させない（認可ホールの入口）。"""
+    """Where public surface grows, complete is withheld until it is declared (the entrance to an
+    authorization hole)."""
     src = _cycle_src()
     seg = src[src.index("def cmd_complete"):src.index("def cmd_plan")]
     assert "--new-surface" in seg and "return 2" in seg
-    assert "認可ホール" in seg
+    assert "authorization hole" in seg
 
 
 # ── 0.22.0: 分割で持ち込んだ穴を塞ぐ ────────────────────────────────────
@@ -1018,7 +1019,8 @@ def test_show_reports_what_the_rounds_are_about():
     assert "rounds:" in src and "last 3" in src
     # 周回ごとに違う理由を見ること（1件だけ引くと全部同じに見える）
     assert "_issue_reasons" in src
-    assert "判断材料であって判断ではない" in src, "board が「切れ」と判定してはいけない"
+    assert "material for a judgment, not a" in src, (
+        "the board must never judge \"cut it\"")
 
 
 def test_verify_hands_the_unshot_areas_to_skeptic():
@@ -2693,7 +2695,7 @@ def test_gc_keeps_worktree_when_branch_cannot_be_resolved(tmp_path, monkeypatch,
     err = captured.err
     assert "feat/issue-9-ghost" in err, f"何を解決できなかったのか名指ししていない: {err!r}"
     out = captured.out
-    assert "detached HEAD のため自動削除しない" in out
+    assert "a detached HEAD, so it is not removed automatically" in out
     assert f"git worktree remove {wt}" in out
 
 
@@ -2805,7 +2807,8 @@ def test_show_attributes_nothing_when_clean_against_constitution_ref(tmp_path):
     g("branch", "feat/issue-7")          # origin/main と同一 commit（差分ゼロ）
     code, out = run("org_cycle.py", "show", "--issue", "7", cwd=str(org))
     assert code == 0, out
-    assert "不可逆" not in out, f"差分ゼロなのに不可逆変更を帰属させた:\n{out}"
+    assert "irrev." not in out, (
+        f"it attributed an irreversible change with a zero diff:\n{out}")
 
 
 def test_show_without_declared_base_prints_status_warns_and_skips_attribution(tmp_path):
@@ -2817,7 +2820,8 @@ def test_show_without_declared_base_prints_status_warns_and_skips_attribution(tm
     org, _ = _declared_org(tmp_path, integration_ref=None, develop=True)
     code, out = run("org_cycle.py", "show", "--issue", "7", cwd=str(org))
     assert code == 0, f"基準が無いだけで orientation 全体を閉め出した:\n{out}"
-    assert "verdicts" in out and "次:" in out, f"台帳由来の状態が出ていない:\n{out}"
+    assert "verdicts" in out and "next:" in out, (
+        f"the state that comes from the ledger is not printed:\n{out}")
     assert "--base" in out and "integration_ref" in out, f"警告が両方の選択肢を名指ししていない:\n{out}"
     # 帰属ブロックの行ラベルは「不可逆:」。警告文（不可逆な変更の帰属は表示しない）とは区別する。
     assert "不可逆:" not in out, f"基準が無いのに帰属ブロックを出した:\n{out}"
@@ -2836,7 +2840,8 @@ def test_show_attribution_block_fires_when_base_is_declared(tmp_path):
     g("checkout", "-q", "main")
     code, out = run("org_cycle.py", "show", "--issue", "9", cwd=str(org))
     assert code == 0, out
-    assert "不可逆" in out and "3 件" in out, f"宣言済みの基準で帰属ブロックが働いていない:\n{out}"
+    assert "irrev." in out and "3 —" in out, (
+        f"the attribution block is not working with a declared reference:\n{out}")
 
 
 def test_gc_all_works_without_declared_base(tmp_path):

@@ -1,6 +1,7 @@
-"""見る・片付ける・残す — show / gc / touched。
+"""Look, clean up, leave a record — show / gc / touched.
 
-1つの Issue の全体像、溜まった worktree の掃除、本番資産への変更の記録。"""
+The whole picture of one Issue, sweeping up accumulated worktrees, and recording changes to
+production assets."""
 
 import json
 import os
@@ -25,11 +26,12 @@ from ._core import (
 
 
 def _issue_reasons(issue):
-    """Issue に載っている admission_decided の理由を**古い順**に全部返す。
+    """Return every admission_decided reason on the Issue, **oldest first**.
 
-    台帳は digest しか持たない（設計どおり）ので、理由は Issue にある。1件だけ引くと
-    どの周回も同じ最新コメントを見てしまい、周回の性質が全部同じに見える（最初の実装が
-    そうなった）。周回ごとに違うものを見たいので、並びで取る。
+    The ledger holds only the digest (by design), so the reasons are on the Issue. Fetching one makes
+    every round read the same latest comment, which makes every round look alike (the first
+    implementation did exactly that). The point is to see something different per round, so they are
+    taken as a sequence.
     """
     args = ["gh", "issue", "view", str(issue), "--json", "comments"]
     r = _repo()
@@ -53,16 +55,18 @@ def _issue_reasons(issue):
 
 
 def cmd_show(a):
-    """1つの Issue について「誰が何を判定し、いま何待ちか」を一望する。
+    """See at a glance, for one Issue, who judged what and what it now waits on.
 
-    実地では gh issue view と台帳の grep と status.py を別々に叩く必要があり、が3周した
-    ときにどの周のどの判定を見ているのか分からなくなった。ある Issue の反証記録 欠落も の
-    reject 欠落も、この視点があれば即座に見つかっていた。
+    In the field gh issue view, a grep of the ledger, and status.py had to be run separately, and
+    once something had gone three rounds it became impossible to tell which round's judgment was
+    being read. Both the missing refutation record on one Issue and a missing reject would have been
+    found immediately from this vantage point.
     """
-    # 不可逆な変更の帰属基準。develop を推測すると、他 Issue の成果を「この Issue の
-    # 不可逆な変更」と誤帰属する（OBS-054 / #106）。ただし show は読み取り専用の
-    # orientation なので、基準が無いことを理由に台帳由来の状態まで隠さない（rework #106）—
-    # 帰属ブロックだけを省き、警告して続行する（cmd_plan と同じ warn-don't-stop の形）。
+    # The reference for attributing irreversible changes. Guessing develop misattributes another
+    # Issue's output as "this Issue's irreversible change" (OBS-054 / #106). show, however, is
+    # read-only orientation, so the absence of a reference is no reason to hide even the state that
+    # comes from the ledger (rework #106) — only the attribution block is omitted, with a warning,
+    # and it continues (the same warn-don't-stop shape as cmd_plan).
     attribution_base, base_err = resolve_integration_base(getattr(a, "base", None))
     if base_err:
         print(f"  ! not attributing irreversible changes — no baseline (#{a.issue}):\n{base_err}",
@@ -74,28 +78,29 @@ def cmd_show(a):
     evs, voided = _events_for(a.issue)
 
     provisional = [e for e in evs if e["class"] == "verdict_provisional"]
-    state = ("rework 待ち" if av == "reject" else
-             "統合できる" if av == "admit" and rv == "survives" else
-             "反証で差し戻し" if rv == "refuted" else
-             "cross-harness 暫定判定あり（joint 確定待ち）" if provisional else
-             "skeptic 待ち" if av == "admit" else
-             "gate 待ち" if any(e["class"] == "cycle_completed" for e in evs) else
-             "実装中" if any(e["class"] == "cycle_started" for e in evs) else "未着手")
+    state = ("waiting on rework" if av == "reject" else
+             "can be integrated" if av == "admit" and rv == "survives" else
+             "sent back by a refutation" if rv == "refuted" else
+             "cross-harness provisional judgment present (waiting on the joint)" if provisional else
+             "waiting on the skeptic" if av == "admit" else
+             "waiting on the gate" if any(e["class"] == "cycle_completed" for e in evs) else
+             "being implemented" if any(e["class"] == "cycle_started" for e in evs)
+             else "not started")
 
     print(f"#{a.issue} {title or ''} — {state}")
     if provisional and not (av or rv):
         print("  ! the provisional verdict is recorded in the ledger, but it is not final."
-              "cross-harness の一致を専用 derive-admission で確定すること。")
+              "Settle the cross-harness agreement with the dedicated derive-admission.")
 
     br = _branch_for(a.issue)
     code, log = _raw(["git", "log", "--oneline", "-3", br])
     if code == 0 and log.strip():
-        print(f"  実装:     {' / '.join(l.split(' ',1)[0] for l in log.strip().splitlines())}"
+        print(f"  built:    {' / '.join(l.split(' ',1)[0] for l in log.strip().splitlines())}"
               f"  ({br})")
     wt = os.path.join(os.getcwd(), ".orgforge", "wt", f"issue-{a.issue}")
-    print(f"  worktree: {'.orgforge/wt/issue-%d/' % a.issue if os.path.isdir(wt) else '(なし)'}")
+    print(f"  worktree: {'.orgforge/wt/issue-%d/' % a.issue if os.path.isdir(wt) else '(none)'}")
 
-    # 判定の履歴 — 何周目のどの判定かが分かるように全部出す
+    # The history of judgments — all of it, so which judgment of which round is clear
     judged = [e for e in evs if e["class"] in
               ("admission_decided", "refutation_attempted", "rework_requested",
                "integration_admitted", "result_deployed", "correction")]
@@ -112,7 +117,7 @@ def cmd_show(a):
                 continue
             mark = "✗" if e.get("seq") in voided else " "
             why = (pl.get("why") or pl.get("reason") or "")[:70]
-            note = " ⟨訂正済み⟩" if e.get("seq") in voided else ""
+            note = " ⟨corrected⟩" if e.get("seq") in voided else ""
             bf = " ⟨backfill⟩" if pl.get("backfilled") else ""
             print(f"   {mark} seq {e.get('seq')}: {e['class']} = {pl.get('verdict', '-')}"
                   f" by {e.get('actor')}{note}{bf}"
@@ -120,10 +125,12 @@ def cmd_show(a):
     else:
         print("  verdicts: none yet")
 
-    # 4: 周回が何を意味しているか。が9周、が10周した。統制は毎回実害のある欠陥を
-    # 見つけており機能しているが、**いつ収束するかの見通しが立たない**。回数だけでなく
-    # 「直近の判定が何を問題にしているか」が見えると、切るかどうかの判断材料になる。
-    # **判定はしない** — 「もう切れ」とは言わない。性質の変化を並べるだけ。
+    # 4: what the rounds mean. One went nine rounds, another ten. The controls work — each round
+    # found a defect with real harm — but **there is no view of when it converges**. Seeing not just
+    # the count but "what the latest judgments take issue with" gives material for deciding whether
+    # to cut it.
+    # **It does not judge** — it never says "cut it now". It merely lays out how the character
+    # changed.
     rounds = [e for e in judged if e["class"] == "admission_decided"]
     if len(rounds) >= 3:
         reasons = _issue_reasons(a.issue)
@@ -132,45 +139,56 @@ def cmd_show(a):
             pl = e.get("payload", {}) or {}
             txt = " ".join(str(pl.get(k, "")) for k in ("why", "reason", "note"))
             if not txt.strip():
-                # 台帳の並びと Issue の並びを末尾から対応させる（どちらも時系列）
+                # Line the ledger's sequence up with the Issue's from the end (both are
+                # chronological)
                 j = len(reasons) - 3 + idx
                 txt = reasons[j] if 0 <= j < len(reasons) else ""
-            # 分類はキーワードによる粗い当て推量である。**判断材料であって判断ではない** —
-            # 「テストの欠陥が3周続いている」は切る理由になり得るが、切るかどうかは CEO が決める。
-            # 誤分類しうるので、原文は Issue と `judged` の一覧で読めるようにしてある。
+            # The classification is a coarse keyword guess. **It is material for a judgment, not a
+            # judgment** — "a test defect three rounds running" can be a reason to cut, but whether
+            # to cut is the CEO's call.
+            # It can misclassify, so the original text stays readable on the Issue and in the
+            # `judged` list.
             k = ("テストの欠陥" if re.search(r"テスト|警報|検出できな|placebo|ミューテーション", txt)
                  else "実装の欠陥" if txt else "不明")
             kinds.append(k)
         print(f"  rounds:   {len(rounds)} — last 3: {' / '.join(kinds)}")
-        # ③ rework が積み増している = 「直すべきものが増え続けている」signal。
-        # 運用では8回 rework し、**4回目以降の発見はすべて spec の MUST に無いもの**だった。
-        # 「不可逆 N 件」と同じ扱い — **止めない。材料を出す。**
+        # ③ rework piling up = the signal that "what needs fixing keeps growing".
+        # In operation it reworked eight times, and **every finding from the fourth onward was
+        # absent from the spec's MUSTs**.
+        # Treated like "N irreversible changes" — **it does not stop; it puts out material.**
         reworks = [e for e in judged
                    if e["class"] == "rework_requested" and e.get("seq") not in voided]
-        # 判定回数ではなく **rework の回数**で見る。は7周かかったが rework は2回で収束した —
-        # 判定を重ねること自体は悪くない（gate が丁寧に見た結果でもある）。問題は
-        # 「直して、また直して」が積み増すことなので、そこを数える。
+        # Read by **the number of reworks**, not the number of judgments. One took seven rounds yet
+        # converged in two reworks — stacking up judgments is not itself bad (it can be the result of
+        # a gate looking carefully). The problem is "fix it, and fix it again" piling up, so that is
+        # what is counted.
         if len(reworks) > 3:
-            print(f"            ⚠ rework {len(reworks)} 回 / 判定 {len(rounds)} 回 — 3回を超えている。"
-                  f"**Issue の切り方か、完了の定義を見直す価値がある。**\n"
-                  f"              運用では8回 rework し、4回目以降の発見はすべて spec の "
-                  f"MUST に無いものだった（範囲外の欠陥は別 Issue にする — template/SPEC.md の"
-                  f"「完了の判定」）")
-        # 4（要望書の提案4）については、**実装を見送った。**
-        # 「直近の rework が MUST のどれに対応しているか」を語彙の重なりで判定してみたが、
-        # 実データで誤検出した: 完了済みの Issue（MUST どおりの作業）に「スコープ外」と
-        # 警告を出し、本当にスコープ外だった は `expenses` がたまたま一致して素通りした。
-        # 対応関係の判定は語彙一致では届かない — 誤警告は正しい警告まで無効化する
-        # （実地で complete の狼少年が Issue コメントの目視統合を招いた）。
-        # 提案の狙い（スコープ外の作業を検出する）は、split-check の (d)(e) と
-        # 上の「不可逆 N 件」が別の角度から材料を出している。
+            print(f"            ⚠ {len(reworks)} rework(s) / {len(rounds)} judgment(s) — over "
+                  f"three. **How the Issue is cut, or the definition of done, is worth "
+                  f"revisiting.**\n"
+                  f"              In operation it reworked eight times, and every finding from the "
+                  f"fourth onward was absent from the spec's MUSTs (an out-of-scope defect becomes "
+                  f"its own Issue — see \"the judgment of done\" in template/SPEC.md)")
+        # As for 4 (proposal 4 of the request), **implementation was declined.**
+        # Deciding "which MUST the latest rework answers" by vocabulary overlap was tried and
+        # produced false results on real data: it warned "out of scope" on a finished Issue (work
+        # exactly per its MUSTs), while one that genuinely was out of scope walked past because
+        # `expenses` happened to match.
+        # Deciding correspondence is out of reach for vocabulary matching — a false warning voids the
+        # correct warnings too (in the field, complete crying wolf led to Issue comments being
+        # integrated by eye).
+        # The proposal's aim (detecting out-of-scope work) is served from other angles by
+        # split-check's (d) and (e) and by "N irreversible changes" above.
         if kinds.count("テストの欠陥") == 3:
-            print(f"            直近3周とも「MUST は満たすが検査が足りない」型。"
-                  f"実装ではなく検査の欠陥が続いている")
+            print(f"            all three latest rounds are of the \"satisfies the MUSTs but the "
+                  f"checking is thin\" kind. The defects continue in the checking, not the "
+                  f"implementation")
 
-    # 3: この Issue が生んだ**不可逆な変更**の数。運用では migration を5本生み、
-    # それらが相互に干渉した（0009 が直したものを 0010 が壊し、0011 が別の2件を RED にした）。
-    # **3本目を書く時点で「これは1つの Issue ではない」と気づけたはず。** 止めない — 材料を出す。
+    # 3: the number of **irreversible changes** this Issue produced. In operation it produced five
+    # migrations and they interfered with each other (0010 broke what 0009 fixed, and 0011 turned two
+    # others RED).
+    # **By the time the third was written, "this is not one Issue" could have been noticed.** It does
+    # not stop — it puts out material.
     if attribution_base is not None:
         irreversible = []
         for ev in evs:
@@ -184,38 +202,41 @@ def cmd_show(a):
                       if re.search(r"(^|/)(migrations?|db/migrate)/", f)]
         total = sorted(set(irreversible) | set(os.path.basename(m) for m in migrations))
         if len(total) >= 3:
-            print(f"  不可逆:   {len(total)} 件 — {', '.join(t[:34] for t in total[:5])}"
+            print(f"  irrev.:   {len(total)} — {', '.join(t[:34] for t in total[:5])}"
                   + (" …" if len(total) > 5 else ""))
-            print(f"            1つの deliverable が3件以上の不可逆な変更を生んでいる。"
-                  f"Issue の切り方を見直す価値がある（相互に干渉するマイグレーションを生む）")
+            print(f"            one deliverable has produced three or more irreversible changes. "
+                  f"How the Issue is cut is worth revisiting (it produces migrations that interfere "
+                  f"with each other)")
 
-    nxt = ("gate 再判定 → skeptic → integrate" if av == "reject" else
+    nxt = ("gate re-judges → skeptic → integrate" if av == "reject" else
            f"integrate --issue {a.issue}" if av == "admit" and rv == "survives" else
            f"verify --issue {a.issue} --role skeptic" if av == "admit" else
            f"verify --issue {a.issue} --role gate")
-    print(f"  次:       {nxt}")
+    print(f"  next:     {nxt}")
     return 0
 
 
 def cmd_gc(a):
-    """5: 溜まった worktree を片付ける。**未コミットの変更があるものは残す。**
+    """5: sweep up accumulated worktrees. **Anything with uncommitted changes is left alone.**
 
-    complete/integrate が片付けるようになったが、既に溜まったものと、予算 cap で消せず
-    残ったものは誰の仕事でもなかった。統合済みなのに残っていると、次に同じ Issue を
-    触ったとき古いツリーを掴む。
+    complete/integrate now clean up, but what had already accumulated — and what a budget cap left
+    unremovable — was nobody's job. One left standing after integration means the stale tree is
+    grabbed when the same Issue is touched next.
     """
-    # 「統合済みか」の基準。develop を推測すると、origin/main に統合済みの worktree を
-    # 「未統合」として永久に残す（OBS-057 / #106）。--all は統合済み判定を**しない**ので
-    # 基準を要求しない — fail-closed は base を実際に消費する判断にだけかける（rework #106）。
+    # The reference for "is it integrated". Guessing develop leaves a worktree already integrated
+    # into origin/main standing forever as "unintegrated" (OBS-057 / #106). --all **does not** decide
+    # integration, so it demands no reference — fail-closed applies only to judgments that actually
+    # consume the base (rework #106).
     merged_base = None
     if not a.all:
         merged_base, base_err = resolve_integration_base(getattr(a, "base", None))
         if base_err:
-            print(f"gc の統合済み判定の基準が決まらない:\n{base_err}", file=sys.stderr)
+            print(f"gc's reference for deciding integration is undecided:\n{base_err}",
+                  file=sys.stderr)
             return 2
     base = os.path.join(os.getcwd(), ".orgforge", "wt")
     if not os.path.isdir(base):
-        print("worktree はありません。")
+        print("there are no worktrees.")
         return 0
     kept, removed = [], []
     for name in sorted(os.listdir(base)):
@@ -225,36 +246,40 @@ def cmd_gc(a):
         wt = os.path.join(base, name)
         code, out = _raw(["git", "-C", wt, "status", "--porcelain"])
         if code == 0 and out.strip():
-            kept.append((name, f"未コミットの変更 {len(out.strip().splitlines())} 件"))
+            kept.append((name, f"{len(out.strip().splitlines())} uncommitted change(s)"))
             continue
         if not a.all:
-            # 既定は「統合済みだけ」を消す。まだ取り込まれていない仕事は消さない。
-            # 「どの branch を統合済みか問うか」は導出名ではなく**実在の branch**（#107）。
-            # 導出名で問うと、タイトル変更後は `--merged --list <導出名>` が常に空になり、
-            # 統合済み worktree が「未統合」として永久に残る（Tatekae OBS-012/057原因2）。
+            # By default only what is integrated is removed. Work not yet taken in is not removed.
+            # "Which branch do we ask about" is **the branch that exists**, not the derived name
+            # (#107). Asking by the derived name makes `--merged --list <derived name>` always empty
+            # after a retitling, so an integrated worktree stands forever as "unintegrated" (Tatekae
+            # OBS-012 / OBS-057 cause 2).
             br, warn, err = resolve_issue_branch(issue, derived=_branch_for(issue))
             if err:
-                # 実在 branch を特定できないなら消す判断はできない — 残して理由を言う。
+                # Without identifying the branch that exists, removal cannot be decided — it is
+                # left standing and the reason is stated.
                 print(err, file=sys.stderr)
                 if "detached HEAD" in err:
-                    kept.append((name, ("detached HEAD のため自動削除しない。内容を確認後、" 
-                                        f"必要なら git -C {wt} switch <実在branch>、または "
-                                        f"git worktree remove {wt} を明示実行する")))
+                    kept.append((name, ("a detached HEAD, so it is not removed automatically. "
+                                        f"After looking at the content, run git -C {wt} switch "
+                                        f"<an existing branch> if needed, or run "
+                                        f"git worktree remove {wt} explicitly")))
                 else:
-                    kept.append((name, "branch を解決できない（上の stderr を見ること）"))
+                    kept.append((name, "the branch cannot be resolved (see the stderr above)"))
                 continue
             if warn:
                 print(f"  ⚠ {warn}", file=sys.stderr)
             code, merged = _raw(["git", "branch", "--merged", merged_base, "--list", br])
             if code != 0 or not (merged or "").strip():
-                kept.append((name, f"{merged_base} に未統合（branch {br}）"))
+                kept.append((name, f"not integrated into {merged_base} (branch {br})"))
                 continue
         code, out = _raw(["git", "worktree", "remove", wt])
         (removed if code == 0 else kept).append(
-            (name, "片付けた" if code == 0 else out.strip()[:60]))
-    # .orgforge/wt/ の外に作られた検証用 worktree（scratchpad 等）も git は把握している。
-    # 実地では skeptic が scratchpad に作った sk7 が、予算 cap で消せず残っていた。
-    # 「配管が作った場所」しか見ないと、こういう孤児が永久に残る。
+            (name, "cleaned up" if code == 0 else out.strip()[:60]))
+    # git also knows about verification worktrees created outside .orgforge/wt/ (in a scratchpad and
+    # the like). In the field an sk7 a skeptic made in a scratchpad was left standing, unremovable
+    # under a budget cap.
+    # Reading only "where the plumbing creates them" leaves orphans like that forever.
     code, out = _raw(["git", "worktree", "list", "--porcelain"])
     if code == 0:
         for block in (out or "").split("\n\n"):
@@ -265,19 +290,19 @@ def cmd_gc(a):
             if wt == os.getcwd() or base in wt:
                 continue
             if not any(k in wt for k in ("/scratchpad/", "/tmp/")):
-                continue      # 素性の分からない場所は触らない
+                continue      # a place of unknown provenance is not touched
             name = os.path.basename(wt)
             code2, st = _raw(["git", "-C", wt, "status", "--porcelain"])
             if code2 == 0 and st.strip():
-                kept.append((name, f"未コミットの変更 {len(st.strip().splitlines())} 件（{wt}）"))
+                kept.append((name, f"{len(st.strip().splitlines())} uncommitted change(s) ({wt})"))
                 continue
             if not os.path.isdir(wt):
                 code3, o3 = _raw(["git", "worktree", "prune"])
-                removed.append((name, "消えていたので prune"))
+                removed.append((name, "it was gone, so pruned"))
                 continue
             code3, o3 = _raw(["git", "worktree", "remove", wt])
             (removed if code3 == 0 else kept).append(
-                (name, f"片付けた（{wt}）" if code3 == 0 else o3.strip()[:60]))
+                (name, f"cleaned up ({wt})" if code3 == 0 else o3.strip()[:60]))
 
     for n, why in removed:
         print(f"  ✓ {n} — {why}")
@@ -291,12 +316,13 @@ def cmd_gc(a):
 
 
 def cmd_touched(a):
-    """本番資産への変更を台帳に残す。
+    """Leave a change to a production asset in the ledger.
 
-    exposure_budget_checked はローカルのファイル操作を数えるが、リモート DB への DDL や
-    本番の権限変更は数えていない。実際には後者のほうが危険で、しかも取り消しにコストが
-    かかる。実地では本番 DB にマイグレーション2本と権限の revoke が入ったのに台帳には
-    何も残らず、「あの revoke は誰の権限で入ったのか」が辿れない状態になった。
+    exposure_budget_checked counts local file operations but counts neither DDL against a remote DB
+    nor a privilege change in production. The latter is in fact the more dangerous, and costs more to
+    undo. In the field two migrations and a privilege revoke went into the production DB while
+    nothing was left in the ledger, so "under whose authority did that revoke go in" could not be
+    traced.
     """
     payload = {"target": a.target, "op": a.op, "name": a.name or "",
                "reversible": bool(a.reversible), "authority": a.authority,
@@ -309,15 +335,18 @@ def cmd_touched(a):
     ], f"record asset_touched ({a.target})")
     if rc == 0 and a.issue:
         _gh_sync("log", "--issue", str(a.issue), "--event", "progress_recorded",
-                 "--detail", f"本番資産に変更: {a.op} {a.name or ''} on {a.target}"
-                             f"（{'戻せる' if a.reversible else '**戻せない**'} / 権限: {a.authority}）",
+                 "--detail", f"changed a production asset: {a.op} {a.name or ''} on {a.target}"
+                             f"({'reversible' if a.reversible else '**irreversible**'} / "
+                             f"authority: {a.authority})",
                  "--command", f"{a.op} {a.name or ''}".strip(),
-                 "--result", a.rollback or "（rollback 手順は未記録）")
+                 "--result", a.rollback or "(the rollback procedure is unrecorded)")
     if not a.reversible:
-        print("  ⚠ reversible=false — 戻せないことを承知で入れた、という記録になった。", file=sys.stderr)
+        print("  ⚠ reversible=false — this is now a record that it went in knowing it cannot be "
+              "undone.", file=sys.stderr)
     return rc
 
 
-# 外に晒される面のパターン。SQL / TS / Python の代表的な公開の形だけを見る。
-# 完全な検出は目的ではない — **見落としを人に問い返す**のが目的なので、拾いすぎるより
-# 「これは公開面ではないか」と聞ける程度で足りる。
+# Patterns for a surface exposed outward. Only the representative public shapes of SQL, TS, and
+# Python are read. Complete detection is not the aim — the aim is **to ask a human back about an
+# oversight**, so being able to ask "isn't this a public surface?" is enough, and picking up too much
+# is worse.
