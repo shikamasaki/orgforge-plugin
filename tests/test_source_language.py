@@ -48,19 +48,17 @@ BUDGET = {
     "tests/test_organs.py": 53,
     "tests/test_orgcycle.py": 424,
     "tests/test_rederivability.py": 1,
-    "tests/test_req_lint.py": 61,
+    "tests/test_req_lint.py": 55,
     "tests/test_source_language.py": 1,
     "tests/test_supersede_recovery.py": 1,
     "tools/drift.py": 11,
     "tools/ghsync/backlog.py": 20,
     "tools/ghsync/record.py": 9,
-    "tools/github_sync.py": 70,
-    "tools/org_cycle.py": 99,
     "tools/orgcycle/inspect.py": 3,
     "tools/orgcycle/judge.py": 2,
     "tools/orgcycle/lens.py": 1,
     "tools/orgcycle/rederivability.py": 9,
-    "tools/req_lint.py": 134,
+    "tools/req_lint.py": 28,
 }
 
 

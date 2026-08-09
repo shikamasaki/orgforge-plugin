@@ -46,7 +46,7 @@ def run(tmp_path, text, *args):
 def test_valid_document_passes(tmp_path):
     code, out = run(tmp_path, VALID)
     assert code == 0, out
-    assert "適合" in out
+    assert "conforms" in out
 
 
 def test_template_conforms_to_its_own_rules(tmp_path):
@@ -106,7 +106,7 @@ def test_acceptance_scenarios_are_not_checked_as_requirements(tmp_path):
 def test_subjective_word_is_held(tmp_path):
     code, out = run(tmp_path, VALID.replace("立替の清算が滞留せずに完了する。",
                                             "使いやすいアプリを作る。"))
-    assert code == 10 and "主観語" in out
+    assert code == 10 and "subjective" in out
 
 
 def test_loophole_word_is_held(tmp_path):
@@ -114,7 +114,7 @@ def test_loophole_word_is_held(tmp_path):
     bad = VALID.replace("| FR-002 | 受領側が7日間応答しないとき、システムは自動で支払い済みとすること |",
                         "| FR-002 | 可能であれば、システムは自動で支払い済みとすること |")
     code, out = run(tmp_path, bad)
-    assert code == 10 and "抜け穴" in out
+    assert code == 10 and "loophole" in out
 
 
 def test_universal_and_ambiguous_conjunction_are_held(tmp_path):
@@ -123,7 +123,7 @@ def test_universal_and_ambiguous_conjunction_are_held(tmp_path):
         "| FR-001 | When a user logs in and/or registers, the system shall always create an account |")
     code, out = run(tmp_path, bad)
     assert code == 10
-    assert "曖昧な接続" in out or "全称語" in out
+    assert "vague conjunction" in out or "universal" in out
 
 
 def test_must_keyword_warns_but_does_not_hold(tmp_path):
@@ -155,7 +155,7 @@ def test_warn_only_does_not_hold(tmp_path):
     code, out = run(tmp_path, VALID.replace("立替の清算が滞留せずに完了する。",
                                             "使いやすいアプリを作る。"), "--warn-only")
     assert code == 0
-    assert "主観語" in out
+    assert "subjective" in out
 
 
 def test_missing_file_is_a_usage_error(tmp_path):
@@ -168,7 +168,7 @@ def test_no_requirements_at_all_is_held(tmp_path):
     """要求が1件もない文書は要求記述ではない。"""
     empty = "\n".join(l for l in VALID.split("\n") if "FR-0" not in l)
     code, out = run(tmp_path, empty)
-    assert code == 10 and "要求文が1件もない" in out
+    assert code == 10 and "not one requirement statement" in out
 
 
 # ── VOIDDEP は 0.25.1 で取り下げた（日本語の要求から目的語を切り出せない）──────

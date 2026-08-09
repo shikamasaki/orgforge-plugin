@@ -1,29 +1,34 @@
 #!/usr/bin/env python3
-"""req_lint — REQUIREMENTS.md が要求記述の標準に適合しているか検査する（docs/11 §0b）。
+"""req_lint — check that REQUIREMENTS.md conforms to the standard for writing requirements
+(docs/11 §0b).
 
-**なぜこれが要るのか。** docs/11 §0a は founding 成果物の *ファイル名* を固定したが、*中身の書式*
-は規定していなかった。その結果、founding のたびにエージェントが構成をその場で発明し、同じ要求から
-別の構造の文書が出る — プラグインの中核主張（同じ spec ⇒ 同じプロセス・同じ契約）が、要求記述の
-層で最初から破れていた。書式を機械検査することでその穴を塞ぐ。
+**Why this is needed.** docs/11 §0a fixed the *file names* of the founding artifacts but prescribed
+nothing about *the format of their content*. As a result an agent invented the structure afresh at
+every founding, and the same requirements produced documents of different structure — the plugin's
+central claim (same spec ⇒ same process, same contract) was broken from the start at the layer where
+requirements are written. Checking the format mechanically closes that hole.
 
-**準拠のレベル: ISO/IEC/IEEE 29148:2018 の tailored conformance**（同規格 §4.5.2 が正式に認める
-適合形態）。SRS の全20条項（§9.6）は採らない — `Memory constraints` 等は組込み・防衛向けで、
-小規模プロダクトでは空欄が並ぶだけになり、空欄の節がある文書は読まれなくなり更新もされなくなる。
-採るのは4条項:
+**Level of conformance: tailored conformance to ISO/IEC/IEEE 29148:2018** (the form of conformance
+that standard's §4.5.2 formally recognises). Not all twenty SRS clauses (§9.6) are adopted —
+`Memory constraints` and the like are for embedded and defence work, and in a small product they
+would only line up empty fields, and a document with empty sections stops being read and stops being
+updated. Four clauses are adopted:
 
-  §5.2.4  構文規約      — 主語＋shall。must は使わない（要求と誤解される）
-  §5.2.5  個々の要求    — Verifiable / Singular / Unambiguous …（9特性）
-  §5.2.6  集合の特性    — TBD/TBS/TBR を残さない、矛盾・重複がない（5特性）
-  §5.2.7  避けるべき語  — 主観語・最上級・抜け穴・全称語（本ツールの中核）
+  §5.2.4  syntactic rules   — subject + shall. must is not used (it is mistaken for a requirement)
+  §5.2.5  each requirement  — Verifiable / Singular / Unambiguous … (nine characteristics)
+  §5.2.6  set properties    — no TBD/TBS/TBR left, no contradiction or duplication (five)
+  §5.2.7  words to avoid    — subjective, superlative, loophole, and universal words (this tool's
+                              core)
 
-加えて EARS（Alistair Mavin / Rolls-Royce。Airbus・NASA・Bosch・Intel・Siemens 採用）の6パターンと、
-GitHub Spec Kit 由来の `[NEEDS CLARIFICATION]` マーカーを検査する。後者が最重要 — **エージェントが
-曖昧なまま推測で実装するのが最大の失敗モード**であり、未解決のマーカーが残ったまま実装フェーズに
-入るのを機械的に止める。
+To that it adds the six patterns of EARS (Alistair Mavin / Rolls-Royce; adopted by Airbus, NASA,
+Bosch, Intel, and Siemens) and the `[NEEDS CLARIFICATION]` marker from GitHub Spec Kit. The last
+matters most — **an agent implementing on a guess while things stay ambiguous is the largest failure
+mode**, and this mechanically stops the implementation phase from starting with an unresolved marker
+still in place.
 
   req_lint.py check <path/to/REQUIREMENTS.md> [--json] [--warn-only]
 
-Exit: 0 適合 / 10 違反あり（gate は HOLD すべき）/ 2 usage・読み取りエラー
+Exit: 0 conforms / 10 violations found (the gate should HOLD) / 2 usage or read error
 """
 import argparse
 import json
@@ -31,9 +36,10 @@ import os
 import re
 import sys
 
-# ── 必須セクション（template/REQUIREMENTS.md の骨格）──────────────────────────
-# 見出しの表記ゆれを吸収するため、各セクションは「これらの語のいずれかを含む見出し」で判定する。
-# 厳密な文字列一致にすると、日本語/英語の混在や番号付けの違いで落ちて実用に耐えない。
+# ── required sections (the skeleton of template/REQUIREMENTS.md) ─────────────
+# To absorb variation in how a heading is written, each section is decided by "a heading containing
+# any of these words". A strict string match fails on a mix of Japanese and English or on different
+# numbering, and would not survive use.
 REQUIRED_SECTIONS = [
     ("why",        ["why", "なぜ", "目的", "purpose"]),
     ("goals",      ["goal", "ゴール", "目標"]),
@@ -45,47 +51,54 @@ REQUIRED_SECTIONS = [
     ("out-of-scope", ["out of scope", "スコープ外", "除外", "exclude"]),
 ]
 
-# ── §5.2.7 避けるべき語 ──────────────────────────────────────────────────────
-# 規格が "shall be avoided" とする語。要求文の中に現れたら落とす。
-# (正規表現, 種類, 説明) — 日本語は語境界が無いので \b を使わない。
+# ── §5.2.7 words to avoid ───────────────────────────────────────────────────
+# The words the standard says "shall be avoided". Appearing inside a requirement statement fails it.
+# (regex, kind, explanation) — Japanese has no word boundary, so \b is not used for it.
 BANNED = [
-    (r"\b(best|most|optimal|maximum possible)\b", "最上級",
-     "何と比べて最上かが検証できない"),
-    (r"(最高の|最適な|最善の|可能な限り)", "最上級", "何と比べて最上かが検証できない"),
-    (r"\b(user[- ]friendly|easy to use|cost[- ]effective|intuitive|seamless)\b", "主観語",
-     "人によって判定が変わる。観測可能な条件に書き換える"),
-    (r"(使いやすい|分かりやすい|わかりやすい|直感的|快適に|スムーズに)", "主観語",
-     "人によって判定が変わる。観測可能な条件に書き換える"),
-    (r"\b(almost always|significant|minimal|sufficient|adequate|reasonable)\b", "曖昧な形容",
-     "程度が定まらない。数値か観測条件にする"),
-    (r"(ほぼ|十分に|適切に|なるべく|できるだけ|柔軟に)", "曖昧な形容",
-     "程度が定まらない。数値か観測条件にする"),
-    (r"\b(and\s*/\s*or)\b", "曖昧な接続", "and と or のどちらかに決める"),
-    (r"(および/または|かつ/または)", "曖昧な接続", "and と or のどちらかに決める"),
-    (r"\b(etc\.|and so on|but not limited to|as a minimum|provide support for)\b", "非検証語",
-     "範囲が閉じない。列挙し切るか、境界を書く"),
-    (r"(など|等をサポート|その他)", "非検証語", "範囲が閉じない。列挙し切るか、境界を書く"),
-    (r"\b(better than|faster than|improved)\b", "比較句",
-     "基準が示されていない。何と比べてどれだけかを書く"),
-    (r"(より良い|より速い|改善された)", "比較句", "基準が示されていない"),
-    (r"\b(if possible|as appropriate|if needed|where necessary)\b", "抜け穴",
-     "実装しない口実になる。条件を確定させる"),
-    (r"(可能であれば|必要に応じて|状況に応じて)", "抜け穴", "実装しない口実になる"),
-    (r"\b(all|always|never|every|none)\b", "全称語",
-     "例外の有無が検証されていない。本当に例外がないか確認し、あるなら書く"),
-    (r"(すべての場合|常に|決して|一切)", "全称語", "例外の有無が検証されていない"),
+    (r"\b(best|most|optimal|maximum possible)\b", "superlative",
+     "what it is superlative to cannot be verified"),
+    (r"(最高の|最適な|最善の|可能な限り)", "superlative",
+     "what it is superlative to cannot be verified"),
+    (r"\b(user[- ]friendly|easy to use|cost[- ]effective|intuitive|seamless)\b", "subjective",
+     "the judgment changes from person to person. Rewrite it as an observable condition"),
+    (r"(使いやすい|分かりやすい|わかりやすい|直感的|快適に|スムーズに)", "subjective",
+     "the judgment changes from person to person. Rewrite it as an observable condition"),
+    (r"\b(almost always|significant|minimal|sufficient|adequate|reasonable)\b", "vague degree",
+     "the degree is unsettled. Make it a number or an observable condition"),
+    (r"(ほぼ|十分に|適切に|なるべく|できるだけ|柔軟に)", "vague degree",
+     "the degree is unsettled. Make it a number or an observable condition"),
+    (r"\b(and\s*/\s*or)\b", "vague conjunction", "settle on either and or or"),
+    (r"(および/または|かつ/または)", "vague conjunction", "settle on either and or or"),
+    (r"\b(etc\.|and so on|but not limited to|as a minimum|provide support for)\b",
+     "unverifiable", "the range does not close. Enumerate it fully, or write the boundary"),
+    (r"(など|等をサポート|その他)", "unverifiable",
+     "the range does not close. Enumerate it fully, or write the boundary"),
+    (r"\b(better than|faster than|improved)\b", "comparative",
+     "no reference is given. Write what it is compared against, and by how much"),
+    (r"(より良い|より速い|改善された)", "comparative", "no reference is given"),
+    (r"\b(if possible|as appropriate|if needed|where necessary)\b", "loophole",
+     "it becomes an excuse not to implement. Settle the condition"),
+    (r"(可能であれば|必要に応じて|状況に応じて)", "loophole",
+     "it becomes an excuse not to implement"),
+    (r"\b(all|always|never|every|none)\b", "universal",
+     "whether exceptions exist has not been verified. Confirm there are none, and write them where "
+     "there are"),
+    (r"(すべての場合|常に|決して|一切)", "universal",
+     "whether exceptions exist has not been verified"),
 ]
 
-# TBD/TBS/TBR — §5.2.6 Complete が明示的に禁じる
+# TBD/TBS/TBR — explicitly forbidden by §5.2.6 Complete
 TBX = re.compile(r"\b(TBD|TBS|TBR)\b")
 
-# §5.2.4 — `must` は要求と誤解されるので使わない
+# §5.2.4 — `must` is not used, because it is mistaken for a requirement
 MUST_KEYWORD = re.compile(r"\bmust\b", re.I)
 
-# EARS の6パターン（英語・日本語の両方を認める）
-# 日本語の shall 相当。「〜すること」だけでは足りない — 実際の要求文は「記録に残すこと」
-# 「対象に含めないこと」「リマインダーを送ること」のように、動詞の連体形＋「こと」で終わる。
-# 「すること」限定にすると、正しく書かれた要求の大半を違反として弾く（実地で判明）。
+# The six EARS patterns (both English and Japanese are accepted).
+# The Japanese equivalent of shall. 「〜すること」 alone is not enough — a real requirement statement
+# ends with an attributive verb plus 「こと」, as in 「記録に残すこと」, 「対象に含めないこと」, or
+# 「リマインダーを送ること」.
+# Limiting it to 「すること」 rejects most correctly-written requirements as violations (found in the
+# field).
 EARS_PATTERNS = [
     (r"\bshall\b", "shall"),
     (r"こと(\s*\||\s*$|。)", "shall(ja: 〜こと)"),
@@ -95,25 +108,27 @@ EARS_TRIGGERS = [r"\bwhile\b", r"\bwhen\b", r"\bwhere\b", r"\bif\b",
                  r"(のとき|の場合|している間|ならば)"]
 
 CLARIFY = re.compile(r"\[NEEDS[ _]CLARIFICATION[^\]]*\]", re.I)
-# 要求 ID: FR-001 形式。行頭やテーブルセル内を許す
+# Requirement IDs in the FR-001 form. Allowed at the start of a line or inside a table cell
 REQ_ID = re.compile(r"\bFR-\d{3,}\b")
 SC_ID = re.compile(r"\bSC-\d{3,}\b")
 
 
-# 付録（レビューチェックリスト）以降は検査しない。そこには禁止語そのものが「例」として並ぶので、
-# 検査すると必ず落ちる — 規約を書いた文書が規約違反になるという不合理を避ける。
+# Nothing from the appendix (the review checklist) onward is checked. The banned words themselves
+# line up there as "examples", so checking it always fails — this avoids the absurdity of a document
+# that states the rules violating them.
 APPENDIX = re.compile(r"^#{1,6}\s*(付録|appendix|レビューチェックリスト)", re.M | re.I)
 
 
 def _strip_noise(text):
-    """検査対象の本文だけを返す。除くのは3つ:
+    """Return only the body to be checked. Three things are removed:
 
-    1. **引用（`> ...`）** — テンプレの解説。EARS の説明や禁止語の解説が含まれる
-    2. **コードブロック** — 記法の例示
-    3. **付録以降** — 禁止語リストそのものが並ぶ
+    1. **quotes (`> ...`)** — the template's commentary, which contains explanations of EARS and of
+       the banned words
+    2. **code blocks** — illustrations of notation
+    3. **everything from the appendix onward** — the banned-word list itself lines up there
 
-    これらを検査すると、規約を正しく説明している文書ほど違反数が多くなる。検査すべきは
-    *著者が書いた要求文* だけ。"""
+    Checking these means the better a document explains the rules, the more violations it has. What
+    should be checked is *the requirement statements the author wrote*, and nothing else."""
     m = APPENDIX.search(text)
     if m:
         text = text[:m.start()]
@@ -130,20 +145,21 @@ def _strip_noise(text):
 
 
 def _sections(text):
-    """見出し（# 〜 ######）の一覧を小文字で返す。"""
+    """Return the headings (# through ######) in lower case."""
     return [m.group(1).strip().lower()
             for m in re.finditer(r"^#{1,6}\s+(.+)$", text, flags=re.M)]
 
 
-# 受入基準セクションは Given-When-Then で書く（EARS ではない）。FR-xxx を参照するので要求文と
-# 誤認されるが、記法が違うのは正しい — 要求は EARS、その検証シナリオは GWT という役割分担。
+# The acceptance-criteria section is written in Given-When-Then (not EARS). It references FR-xxx and
+# so gets mistaken for a requirement statement, but the different notation is correct — requirements
+# in EARS, the scenarios that verify them in GWT.
 GWT = re.compile(r"\b(given|when|then)\b", re.I)
 ACCEPTANCE_HEAD = re.compile(r"^#{1,6}.*(acceptance|受入|受け入れ)", re.M | re.I)
 NEXT_HEAD = re.compile(r"^#{1,6}\s", re.M)
 
 
 def _acceptance_span(text):
-    """受入基準セクションの行番号の範囲 (start, end) を返す。無ければ (0, 0)。"""
+    """Return the line-number range (start, end) of the acceptance-criteria section, or (0, 0)."""
     m = ACCEPTANCE_HEAD.search(text)
     if not m:
         return (0, 0)
@@ -154,23 +170,26 @@ def _acceptance_span(text):
 
 
 def _requirement_lines(text):
-    """要求文とみなす行。FR-xxx を含む行、または表の行で shall/すること を含むもの。
+    """The lines taken to be requirement statements: a line containing FR-xxx, or a table row
+    containing shall (or its Japanese equivalent).
 
-    除外するもの: 見出し（節タイトルに FR-001 と書かれることがある）、受入基準セクション内
-    （GWT で書くのが正しく、shall が無いのは違反ではない）、GWT キーワードを含む行。"""
+    Excluded: headings (a section title can carry FR-001), anything inside the acceptance-criteria
+    section (GWT is the correct notation there, and having no shall is not a violation), and lines
+    containing a GWT keyword."""
     a_start, a_end = _acceptance_span(text)
     lines = []
     for i, line in enumerate(text.split("\n"), 1):
         s = line.strip()
         if s.startswith("#"):
             continue
-        if a_start <= i < a_end:          # 受入基準セクション内は対象外
+        if a_start <= i < a_end:          # inside the acceptance section: out of scope
             continue
         if GWT.search(line) and not re.search(r"\bshall\b", line, re.I):
-            continue                       # GWT シナリオ行
-        # 要求 ID を「定義している」行か、「参照している」だけの行かを区別する。
-        # 制約表や EXCLUDE 表は根拠として (FR-021) のように参照するが、それ自体は要求文ではない。
-        # 定義行は必ず先頭セルが ID（`| FR-001 | …`）なので、そこで判定する。
+            continue                       # a GWT scenario line
+        # Distinguish a line that "defines" a requirement ID from one that merely "references" it.
+        # A constraints table or an EXCLUDE table references (FR-021) as grounds, but is not itself a
+        # requirement statement. A defining line always carries the ID in its first cell
+        # (`| FR-001 | …`), so that is what decides it.
         cells = [c.strip() for c in s.strip("|").split("|")] if s.startswith("|") else []
         defines = bool(cells) and bool(REQ_ID.match(cells[0].replace("**", "")))
         if defines or (s.startswith("|") and not cells[0:1]
@@ -180,47 +199,52 @@ def _requirement_lines(text):
 
 
 def check(path):
-    """検査して violations のリストを返す。各要素 {code, severity, line, message}"""
+    """Check, and return the list of violations. Each is {code, severity, line, message}."""
     with open(path, encoding="utf-8") as f:
         raw = f.read()
     body = _strip_noise(raw)
     v = []
 
-    # SEC — 必須セクション（§9 相当を tailoring したもの）
+    # SEC — the required sections (a tailoring of the equivalent of §9)
     heads = " || ".join(_sections(raw))
     for key, aliases in REQUIRED_SECTIONS:
         if not any(a in heads for a in aliases):
             v.append({"code": "SEC", "severity": "error", "line": 0,
-                      "message": f"必須セクション '{key}' がない（{'/'.join(aliases[:2])} 等の見出し）"})
+                      "message": f"the required section '{key}' is missing (a heading such as "
+                                 f"{'/'.join(aliases[:2])})"})
 
     reqs = _requirement_lines(body)
 
-    # REQ — 要求が1件もない文書は要求記述ではない
+    # REQ — a document with no requirements at all is not a statement of requirements
     if not reqs:
         v.append({"code": "REQ", "severity": "error", "line": 0,
-                  "message": "要求文が1件もない。FR-001 形式で採番し、EARS で書くこと"})
+                  "message": "there is not one requirement statement. Number them in the FR-001 "
+                             "form and write them in EARS"})
 
-    # EARS — 各要求文が shall（またはその日本語相当）を持つか
+    # EARS — does each requirement statement carry shall (or its Japanese equivalent)?
     for ln, line in reqs:
         if not any(re.search(p, line, re.I) for p, _ in EARS_PATTERNS):
             v.append({"code": "EARS", "severity": "error", "line": ln,
-                      "message": f"要求文に shall（日本語なら「〜すること」）がない: {line.strip()[:70]}"})
-        # trigger が2つ以上 = EARS ruleset 違反（trigger は最大1つ）。粒度が粗いサイン
+                      "message": f"the requirement statement has no shall (in Japanese, "
+                                 f"\u300c\u301c\u3059\u308b\u3053\u3068\u300d): "
+                                 f"{line.strip()[:70]}"})
+        # Two or more triggers = an EARS ruleset violation (at most one trigger). A sign the
+        # granularity is coarse
         hits = sum(1 for p in EARS_TRIGGERS if re.search(p, line, re.I))
         if hits >= 3:
             v.append({"code": "EARS-1T", "severity": "warn", "line": ln,
-                      "message": f"トリガー/条件が多すぎる（EARS の ruleset はトリガー最大1つ）。"
-                                 f"要求を分割すること: {line.strip()[:60]}"})
+                      "message": f"too many triggers/conditions (the EARS ruleset allows at most "
+                                 f"one trigger). Split the requirement: {line.strip()[:60]}"})
 
-    # MUST — §5.2.4「must は要求と誤解されるので避ける」
+    # MUST — §5.2.4, "must is avoided because it is mistaken for a requirement"
     for i, line in enumerate(body.split("\n"), 1):
         if MUST_KEYWORD.search(line) and not line.strip().startswith("#"):
             v.append({"code": "MUST", "severity": "warn", "line": i,
-                      "message": "`must` は使わない（29148 §5.2.4）。要求は `shall`、"
-                                 "選好は `should`、許容は `may`"})
-            break   # 1件報告すれば足りる（全行報告するとノイズになる）
+                      "message": "`must` is not used (29148 §5.2.4). A requirement is `shall`, a "
+                                 "preference `should`, a permission `may`"})
+            break   # reporting one is enough (reporting every line becomes noise)
 
-    # BAN — §5.2.7 避けるべき語
+    # BAN — §5.2.7, the words to avoid
     for i, line in enumerate(body.split("\n"), 1):
         if line.strip().startswith("#") or not line.strip():
             continue
@@ -228,55 +252,61 @@ def check(path):
             m = re.search(rx, line, re.I)
             if m:
                 v.append({"code": "BAN", "severity": "error", "line": i,
-                          "message": f"{kind} '{m.group(0)}' — {why}（29148 §5.2.7）"})
-                break   # 1行1件（同じ行の複数指摘はノイズ）
+                          "message": f"{kind} '{m.group(0)}' — {why} (29148 §5.2.7)"})
+                break   # one per line (several findings on one line are noise)
 
-    # TBX — §5.2.6 Complete は TBD/TBS/TBR を明示的に禁じる
+    # TBX — §5.2.6 Complete explicitly forbids TBD/TBS/TBR
     for i, line in enumerate(body.split("\n"), 1):
         if TBX.search(line):
             v.append({"code": "TBX", "severity": "error", "line": i,
-                      "message": "TBD/TBS/TBR が残っている（29148 §5.2.6 Complete）。"
-                                 "決めるか、Open Questions に移すこと"})
+                      "message": "a TBD/TBS/TBR is still here (29148 §5.2.6 Complete). Settle it, "
+                                 "or move it to Open Questions"})
 
-    # CLARIFY — 未解決の [NEEDS CLARIFICATION]（Spec Kit 由来。最も重要）
+    # CLARIFY — an unresolved [NEEDS CLARIFICATION] (from Spec Kit; the most important)
     for i, line in enumerate(body.split("\n"), 1):
         if CLARIFY.search(line):
             v.append({"code": "CLARIFY", "severity": "error", "line": i,
-                      "message": "未解決の [NEEDS CLARIFICATION] が残っている。"
-                                 "推測で実装させないため、実装前に必ず解消すること"})
+                      "message": "an unresolved [NEEDS CLARIFICATION] is still here. Resolve it "
+                                 "before implementation, so nothing gets implemented on a guess"})
 
-    # VOIDDEP（QUS の Complete）は **0.25.0 で入れ、0.25.1 で取り下げた。**
+    # VOIDDEP (QUS's Complete) **went in at 0.25.0 and was withdrawn at 0.25.1.**
     #
-    # 形式化そのものは正しい — "to read, update or delete an item one first needs to create it"。
-    # 問題は日本語の要求記述で**目的語を機械的に切り出せない**ことだった。実装は
-    # バッククォート識別子を見ていたが、実地の REQUIREMENTS.md には識別子が **0 件**。
-    # 「利用者が表示名を変更したとき」のように普通の名詞で書くのが自然な日本語であり、
-    # テンプレートもそう書かせている。助詞で区切って「〜を<動詞>」を拾う実装も試したが、
-    # `利用者が支出` と `メンバーが支出` が別物として抽出され、**全件が誤検出**になった。
-    # 形態素解析を持ち込めば届くが、それは req_lint の重さを一段変える判断になる。
+    # The formalisation itself is right — "to read, update or delete an item one first needs to
+    # create it". The problem was that **the object cannot be extracted mechanically** from
+    # requirements written in Japanese. The implementation read backtick identifiers, and a
+    # REQUIREMENTS.md in the field held **zero** of them. Writing with ordinary nouns, as in
+    # 「利用者が表示名を変更したとき」, is natural Japanese, and the template has it written that way
+    # too. An implementation splitting on particles to pick up 「〜を<verb>」 was tried as well, and
+    # `利用者が支出` and `メンバーが支出` came out as different things, making **every finding a
+    # false positive**.
+    # Morphological analysis would reach it, but adopting that is a decision that changes req_lint's
+    # weight by a whole step.
     #
-    # 誤検出しかしない検査は、無いより悪い（誤警告は正しい警告まで無効化する）。
-    # 狙い（要求の欠落を捕まえる）は `github_sync split-check` の「認可が境界だけを定めて
-    # いないか」が実データで機能しているので、そちらに寄せる。
-    # 再挑戦するなら、**英語の要求か、識別子を義務づける記法**が前提になる。
+    # A check that only produces false positives is worse than none (a false warning voids the
+    # correct warnings too).
+    # The aim (catching a missing requirement) is served by `github_sync split-check`'s "does the
+    # authorization set only the boundary", which works on real data, so it leans on that instead.
+    # Attempting it again presupposes **requirements in English, or a notation that mandates
+    # identifiers**.
 
-    # SC — 成功基準が採番されているか    # SC — 成功基準が採番されているか
+    # SC — are the success criteria numbered?
     if not SC_ID.search(body):
         v.append({"code": "SC", "severity": "warn", "line": 0,
-                  "message": "成功基準が SC-001 形式で採番されていない（技術非依存・定量的に）"})
+                  "message": "the success criteria are not numbered in the SC-001 form "
+                             "(technology-independent and quantitative)"})
 
     return v
 
 
 def cmd_check(a):
     if not os.path.isfile(a.path):
-        print(f"req_lint: {a.path} がない。/org-found が REQUIREMENTS.md を書いたか確認すること",
+        print(f"req_lint: there is no {a.path}. Check whether /org-found wrote REQUIREMENTS.md",
               file=sys.stderr)
         return 2
     try:
         v = check(a.path)
     except OSError as e:
-        print(f"req_lint: 読み取れない: {e}", file=sys.stderr)
+        print(f"req_lint: cannot read it: {e}", file=sys.stderr)
         return 2
     errors = [x for x in v if x["severity"] == "error"]
     warns = [x for x in v if x["severity"] == "warn"]
@@ -285,19 +315,20 @@ def cmd_check(a):
                           "errors": len(errors), "warnings": len(warns),
                           "violations": v}, ensure_ascii=False, indent=2))
     else:
-        print(f"要求記述の検査 — {a.path}")
-        print("  （ISO/IEC/IEEE 29148:2018 tailored conformance + EARS、docs/11 §0b）")
+        print(f"checking how the requirements are written — {a.path}")
+        print("  (ISO/IEC/IEEE 29148:2018 tailored conformance + EARS, docs/11 §0b)")
         if not v:
-            print("\n適合。必須セクション・EARS・禁止語すべて問題なし。")
+            print("\nconforms. The required sections, EARS, and the banned words are all clean.")
         for x in v:
             mark = "✗" if x["severity"] == "error" else "▲"
             loc = f"L{x['line']}" if x["line"] else "—"
             print(f"  {mark} [{x['code']}] {loc}: {x['message']}")
         if errors:
-            print(f"\nHELD: {len(errors)} 件の違反。要求が曖昧なまま実装に入ると、"
-                  f"エージェントは推測で埋める — それが最大の失敗モード。")
+            print(f"\nHELD: {len(errors)} violation(s). Enter implementation with the requirements "
+                  f"still ambiguous and the agent fills the gaps by guessing — that is the largest "
+                  f"failure mode.")
         elif warns:
-            print(f"\nOK（警告 {len(warns)} 件）。")
+            print(f"\nOK ({len(warns)} warning(s)).")
     if a.warn_only:
         return 0
     return 10 if errors else 0
@@ -309,10 +340,11 @@ def main(argv):
     sub = p.add_subparsers(dest="cmd", required=True)
     q = sub.add_parser("check")
     q.add_argument("path", nargs="?", default="REQUIREMENTS.md",
-                   help="要求文書のパス（既定: REQUIREMENTS.md）")
+                   help="path to the requirements document (default: REQUIREMENTS.md)")
     q.add_argument("--json", action="store_true")
     q.add_argument("--warn-only", action="store_true",
-                   help="違反があっても exit 0（導入初期の drain 用。docs/11 §4e）")
+                   help="exit 0 even with violations (for the drain early after adoption; "
+                        "docs/11 §4e)")
     a = p.parse_args(argv[1:])
     return {"check": cmd_check}[a.cmd](a)
 

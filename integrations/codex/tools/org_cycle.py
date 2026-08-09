@@ -1,28 +1,32 @@
 #!/usr/bin/env python3
-"""org_cycle — 1サイクル分の配管を1コマンドで回す（docs/11 §0d）。
+"""org_cycle — run one cycle's plumbing with one command (docs/11 §0d).
 
-**なぜこれが要るのか。** `/org-work` は「こういうイベントを打て」という散文の指示で、実行するのは
-エージェントだった。実地で1サイクル（Issue 2件）あたり **11コマンド**を手で叩いており、18 Issue
-なら約90回になる。そのうち1回でも間違えれば台帳の整合が崩れる。
+**Why this is needed.** `/org-work` was a prose instruction to "type these events", and an agent was
+what executed it. In the field **eleven commands** were typed by hand per cycle (two Issues), which
+comes to around ninety for eighteen Issues. One mistake among them breaks the ledger's consistency.
 
-さらに悪いのは `parent` の扱いだった。フェーズ連鎖は親 objective の admit を継承する（docs/11 §2）
-のに、その `parent` の値を**人が Issue から目で拾って手打ち**していた。継承の実装を入れても、
-値が手打ちである限り取り違えが起きる — **拾えるものを拾わせないのは設計の怠慢**である。
+Worse was how `parent` was handled. A phase chain inherits the parent objective's admit
+(docs/11 §2), yet **a human picked that `parent` value out of the Issue by eye and typed it in**.
+Implementing the inheritance changes nothing while the value is typed by hand — mistaking one for
+another still happens. **Not picking up what can be picked up is negligence in the design.**
 
-このツールは「順序と actor が決まっている配管」だけを引き受ける。**判断は引き受けない** —
-何を選ぶか、誰に委ねるか、admit するかは役割の仕事であり、ここでは自動化しない（docs/03 §6.5 の
-「forced delegation は設計エラー、forced invariant は正しい」の線引きをそのまま踏襲する）。
+This tool takes on only "plumbing whose order and actor are already settled". **It takes on no
+judgment** — what to choose, whom to delegate to, and whether to admit are the roles' work, and are
+not automated here (it follows exactly the line docs/03 §6.5 draws: forced delegation is a design
+error, a forced invariant is right).
 
   org_cycle.py begin    --role R --issue N [--phase implement] [--agent A]
-      claim → spec_delegated → phase_started（parent 自動解決）→ cycle_started → Issue へ log
+      claim → spec_delegated → phase_started (parent resolved automatically) → cycle_started →
+      log to the Issue
   org_cycle.py complete --role R --issue N --outputs TEXT
                         (--domain-model-updated REF | --domain-model-none WHY)
-      cycle_completed（domain_model 必須）→ Issue へ log → stage done
+      cycle_completed (domain_model required) → log to the Issue → stage done
   org_cycle.py plan     --role R --issue N [...]
-      **何も実行せず**、打つイベント列を印字する（--dry-run 相当）
+      **Runs nothing**; prints the sequence of events that would be typed (the --dry-run
+      equivalent)
 
-Exit: 0 ok / 3 台帳が拒否（順序違反など）/ 8 judge preflight 失敗 /
-      9 installed-organ binding 不備 / 10 contended / 2 usage・設定エラー
+Exit: 0 ok / 3 the ledger refused it (an order violation and the like) / 8 judge preflight failed /
+      9 the installed-organ binding is deficient / 10 contended / 2 usage or configuration error
 """
 import argparse
 import json
@@ -50,39 +54,49 @@ def main(argv):
     sub = p.add_subparsers(dest="cmd", required=True)
     for name in ("begin", "plan"):
         q = sub.add_parser(name)
-        q.add_argument("--role", required=True, help="委譲する側（supervisor / 部門長）")
-        q.add_argument("--issue", required=True, type=int, help="task Issue 番号")
-        q.add_argument("--agent", help="実際に作る側（省略時は --role と同じ）")
-        q.add_argument("--phase", default="implement", help="開始するフェーズ（既定 implement）")
-        q.add_argument("--parent", help="親 objective 番号（省略時は Issue から自動解決）")
+        q.add_argument("--role", required=True,
+                       help="the delegating side (a supervisor / department head)")
+        q.add_argument("--issue", required=True, type=int, help="the task Issue number")
+        q.add_argument("--agent", help="the side that actually builds (defaults to --role)")
+        q.add_argument("--phase", default="implement",
+                       help="the phase to start (default: implement)")
+        q.add_argument("--parent",
+                       help="the parent objective number (resolved from the Issue when omitted)")
         q.add_argument("--candidate-id", dest="candidate_id",
-                       help="省略時は Issue の candidate_id トレーラから読む")
-        q.add_argument("--base", help="worktree を切る元（省略時は constitution の "
-                                      "enforcement.judges.integration_ref。どちらも無ければ"
-                                      "失敗する — develop は推測しない、#106）")
-        q.add_argument("--why", help="なぜ今これを選んだか（attention_allocated の reason）")
+                       help="read from the Issue's candidate_id trailer when omitted")
+        q.add_argument("--base",
+                       help="what the worktree branches from (the constitution's "
+                            "enforcement.judges.integration_ref when omitted; with neither it "
+                            "fails — develop is not guessed, #106)")
+        q.add_argument("--why",
+                       help="why this was chosen now (attention_allocated's reason)")
         q.add_argument("--no-check", dest="no_check", action="store_true",
-                       help="着手前の確認（依存の状態・人間の作業待ち）を出さない")
+                       help="do not print the pre-start checks (dependency states, work waiting on "
+                            "a human)")
         q.add_argument("--no-worktree", dest="no_worktree", action="store_true",
-                       help="worktree を作らない。**並列で回すなら使わないこと** — 同一ツリーで"
-                            "並列 maker を走らせると、あるIssueのコミットが別Issueのブランチに"
-                            "載る事故が起きる（実際に起きた）。単発の逐次作業のときだけ。")
-    q = sub.add_parser("verify", help="gate/skeptic を起動する材料を組み立てる（判定はしない）")
+                       help="do not create a worktree. **Do not use this when running in "
+                            "parallel** — running parallel makers over one tree causes the accident "
+                            "where one Issue's commits land on another Issue's branch (it actually "
+                            "happened). Only for single, sequential work.")
+    q = sub.add_parser("verify",
+                       help="assemble the material that starts gate/skeptic (it does not judge)")
     q.add_argument("--issue", required=True, type=int)
     q.add_argument("--role", required=True, choices=("gate", "skeptic"))
-    # phase は review_subject の一部（どのフェーズの判定か）。
+    # phase is part of review_subject (which phase the judgment belongs to).
     q.add_argument("--phase", default=None,
-                   help="判定するフェーズ（review_subject_id に入る）")
+                   help="the phase being judged (it enters review_subject_id)")
     q.add_argument("--base", dest="base", default=None,
-                   help="統合先 ref（省略時は origin/develop/develop/origin/main/main の順で解決）")
+                   help="the integration ref (resolved in the order origin/develop, develop, "
+                        "origin/main, main when omitted)")
     q.add_argument("--subject-root", dest="subject_root", default=None,
-                   help="判定対象の checkout を明示する（既定は Issue の worktree "
-                        ".orgforge/wt/issue-<N>）。worktree 運用でないレイアウトを意図して"
-                        "判定するときだけ使う — cwd への暗黙 fallback はしない（#101）")
-    # 記録のためだけに judge を起動させない。cross-harness の org では verify が実際に
-    # headless judge を回すので、subject を知るのに数分待つのは筋が悪い（実測）。
+                   help="state the checkout being judged explicitly (the Issue's worktree "
+                        ".orgforge/wt/issue-<N> by default). Only for deliberately judging a layout "
+                        "that does not use worktrees — there is no implicit fallback to the cwd "
+                        "(#101)")
+    # Do not start a judge merely to record something. In a cross-harness org verify actually runs a
+    # headless judge, so waiting minutes just to learn the subject makes no sense (measured).
     q.add_argument("--print-subject", action="store_true",
-                   help="review_subject_id だけを出して終わる（judge は起動しない）")
+                   help="print review_subject_id and stop (no judge is started)")
     # What a re-review may turn on besides the revision (#193). The subject id digests the tree,
     # not the evidence a maker cited or the risk a judge recorded, so those are passed here and
     # compared against the recorded round.
@@ -96,110 +110,141 @@ def main(argv):
     # verdict — it only spends a judge run and a CI round (#182).
     q.add_argument("--force", action="store_true",
                    help="dispatch even when this review subject already has a recorded verdict")
-    # read-only judge が再導出できない MUST は park にしかならない。既定は助言だけ出して
-    # 起動は妨げない（判定は gate のもの）が、空振りに数分〜30分を払いたくないなら止められる。
+    # A MUST a read-only judge cannot re-derive can only become a park. By default it advises and
+    # does not obstruct the start (the judgment is the gate's), but where paying minutes to half an
+    # hour for a miss is unwanted, it can stop.
     q.add_argument("--strict-rederivability", dest="strict_rederivability",
                    action="store_true",
-                   help="read-only judge が再導出できない MUST があるとき、judge を起動せずに"
-                        "止める（既定は助言のみ）。空振りの park に時間を払いたくないとき用")
+                   help="stop without starting the judge where a MUST cannot be re-derived by a "
+                        "read-only judge (advice only by default). For when paying time for a park "
+                        "that goes nowhere is unwanted")
 
-    q = sub.add_parser("touched", help="本番資産への変更を台帳に残す（DDL・権限・インフラ）")
-    q.add_argument("--target", required=True, help='何に対してか（例 supabase:<project>）')
+    q = sub.add_parser("touched",
+                       help="leave a change to a production asset in the ledger (DDL, privileges, "
+                            "infrastructure)")
+    q.add_argument("--target", required=True,
+                   help='against what (e.g. supabase:<project>)')
     q.add_argument("--op", required=True, help="apply_migration / revoke / grant / deploy …")
-    q.add_argument("--name", help="対象の名前（マイグレーション名・関数名など）")
-    q.add_argument("--by", required=True, help="誰が入れたか")
+    q.add_argument("--name", help="the subject's name (a migration name, a function name, …)")
+    q.add_argument("--by", required=True, help="who put it in")
     q.add_argument("--authority", required=True,
-                   help="誰の権限で入れたか（issue-N の一部 / CEO の明示指示 / 自己判断）")
-    q.add_argument("--issue", type=int, help="関連する Issue")
-    q.add_argument("--reversible", action="store_true", help="戻せるなら付ける")
-    q.add_argument("--rollback", help="戻し方（reversible なら書くこと）")
+                   help="under whose authority (part of issue-N / an explicit CEO instruction / "
+                        "its own judgment)")
+    q.add_argument("--issue", type=int, help="the related Issue")
+    q.add_argument("--reversible", action="store_true", help="pass this where it can be undone")
+    q.add_argument("--rollback", help="how to undo it (write this where reversible)")
 
-    q = sub.add_parser("show", help="1つの Issue の全体像（判定履歴・いま何待ちか）")
+    q = sub.add_parser("show",
+                       help="the whole picture of one Issue (its judgment history, what it waits "
+                            "on)")
     q.add_argument("--issue", required=True, type=int)
     q.add_argument("--base", default=None,
-                   help="不可逆な変更の帰属基準（省略時は constitution の integration_ref）")
+                   help="the reference for attributing irreversible changes (the constitution's "
+                        "integration_ref when omitted)")
 
-    q = sub.add_parser("gc", help="溜まった worktree を片付ける（未コミットのものは残す）")
+    q = sub.add_parser("gc",
+                       help="sweep up accumulated worktrees (leaving any with uncommitted changes)")
     q.add_argument("--base", default=None,
-                   help="統合済み判定の基準（省略時は constitution の integration_ref）")
-    q.add_argument("--all", action="store_true", help="未統合のものも対象にする")
+                   help="the reference for deciding integration (the constitution's "
+                        "integration_ref when omitted)")
+    q.add_argument("--all", action="store_true", help="include the unintegrated ones too")
 
-    q = sub.add_parser("intake", help="subagent の報告が成果物の形になっているかを検査する")
+    q = sub.add_parser("intake",
+                       help="check whether a subagent's report has the shape of a deliverable")
     q.add_argument("--issue", required=True, type=int)
     q.add_argument("--role", required=True, help="gate / skeptic / maker")
     q.add_argument("--report", required=True,
-                   help="subagent が返した報告（`-` で標準入力から読む）")
+                   help="the report the subagent returned (`-` reads standard input)")
 
-    q = sub.add_parser("rework", help="reject/refuted を受けて rework を発注したことを記録する")
+    q = sub.add_parser("rework",
+                       help="record that rework was commissioned in answer to a reject/refuted")
     q.add_argument("--issue", required=True, type=int)
     q.add_argument("--after", required=True, choices=("reject", "refuted"),
-                   help="どちらの判定を受けての rework か")
-    q.add_argument("--by", required=True, help="発注した役割（監督）")
-    q.add_argument("--reason", required=True, help="maker に直させることを1行で")
-    q.add_argument("--round", default="1", help="何周目か（冪等キーに入る）")
-    q.add_argument("--to", help="誰に発注したか")
-    q.add_argument("--root", help="死因の根の分類（learning.py DEATH_ROOTS: placebo_test / "
+                   help="which judgment the rework answers")
+    q.add_argument("--by", required=True, help="the role that commissioned it (the supervisor)")
+    q.add_argument("--reason", required=True,
+                   help="what the maker is to fix, in one line")
+    q.add_argument("--round", default="1", help="which round (it enters the idempotency key)")
+    q.add_argument("--to", help="whom it was commissioned to")
+    q.add_argument("--root", help="the root-cause-of-death class (learning.py DEATH_ROOTS: "
+                                  "placebo_test / "
                                   "declaration_drift / integration_base_moved / "
-                                  "self_written_premise / other）— 再発検出は root の一致で"
-                                  "数える（Issue #104）")
+                                  "self_written_premise / other) — recurrence detection counts by "
+                                  "matching roots (Issue #104)")
 
-    q = sub.add_parser("record", help="済んだ判定を遡って台帳に記録する（backfill 印が付く）")
+    q = sub.add_parser("record",
+                       help="record a judgment already made, retroactively (it carries a backfill "
+                            "mark)")
     q.add_argument("--issue", required=True, type=int)
-    q.add_argument("--event", required=True, help="integration_admitted / refutation_attempted など")
+    q.add_argument("--event", required=True,
+                   help="integration_admitted / refutation_attempted / …")
     q.add_argument("--verdict", required=True)
-    q.add_argument("--by", required=True, help="誰の判定か")
-    q.add_argument("--why", required=True, help="何を見て、何が決め手になったか")
-    q.add_argument("--command", help="当時実行したコマンド")
-    q.add_argument("--result", help="その実出力")
+    q.add_argument("--by", required=True, help="whose judgment it is")
+    q.add_argument("--why", required=True, help="what was read, and what decided it")
+    q.add_argument("--command", help="the command run at the time")
+    q.add_argument("--result", help="its real output")
     q.add_argument("--base", default=None,
-                   help="integration_admitted の統合先（省略時は constitution の integration_ref）")
+                   help="integration_admitted's integration target (the constitution's "
+                        "integration_ref when omitted)")
 
-    q = sub.add_parser("handback", help="feature ブランチを push → 統合先宛 PR → Issue に紐付け")
+    q = sub.add_parser("handback",
+                       help="push the feature branch → open a PR against the integration target → "
+                            "link it to the Issue")
     q.add_argument("--issue", required=True, type=int)
-    q.add_argument("--branch", help="省略時は Issue から決定的に導出")
+    q.add_argument("--branch", help="derived deterministically from the Issue when omitted")
     q.add_argument("--base", default=None,
-                   help="PR の統合先（省略時は constitution の integration_ref）")
-    q.add_argument("--summary", help="何を作ったか（1行）")
-    q.add_argument("--result", help="DoD コマンドの実出力（PR body と log に入る）")
-    q.add_argument("--files", help="変更ファイル")
+                   help="the PR's integration target (the constitution's integration_ref when "
+                        "omitted)")
+    q.add_argument("--summary", help="what was built (one line)")
+    q.add_argument("--result",
+                   help="the DoD command's real output (it enters the PR body and the log)")
+    q.add_argument("--files", help="the changed files")
 
-    q = sub.add_parser("integrate", help="統合先への fan-in（前提照合 → マージ → 統合後テスト → 記録）")
+    q = sub.add_parser("integrate",
+                       help="fan-in to the integration target (reconcile the preconditions → merge "
+                            "→ test after integration → record)")
     q.add_argument("--issue", required=True, type=int)
-    q.add_argument("--role", default="integrator", help="統合を回す役割（記録の actor）")
-    q.add_argument("--branch", help="省略時は Issue から決定的に導出")
+    q.add_argument("--role", default="integrator",
+                   help="the role running the integration (the record's actor)")
+    q.add_argument("--branch", help="derived deterministically from the Issue when omitted")
     q.add_argument("--base", default=None,
-                   help="統合先（省略時は constitution の integration_ref。無ければ失敗 — #106）")
-    q.add_argument("--test", default="npm test", help="統合後に走らせる全体テスト")
+                   help="the integration target (the constitution's integration_ref when omitted; "
+                        "with neither it fails — #106)")
+    q.add_argument("--test", default="npm test",
+                   help="the whole-suite test to run after integration")
     q.add_argument("--force", action="store_true",
-                   help="gate/skeptic の前提が無くても進める。**理由を記録すること**")
+                   help="proceed without the gate/skeptic preconditions. **Record the reason**")
     q.add_argument("--plan", action="store_true",
-                   help="何も実行せず、何を統合するか・衝突しそうな箇所を見せる")
+                   help="run nothing; show what would be integrated and where it may conflict")
 
     q = sub.add_parser("complete")
     q.add_argument("--role", required=True)
     q.add_argument("--issue", required=True, type=int)
     q.add_argument("--agent")
-    q.add_argument("--outputs", required=True, help="何を作ったか（1行）")
+    q.add_argument("--outputs", required=True, help="what was built (one line)")
     q.add_argument("--command", required=True,
-                   help="DoD コマンド（verbatim。他人が再実行できる形で）")
+                   help="the DoD command (verbatim, in a form someone else can re-run)")
     q.add_argument("--result", required=True,
-                   help="そのコマンドの**実出力**（失敗込み。「通った」は不可 — log が拒否する）")
-    q.add_argument("--files", help="変更したファイル")
+                   help="that command's **real output** (failures included; \"it passed\" is not "
+                        "accepted — the log refuses it)")
+    q.add_argument("--files", help="the files changed")
     q.add_argument("--new-surface", dest="new_surface", action="append",
-                   help="このサイクルで外に晒した面（誰が呼べるか / 何ができるか）。複数可")
+                   help="the surface this cycle exposed outward (who can call it / what it can "
+                        "do). Repeatable")
     q.add_argument("--new-surface-none", dest="new_surface_none",
-                   help="公開面を増やしていない理由（明示的な否定）")
+                   help="the reason no public surface was added (an explicit negation)")
     q.add_argument("--learned",
-                   help="次のサイクルにも効く学び（doctrine に propose する。admit は gate）")
-    q.add_argument("--affects", help="その学びが効く役割（カンマ区切り）")
+                   help="a learning that holds for the next cycle too (proposed to doctrine; the "
+                        "admit is the gate's)")
+    q.add_argument("--affects", help="the roles that learning holds for (comma-separated)")
     q.add_argument("--confidence", type=float, default=0.7,
-                   help="その学びへの確信度 0..1（既定 0.7）")
+                   help="confidence in that learning, 0..1 (default 0.7)")
     q.add_argument("--review-days", dest="review_days", type=int, default=180,
-                   help="その学びを再確認するまでの日数（既定 180）")
+                   help="days until that learning is re-confirmed (default 180)")
     q.add_argument("--domain-model-updated", dest="domain_model_updated",
-                   help="このサイクルが確立したドメイン規則への参照")
+                   help="a reference to the domain rule this cycle established")
     q.add_argument("--domain-model-none", dest="domain_model_none",
-                   help="何も確立しなかった理由（明示的な否定。docs/11 §4d）")
+                   help="the reason nothing was established (an explicit negation; docs/11 §4d)")
     q.add_argument("--candidate-id", dest="candidate_id")
     a = p.parse_args(argv[1:])
     banner()
