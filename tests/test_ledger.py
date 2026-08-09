@@ -2074,7 +2074,7 @@ def test_install_script_dry_run_changes_nothing(tmp_path):
         assert "PyYAML" in both, both
     else:
         assert "[dry-run]" in r.stdout
-        assert "脅威モデルの外" in r.stdout        # 境界を明示している
+        assert "outside the threat model" in r.stdout   # it states the boundary
     assert sorted(str(p.relative_to(tmp_path))
                   for p in tmp_path.rglob("*")) == before, "dry-run が何かを変えた"
 
@@ -2083,7 +2083,7 @@ def test_verify_script_refuses_to_run_as_root():
     """Running the verification as root proves nothing — root can do everything."""
     src = (TOOLS / "writer-verify.sh").read_text(encoding="utf-8")
     assert 'if [ "$(id -u)" = "0" ]' in src
-    assert "root では全部できてしまい" in src
+    assert "as root everything succeeds" in src
 
 
 # ══ 0.39.1 — 監査が見つけた「installer が作る状態では動かない」9件 ═══════════
@@ -2132,7 +2132,8 @@ def test_installer_uses_permissions_the_daemon_accepts():
     assert "chmod 0755 '${SOCK_PARENT}'" in src, "leaf が 0755 でない"
     assert "chmod 0755 '${SOCK_ANCHOR}'" in src, "anchor が 0755 でない"
     assert "chmod 1770" not in src, "1770 は writerd が拒否する"
-    # 台帳は読めなければ verify も projection も動かない（権威データは org tree の外）
+    # An unreadable ledger breaks verify and projection alike (the authoritative data lives outside
+    # the org tree)
     assert "chmod 750 '${AUTHORITATIVE}/ledger'" in src
     assert "chmod 700" not in src
 
@@ -2178,7 +2179,7 @@ def test_installer_stops_on_the_first_failure():
     """Without `set -e`, a half-applied chown still prints "install complete"."""
     src = (TOOLS / "writer-install.sh").read_text(encoding="utf-8")
     assert "set -euo pipefail" in src
-    assert "半端な状態で続けない" in src
+    assert "Do not continue in a half-finished state" in src
 
 
 def test_installer_checks_the_daemon_python_for_pyyaml():
@@ -2190,7 +2191,7 @@ def test_installer_checks_the_daemon_python_for_pyyaml():
     src = (TOOLS / "writer-install.sh").read_text(encoding="utf-8")
     assert "PYTHONNOUSERSITE=1" in src
     assert "${DAEMON_PYTHON}" in src
-    assert "site-packages にある場合は無効" in src
+    assert "useless in ~/Library/Python" in src
     # 実行可能な回避策を出すこと
     assert "venv" in src and "break-system-packages" in src
 
@@ -2214,7 +2215,7 @@ def test_verifier_does_not_damage_the_target():
             ('mv "$PARENT"', "socket が消える"),
             ("launchctl bootout", "daemon が止まる")):
         assert forbidden not in src, f"破壊的な操作が残っている（{why}）: {forbidden}"
-    assert "1バイトも書かない" in src
+    assert "Not one byte is written" in src
     assert "--no-write" in src            # 副作用ゼロで回せる経路がある
 
 
@@ -2222,8 +2223,8 @@ def test_verifier_checks_the_ledger_stays_readable():
     """**Unwritable and unreadable are different.** A ledger nobody can read is not an audit
     record."""
     src = (TOOLS / "writer-verify.sh").read_text(encoding="utf-8")
-    assert "caller から台帳を **読める**" in src
-    assert "verify / board / projection が動かない" in src
+    assert "the caller **can read** the ledger" in src
+    assert "verify / board / projection will not run" in src
 
 
 # ══ 0.39.2 — 再監査が見つけた9件 ═══════════════════════════════════════════════
@@ -2336,23 +2337,23 @@ def test_verifier_counts_rpc_failures():
     """Printing ✗ alone leaves the final exit at 0 even when a check failed."""
     src = (TOOLS / "writer-verify.sh").read_text(encoding="utf-8")
     assert "FAIL + RPC_BAD" in src
-    assert 'bad "writerd check が落ちた"' in src
+    assert 'bad "the writerd check failed"' in src
 
 
 def test_verifier_no_write_writes_nothing():
     """Under `--no-write`, even step 9's happy-path append is not emitted."""
     src = (TOOLS / "writer-verify.sh").read_text(encoding="utf-8")
     assert "no_write = sys.argv[3]" in src
-    assert "再送: --no-write なので飛ばす" in src
+    assert "replay: skipped under --no-write" in src
 
 
 def test_installer_does_not_overwrite_the_original_owner():
     """A re-install does not rewrite the original owner to the writer — that would break
     uninstall."""
     src = (TOOLS / "writer-install.sh").read_text(encoding="utf-8")
-    assert "再 install では上書きしない" in src
-    assert "元の所有者は既に記録されている" in src
-    assert "へ「復元」して、caller に戻せなくなる" in src
+    assert "Not overwritten on a re-install" in src
+    assert "the original owner is already recorded" in src
+    assert 'it can never go back to the caller' in src
 
 
 # ══ 0.39.3 — 第2再監査の7件 ═══════════════════════════════════════════════════
@@ -2550,7 +2551,7 @@ def test_authoritative_data_lives_outside_the_org_tree():
     """**Tight permissions on the contents mean nothing if the container can be swapped.**"""
     src = (TOOLS / "writer-install.sh").read_text(encoding="utf-8")
     assert "AUTHORITATIVE=" in src
-    assert "org tree の外" in src
+    assert "Outside the org tree" in src
     assert "ln -s '${AUTHORITATIVE}/ledger'" in src
     # daemon には実体のパスを渡す
     assert "default=${AUTHORITATIVE}/ledger" in src
@@ -2564,14 +2565,14 @@ def test_installer_and_verifier_agree_on_the_socket():
     assert 'SOCK_PARENT="/usr/local/var/orgforge/run/${ORG_NAME}"' in isrc
     assert '/usr/local/var/orgforge/run/${ORG_NAME}/writer.sock' in vsrc
     # verifier は leaf に root 所有を期待しない（writer 所有が正しい）
-    assert "leaf は $POWNER 所有（自分ではない）" in vsrc
+    assert 'the leaf is owned by $POWNER (not by me)' in vsrc
 
 
 def test_pyyaml_guidance_prefers_a_root_owned_venv():
     """Do not lead with advice that rewrites the system python."""
     src = (TOOLS / "writer-install.sh").read_text(encoding="utf-8")
-    assert "1. root 所有の専用 venv（推奨）" in src
-    assert "勧めない" in src
+    assert "1. a root-owned dedicated venv (recommended)" in src
+    assert "is not advised" in src
 
 
 # ══ 0.39.5 束A — judgment boundary ═══════════════════════════════════════════
@@ -2848,29 +2849,31 @@ def test_C_uninstall_order_is_explicit():
     実際の危険性を決める性質を見る（実測: cp 失敗 → 再実行で唯一の写しが消えた）。
     """
     src = (TOOLS / "writer-install.sh").read_text(encoding="utf-8")
-    i_stop = src.index("① LaunchDaemon を停止した（停止を確認済み）")
+    i_stop = src.index("① stopped the LaunchDaemon (confirmed stopped)")
     i_stage = src.index('staged="${cur}.restoring.$$"')
     i_copy = src.index('''run "cp -R '${src}' '${staged}'"''')
     i_rm = src.index('''run "rm -f '${cur}'"''')
     i_mv = src.index('''run "mv '${staged}' '${cur}'"''')
-    i_own = src.index("④ 所有者を")
+    i_own = src.index("④ restored the ownership to")
     # 停止 → staging 作成 → コピー → **そのあとで** symlink 削除 → atomic 置換 → chown
     assert i_stop < i_stage < i_copy < i_rm < i_mv < i_own, "uninstall の順序が違う"
-    assert "先に止めないと、書き戻している途中に writer が書く" in src
+    assert "Without stopping first, the writer writes mid-restore" in src
     # 復元できなかったら権威データを消さない
     # `:-1`（未設定なら「復元済み」扱い）は **消してよい側に倒れる既定**だった。
     # org root が消えるとループごと飛んで未設定になり、権威データを消していた。
     assert 'if [ "${RESTORE_OK}" = 0 ]; then' in src
-    assert "**権威データと backup は残す**" in src
+    assert "**The authoritative data and the backup are kept**" in src
 
 
 def test_C_uninstall_keeps_shared_things_while_other_orgs_remain():
     """**While another org remains, the shared code and the service UID are not removed.**"""
     src = (TOOLS / "writer-install.sh").read_text(encoding="utf-8")
     assert "REMAINING=" in src
-    assert '他の org が ${REMAINING} 件残っているので、共有コードとサービス UID は消さない' in src
+    assert ('${REMAINING} other org(s) remain, so the shared code and the service UID are kept'
+            in src)
     # 消すのは this org のものだけ
-    assert "この org（${ORG_NAME}）の socket / 権威データ / backup / 設定を消した" in src
+    assert ("removed this org's (${ORG_NAME}) socket, authoritative data, backup, and "
+            "configuration") in src
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="writer-install.sh is macOS-only")
@@ -2880,7 +2883,7 @@ def test_C_uninstall_requires_an_org(tmp_path):
     r = subprocess.run(["bash", str(TOOLS / "writer-install.sh"), "--uninstall", "--dry-run"],
                        capture_output=True, text=True)
     assert r.returncode != 0
-    assert "どの org を外すのか決まらない" in (r.stdout + r.stderr)
+    assert "which org to remove is undecided" in (r.stdout + r.stderr)
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="writer-install.sh is macOS-only")
@@ -2895,7 +2898,7 @@ def test_C_dry_run_changes_nothing_and_states_the_boundary(tmp_path):
     if r.returncode != 0:
         assert "PyYAML" in both, both
     else:
-        assert "脅威モデルの外" in r.stdout
+        assert "outside the threat model" in r.stdout
     assert sorted(str(p.relative_to(tmp_path))
                   for p in tmp_path.rglob("*")) == before, "dry-run が何かを変えた"
 
@@ -2932,11 +2935,11 @@ def test_installer_pins_constitution_root_owned():
     assert "chown root:wheel '${AUTHORITATIVE}/constitution.yaml'" in src
     assert "--constitution</string><string>default=${AUTHORITATIVE}/constitution.yaml" in src
     # 宣言が無ければ install しない
-    assert "**宣言が無いまま writer を動かさない。**" in src
+    assert "**Do not run the writer with no declarations.**" in src
 
 
 def test_uninstall_does_not_treat_missing_symlink_as_done():
-    """**symlink が無いことを「戻し済み」と読んではいけない。**
+    """**The absence of a symlink must never be read as "already restored".**
 
     caller は自分の org tree を動かせる（.orgforge を rename するなど）。すると symlink が
     消え、権威側だけが唯一の最新の写しになる。そこで復元を飛ばすと、⑤ がそれを消す
@@ -2945,7 +2948,7 @@ def test_uninstall_does_not_treat_missing_symlink_as_done():
     src = (TOOLS / "writer-install.sh").read_text(encoding="utf-8")
     # 素の `|| continue` で済ませていないこと
     assert '[ -L "${cur}" ] || continue' not in src, "symlink 不在を無条件に飛ばしている"
-    assert "**symlink が無いことを「戻し済み」と読んではいけない。**" in src
+    assert '**The absence of a symlink must never be read as "already restored".**' in src
     # 実体が在るときだけ飛ばす
     # 「実体が在れば飛ばす」は variant 4 で危険と分かったので、**digest が一致したときだけ**
     # 飛ばす形に変わっている（[[test_uninstall_does_not_trust_a_planted_directory]]）。
@@ -2953,7 +2956,7 @@ def test_uninstall_does_not_treat_missing_symlink_as_done():
     seg = src[i:i + 1400]
     assert "continue" in seg and 'shasum -a 256' in seg
     # 権威側に実体が在るなら復元を試みる
-    assert "**消さずに復元を試みる**" in src
+    assert "**a restore is attempted rather than a deletion**" in src
 
 
 def test_uninstall_defaults_to_not_restored():
@@ -2972,11 +2975,12 @@ def test_uninstall_defaults_to_not_restored():
     assert '"${RESTORE_OK:-1}"' not in src, "既定が 1（消してよい）に戻っている"
     assert 'if [ "${RESTORE_OK}" = 0 ]; then' in src
     # org root が無いときは理由を言う
-    assert "移動されたか消されている。**権威側にしか無いデータを消さない。**" in src
+    assert ("it was moved or deleted. **Data that exists only on the authoritative side is not "
+            "removed.**") in src
 
 
 def test_uninstall_does_not_trust_a_planted_directory():
-    """**「在ること」を「戻っていること」と読んではいけない。**
+    """**"It is there" must never be read as "it was restored".**
 
     caller は symlink の代わりに自分の偽の実体を置ける。それを「復元済み」と認めると、
     ⑤ が権威側の最新版を消し、org 側には caller が置いた古い中身だけが残る。
@@ -2987,7 +2991,7 @@ def test_uninstall_does_not_trust_a_planted_directory():
     # 「在れば飛ばす」に戻っていないこと
     assert 'if [ -e "${cur}" ]; then\n          continue' not in src, \
         "実体が在るだけで復元済みと認めている"
-    assert "**「在ること」を「戻っていること」と読んではいけない。**" in src
+    assert '**"It is there" must never be read as "it was restored".**' in src
     # 中身を数えてから判断すること
     i = src.index('if [ ! -L "${cur}" ] && [ -e "${cur}" ]; then')
     seg = src[i:i + 1400]
@@ -2999,7 +3003,7 @@ def test_uninstall_does_not_trust_a_planted_directory():
     # 名前だけを digest に入れると同一と誤認する（実測で確認）。種別と向き先まで入れること。
     assert "type=%HT link=%Y" in seg, "種別と symlink の向き先が digest に入っていない"
     # 食い違うなら権威側を消さずに退避する
-    assert "**「在る」を「戻った」と読まない**" in src
+    assert '**\\"it is there\\" is not read as \\"it was restored\\"**' in src
     assert "${cur}.found-$$" in src
 
 
@@ -3022,7 +3026,7 @@ def test_writer_verify_completes_under_foreign_locale():
             out = r.stdout + r.stderr
             assert "unbound variable" not in out, f"{loc} で落ちた:\n{out[-400:]}"
             # 途中で死んでいないこと（最後の見出しまで到達している）
-            assert "総合" in out or "合格" in out or "不合格" in out, \
+            assert "passed" in out or "failed" in out, \
                 f"{loc} で最後まで到達していない:\n{out[-400:]}"
 
 
@@ -3037,7 +3041,7 @@ def test_verify_never_calls_unmeasured_a_pass():
     import subprocess, tempfile, os
     src = (TOOLS / "writer-verify.sh").read_text(encoding="utf-8")
     assert "SKIPPED" in src, "飛ばした検査を数えていない"
-    i = src.index("printf '  合格 %d / 不合格 %d / 未測定 %d")
+    i = src.index("printf '  passed %d / failed %d / unmeasured %d")
     tail = src[i:]
 
     def run(p, f, s):
@@ -3048,12 +3052,12 @@ def test_verify_never_calls_unmeasured_a_pass():
     # 未測定があるなら、合格と言ってはいけない
     r = run(3, 0, 1)
     assert r.returncode != 0, "未測定があるのに exit 0（偽の合格）"
-    assert "主張してはいけない" in r.stdout
+    assert "Do not claim separate_uid" in r.stdout
 
     # 全部測って全部通ったなら、従来どおり合格できる（デッドロックさせない）
     r2 = run(14, 0, 0)
     assert r2.returncode == 0, f"全部通ったのに合格にならない: {r2.stdout}"
-    assert "separate_uid" in r2.stdout and "主張してよい" in r2.stdout
+    assert "separate_uid" in r2.stdout and "may be claimed" in r2.stdout
 
     # 不合格があるなら当然だめ
     r3 = run(10, 1, 0)
@@ -3073,7 +3077,7 @@ def test_service_account_requires_free_uid_and_gid():
     assert "dscl . -search /Users UniqueID" in seg
     assert "dscl . -search /Groups PrimaryGroupID" in seg, \
         "gid の空きを確かめずに番号を選んでいる"
-    assert "両方" in src
+    assert "as **both** a uid and a gid" in src
 
 
 def test_install_keeps_two_copies_until_symlink_is_made():
@@ -3088,7 +3092,7 @@ def test_install_keeps_two_copies_until_symlink_is_made():
     i_ln = src.index("""run "ln -s '${AUTHORITATIVE}/ledger' '${ORG_ROOT}/.orgforge/ledger'\"""")
     assert i_cp < i_mv < i_ln, "コピーより先に移動・symlink を作っている"
     # 元を消さずに退避すること
-    assert ".pre-writer" in src and "**消さない**" in src
+    assert ".pre-writer" in src and "**it is not removed**" in src
 
 
 def test_schema_fix_repairs_existing_class_fields(tmp_path):

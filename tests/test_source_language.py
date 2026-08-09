@@ -44,7 +44,7 @@ BUDGET = {
     "tests/test_ears_acceptance.py": 6,
     "tests/test_github_sync.py": 62,
     "tests/test_hook.py": 447,
-    "tests/test_ledger.py": 450,
+    "tests/test_ledger.py": 411,
     "tests/test_organ_unit.py": 2,
     "tests/test_orgcycle.py": 424,
     "tests/test_rederivability.py": 1,
@@ -59,8 +59,6 @@ BUDGET = {
     "tools/orgcycle/lens.py": 1,
     "tools/orgcycle/rederivability.py": 9,
     "tools/req_lint.py": 28,
-    "tools/writer-install.sh": 242,
-    "tools/writer-verify.sh": 124,
 }
 
 
