@@ -1,53 +1,53 @@
 #!/usr/bin/env bash
-# writer-install.sh — writerd を別 UID の LaunchDaemon として据える（段階B, macOS）。
+# writer-install.sh — install writerd as a LaunchDaemon under a separate UID (stage B, macOS).
 #
-# ## これが何を変えるのか
+# ## What this changes
 #
-# 段階A（`writerd.py` を同じ UID で動かす）で強制できるのは「台帳への経路が1つであること」
-# までである。**同じ UID の caller は daemon を止められ、ファイル権限を戻せる**ので、
-# `workload_isolation` は `process_mediated` にとどまる。
+# Stage A (running `writerd.py` under the same UID) can enforce no more than "there is one path to
+# the ledger". **A caller under the same UID can stop the daemon and restore the file permissions**,
+# so `workload_isolation` stays at `process_mediated`.
 #
-# このスクリプトは:
-#   - 専用 UID（サービスアカウント）を作る
-#   - 台帳・鍵 registry・schema・HALT ラッチを **その UID の所有**にする
-#   - socket の親ディレクトリを **root 所有・他者書き込み不可**にする
-#   - daemon・plist・設定を **root 所有**にして caller から差し替え不能にする
+# This script:
+#   - creates a dedicated UID (a service account)
+#   - makes the ledger, key registry, schema, and HALT latch **owned by that UID**
+#   - makes the socket's parent directory **root-owned and unwritable by others**
+#   - makes the daemon, plist, and configuration **root-owned**, so a caller cannot replace them
 #
-# ここまで揃うと、**通常の caller UID からは台帳のファイルに書けなくなる**（OS 権限で失敗する）。
-# そこで初めて `workload_isolation: separate_uid` を主張できる。
+# With all of that in place, **a normal caller UID can no longer write to the ledger files** (it
+# fails on OS permissions). Only then may `workload_isolation: separate_uid` be claimed.
 #
-# ## 脅威モデルから外れるもの
+# ## What falls outside the threat model
 #
-# **ホストの管理者（root）。** LaunchDaemon を止め、所有者を戻し、plist を書き換えられる。
-# 保証の対象は「**通常の agent / caller UID から writer の資産を変更できない**」ことであって、
-# root ではない。これは限界ではなく境界の定義である。
+# **The host's administrator (root).** They can stop the LaunchDaemon, restore the ownership, and
+# rewrite the plist. What is guaranteed is that **a normal agent / caller UID cannot modify the
+# writer's assets** — not root. That is not a limitation but the definition of the boundary.
 #
-# ## 使い方
+# ## Usage
 #
-#   sudo tools/writer-install.sh --org-root /path/to/org --dry-run   # 何をするか見る
-#   sudo tools/writer-install.sh --org-root /path/to/org             # 実行
-#   sudo tools/writer-install.sh --org-root /path/to/org --uninstall  # 戻す
+#   sudo tools/writer-install.sh --org-root /path/to/org --dry-run   # see what it would do
+#   sudo tools/writer-install.sh --org-root /path/to/org             # run it
+#   sudo tools/writer-install.sh --org-root /path/to/org --uninstall  # put it back
 #
-# 冪等である。既にあるものは作り直さず、足りないものだけ足す。
+# It is idempotent. What already exists is not rebuilt; only what is missing is added.
 set -euo pipefail
-# **失敗したら止まる。** set -e が無いと、chown が半端に済んだ状態で「install 完了」と
-# 表示され、daemon が起動しない org が残る（実測で指摘された）。
+# **It stops on failure.** Without set -e a half-finished chown prints "install complete" and
+# leaves an org whose daemon will not start (raised by measurement).
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 SERVICE_USER="_orgforge-writer"
 SERVICE_GROUP="_orgforge-writer"
 LABEL="com.orgforge.writerd"
 PLIST="/Library/LaunchDaemons/${LABEL}.plist"
-SOCK_ANCHOR="/usr/local/var/orgforge"          # root 所有。caller はここに書けない
-SOCK_PARENT="/usr/local/var/orgforge/run"      # writer 所有。daemon が socket を作る
+SOCK_ANCHOR="/usr/local/var/orgforge"          # root-owned. A caller cannot write here
+SOCK_PARENT="/usr/local/var/orgforge/run"      # writer-owned. The daemon creates the socket here
 INSTALL_DIR="/usr/local/libexec/orgforge"
 CONFIG="/usr/local/etc/orgforge/writerd.conf"
 BACKUP_DIR="/usr/local/var/orgforge/backup"
-AUTHORITATIVE=""                     # 権威データ。**org tree の外**。org ごとに分ける
-ORG_NAME=""                          # namespace。既定は org root のハッシュ
-DAEMON_PYTHON="/usr/bin/python3"     # LaunchDaemon が起動する処理系。--daemon-python で変えられる
-CALLER_GROUP="staff"                 # 台帳を読める group（caller の primary group）
-CALLER_UID=""                        # 書き込みを認可する peer。既定は sudo の呼び出し元
+AUTHORITATIVE=""                     # the authoritative data. **Outside the org tree.** Per org
+ORG_NAME=""                          # the namespace. Defaults to a hash of the org root
+DAEMON_PYTHON="/usr/bin/python3"     # the interpreter the LaunchDaemon starts. --daemon-python
+CALLER_GROUP="staff"                 # the group that can read the ledger (the caller's primary)
+CALLER_UID=""                        # the peer authorized to write. Defaults to sudo's caller
 
 ORG_ROOT=""
 DRY_RUN=0
@@ -62,7 +62,7 @@ while [ $# -gt 0 ]; do
     --dry-run)  DRY_RUN=1; shift ;;
     --uninstall) UNINSTALL=1; shift ;;
     -h|--help) sed -n '1,40p' "$0"; exit 0 ;;
-    *) echo "不明な引数: $1" >&2; exit 2 ;;
+    *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
 
@@ -70,34 +70,35 @@ say()  { printf '  %s\n' "$*"; }
 run()  {
   if [ "$DRY_RUN" = 1 ]; then printf '  [dry-run] %s\n' "$*"; return 0; fi
   if ! eval "$@"; then
-    printf '✗ 失敗した: %s\n' "$*" >&2
-    printf '  **半端な状態で続けない。** ここまでの変更を戻すには:\n' >&2
+    printf '✗ failed: %s\n' "$*" >&2
+    printf '  **Do not continue in a half-finished state.** To undo the changes made so far:\n' >&2
     printf '    sudo %s --uninstall\n' "$0" >&2
     exit 1
   fi
 }
 fail() { printf '✗ %s\n' "$*" >&2; exit 1; }
 
-# ── 事前条件 ──────────────────────────────────────────────────────────────────
-echo "── 事前条件"
-[ "$(uname -s)" = "Darwin" ] || fail "このスクリプトは macOS 用である（Linux は systemd 版が必要）"
+# ── preconditions ───────────────────────────────────────────────────────────
+echo "── preconditions"
+[ "$(uname -s)" = "Darwin" ] || fail "this script is for macOS (Linux needs a systemd version)"
 if [ "$DRY_RUN" = 0 ] && [ "$(id -u)" != "0" ]; then
-  fail "root で実行すること: sudo $0 …（--dry-run なら root は不要）"
+  fail "run it as root: sudo $0 … (--dry-run does not need root)"
 fi
 say "OS: $(sw_vers -productName) $(sw_vers -productVersion)"
-say "実行者: uid=$(id -u) ($(whoami))"
-# sudo で呼ばれたなら、**元の利用者**を書き込みの認可対象にする（root ではない）。
+say "running as: uid=$(id -u) ($(whoami))"
+# Where it was called through sudo, **the original user** is what is authorized to write (not
+# root).
 if [ -z "${CALLER_UID}" ]; then
   CALLER_UID="${SUDO_UID:-$(id -u)}"
 fi
-say "書き込みを認可する caller uid: ${CALLER_UID}（--caller-uid で変えられる）"
+say "the caller uid authorized to write: ${CALLER_UID} (change it with --caller-uid)"
 
 if [ "$UNINSTALL" = 0 ]; then
-  [ -n "${ORG_ROOT}" ] || fail "--org-root が必要（org のルート = .orgforge の親）"
-  [ -d "${ORG_ROOT}/.orgforge/ledger" ] || fail "台帳が見つからない: ${ORG_ROOT}/.orgforge/ledger"
+  [ -n "${ORG_ROOT}" ] || fail "--org-root is required (the org's root = the parent of .orgforge)"
+  [ -d "${ORG_ROOT}/.orgforge/ledger" ] || fail "no ledger found: ${ORG_ROOT}/.orgforge/ledger"
   ORG_ROOT="$(cd "${ORG_ROOT}" && pwd)"
-  # **org ごとに分ける。** 固定のパス・Label・backup を共有すると、2つ目の org を入れた瞬間に
-  # 1つ目の設定を壊す（実測で指摘された）。
+  # **Separate per org.** Sharing one fixed path, Label, and backup breaks the first org's
+  # configuration the moment a second org is installed (raised by measurement).
   if [ -z "${ORG_NAME}" ]; then
     ORG_NAME="$(printf '%s' "${ORG_ROOT}" | shasum -a 256 | cut -c1-12)"
   fi
@@ -108,54 +109,56 @@ if [ "$UNINSTALL" = 0 ]; then
   BACKUP_DIR="/usr/local/var/orgforge/backup/${ORG_NAME}"
   CONFIG="/usr/local/etc/orgforge/${ORG_NAME}.conf"
   say "org: ${ORG_ROOT}"
-  say "namespace: ${ORG_NAME}（--org-name で固定できる）"
-  # **元の所有者を記録する。** rollback で戻すために必要である。
+  say "namespace: ${ORG_NAME} (fix it with --org-name)"
+  # **Record the original owner.** It is needed to restore on rollback.
   ORIG_OWNER="$(stat -f '%Su:%Sg' "${ORG_ROOT}/.orgforge/ledger")"
-  say "台帳の現在の所有者: ${ORIG_OWNER}"
-  [ -f "$PLUGIN_DIR/tools/writerd.py" ] || fail "writerd.py が無い: $PLUGIN_DIR/tools"
-  # **daemon が使う python で検査する。** 利用者の python3 に入っていても、LaunchDaemon が
-  # 起動する /usr/bin/python3 に無ければ writerd は schema を読めない（実測で指摘された）。
+  say "the ledger's current owner: ${ORIG_OWNER}"
+  [ -f "$PLUGIN_DIR/tools/writerd.py" ] || fail "no writerd.py: $PLUGIN_DIR/tools"
+  # **Check with the python the daemon uses.** Present in the user's python3 or not, writerd cannot
+  # read the schema unless it is in the /usr/bin/python3 the LaunchDaemon starts (raised by
+  # measurement).
   if ! PYTHONNOUSERSITE=1 "${DAEMON_PYTHON}" -c 'import yaml' 2>/dev/null; then
     fail "$(cat <<EOF
-${DAEMON_PYTHON} に PyYAML が無い（writerd が schema を読むのに要る）。
-  LaunchDaemon はここで起動するので、利用者の python3 に入っていても足りない。
-  **とくに ~/Library/Python/*/lib/python/site-packages にある場合は無効である** —
-  daemon は別 UID で走るので、そのユーザーの site-packages は見えない
-  （このマシンの実測: PyYAML は ${HOME}/Library/Python/3.9 にあり、PYTHONNOUSERSITE=1 では
-  読めなかった）。
-  **PyYAML が無いと writerd は何も書けない** — ledger.py が schema を読めず、
-  「検証できないまま書かない」として全ての append を拒否する（fail-closed）。
-  省略できない前提条件である。
+${DAEMON_PYTHON} has no PyYAML (writerd needs it to read the schema).
+  The LaunchDaemon starts here, so having it in the user's python3 is not enough.
+  **It is useless in ~/Library/Python/*/lib/python/site-packages in particular** — the daemon runs
+  under a different UID, so that user's site-packages is invisible to it
+  (measured on this machine: PyYAML was in ${HOME}/Library/Python/3.9 and was unreadable under
+  PYTHONNOUSERSITE=1).
+  **Without PyYAML writerd can write nothing** — ledger.py cannot read the schema and refuses every
+  append as "do not write what cannot be verified" (fail-closed).
+  It is a precondition that cannot be skipped.
 
-  どれかを選ぶこと（**システム python を書き換えない順**）:
-    1. root 所有の専用 venv（推奨）— システムに触れず、daemon 専用に閉じる:
+  Pick one (**ordered by not rewriting the system python**):
+    1. a root-owned dedicated venv (recommended) — it touches nothing system-wide and stays closed
+       to the daemon:
          sudo ${DAEMON_PYTHON} -m venv /usr/local/libexec/orgforge/venv
          sudo /usr/local/libexec/orgforge/venv/bin/pip install pyyaml
          sudo chown -R root:wheel /usr/local/libexec/orgforge/venv
          sudo $0 --org-root '<org>' --daemon-python /usr/local/libexec/orgforge/venv/bin/python3
-    2. Homebrew の python（自分で管理する処理系）:
+    2. Homebrew's python (an interpreter you manage yourself):
          brew install python@3.13
          /opt/homebrew/bin/python3 -m pip install pyyaml
          sudo $0 --org-root '<org>' --daemon-python /opt/homebrew/bin/python3
 
-  **--break-system-packages でシステム python に入れることは勧めない** — OS の管理下にある
-  処理系を書き換えると、他の何かが壊れたときに切り分けられなくなる。
-  検査したコマンド: PYTHONNOUSERSITE=1 ${DAEMON_PYTHON} -c 'import yaml'
+  **Installing into the system python with --break-system-packages is not advised** — rewriting an
+  interpreter the OS manages makes it impossible to isolate the cause when something else breaks.
+  The command that was checked: PYTHONNOUSERSITE=1 ${DAEMON_PYTHON} -c 'import yaml'
 EOF
 )"
   fi
-  say "${DAEMON_PYTHON}: PyYAML あり"
+  say "${DAEMON_PYTHON}: PyYAML present"
 fi
 
 # ── uninstall ────────────────────────────────────────────────────────────────
 if [ "$UNINSTALL" = 1 ]; then
-  # **どの org を外すのかを決める。** namespace が無いと、複数 org で固定の Label / backup を
-  # 共有し、1つ外すと全部壊れる（実測で指摘された）。
+  # **Decide which org is being removed.** Without a namespace, several orgs share one fixed Label
+  # and backup, and removing one breaks them all (raised by measurement).
   if [ -z "${ORG_NAME}" ] && [ -n "${ORG_ROOT}" ]; then
     ORG_NAME="$(printf '%s' "$(cd "${ORG_ROOT}" && pwd)" | shasum -a 256 | cut -c1-12)"
   fi
   if [ -z "${ORG_NAME}" ]; then
-    fail "--org-root か --org-name が必要（どの org を外すのか決まらない）"
+    fail "--org-root or --org-name is required (which org to remove is undecided)"
   fi
   AUTHORITATIVE="/usr/local/var/orgforge/orgs/${ORG_NAME}"
   SOCK_PARENT="/usr/local/var/orgforge/run/${ORG_NAME}"
@@ -165,64 +168,71 @@ if [ "$UNINSTALL" = 1 ]; then
   CONFIG="/usr/local/etc/orgforge/${ORG_NAME}.conf"
   say "namespace: ${ORG_NAME}"
   echo
-  echo "── uninstall（**台帳は消さない**。順序: daemon停止 → 書戻し → 実体化 → 所有者復元）"
-  # ① daemon を止める。**先に止めないと、書き戻している途中に writer が書く。**
+  echo "── uninstall (**the ledger is never removed**. Order: stop the daemon → write back →
+materialise → restore ownership)"
+  # ① Stop the daemon. **Without stopping first, the writer writes mid-restore.**
   if [ -f "${PLIST}" ]; then
-    # **停止の失敗を握り潰さない。** 止まっていない writer が、書き戻している最中に書く。
+    # **Do not swallow a failure to stop.** A writer still running writes mid-restore.
     if [ "${DRY_RUN}" = 0 ]; then
       launchctl bootout system "${PLIST}" 2>/dev/null || true
       sleep 1
       if launchctl print "system/${LABEL}" >/dev/null 2>&1; then
-        fail "LaunchDaemon を止められなかった（system/${LABEL} がまだ居る）。
-  **止まっていない writer が、書き戻している最中に台帳へ書く。**
-  手で止めてから再実行すること:
+        fail "could not stop the LaunchDaemon (system/${LABEL} is still there).
+  **A writer that has not stopped writes to the ledger mid-restore.**
+  Stop it by hand and run this again:
     sudo launchctl bootout system ${PLIST}"
       fi
     else
-      printf '  [dry-run] launchctl bootout system %s（停止を確認する）\n' "${PLIST}"
+      printf '  [dry-run] launchctl bootout system %s (confirming it stopped)\n' "${PLIST}"
     fi
     run "rm -f '${PLIST}'"
-    say "① LaunchDaemon を停止した（停止を確認済み）"
+    say "① stopped the LaunchDaemon (confirmed stopped)"
   else
-    say "① LaunchDaemon は無い"
+    say "① there is no LaunchDaemon"
   fi
 
   ROOTP="$(cat "${BACKUP_DIR}/original-org-root" 2>/dev/null || true)"
   OWNER="$(cat "${BACKUP_DIR}/original-owner" 2>/dev/null || true)"
   if [ -z "$ROOTP" ] && [ -n "${ORG_ROOT}" ]; then ROOTP="${ORG_ROOT}"; fi
 
-  # **既定は「復元していない」。** 復元ループに入らなかったとき（org root が移動・消失した等）に
-  # 「復元済み」と見なすと、権威側にしか無い最新データを消す = 永続データ損失。
-  # 消してよいのは、**戻したことを確かめられたときだけ**である（実測で指摘された）。
+  # **The default is "not restored".** Treating it as restored where the restore loop never ran (the
+  # org root was moved or deleted, say) deletes the only up-to-date copy, which lives on the
+  # authoritative side = permanent data loss.
+  # Deletion is allowed **only once the restore is confirmed** (raised by measurement).
   RESTORE_OK=0
 
-  # ②③ 権威側の内容を書き戻し、symlink を実体に置き換える。
+  # ②③ Write the authoritative content back and replace the symlink with real content.
   if [ -n "$ROOTP" ] && [ -d "$ROOTP" ]; then
     RESTORE_OK=1
     for pair in ".orgforge/ledger:ledger" ".orgforge/trust:trust" \
                 "ledger-schema.yaml:ledger-schema.yaml"; do
       cur="${ROOTP}/${pair%%:*}"; src="${AUTHORITATIVE}/${pair##*:}"
       old_copy="${ROOTP}/${pair%%:*}.pre-writer"
-      # **symlink が無いことを「戻し済み」と読んではいけない。**
-      # caller は自分の org tree を動かせる（例: .orgforge を rename する）。すると symlink は
-      # 消え、権威側だけが唯一の最新の写しになる。ここで continue すると ⑤ がそれを消す
-      # = 永続データ損失（実測で指摘された）。
-      # **「在ること」を「戻っていること」と読んではいけない。**
-      # caller は symlink の代わりに **自分の偽の実体** を置ける。それを「復元済み」と認めると、
-      # ⑤ が権威側の最新版を消し、org 側には caller が置いた古い中身だけが残る
-      # （= 永続データ損失。実測で確認した4つ目の変種）。
-      # 飛ばしてよいのは **権威側に何も無いとき** か、**中身が一致するとき** だけである。
+      # **The absence of a symlink must never be read as "already restored".**
+      # A caller can move its own org tree (renaming .orgforge, say). The symlink then disappears and
+      # the authoritative side becomes the only up-to-date copy. Continuing here has ⑤ delete it =
+      # permanent data loss (raised by measurement).
+      # **"It is there" must never be read as "it was restored".**
+      # A caller can plant **its own fake content** in place of the symlink. Accepting that as
+      # "restored" has ⑤ delete the authoritative side's latest version, leaving the org side with
+      # only the stale content the caller planted (= permanent data loss; the fourth variant
+      # confirmed by measurement).
+      # It may be skipped **only where the authoritative side holds nothing**, or **where the content
+      # matches**.
       if [ ! -L "${cur}" ] && [ -e "${cur}" ]; then
         if [ ! -e "${src}" ]; then
-          continue                     # 権威側に無い = 戻すものが無い
+          continue                     # nothing authoritative = nothing to restore
         fi
-        # **数は caller が合わせられる。** ファイル数の一致を「同じ中身」と読むと、
-        # 数だけ揃えた偽物で権威側の最新版を消せる（実測で確認した5つ目の変種）。
-        # **中身の digest で比べる** — caller はデータを持っていない限り一致させられない。
-        # `-type f` だけだと **symlink が数えられない** — caller は中身を一致させたまま
-        # symlink を紛れ込ませられる（実測）。名前と種別も digest に入れる。
-        # **名前だけでは足りない。** 同じ名前の「ディレクトリ」と「symlink」は名前が同じなので、
-        # 名前だけを入れると同一と誤認する（実測）。**種別と symlink の向き先**まで入れる。
+        # **A caller can match the count.** Reading a matching file count as "the same content" lets
+        # a forgery that merely matches the count delete the authoritative side's latest version (the
+        # fifth variant confirmed by measurement).
+        # **Compare by a digest of the content** — a caller cannot match that without holding the
+        # data.
+        # `-type f` alone **does not count symlinks** — a caller can slip a symlink in while keeping
+        # the content matching (measured). Names and types go into the digest as well.
+        # **Names alone are not enough.** A "directory" and a "symlink" of the same name share that
+        # name, so including only names misidentifies them as the same (measured). **The type and
+        # the symlink's target** go in too.
         _digest() (
           cd "$1" 2>/dev/null || return 0
           { find . -type f -exec shasum -a 256 {} \;
@@ -232,48 +242,48 @@ if [ "$UNINSTALL" = 1 ]; then
         d_s="$(_digest "${src}")"
         d_c="$(_digest "${cur}")"
         if [ -n "${d_s}" ] && [ "${d_s}" = "${d_c}" ]; then
-          continue                     # 中身が同一 = 戻っている
+          continue                     # identical content = it is restored
         fi
-        say "  ！$(basename "${cur}") に実体が在るが、権威側と中身が違う。"
-        say "    **「在る」を「戻った」と読まない** — 権威側を消さずに退避する"
+        say "  ! $(basename "${cur}") holds real content, but it differs from the authoritative side."
+        say "    **\"it is there\" is not read as \"it was restored\"** — it is set aside without deleting the authoritative side"
         run "mv '${cur}' '${cur}.found-$$'"
       fi
       if [ ! -L "${cur}" ]; then
         if [ -e "${src}" ]; then
-          say "  ！$(basename "${cur}") の symlink が無いのに権威側に実体が在る。"
-          say "    org tree が動かされた可能性がある — **消さずに復元を試みる**"
+          say "  ! $(basename "${cur}") has no symlink, yet the authoritative side holds real content."
+          say "    the org tree may have been moved — **a restore is attempted rather than a deletion**"
           run "mkdir -p '$(dirname "${cur}")'"
         else
-          continue                     # 権威側にも無い = 消すものが無い
+          continue                     # nothing on either side = nothing to delete
         fi
       fi
-      # **順序が安全性である。** 先に symlink を消すと、コピーが失敗した時点で org 側から
-      # 実体が消え、再実行時は `[ -L ]` が偽なので復元を飛ばし、⑤が権威データを消す
-      # （= 唯一の写しを失う）。実測で指摘された。
-      #   ① 隣に新しい実体を作る（cur には触れない）
-      #   ② 中身を検証する
-      #   ③ atomic に差し替える
-      #   ④ そのあとで初めて古い symlink を消す
+      # **The order is the safety.** Removing the symlink first makes the real content vanish from
+      # the org side the moment a copy fails; on a re-run `[ -L ]` is false, so the restore is skipped
+      # and ⑤ deletes the authoritative data (= the only copy is lost). Raised by measurement.
+      #   ① create the new content alongside (cur is untouched)
+      #   ② verify the content
+      #   ③ swap it in atomically
+      #   ④ only then remove the old symlink
       staged="${cur}.restoring.$$"
       run "rm -rf '${staged}'"
       if [ -e "${src}" ]; then
         run "cp -R '${src}' '${staged}'"
-        FROM="権威側"
+        FROM="the authoritative side"
       elif [ -e "${old_copy}" ]; then
         run "cp -R '${old_copy}' '${staged}'"
-        FROM="install 前の控え"
+        FROM="the copy taken before install"
       else
-        say "  ！$(basename "${cur}") の復元元が無い（権威側も控えも）— **symlink を残す**"
+        say "  ! $(basename "${cur}") has nothing to restore from (neither authoritative nor a copy) — **the symlink is kept**"
         RESTORE_OK=0
         continue
       fi
-      # ② 検証。**中身を確かめてから差し替える。**
+      # ② Verify. **Confirm the content before swapping.**
       if [ "${DRY_RUN}" = 0 ]; then
         if [ -d "${staged}" ]; then
           n_src="$(find "${src}" -type f 2>/dev/null | wc -l | tr -d ' ')"
           n_dst="$(find "${staged}" -type f 2>/dev/null | wc -l | tr -d ' ')"
           if [ "${n_src}" != "${n_dst}" ]; then
-            say "  ！$(basename "${cur}") のコピーが不完全（${n_src} → ${n_dst}）— **中止**"
+            say "  ! $(basename "${cur}")'s copy is incomplete (${n_src} → ${n_dst}) — **aborting**"
             rm -rf "${staged}"
             RESTORE_OK=0
             continue
@@ -281,78 +291,81 @@ if [ "$UNINSTALL" = 1 ]; then
         fi
         sync 2>/dev/null || true
       fi
-      # ③④ atomic に置き換え、そのあとで symlink を消す
+      # ③④ Swap atomically, and only then remove the symlink
       run "rm -f '${cur}'"
       run "mv '${staged}' '${cur}'"
-      say "② $(basename "${cur}") を${FROM}の内容で実体化した"
-      [ -e "${old_copy}" ] && say "  （install 前の控え: ${old_copy} — 確認して消すこと）"
+      say "② materialised $(basename "${cur}") from ${FROM}"
+      [ -e "${old_copy}" ] && say "  (the copy from before install: ${old_copy} — look at it, then remove it)"
     done
-    say "③ symlink を実体に置き換えた"
-    # ④ 所有者を戻す。**書き戻したあとに行う** — 先に戻すと writer が書けなくなる。
+    say "③ replaced the symlinks with real content"
+    # ④ Restore the ownership. **After writing back** — restoring first leaves the writer unable to
+    # write.
     if [ -n "$OWNER" ]; then
       run "chown -R '$OWNER' '$ROOTP/.orgforge'"
       run "chmod -R u+rwX '$ROOTP/.orgforge'"
       [ -e "$ROOTP/ledger-schema.yaml" ] && run "chown '$OWNER' '$ROOTP/ledger-schema.yaml'"
-      say "④ 所有者を $OWNER に戻した"
+      say "④ restored the ownership to $OWNER"
     else
-      say "④ **元の所有者の記録が無い** — 手で戻すこと: chown -R \$(whoami) '$ROOTP/.orgforge'"
+      say "④ **there is no record of the original owner** — restore it by hand: chown -R \$(whoami) '$ROOTP/.orgforge'"
     fi
   fi
 
-  # ⑤ この org のものだけを消す。**共有物は他 org が残る間は消さない。**
-  # **復元できていないなら、権威データも backup も消さない。** 消すと唯一の写しを失う
-  # （実測で指摘された経路）。再実行できる状態のまま止める。
+  # ⑤ Remove only what belongs to this org. **Shared items stay while another org remains.**
+  # **Where the restore did not succeed, neither the authoritative data nor the backup is removed.**
+  # Removing them loses the only copy (a path raised by measurement). It stops in a state that can be
+  # re-run.
   if [ -z "$ROOTP" ] || [ ! -d "$ROOTP" ]; then
-    say "！org root が見つからない: ${ROOTP:-（記録なし）}"
-    say "  移動されたか消されている。**権威側にしか無いデータを消さない。**"
+    say "! the org root cannot be found: ${ROOTP:-(nothing recorded)}"
+    say "  it was moved or deleted. **Data that exists only on the authoritative side is not removed.**"
   fi
   if [ "${RESTORE_OK}" = 0 ]; then
     run "rm -rf '${SOCK_PARENT}'"
-    say "⑤ socket だけ消した。**権威データと backup は残す** — 復元できていない。"
-    say "  内容: ${AUTHORITATIVE}"
-    say "  控え: ${BACKUP_DIR}"
-    say "  原因を確かめてから、同じコマンドを再実行すること（この uninstall は冪等である）。"
+    say "⑤ removed the socket only. **The authoritative data and the backup are kept** — the restore did not succeed."
+    say "  content: ${AUTHORITATIVE}"
+    say "  copy:    ${BACKUP_DIR}"
+    say "  find the cause, then run the same command again (this uninstall is idempotent)."
     echo
-    echo "✗ uninstall は完了していない。**データは消していない。**"
+    echo "✗ the uninstall did not complete. **No data was removed.**"
     exit 1
   fi
   run "rm -rf '${SOCK_PARENT}' '${AUTHORITATIVE}' '${BACKUP_DIR}' '${CONFIG}'"
-  say "⑤ この org（${ORG_NAME}）の socket / 権威データ / backup / 設定を消した"
+  say "⑤ removed this org's (${ORG_NAME}) socket, authoritative data, backup, and configuration"
   REMAINING="$(ls -1 /usr/local/var/orgforge/orgs 2>/dev/null | wc -l | tr -d ' ')"
   if [ "${REMAINING}" = "0" ]; then
     run "rm -rf '${INSTALL_DIR}'"
-    say "  他の org が無いので共有コードも消した"
+    say "  no other org remains, so the shared code was removed too"
     if id -u "${SERVICE_USER}" >/dev/null 2>&1; then
       run "sysadminctl -deleteUser '${SERVICE_USER}' 2>/dev/null || dscl . -delete '/Users/${SERVICE_USER}'"
-      say "  サービスユーザー ${SERVICE_USER} を削除した"
+      say "  removed the service user ${SERVICE_USER}"
     fi
   else
-    say "  **他の org が ${REMAINING} 件残っているので、共有コードとサービス UID は消さない**"
+    say "  **${REMAINING} other org(s) remain, so the shared code and the service UID are kept**"
   fi
-  say "**鍵は消していない**（権威側を org へ書き戻した）。判断の receipt を検証できなくなるため。"
+  say "**the keys were not removed** (the authoritative side was written back to the org), because otherwise a judgment's receipt could no longer be verified."
   echo
-  echo "✓ uninstall 完了。workload_isolation は process_mediated に戻る。"
+  echo "✓ uninstall complete. workload_isolation returns to process_mediated."
   exit 0
 fi
 
-# ── サービスユーザー ─────────────────────────────────────────────────────────
+# ── the service user ────────────────────────────────────────────────────────
 echo
-echo "── サービスユーザー"
+echo "── the service user"
 if id -u "${SERVICE_USER}" >/dev/null 2>&1; then
-  say "${SERVICE_USER} は既にある（uid=$(id -u "${SERVICE_USER}")）— 作り直さない"
+  say "${SERVICE_USER} already exists (uid=$(id -u "${SERVICE_USER}")) — it is not rebuilt"
 else
-  # 500 未満の uid を探す（macOS の役割アカウントの慣習）。
-  # **uid と gid の両方が空いている番号でなければならない。** 同じ番号を
-  # PrimaryGroupID にも使うので、gid が既存だと **writer の group を他人と共有する**
-  # ことになり、group 権限で台帳へ届く経路ができる（このマシンでは 395-400 が該当した）。
+  # Look for a uid below 500 (the macOS convention for role accounts).
+  # **The number must be free as both a uid and a gid.** The same number is also used as the
+  # PrimaryGroupID, so an existing gid means **the writer's group is shared with someone else**,
+  # opening a path to the ledger through group permissions (395-400 were such cases on this
+  # machine).
   NEXT_UID=""
   for u in $(seq 300 498); do
     if dscl . -search /Users UniqueID "$u" 2>/dev/null | grep -q .; then continue; fi
     if dscl . -search /Groups PrimaryGroupID "$u" 2>/dev/null | grep -q .; then continue; fi
     NEXT_UID="$u"; break
   done
-  [ -n "$NEXT_UID" ] || fail "uid と gid が **両方** 空いている番号が見つからない（300-498）"
-  say "uid=$NEXT_UID を使う"
+  [ -n "$NEXT_UID" ] || fail "no number is free as **both** a uid and a gid (300-498)"
+  say "using uid=$NEXT_UID"
   run "dscl . -create '/Groups/${SERVICE_GROUP}'"
   run "dscl . -create '/Groups/${SERVICE_GROUP}' PrimaryGroupID '$NEXT_UID'"
   run "dscl . -create '/Users/${SERVICE_USER}'"
@@ -362,14 +375,14 @@ else
   run "dscl . -create '/Users/${SERVICE_USER}' PrimaryGroupID '$NEXT_UID'"
   run "dscl . -create '/Users/${SERVICE_USER}' NFSHomeDirectory /var/empty"
   run "dscl . -create '/Users/${SERVICE_USER}' IsHidden 1"
-  say "作成した（ログイン不可・ホーム無し）"
+  say "created (no login, no home)"
 fi
 
-# ── daemon の複製（root 所有・caller から差し替え不能）──────────────────────
+# ── the daemon's copy (root-owned, unreplaceable by a caller) ───────────────
 echo
-echo "── daemon を root 所有の場所へ"
-# **再実行で tools/tools を作らない。** `cp -R src dst/src` は dst/src があると
-# その中にコピーする（実測で指摘された）。毎回消してから入れる。
+echo "── moving the daemon to a root-owned location"
+# **Do not create tools/tools on a re-run.** `cp -R src dst/src` copies into dst/src where it already
+# exists (raised by measurement). It is removed before each install.
 run "rm -rf '${INSTALL_DIR}/tools' '${INSTALL_DIR}/template'"
 run "mkdir -p '${INSTALL_DIR}'"
 run "mkdir -p '${INSTALL_DIR}/tools' '${INSTALL_DIR}/template'"
@@ -377,61 +390,67 @@ run "cp -R '$PLUGIN_DIR/tools/.' '${INSTALL_DIR}/tools/'"
 run "cp -R '$PLUGIN_DIR/template/.' '${INSTALL_DIR}/template/'"
 run "chown -R root:wheel '${INSTALL_DIR}'"
 run "chmod -R go-w '${INSTALL_DIR}'"
-say "${INSTALL_DIR} （root 所有・他者書き込み不可）"
-say "**caller はここを書き換えられない** — writerd 自体の差し替えを塞ぐ"
+say "${INSTALL_DIR} (root-owned, unwritable by others)"
+say "**a caller cannot rewrite this** — it blocks replacing writerd itself"
 
-# ── socket の親ディレクトリ（root 所有）─────────────────────────────────────
+# ── the socket's parent directory (root-owned) ──────────────────────────────
 echo
-echo "── socket の親ディレクトリ"
+echo "── the socket's parent directory"
 run "mkdir -p '${SOCK_PARENT}'"
-# **anchor と leaf を分ける。**
+# **Separate the anchor from the leaf.**
 #
-#   anchor: root 所有 0755。**caller はここに書けない**ので、leaf ごと差し替えられない。
-#   leaf:   writer 所有 0755。**daemon がここに socket を作る**（bind は親への書き込み権限が要る）。
+#   anchor: root-owned 0755. **A caller cannot write here**, so the leaf cannot be replaced
+#           wholesale.
+#   leaf:   writer-owned 0755. **The daemon creates the socket here** (bind needs write permission on
+#           the parent).
 #
-# 実測（監査）: root 所有 0755 の親には **daemon 自身が bind できない**（Permission denied）。
-# 0755 も 1770 も、どちらでも動かない — 前者は daemon が作れず、後者は writerd が拒否する。
-# caller から見た保証は「**anchor に書けないので leaf を差し替えられない**」ことである。
+# Measured (in an audit): **the daemon itself cannot bind** under a root-owned 0755 parent
+# (Permission denied).
+# Neither 0755 nor 1770 works — under the first the daemon cannot create it, and the second writerd
+# refuses.
+# From the caller's side the guarantee is "**the anchor cannot be written to, so the leaf cannot be
+# replaced**".
 #
-# より強い形は launchd の socket activation（launchd が先に socket を作り FD を daemon に渡す）
-# で、その場合 leaf すら writer 所有でなくてよい。ここでは移植性のため anchor/leaf 方式を採る。
+# A stronger shape is launchd's socket activation (launchd creates the socket first and hands the FD
+# to the daemon), where not even the leaf need be writer-owned. The anchor/leaf approach is taken here
+# for portability.
 run "chown root:wheel '${SOCK_ANCHOR}'"
 run "chmod 0755 '${SOCK_ANCHOR}'"
 run "mkdir -p '${SOCK_PARENT}'"
 run "chown '${SERVICE_USER}:${SERVICE_GROUP}' '${SOCK_PARENT}'"
 run "chmod 0755 '${SOCK_PARENT}'"
-say "${SOCK_ANCHOR} （root 所有 0755 — **caller はここに書けない**）"
-say "${SOCK_PARENT} （${SERVICE_USER} 所有 0755 — daemon が socket を作れる／caller は書けない）"
-say "**caller は親ディレクトリを差し替えられない** — 偽 socket に繋がされる経路を塞ぐ"
+say "${SOCK_ANCHOR} (root-owned 0755 — **a caller cannot write here**)"
+say "${SOCK_PARENT} (${SERVICE_USER}-owned 0755 — the daemon can create the socket; a caller cannot write)"
+say "**a caller cannot replace the parent directory** — it blocks being routed to a fake socket"
 
-# ── 設定（root 所有。caller は台帳のパスを指定できない）─────────────────────
+# ── the configuration (root-owned; a caller cannot state the ledger path) ───
 echo
-echo "── 設定"
+echo "── the configuration"
 run "mkdir -p '$(dirname "${CONFIG}")'"
 if [ "$DRY_RUN" = 1 ]; then
-  printf '  [dry-run] %s に org=%s を書く\n' "${CONFIG}" "${ORG_ROOT}/.orgforge/ledger"
+  printf '  [dry-run] write org=%s into %s\n' "${ORG_ROOT}/.orgforge/ledger" "${CONFIG}"
 else
   printf 'org=default=%s\n' "${AUTHORITATIVE}/ledger" > "${CONFIG}"
   chown root:wheel "${CONFIG}"; chmod 644 "${CONFIG}"
 fi
-say "${CONFIG} （root 所有）— **書き込み先はここで決まる。RPC では指定できない**"
+say "${CONFIG} (root-owned) — **the write target is decided here. An RPC cannot state it**"
 
-# ── 台帳・鍵・schema を writer 所有に ───────────────────────────────────────
+# ── making the ledger, keys, and schema writer-owned ────────────────────────
 echo
-echo "── writer が所有すべき資産"
+echo "── the assets the writer should own"
 run "mkdir -p '${BACKUP_DIR}'"
-# **再 install で上書きしない。** 2回目の実行では所有者が既に writer になっているので、
-# それを「元の所有者」として記録すると、uninstall が service UID へ「復元」してしまう
-# （実測で指摘された）。最初の1回だけ書く。
+# **Do not overwrite on a re-install.** On a second run the owner is already the writer, and
+# recording that as "the original owner" makes uninstall "restore" it to the service UID (raised by
+# measurement). It is written on the first run only.
 if [ "$DRY_RUN" = 0 ]; then
   if [ -f "${BACKUP_DIR}/original-owner" ]; then
-    say "元の所有者は既に記録されている（$(cat "${BACKUP_DIR}/original-owner")）— 上書きしない"
+    say "the original owner is already recorded ($(cat "${BACKUP_DIR}/original-owner")) — it is not overwritten"
   elif [ "$(printf '%s' "${ORIG_OWNER}" | cut -d: -f1)" = "${SERVICE_USER}" ]; then
     fail "$(cat <<EOF2
-台帳の所有者が既に ${SERVICE_USER} だが、元の所有者の記録が無い。
-  このまま進めると uninstall が ${SERVICE_USER} へ「復元」して、caller に戻せなくなる。
-  手で記録してから再実行すること:
-    echo '<元の owner:group>' | sudo tee ${BACKUP_DIR}/original-owner
+the ledger is already owned by ${SERVICE_USER}, but there is no record of the original owner.
+  Proceeding makes uninstall "restore" it to ${SERVICE_USER}, and it can never go back to the caller.
+  Record it by hand and run this again:
+    echo '<the original owner:group>' | sudo tee ${BACKUP_DIR}/original-owner
     echo '${ORG_ROOT}' | sudo tee ${BACKUP_DIR}/original-org-root
 EOF2
 )"
@@ -439,27 +458,28 @@ EOF2
     printf '%s\n' "${ORIG_OWNER}" > "${BACKUP_DIR}/original-owner"
     printf '%s\n' "${ORG_ROOT}"   > "${BACKUP_DIR}/original-org-root"
     chmod 600 "${BACKUP_DIR}"/original-*
-    say "元の所有者を ${BACKUP_DIR} に記録した（rollback 用。**再 install では上書きしない**）"
+    say "recorded the original owner in ${BACKUP_DIR} (for rollback. **Not overwritten on a re-install**)"
   fi
 fi
-# **鍵は先に退避する。** 所有者を変えると読めなくなる場合があるため。
+# **Set the keys aside first**, since changing the owner can make them unreadable.
 if [ -d "${ORG_ROOT}/.orgforge/trust" ]; then
   run "cp -R '${ORG_ROOT}/.orgforge/trust' '${BACKUP_DIR}/trust-backup'"
   run "chmod -R go-rwx '${BACKUP_DIR}/trust-backup'"
-  say "鍵 registry を退避した: ${BACKUP_DIR}/trust-backup"
+  say "set the key registry aside: ${BACKUP_DIR}/trust-backup"
 fi
-# **書けないが、読める。** 700 にすると caller の `ledger verify` も board も projection も
-# 落ちる（実測で指摘された）。統制は「書けないこと」であって「見えないこと」ではない —
-# 監査できない台帳は、監査のための台帳ではない。
-# **org tree 自体が caller の所有なので、その中にあるものはパスごと差し替えられる。**
-# 実測（監査）: .orgforge と org root が caller 所有のままなので、writer 所有の ledger/trust や
-# root 所有の schema を **ディレクトリごと** 置き換えられた。中身の権限を絞っても、入れ物を
-# 差し替えられるなら意味が無い。
+# **Unwritable, but readable.** At 700 the caller's `ledger verify`, board, and projection all fail
+# (raised by measurement). The control is "it cannot be written to", not "it cannot be seen" — a
+# ledger that cannot be audited is not a ledger for auditing.
+# **The org tree itself is caller-owned, so anything inside it can be replaced path and all.**
+# Measured (in an audit): with .orgforge and the org root still caller-owned, the writer-owned
+# ledger/trust and the root-owned schema could be replaced **directory and all**. Tightening the
+# permissions on the contents means nothing if the container can be replaced.
 #
-# したがって **権威データは org tree の外に置き、org tree からは symlink で指す**。
-# 実体は root 所有のディレクトリ配下にあり、caller はそこに書けない。
-# symlink を張り替えられても、writerd は `--org` で **実体のパス** を固定して起動するので、
-# 書き込み先は変わらない（読み手が騙される可能性は残る — それは次段で扱う）。
+# So **the authoritative data lives outside the org tree, and the org tree points at it with a
+# symlink**. The real content sits under a root-owned directory, where a caller cannot write.
+# Even where the symlink is repointed, writerd starts with **the real path** fixed via `--org`, so
+# the write target does not move (a reader can still be deceived — that is handled in the next
+# stage).
 run "mkdir -p '${AUTHORITATIVE}/ledger' '${AUTHORITATIVE}/trust'"
 run "chown root:wheel '${AUTHORITATIVE}'"
 run "chmod 0755 '${AUTHORITATIVE}'"
@@ -467,35 +487,38 @@ if [ -d "${ORG_ROOT}/.orgforge/ledger" ] && [ ! -L "${ORG_ROOT}/.orgforge/ledger
   run "cp -R '${ORG_ROOT}/.orgforge/ledger/.' '${AUTHORITATIVE}/ledger/'"
   run "mv '${ORG_ROOT}/.orgforge/ledger' '${ORG_ROOT}/.orgforge/ledger.pre-writer'"
   run "ln -s '${AUTHORITATIVE}/ledger' '${ORG_ROOT}/.orgforge/ledger'"
-  say "台帳を ${AUTHORITATIVE}/ledger へ移し、org からは symlink で指す"
-  say "  （元は ${ORG_ROOT}/.orgforge/ledger.pre-writer に残す — **消さない**）"
+  say "moved the ledger to ${AUTHORITATIVE}/ledger; the org points at it with a symlink"
+  say "  (the original stays at ${ORG_ROOT}/.orgforge/ledger.pre-writer — **it is not removed**)"
 fi
 if [ -d "${ORG_ROOT}/.orgforge/trust" ] && [ ! -L "${ORG_ROOT}/.orgforge/trust" ]; then
   run "cp -R '${ORG_ROOT}/.orgforge/trust/.' '${AUTHORITATIVE}/trust/'"
   run "mv '${ORG_ROOT}/.orgforge/trust' '${ORG_ROOT}/.orgforge/trust.pre-writer'"
   run "ln -s '${AUTHORITATIVE}/trust' '${ORG_ROOT}/.orgforge/trust'"
-  say "鍵 registry を ${AUTHORITATIVE}/trust へ移した"
+  say "moved the key registry to ${AUTHORITATIVE}/trust"
 fi
-# **constitution を root 所有で固定する。**
-# ここに宣言（require_attested_identity など）が入っている。caller が書ける場所に置いたままだと、
-# caller が宣言を偽に書き換えて強制を消せる — **検査の入力を、検査される側が書けてはいけない。**
-# また daemon は org の外で動くので、cwd から探させてはいけない（実測: 導出に失敗し、
-# 未認証 admission が通った）。よってコピーして、パスを明示的に渡す。
+# **Fix the constitution root-owned.**
+# It holds the declarations (require_attested_identity and the like). Left somewhere a caller can
+# write, the caller can rewrite a declaration to false and erase the enforcement — **whoever is
+# checked must not be able to write the check's input.**
+# The daemon also runs outside the org, so it must not be made to search from the cwd (measured: the
+# derivation failed and an unauthenticated admission passed). So it is copied and the path passed
+# explicitly.
 if [ -f "${ORG_ROOT}/constitution.yaml" ] && [ ! -L "${ORG_ROOT}/constitution.yaml" ]; then
   run "cp '${ORG_ROOT}/constitution.yaml' '${AUTHORITATIVE}/constitution.yaml'"
   run "chown root:wheel '${AUTHORITATIVE}/constitution.yaml'"
   run "chmod 0644 '${AUTHORITATIVE}/constitution.yaml'"
-  # **写しは古くなる。** org 側は caller が編集できるまま残す（宣言を読むのは人間でもある）。
-  # だが編集しても daemon には届かない — 届いたら caller が強制を消せてしまうからである。
-  # 「編集したのに効かない」を黙って起こさないよう、**食い違いを見えるようにする**。
-  say "  constitution を root 所有で固定した: ${AUTHORITATIVE}/constitution.yaml"
-  say "  **org 側 (${ORG_ROOT}/constitution.yaml) を編集しても daemon には届かない。**"
-  say "  宣言を変えたら、この installer を再実行して固定し直すこと。"
-  say "  食い違いは writerd が起動時に警告する。"
+  # **A copy goes stale.** The org side stays editable by the caller (a human reads the declarations
+  # too). But an edit does not reach the daemon — if it did, the caller could erase the enforcement.
+  # So that "I edited it and nothing happened" never happens silently, **the divergence is made
+  # visible**.
+  say "  fixed the constitution root-owned: ${AUTHORITATIVE}/constitution.yaml"
+  say "  **Editing the org side (${ORG_ROOT}/constitution.yaml) does not reach the daemon.**"
+  say "  After changing a declaration, run this installer again to fix it anew."
+  say "  writerd warns about the divergence at startup."
 elif [ ! -f "${AUTHORITATIVE}/constitution.yaml" ]; then
-  fail "constitution.yaml が無い: ${ORG_ROOT}/constitution.yaml
-  **宣言が無いまま writer を動かさない。** require_attested_identity が子プロセスに届かず、
-  未認証の admission が通る（実測で指摘された経路）。"
+  fail "no constitution.yaml: ${ORG_ROOT}/constitution.yaml
+  **Do not run the writer with no declarations.** require_attested_identity would not reach the child
+  process and an unauthenticated admission would pass (a path raised by measurement)."
 fi
 
 if [ -f "${ORG_ROOT}/ledger-schema.yaml" ] && [ ! -L "${ORG_ROOT}/ledger-schema.yaml" ]; then
@@ -504,18 +527,18 @@ if [ -f "${ORG_ROOT}/ledger-schema.yaml" ] && [ ! -L "${ORG_ROOT}/ledger-schema.
   run "chmod 0644 '${AUTHORITATIVE}/ledger-schema.yaml'"
   run "mv '${ORG_ROOT}/ledger-schema.yaml' '${ORG_ROOT}/ledger-schema.yaml.pre-writer'"
   run "ln -s '${AUTHORITATIVE}/ledger-schema.yaml' '${ORG_ROOT}/ledger-schema.yaml'"
-  say "schema を ${AUTHORITATIVE} へ移した（daemon は実体のパスを --schema で受け取る）"
+  say "moved the schema to ${AUTHORITATIVE} (the daemon receives the real path via --schema)"
 fi
 run "chown -R '${SERVICE_USER}:${CALLER_GROUP}' '${AUTHORITATIVE}/ledger'"
 run "chmod 750 '${AUTHORITATIVE}/ledger'"
 run "find '${AUTHORITATIVE}/ledger' -type f -exec chmod 640 {} +"
-say "台帳を ${SERVICE_USER} 所有・750/640（group=${CALLER_GROUP}）にした"
-say "  → **caller は読めるが書けない**（verify / board / projection は動く）"
+say "made the ledger ${SERVICE_USER}-owned at 750/640 (group=${CALLER_GROUP})"
+say "  → **a caller can read but not write** (verify / board / projection still work)"
 if [ -d "${AUTHORITATIVE}/trust" ]; then
   run "chown -R root:${SERVICE_GROUP} '${AUTHORITATIVE}/trust'"
   run "chmod 750 '${AUTHORITATIVE}/trust'"
   run "chmod 640 '${AUTHORITATIVE}/trust/keys.json' 2>/dev/null || true"
-  say "鍵 registry を root 所有・group 読み取りにした → **caller は公開鍵を差し替えられない**"
+  say "made the key registry root-owned and group-readable → **a caller cannot replace a public key**"
 fi
 
 
@@ -523,7 +546,7 @@ fi
 echo
 echo "── LaunchDaemon"
 if [ "$DRY_RUN" = 1 ]; then
-  printf '  [dry-run] %s を書いて launchctl bootout/bootstrap する\n' "${PLIST}"
+  printf '  [dry-run] write %s and launchctl bootout/bootstrap\n' "${PLIST}"
 else
   cat > "${PLIST}" <<PLISTEOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -539,22 +562,23 @@ else
     <string>${DAEMON_PYTHON}</string>
     <string>${INSTALL_DIR}/tools/writerd.py</string>
     <string>serve</string>
-    <!-- **実体のパスを渡す。** org tree の symlink を張り替えられても、書き込み先は動かない。 -->
+    <!-- **Pass the real path.** Repointing the org tree's symlink does not move the write target. -->
     <string>--org</string><string>default=${AUTHORITATIVE}/ledger</string>
     <string>--socket</string><string>${SOCK_PARENT}/writer.sock</string>
-    <!-- **schema を固定する。** 渡さないと ledger.py が cwd から org を探し、見つからなければ
-         プラグインのテンプレートに fallback する — org が変えた規則ではなく、テンプレートの
-         規則で検証されることになる（実測で指摘された）。 -->
+    <!-- **Fix the schema.** Without it ledger.py searches for the org from the cwd and falls back to
+         the plugin's template when it finds none — so validation happens under the template's rules
+         rather than the rules the org changed (raised by measurement). -->
     <string>--schema</string><string>${AUTHORITATIVE}/ledger-schema.yaml</string>
-    <!-- **宣言を固定する。** daemon は org の外で動くので、台帳のパスから org root を
-         導出することはできない（実測: 導出に失敗し、未認証 admission が通った）。 -->
+    <!-- **Fix the declarations.** The daemon runs outside the org, so the org root cannot be derived
+         from the ledger path (measured: the derivation failed and an unauthenticated admission
+         passed). -->
     <string>--constitution</string><string>default=${AUTHORITATIVE}/constitution.yaml</string>
-    <!-- **trust store を固定する。** installer は trust を ${AUTHORITATIVE} へ移し、
-         org 側を .pre-writer に改名する。ここで渡さないと daemon（cwd=/）は鍵 registry を
-         見つけられず、**正しく署名された receipt もすべて拒否される**（実測で指摘された）。 -->
+    <!-- **Fix the trust store.** The installer moves trust to ${AUTHORITATIVE} and renames the org
+         side to .pre-writer. Without passing it here the daemon (cwd=/) cannot find the key registry
+         and **refuses even correctly signed receipts** (raised by measurement). -->
     <string>--trust</string><string>default=${AUTHORITATIVE}/trust/keys.json</string>
-    <!-- **caller UID を配線する。** socket は 0666 なので繋げること自体は誰でもできる —
-         繋げることと書けることは別である。 -->
+    <!-- **Wire in the caller UID.** The socket is 0666, so anyone can connect — connecting and
+         writing are different things. -->
     <string>--allow-uid</string><string>${CALLER_UID}</string>
     <string>--require-root-owned</string>
   </array>
@@ -570,26 +594,27 @@ PLISTEOF
   launchctl bootout system "${PLIST}" 2>/dev/null || true
   launchctl bootstrap system "${PLIST}"
 fi
-say "${PLIST} （root 所有）— **caller は plist を書き換えられない**"
-say "--require-root-owned 付きで起動する（socket の親が root 所有でなければ writerd が拒否する）"
+say "${PLIST} (root-owned) — **a caller cannot rewrite the plist**"
+say "it starts with --require-root-owned (writerd refuses unless the socket's parent is root-owned)"
 
-# ── 次にやること ────────────────────────────────────────────────────────────
+# ── what to do next ─────────────────────────────────────────────────────────
 echo
-echo "✓ install 完了（--dry-run では何も変えていない）"
+echo "✓ install complete (--dry-run changed nothing)"
 cat <<NEXT
 
-  次にやること:
+  What to do next:
 
-    1. 検証を回す（**このスクリプトの自己申告ではなく、実測で確かめる**）:
+    1. run the verification (**confirm by measurement, not by this script's own word**):
          tools/writer-verify.sh --org-root '${ORG_ROOT}'
 
-    2. org に socket を教える:
+    2. tell the org about the socket:
          export ORG_WRITER_SOCKET=${SOCK_PARENT}/writer.sock
 
-    3. 戻すとき:
+    3. to put it back:
          sudo $0 --uninstall
 
-  **保証の範囲:** 通常の agent / caller UID から writer の資産（台帳・鍵・schema・ラッチ）を
-  変更できないこと。**ホストの管理者（root）は脅威モデルの外である** — daemon を止め、
-  所有者を戻せる。それは限界ではなく境界の定義である。
+  **The extent of the guarantee:** a normal agent / caller UID cannot modify the writer's assets
+  (the ledger, keys, schema, and latch). **The host's administrator (root) is outside the threat
+  model** — they can stop the daemon and restore the ownership. That is not a limitation but the
+  definition of the boundary.
 NEXT
