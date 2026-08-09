@@ -39,8 +39,9 @@ done
 for f in "$REPO"/tools/*.py; do
   sync_one "$f" "$HERE/tools/$(basename "$f")" || rc=1
 done
-# サブパッケージ（tools/orgcycle/ など）も同期する。`tools/*.py` だけを見ていると
-# 分割したモジュールがバンドルに入らず、プラグインとして入れた瞬間に ImportError で死ぬ。
+# Sync the subpackages (tools/orgcycle/ and the like) too. Reading only `tools/*.py` leaves the
+# split-out modules out of the bundle, and it dies with an ImportError the moment it is installed
+# as a plugin.
 for d in "$REPO"/tools/*/; do
   [ -f "${d}__init__.py" ] || continue
   name="$(basename "$d")"

@@ -45,7 +45,7 @@ done
 for f in "$REPO"/tools/*.py; do
   sync_one "$f" "$HERE/tools/$(basename "$f")" || rc=1
 done
-# サブパッケージ（tools/orgcycle/ など）。`tools/*.py` だけを見ていると取り落とす。
+# The subpackages (tools/orgcycle/ and the like). Reading only `tools/*.py` drops them.
 for d in "$REPO"/tools/*/; do
   name="$(basename "$d")"
   [ "$name" = "__pycache__" ] && continue
