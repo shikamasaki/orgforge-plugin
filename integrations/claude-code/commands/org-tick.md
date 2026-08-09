@@ -6,7 +6,7 @@ allowed-tools: Bash(*), Read, Write, Edit, Glob, Grep, Agent, Task, PushNotifica
 
 Run one operating tick of the articulated organization against its ledger.
 
-Ledger root は**発見される**（`tools/discover.py`）— 環境変数の設定は不要。
+The ledger root is **discovered** (`tools/discover.py`) — no environment variable to set.
 
 ## Plan the tick (which checks are due / suspended / MISSED)
 

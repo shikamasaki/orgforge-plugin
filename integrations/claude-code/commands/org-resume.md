@@ -8,7 +8,7 @@ Recover **work in progress** for role **${1:-(all roles)}** from the ledger — 
 context wipe. A half-done implementation lives in the ledger's `progress_recorded` checkpoints, not in
 the lost conversation, so this shows exactly where a cycle stopped and what its next step is.
 
-Ledger root は**発見される**（`tools/discover.py`）— 環境変数の設定は不要。
+The ledger root is **discovered** (`tools/discover.py`) — no environment variable to set.
 
 ## Work in progress (started, not yet completed)
 

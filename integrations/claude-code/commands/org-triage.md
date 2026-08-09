@@ -9,7 +9,7 @@ item so the org can work it unattended. The human's input is compressed to *hand
 triage does the rest. This is what makes orgforge a factory (work flows in from the world) rather than a
 workshop (a human types every task).
 
-Ledger root は**発見される**（`tools/discover.py`）— 環境変数の設定は不要。
+The ledger root is **discovered** (`tools/discover.py`) — no environment variable to set.
 
 ## 1. Read the signal and the current state
 

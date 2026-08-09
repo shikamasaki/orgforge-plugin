@@ -14,21 +14,24 @@ Org name: **${1:-(derive from the directory name)}** · output language: **${2:-
 minted. The order is: `/org-init` → `/org-found` (design, CEO approves) → `/org-decompose` (task Issues)
 → `/org-work` (build).
 
-## 0. どこに org を作るのか — 実行前に必ず確認する
+## 0. Where is the org being created — always confirm before running
 
-このコマンドは**実行時のカレントディレクトリ**に org を作る。セッションが目的のリポジトリにいないと、
-関係ないリポジトリ（プラグイン自身の開発ツリーなど）を org 化してしまう。実際に起きた事故なので、
-書き込む前に場所を出して確認する:
+This command creates the org in **the current directory at run time**. If the session is not in the
+intended repository, it turns an unrelated one (the plugin's own development tree, say) into an
+org. That accident actually happened, so the location is printed and confirmed before anything is
+written:
 
-!`echo "  ここに org を作ります: $(pwd)"; echo "  git remote        : $(git remote get-url origin 2>/dev/null || echo '(なし)')"; if [ -f organization.yaml ] || [ -d .orgforge ]; then echo "  既存の org        : あり（再実行＝修復モード。既存ファイルは上書きしない）"; else echo "  既存の org        : なし（新規作成）"; fi; if [ -f .claude-plugin/marketplace.json ] || [ -d integrations/claude-code/commands ]; then echo; echo "  ⛔ STOP — ここは orgforge プラグイン自身の開発ツリーです。"; echo "     org を作る場所ではありません。プロダクトのリポジトリに移動してください。"; echo "     （このガードは実際に2回起きた事故を止めるためのものです）"; fi`
+!`echo "  creating the org here: $(pwd)"; echo "  git remote           : $(git remote get-url origin 2>/dev/null || echo '(none)')"; if [ -f organization.yaml ] || [ -d .orgforge ]; then echo "  existing org         : yes (a re-run is repair mode; existing files are not overwritten)"; else echo "  existing org         : no (creating a new one)"; fi; if [ -f .claude-plugin/marketplace.json ] || [ -d integrations/claude-code/commands ]; then echo; echo "  ⛔ STOP — this is the orgforge plugin's own development tree."; echo "     It is not a place to create an org. Move to the product repository."; echo "     (this guard exists to stop an accident that actually happened twice)"; fi`
 
-**上のパスが目的のリポジトリでなければ、ここで止める。** 続けて書き込むと、他所のツリーに
-`.orgforge/` とテンプレ7ファイルと `develop` ブランチができ、GitHub にラベル9件が作られる。
+**If the path above is not the intended repository, stop here.** Writing on regardless creates
+`.orgforge/`, seven template files, and a `develop` branch in someone else's tree, and nine labels
+on GitHub.
 
-**⛔ STOP と出たら、以降のステップを一切実行しないこと。** これは表示ではなく指示である。
-プラグインの開発ツリーで `/org-init` を走らせる正当な理由はない — orgforge は*他の*リポジトリを
-org 化するための道具であって、自分自身を org 化するものではない。CEO が「ここでいい」と言った
-場合のみ続行し、それ以外は場所を確認してもらうこと。
+**If ⛔ STOP is printed, do not run any of the steps that follow.** That is an instruction, not a
+display.
+There is no legitimate reason to run `/org-init` in the plugin's development tree — orgforge is a
+tool for turning *other* repositories into orgs, not itself. Continue only where the CEO says
+"here is fine", and otherwise have them confirm the location.
 
 ## 1. Where the org's state lives
 
@@ -107,22 +110,23 @@ first `create` would then race on label creation.
 
 !`REPO="$(python3 "${CLAUDE_PLUGIN_ROOT}/tools/discover.py" repo 2>/dev/null)"; if [ -n "$REPO" ]; then fail=0; for spec in ready:1d76db in-progress:fbca04 blocked:b60205 needs-human:d93f0b done:0e8a16 kind:objective:0e8a16 kind:task:bfd4f2 mandate:fbca04 self:c5def5; do name="orgforge:${spec%:*}"; color="${spec##*:}"; if gh label create "$name" --repo "$REPO" --color "$color" --force >/dev/null 2>&1; then echo "  $name"; else echo "  FAILED $name"; fail=$((fail+1)); fi; done; if [ "$fail" -eq 0 ]; then echo "labels ensured on $REPO"; else echo "WARNING: $fail label(s) FAILED on $REPO — fix gh auth / repo access BEFORE /org-decompose, or the first create races on label creation"; fi; else echo "no GitHub remote discoverable — ledger-only org, skipping labels. Add a remote (gh repo create --source=.) to enable the cross-environment backlog."; fi`
 
-## 5b. 機械バーの現状を baseline として記録する（docs/11 §4e）
+## 5b. Record the current state of the machine bar as a baseline (docs/11 §4e)
 
-`repro_lint` は「この変更で新たに悪化したか」を baseline との差で見る。**baseline が無いと
-比較のしようがなく**、既存の失敗も新規の悪化も同じ HELD として出る。実地では gate がそれを
-「この変更による悪化」と読んで判定を止めた（対象の Issue は、まさにその項目を緑にする作業
-だった）。0.25.2 以降、baseline が無ければツールは「判定していない」と明示するが、
-**基準を1回取っておくほうが根本的**である。
+`repro_lint` reads "did this change newly break something" as a difference against the baseline.
+**With no baseline there is nothing to compare against**, and a pre-existing failure and a new
+regression come out as the same HELD. In the field a gate read that as "a regression from this
+change" and stopped the judgment (while the Issue in question was the work of turning that very
+item green). From 0.25.2 the tool states outright that it "has not decided" where there is no
+baseline, but **taking the reference once is the more fundamental fix**.
 
-新規リポジトリなら失敗は0件か少数で、それが正しい出発点になる（空の baseline は「負債ゼロで
-始めた」という記録であり、以後の悪化が全部見える）。既存コードに後付けするなら
-`/org-adopt` が同じことをする。
+In a new repository the failures are zero or few, and that is the correct starting point (an empty
+baseline is a record that says "started with zero debt", and every later regression is visible).
+For retrofitting onto existing code, `/org-adopt` does the same thing.
 
-!`echo 'baseline を記録: python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/repro_lint.py" baseline .'`
+!`echo 'record the baseline: python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/repro_lint.py" baseline .'`
 
-記録された内容は「期限のない免除」ではない — `repro_lint check` は返済済みの項目を検出して
-「baseline から外して締め直せ」と言う（drain-then-ratchet）。
+What is recorded is not an exemption without end — `repro_lint check` detects the items that have
+been repaid and says "drop them from the baseline and tighten again" (drain-then-ratchet).
 
 ## 6. Verify the org spec lints, and the guardrails actually bite
 
@@ -147,7 +151,7 @@ Tell the CEO, briefly: where the ledger lives, the output language, whether the 
 (and to what repo) or the org is ledger-only, whether `develop` exists, and the lint/probe result.
 
 Then the next step: **`/org-found "<the RFP, or a path to the brief>"`** — which writes the five fixed
-founding artifacts (`REQUIREMENTS.md`, `FEATURE-INVENTORY.md`, `ARCHITECTURE.md` = the 全体設計書,
+founding artifacts (`REQUIREMENTS.md`, `FEATURE-INVENTORY.md`, `ARCHITECTURE.md` = the whole-system design,
 `coverage-manifest.md`, `organization.yaml`; docs/11 §0a) and stops for approval.
 
 ## Discipline

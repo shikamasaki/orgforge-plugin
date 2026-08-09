@@ -10,7 +10,9 @@ and an architecture with the seam contracts between parts), then stops and repor
 CEO — approve the scope before any build.
 
 
-> **出力言語:** `constitution.yaml` の `output_language`（既定 `en`）を読み、Issue・spec・人間向けテキストはその言語で書く（コード・ledger のイベント名・パスは英語の正準形のまま）。
+> **Output language:** read `output_language` from `constitution.yaml` (default `en`) and write
+> Issues, specs, and human-facing text in that language (code, ledger event names, and paths stay
+> in their canonical English form).
 
 ## The brief
 
@@ -27,44 +29,51 @@ keep the CEO's decisions minimal. Concretely:
 > the org root, under exactly these names, because downstream commands (`/org-decompose`, `/org-init`)
 > address them **by name** rather than by search, and a stranger opening any orgforge org must find the
 > design in the same place:
-> `REQUIREMENTS.md` · `FEATURE-INVENTORY.md` · **`ARCHITECTURE.md` (= 全体設計書)** · `coverage-manifest.md` ·
+> `REQUIREMENTS.md` · `FEATURE-INVENTORY.md` · **`ARCHITECTURE.md` (= the whole-system design)** · `coverage-manifest.md` ·
 > `organization.yaml`. Do not invent a variant name (`design.md`, `architecture-overview.md`, `.yaml`
 > instead of `.md`); a renamed artifact is an unfindable one.
 
-1. **RECEIVE → `REQUIREMENTS.md`（書式はテンプレートに従う。自分で構成を発明しない）**
+1. **RECEIVE → `REQUIREMENTS.md` (follow the template's format; do not invent a structure of your own)**
 
-   受け取ったブリーフを **`${CLAUDE_PLUGIN_ROOT}/template/REQUIREMENTS.md` の骨格に整形して**書く。
-   構成をその場で考えてはならない — founding のたびに違う構造の文書が出ると、「同じ spec ⇒ 同じ
-   プロセス」という中核主張が要求記述の層で破れる（docs/11 §0b）。
+   Write the brief you received **shaped onto the skeleton of
+   `${CLAUDE_PLUGIN_ROOT}/template/REQUIREMENTS.md`**.
+   Do not devise a structure on the spot — a document of different structure per founding breaks
+   the central claim, "same spec ⇒ same process", at the layer where requirements are written
+   (docs/11 §0b).
 
-   準拠: **ISO/IEC/IEEE 29148:2018 tailored conformance**（§4.5.2 が認める適合形態）+ **EARS**。
-   要求は `FR-001` で採番し EARS の6パターンで書く。受入基準は Given-When-Then。成功基準は
-   `SC-001` で採番し**技術非依存・定量的**に。**曖昧な点は推測で埋めず
-   `[NEEDS CLARIFICATION: 何が不明か]` と明示する** — エージェントが推測で実装するのが最大の
-   失敗モードであり、これが残っていれば下の lint が落とす。
+   Conformance: **tailored conformance to ISO/IEC/IEEE 29148:2018** (the form §4.5.2 recognises) +
+   **EARS**.
+   Number requirements `FR-001` and write them in the six EARS patterns. Acceptance criteria go in
+   Given-When-Then. Number success criteria `SC-001` and make them **technology-independent and
+   quantitative**. **Do not fill an ambiguity with a guess — state it as
+   `[NEEDS CLARIFICATION: what is unclear]`** — an agent implementing on a guess is the largest
+   failure mode, and the lint below fails on any that remain.
 
-   書いたら**必ず検査する**（必須節の欠落・EARS違反・§5.2.7 の禁止語・未解決マーカー・TBD）。
-   **ファイルを書いた後に、あなた自身が Bash で実行すること**:
+   Once written, **always check it** (missing required sections, EARS violations, §5.2.7's banned
+   words, unresolved markers, TBDs).
+   **After writing the file, run this yourself through Bash**:
 
    ```
    python3 "${CLAUDE_PLUGIN_ROOT}/tools/req_lint.py" check REQUIREMENTS.md
    ```
 
-   > これを `!` の自動実行にしてはならない。`!` ブロックはあなたが作業を始める**前**に一斉に
-   > 展開されるので、まだ書いていないファイルを検査しようとして必ず失敗する（実地で判明）。
-   > 「書く→検査する」という順序が要る手順は、あなたが順番に実行する。
+   > Do not make this an automatic `!` execution. `!` blocks all expand **before** you begin work,
+   > so it would try to check a file you have not written yet and fail every time (found in the
+   > field).
+   > A procedure needing the order "write, then check" is one you run in order yourself.
 
-   落ちたら直して**再実行する**。**検査を通らない要求記述で先に進まないこと** — 曖昧なまま
-   設計に入ると、その曖昧さは実装まで伝播して、そこで初めて表面化する。
+   If it fails, fix it and **run it again**. **Do not proceed on requirements that do not pass the
+   check** — entering design with an ambiguity intact propagates that ambiguity into the
+   implementation, where it surfaces for the first time.
 
 2. **FEATURE INVENTORY → `FEATURE-INVENTORY.md`.** Enumerate what the brief actually requires, grouped
    and prioritized
    (must / should / nice), and an explicit EXCLUDE list (what a first cut deliberately omits). You
    MAY fan out helper subagents per area to cover breadth — if you do, start each helper's prompt
    with `INDEPENDENT:` (its output is an inventory slice, never merged with a sibling's), so the
-   spawn passes the seam gate. Be thorough; this is the 洗い出し.
+   spawn passes the seam gate. Be thorough; this is the full sweep.
 
-3. **ARCHITECTURE + SEAMS → `ARCHITECTURE.md` (the 全体設計書).** This file is the **whole-system
+3. **ARCHITECTURE + SEAMS → `ARCHITECTURE.md` (the whole-system design).** This file is the **whole-system
    design**, and it is deliberately NOT an SDD artifact: SDD's spec/plan/tasks live in the Issue
    hierarchy (docs/11 §4b) and are per-objective/per-task, while this sits *above* all of them as the
    standing shape of the system — authored once here, amended at reorg. For the must-have set, name the layers/components and the **seam
@@ -109,8 +118,8 @@ keep the CEO's decisions minimal. Concretely:
    `origin/main`). It is a governance declaration, not a branch-name convenience; removing it makes
    the first `org_cycle begin` fail closed until an explicit `--base` is supplied.
 
-   **`organization.yaml` を書いた後に、あなた自身が Bash で実行すること**（`!` の自動実行では
-   まだ存在しないファイルを検査してしまう）:
+   **After writing `organization.yaml`, run this yourself through Bash** (the automatic `!`
+   execution would check a file that does not exist yet):
 
    ```
    set -- organization.yaml
@@ -120,53 +129,63 @@ keep the CEO's decisions minimal. Concretely:
    python3 "${CLAUDE_PLUGIN_ROOT}/tools/org_lint.py" "$@"
    ```
 
-   > `set --` の位置パラメータを使うこと。`A="$A $f"` と文字列に組み立てて `$A` で渡すと、
-   > **zsh は単語分割しない**ので全体が1引数として渡り、引数不足で usage が出る（実地で判明）。
+   > Use `set --`'s positional parameters. Building a string as `A="$A $f"` and passing `$A`
+   > means **zsh does not word-split**, so the whole thing arrives as one argument and usage is
+   > printed for too few arguments (found in the field).
 
    Fix anything the lint fails; a chart that does not lint is not founded. If O10 fires, a
    deliverable is missing its standard, owned twice, or self-checked — fix the contract, not the
    check. Cross-check the manifest against the chart: any must-have with no owning contract is a
    coverage GAP the founding must close before reporting up.
 
-## 人間にしか実行できない前提条件を Issue にする（docs/11 §0c）— 省略しないこと
+## File the prerequisites only a human can carry out as Issues (docs/11 §0c) — do not skip this
 
-**org は自分が作れる作業だけを Issue にし、人間に頼むものを散文に落としてはならない。**
-実地の founding で3件（Supabase プロジェクト作成 / Google OAuth クライアント登録 / GitHub の
-ブランチ保護設定）がセッションの文章の中にしか残らず、Issue にも台帳にも入らなかった。
-結果、`/org` は GREEN と表示するのに実際は着手できない、という乖離が起きた。
+**An org must not file only the work it can do itself and let what it needs from a human fall into
+prose.**
+In a founding in the field, three of them (creating the Supabase project, registering the Google
+OAuth client,
+setting GitHub branch protection) survived only in the session's text and entered neither an Issue
+nor the ledger.
+The result was the gap where `/org` displayed GREEN while work could not actually be started.
 
-**人間への依頼こそ、忘れられると最も長く止まる。** 必ず構造化すること。
+**A request to a human is exactly what stops things longest when it is forgotten.** Always give it
+a structure.
 
-抽出源はすでに手元にある:
+The sources to extract from are already at hand:
 
-- `REQUIREMENTS.md` の **Open Questions** 節 — 「実装前に決める」と自分で書いたもの
-- 同 **Assumptions** 節 — 「CEO が用意する」「アカウントが必要」と書いたもの
-- `ARCHITECTURE.md` の技術選択のうち、**外部サービスの登録・鍵の発行**が要るもの
-- 起草中に「これは自分にはできない」と気づいたすべて
+- the **Open Questions** section of `REQUIREMENTS.md` — what you yourself wrote as "decide before
+  implementing"
+- its **Assumptions** section — what you wrote as "the CEO provides this" or "an account is
+  needed"
+- among `ARCHITECTURE.md`'s technology choices, those needing **an external service registration
+  or a key to be issued**
+- everything you noticed while drafting as "I cannot do this myself"
 
-判定は単純: **org のツールで完結するか。** アカウント作成・課金・OAuth クライアント登録・
-ドメイン取得・ストア審査・GitHub の管理設定（ブランチ保護など）は、いずれも人間にしかできない。
+The test is simple: **does it complete within the org's tools?** Creating an account, billing,
+registering an OAuth client, acquiring a domain, store review, and GitHub's administrative
+settings (branch protection and the like) can none of them be done by anyone but a human.
 
-該当するものを1件ずつ Issue にする:
+File each one that qualifies as its own Issue:
 
 ```
 python3 "${CLAUDE_PLUGIN_ROOT}/tools/github_sync.py" needs-human \
-  --title "<人間がやる作業（一行）>" \
-  --body "<どこで・何をして・何を返せばよいか。手順まで書く>" \
-  --objective "<関連する objective id>" --parent <objective Issue 番号> \
-  --blocks "<この作業が終わるまで着手できない Issue 番号>"
+  --title "<the work a human does (one line)>" \
+  --body "<where, what to do, and what to hand back. Write the steps out>" \
+  --objective "<the related objective id>" --parent <the objective Issue number> \
+  --blocks "<the Issue numbers that cannot start until this is done>"
 ```
 
-`--blocks` を書いたら、**その下流 Issue の body に `Depends on: #<この Issue 番号>` を追記する**
-こと（正書法はこの literal — 参照の後ろに注釈を足すのは許容されるが、依存は必ず `#番号` の形で。
-散文だけの依存は `ready` に見えない、Issue #103）。そうして初めて `ready` が人間待ちを依存として
-解釈し、ブロックされた task を maker に渡さなくなる。
+Once you write `--blocks`, **append `Depends on: #<this Issue's number>` to the body of each
+downstream Issue** (the orthography is that literal — an annotation after the reference is allowed,
+but a dependency always takes the `#number` form; a dependency in prose alone is invisible to
+`ready`, Issue #103). Only then does `ready` read "waiting on a human" as a dependency and stop
+handing the blocked task to a maker.
 
 5. **REPORT UP for CEO review.** Summarize concisely: the must/should/nice counts, the layers +
    seams, the roles you defined, the **coverage manifest** (every must-have → its one owning role +
    acceptance, with any gaps called out), and the decisions that genuinely need the CEO's sign-off
-   (stack choice, the must-have line, anything irreversible)、そして
-   **あなたが立てた needs-human Issue の一覧**（これが CEO の作業リストになる）。 **STOP here** — do not build the
+   (stack choice, the must-have line, anything irreversible), and
+   **the list of needs-human Issues you filed** (this becomes the CEO's task list). **STOP here** — do not build the
    product, and do not mint task Issues. Founding is design; the scope is the CEO's call. Once the CEO
    signs off, the next step is **`/org-decompose`**, which turns `coverage-manifest.md` +
    `ARCHITECTURE.md` into the atomic task Issues — tell the CEO that in your report.
@@ -175,14 +194,14 @@ Write all five artifacts — `REQUIREMENTS.md`, `FEATURE-INVENTORY.md`, `ARCHITE
 `organization.yaml` — as files under those exact names (docs/11 §0a) so they can be reviewed, edited,
 and addressed by name downstream. Do not touch real assets; this command only drafts the org.
 
-## CEO の承認を台帳に記録する — 口頭で終わらせない
+## Record the CEO's approval in the ledger — do not let it end as spoken words
 
-「承認後に objective Issue を作れ」と指示しても、**承認そのものを記録する手段がなかった**ため、
-承認された事実がどこにも残らなかった（実地で判明）。founding は charter-tier の決定であり、
-docs/05 §1 は「人間の承認が要る」と明記している。それが台帳に無いなら、後から「誰がいつ何を
-承認したのか」を辿れない。
+Even with the instruction "create the objective Issue after approval", **there was no means of
+recording the approval itself**, so the fact of it was left nowhere (found in the field). A
+founding is a charter-tier decision, and docs/05 §1 states outright that it needs a human's
+approval. With that absent from the ledger, "who approved what, and when" cannot be traced later.
 
-CEO の承認を受けたら、**Issue を作る前に**記録すること:
+Once you have the CEO's approval, record it **before creating any Issue**:
 
 ```
 python3 "${CLAUDE_PLUGIN_ROOT}/tools/ledger.py" append --actor ceo \
@@ -190,9 +209,10 @@ python3 "${CLAUDE_PLUGIN_ROOT}/tools/ledger.py" append --actor ceo \
   --payload '{"proposal_id":"founding","decision":"approve","human":"<CEO>"}'
 ```
 
-承認されなかった点があれば `decision: amend` で、何を変えるよう指示されたかを payload に残す。
-**承認を受けていないなら、この先に進まないこと** — objective Issue を作るのは承認の投影であって、
-承認の代わりではない。
+Where something was not approved, use `decision: amend` and leave in the payload what you were told
+to change.
+**If you do not have approval, do not proceed past this point** — creating the objective Issue is a
+projection of the approval, not a substitute for it.
 
 ## Project the objectives onto GitHub (only if `ORG_GITHUB_REPO` is set)
 
@@ -232,5 +252,5 @@ that separation at write time for admissions (docs/11 §4f.1) — the same actor
 and sign it off. Record the admission's reasoning on the objective Issue too (`github_sync decide
 --event phase_admitted --verdict pass --why … --evidence "<the artifacts>"`), since no human reviews it.
 
-org が発見できない（`.orgforge/` も `organization.yaml` も無い）場合は、そう言って止まること。
-先に `/org-init` をこのディレクトリで実行する必要がある。
+Where no org can be discovered (neither `.orgforge/` nor `organization.yaml`), say so and stop.
+`/org-init` has to be run in this directory first.

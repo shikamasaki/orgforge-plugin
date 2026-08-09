@@ -13,10 +13,12 @@ raise those as **self** backlog items. It only ADDS to the backlog; `/org-work` 
 > `source: mandate`). If a gap you find is really an undecomposed must-have, say so and route it to
 > `/org-decompose` rather than raising it as a self-item; otherwise the coverage gate can't see it.
 
-Ledger root は**発見される**（`tools/discover.py`）— 環境変数の設定は不要。
+The ledger root is **discovered** (`tools/discover.py`) — no environment variable to set.
 
 
-> **出力言語:** `constitution.yaml` の `output_language`（既定 `en`）を読み、Issue・spec・人間向けテキストはその言語で書く（コード・ledger のイベント名・パスは英語の正準形のまま）。
+> **Output language:** read `output_language` from `constitution.yaml` (default `en`) and write
+> Issues, specs, and human-facing text in that language (code, ledger event names, and paths stay
+> in their canonical English form).
 
 ## 1. Surface the gaps (where is this role under-performing its aspiration?)
 
