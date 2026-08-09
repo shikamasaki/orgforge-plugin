@@ -113,10 +113,10 @@ def main(argv):
     sub = p.add_subparsers(dest="cmd", required=True)
     for name in ("claim", "release"):
         q = sub.add_parser(name)
-        q.add_argument("--repo", help="owner/name（省略時は git remote origin から自動発見）"); q.add_argument("--issue", required=True, type=int)
+        q.add_argument("--repo", help="owner/name (discovered from the git remote origin when omitted)"); q.add_argument("--issue", required=True, type=int)
         q.add_argument("--agent", required=True)
     q = sub.add_parser("create")
-    q.add_argument("--repo", help="owner/name（省略時は git remote origin から自動発見）"); q.add_argument("--title", required=True)
+    q.add_argument("--repo", help="owner/name (discovered from the git remote origin when omitted)"); q.add_argument("--title", required=True)
     q.add_argument("--body", required=True, help="complete non-placeholder Issue context")
     q.add_argument("--objective"); q.add_argument("--source")
     q.add_argument("--depends"); q.add_argument("--priority", type=int)
@@ -127,31 +127,34 @@ def main(argv):
     q.add_argument("--parent", help="parent Issue number: link this task as a NATIVE GitHub sub-issue "
                                     "of that objective (GitHub shows the hierarchy + progress roll-up)")
     q.add_argument("--carved-from", dest="carved_from",
-                   help="rework 中の carve-out 元 Issue 番号。「carve out 先は元に依存する」は例外なく"
-                        "成り立つので、`Depends on: #N` を機械可読に自動付与する（Issue #103）。"
-                        "散文で依存を書いても ready は読まない — この option が唯一の伝播経路")
+                   help="the number of the Issue a mid-rework carve-out came from. \"A carve-out "
+                        "depends on its origin\" holds without exception, so `Depends on: #N` is "
+                        "added automatically in machine-readable form (Issue #103). Writing the "
+                        "dependency in prose is not read by ready — this option is the only path by "
+                        "which it propagates")
     q = sub.add_parser("repair-body")
-    q.add_argument("--repo", help="owner/name（省略時は git remote origin から自動発見）")
+    q.add_argument("--repo", help="owner/name (discovered from the git remote origin when omitted)")
     q.add_argument("--issue", required=True, type=int)
     q.add_argument("--body", required=True, help="complete replacement Issue body")
     q.add_argument("--reason", required=True, help="why this rewrite is necessary")
     q.add_argument("--confirm-drop-depends", action="store_true",
                    help="explicitly confirm removing existing Depends on references")
     q = sub.add_parser("stage")
-    q.add_argument("--repo", help="owner/name（省略時は git remote origin から自動発見）"); q.add_argument("--issue", required=True, type=int)
+    q.add_argument("--repo", help="owner/name (discovered from the git remote origin when omitted)"); q.add_argument("--issue", required=True, type=int)
     q.add_argument("--stage", required=True)
     for name in ("park", "unpark"):
         q = sub.add_parser(name)
-        q.add_argument("--repo", help="owner/name（省略時は git remote origin から自動発見）")
+        q.add_argument("--repo", help="owner/name (discovered from the git remote origin when omitted)")
         q.add_argument("--issue", required=True, type=int)
-        q.add_argument("--why", help="park/unpark の理由 — Issue のコメントとして残す（散文タイトル "
-                                     "`[PARKED]` の置き換え、Issue #103）")
-    q = sub.add_parser("ready"); q.add_argument("--repo", help="owner/name（省略時は git remote origin から自動発見）")
+        q.add_argument("--why",
+                       help="the reason for the park/unpark — left as a comment on the Issue "
+                            "(replacing the prose title `[PARKED]`, Issue #103)")
+    q = sub.add_parser("ready"); q.add_argument("--repo", help="owner/name (discovered from the git remote origin when omitted)")
     q.add_argument("--kind", choices=("task", "objective", "any"), default="task",
                    help="which kind of Issue to list as ready (default: task — objectives are "
                         "parent/roll-up Issues, not claimable units of work)")
     q = sub.add_parser("log")
-    q.add_argument("--repo", help="owner/name（省略時は git remote origin から自動発見）"); q.add_argument("--issue", required=True, type=int)
+    q.add_argument("--repo", help="owner/name (discovered from the git remote origin when omitted)"); q.add_argument("--issue", required=True, type=int)
     q.add_argument("--event", required=True,
                    help="the milestone ledger event class (cycle_started, progress_recorded, "
                         "phase_admitted, cycle_completed, …)")
@@ -174,121 +177,146 @@ def main(argv):
     q.add_argument("--issue", required=True, type=int)
 
     q = sub.add_parser("review-response",
-                       help="review finding への対応を Issue に追記し、別harnessが再確認できる形にする")
-    q.add_argument("--repo", help="owner/name（省略時は git remote origin から自動発見）")
+                       help="append the response to a review finding to the Issue, in a form "
+                            "another harness can re-confirm")
+    q.add_argument("--repo", help="owner/name (discovered from the git remote origin when omitted)")
     q.add_argument("--issue", required=True, type=int)
     q.add_argument("--review", required=True,
-                   help="元レビューの review_subject_id または Issue comment marker")
-    q.add_argument("--finding", required=True, help="元レビューが付けた finding ID（例: GATE-001）")
+                   help="the original review's review_subject_id, or an Issue comment marker")
+    q.add_argument("--finding", required=True,
+                   help="the finding ID the original review assigned (e.g. GATE-001)")
     q.add_argument("--status", required=True, choices=("addressed", "not_reproducible", "deferred"))
-    q.add_argument("--response", required=True, help="何をどう対応したか、または反証したか")
-    q.add_argument("--evidence", required=True, help="対応を裏付けるコマンドと実出力")
-    q.add_argument("--by", required=True, help="対応者（maker / reviewer / supervisor）")
+    q.add_argument("--response", required=True,
+                   help="what was done about it and how, or how it was refuted")
+    q.add_argument("--evidence", required=True,
+                   help="the command and real output backing the response")
+    q.add_argument("--by", required=True, help="who responded (maker / reviewer / supervisor)")
     q.add_argument("--blocked-by", dest="blocked_by", help="what is blocking, if anything")
-    # 各血統の judge の判定を **暫定** として記録する。2血統が一致したときにだけ
-    # admission_decided / refutation_attempted が生成される（受け入れ条件1〜4）。
+    # Record each lineage's judge's judgment as **provisional**. admission_decided /
+    # refutation_attempted are generated only once the two lineages agree (acceptance criteria 1-4).
     pv = sub.add_parser("provisional",
-                        help="ある血統の judge の判定を暫定記録し、一致したら admission を生成")
+                        help="record one lineage's judge's judgment provisionally, and generate "
+                             "the admission once they agree")
     pv.add_argument("--issue", type=int, required=True)
     pv.add_argument("--role", required=True, choices=("gate", "skeptic"))
     pv.add_argument("--lineage", required=True, choices=("same-harness", "cross-harness"))
     pv.add_argument("--verdict", required=True,
                     help="gate: admit|reject|park / skeptic: survives|refuted")
-    # **judge に作らせない値。** verify が観測して出したものをそのまま渡す。
-    # 別の対象を見た2判定を「同じものを見た」と申告して一致を作られないための鍵。
+    # **A value no judge produces.** What verify observed and printed is passed through as-is.
+    # It is the key that stops two judgments of different subjects being declared as "having looked
+    # at the same thing" and made to agree.
     pv.add_argument("--subject", required=True,
-                    help="review_subject_id — verify が出した値。judge が作るものではない")
-    pv.add_argument("--repo", help="owner/name（Issue への投影に使う。省略時は自動発見）")
-    pv.add_argument("--why", required=True, help="何を見て、どこで決まったか（言い換えは不可）")
-    pv.add_argument("--evidence", default="", help="通過させるなら必須 — 参照したもの")
+                    help="review_subject_id — the value verify printed. Not something a judge "
+                         "produces")
+    pv.add_argument("--repo",
+                    help="owner/name (used to project onto the Issue; discovered when omitted)")
+    pv.add_argument("--why", required=True,
+                    help="what was read and where it was decided (a paraphrase is not accepted)")
+    pv.add_argument("--evidence", default="",
+                    help="required to pass it — what was referred to")
     pv.add_argument("--alternatives", default="")
     pv.add_argument("--standard", default="")
     pv.add_argument("--risk", default="")
     pv.add_argument("--phase", default=None)
-    pv.add_argument("--by", default=None, help="記録者（既定は --role）")
-    # **judge の署名 receipt。** これがあるときだけ decision_by が確定する（H1）。
-    # ファイルパスか JSON 文字列。CLI で decision_by を申告する引数は **用意しない**。
+    pv.add_argument("--by", default=None, help="the recorder (defaults to --role)")
+    # **The judge's signed receipt.** decision_by is settled only where this is present (H1).
+    # A file path or a JSON string. **No argument is provided** for declaring decision_by on the
+    # CLI.
     pv.add_argument("--receipt", default=None,
-                    help="判断の receipt（ファイルか JSON）。検証できたときだけ decision_by が "
-                         "attested になる。無ければ claimed のまま — 独立性の強制には使えない")
+                    help="the judgment's receipt (a file or JSON). decision_by becomes attested "
+                         "only where it verifies. Without one it stays claimed — it cannot be used "
+                         "to enforce independence")
     pv.set_defaults(fn=cmd_provisional)
 
     q = sub.add_parser("decide")
-    q.add_argument("--repo", help="owner/name（省略時は git remote origin から自動発見）"); q.add_argument("--issue", required=True, type=int)
+    q.add_argument("--repo", help="owner/name (discovered from the git remote origin when omitted)"); q.add_argument("--issue", required=True, type=int)
     q.add_argument("--event", required=True, help=f"the judgment class, one of {DECISIONS}")
     q.add_argument("--verdict", required=True, help="admit|reject|pass|rework|survives|refuted|park|…")
     q.add_argument("--why", required=True,
                    help="THE REASONING that produced the verdict — what was weighed and what evidence "
                         "decided it. With human review retired this is the only account of why the "
                         "change merged; a restatement of the verdict is rejected (docs/11 §4f)")
-    # 判定した judge の血統。judges.lineage = cross-harness の org では、admit/survives の
-    # 記録に **両方の血統** が要る（片方でも否なら否なので、admit だけが一致を要求する）。
+    # The lineage of the judge that judged. In an org with judges.lineage = cross-harness, recording
+    # admit/survives needs **both lineages** (negative from either side is negative, so only an admit
+    # demands agreement).
     q.add_argument("--lineage", choices=("same-harness", "cross-harness"),
-                   help="この判定を出した judge の血統（cross-harness の org で admit/survives "
-                        "を記録するときは必須）")
+                   help="the lineage of the judge that produced this judgment (required when "
+                        "recording admit/survives in a cross-harness org)")
     q.add_argument("--by", help="the role that decided (gate, skeptic, registrar, …)")
     q.add_argument("--phase", help="the SDLC phase this judgment gates")
     q.add_argument("--evidence", help="what was consulted — test output, CI run, repro_lint verdict, files read")
     q.add_argument("--claimed",
-                   help="maker / gate / skeptic が**報告した**こと（原文に近い形で）。"
-                        "条件節（「〜には無い」「未測定」など）は落とさず運ぶこと")
+                   help="what the maker / gate / skeptic **reported** (close to the original "
+                        "wording). Carry the qualifiers (\u300c\u301c\u306b\u306f\u7121"
+                        "\u3044\u300d, \u300c\u672a\u6e2c\u5b9a\u300d, and the like) through "
+                        "rather than dropping them")
     q.add_argument("--verified",
-                   help="**監督が自分で実行して確かめた**こと（コマンドと出力）。"
-                        "報告の要約ではない — 走らせていないなら --claimed 側に書く")
+                   help="what **the supervisor ran and confirmed themselves** (the command and its "
+                        "output). Not a summary of the report — where it was not run, it belongs "
+                        "under --claimed")
     q.add_argument("--alternatives", help="the options considered and why they were rejected")
     q.add_argument("--standard", help="the acceptance standard applied (the bar, not a vibe)")
     q.add_argument("--risk", help="a known risk knowingly accepted by this decision")
-    q.add_argument("--root", help="死因の根の分類（learning.py DEATH_ROOTS: placebo_test / "
+    q.add_argument("--root", help="the root-cause-of-death class (learning.py DEATH_ROOTS: "
+                                  "placebo_test / "
                                   "declaration_drift / integration_base_moved / "
-                                  "self_written_premise / other）— reject/refuted の記録に"
-                                  "付けると再発検出が根で数えられる（Issue #104）")
+                                  "self_written_premise / other) — attaching it to a "
+                                  "reject/refuted record lets recurrence detection count by root "
+                                  "(Issue #104)")
     q.add_argument("--event-id", dest="event_id", help="the ledger event's id — keys the idempotent dedup")
     q = sub.add_parser("branch")
-    q.add_argument("--repo", help="owner/name（省略時は git remote origin から自動発見）"); q.add_argument("--issue", required=True, type=int)
+    q.add_argument("--repo", help="owner/name (discovered from the git remote origin when omitted)"); q.add_argument("--issue", required=True, type=int)
     q.add_argument("--no-worktree", dest="no_worktree", action="store_true",
-                   help="worktree 運用の org でも、あえてメインリポジトリのブランチを切り替える")
+                   help="switch the main repository's branch deliberately, even in an org that "
+                        "uses worktrees")
     q.add_argument("--create", action="store_true",
                    help="also `git checkout -b <name> <base>` in the current repo (idempotent). "
-                        "並列で maker を走らせるなら --worktree を使うこと — checkout は"
-                        "ツリーを切り替えるので、並列だと必ずコミットが混ざる")
+                        "Use --worktree when running makers in parallel — a checkout switches the "
+                        "tree, so in parallel the commits are certain to mix")
     q.add_argument("--worktree", action="store_true",
-                   help="ブランチ専用の git worktree を `.orgforge/wt/issue-<N>/` に作る。"
-                        "並列 fan-out の唯一の安全な形")
+                   help="create a git worktree dedicated to the branch at "
+                        "`.orgforge/wt/issue-<N>/`. The only safe shape for a parallel fan-out")
     q.add_argument("--base", help="the branch to fork from (default: develop, docs/11 §4c)")
     q = sub.add_parser("split-check")
-    q.add_argument("--repo", help="owner/name（省略時は git remote origin から自動発見）"); q.add_argument("--issue", required=True, type=int)
+    q.add_argument("--repo", help="owner/name (discovered from the git remote origin when omitted)"); q.add_argument("--issue", required=True, type=int)
     q = sub.add_parser("needs-human")
-    q.add_argument("--repo", help="owner/name（省略時は git remote origin から自動発見）")
-    q.add_argument("--title", required=True, help="人間がやる作業（一行）")
-    q.add_argument("--body", help="何を・どこで・何を返せばよいかの手順")
-    q.add_argument("--objective", help="関連する objective id")
-    q.add_argument("--parent", help="objective Issue 番号（native sub-issue として繋ぐ）")
-    q.add_argument("--blocks", help="この作業が終わるまで着手できない Issue 番号（カンマ区切り）")
+    q.add_argument("--repo", help="owner/name (discovered from the git remote origin when omitted)")
+    q.add_argument("--title", required=True, help="the work a human does (one line)")
+    q.add_argument("--body", help="the steps: what, where, and what to hand back")
+    q.add_argument("--objective", help="the related objective id")
+    q.add_argument("--parent",
+                   help="the objective Issue number (linked as a native sub-issue)")
+    q.add_argument("--blocks",
+                   help="the Issue numbers that cannot start until this is done "
+                        "(comma-separated)")
     q = sub.add_parser("candidate-id")
     q.add_argument("--role", required=True, help="the maker/department that owns the item")
     q.add_argument("--contract", required=True, help="contract_ref — the objective this item serves")
     q.add_argument("--gap", required=True, help="a SHORT one-line description of the gap/deliverable")
     q = sub.add_parser("coverage-check")
-    q.add_argument("--repo", help="owner/name（省略時は git remote origin から自動発見）")
+    q.add_argument("--repo", help="owner/name (discovered from the git remote origin when omitted)")
     q.add_argument("--manifest", default="coverage-manifest.md",
                    help="path to the founding coverage manifest (docs/11 §0a fixes the name)")
     a = p.parse_args(argv[1:])
     banner()
-    # --repo は省略可能: 省略時は git remote origin から発見する（.envrc 不要）。
-    # バックログ Issue の所在はチェックアウトを見れば分かる事実であって、operator が
-    # 書き写す設定ではない — 書き写しは手順であり、飛ばされ、別マシンでずれる。
-    # provisional は台帳だけに書く（Issue へのコメントは admission が生成されてから）。
-    # GitHub remote が無い ledger-only の org でも 2血統の判定は記録できるべきなので、
-    # repo 解決より前に返す。
-    # provisional は台帳が主で、Issue への投影は付随（reasoning の照合対象を残すため）。
-    # **ledger-only の org でも2血統の判定は記録できなければならない** — GitHub が無いことを
-    # 理由に判定を落とすと、その org は cross-harness を使えない。repo が無ければ投影を省き、
-    # 「照合対象が残らない」ことを cmd_provisional が言う。
+    # --repo is optional: when omitted it is discovered from the git remote origin (no .envrc
+    # needed). Where the backlog Issues live is a fact readable from the checkout, not a setting an
+    # operator transcribes — transcription is a step, steps get skipped, and it drifts on another
+    # machine.
+    # A provisional is written only to the ledger (the Issue comment waits until the admission is
+    # generated). A ledger-only org with no GitHub remote should still be able to record both
+    # lineages' judgments, so this returns before the repo is resolved.
+    # For a provisional the ledger is primary and the projection onto the Issue is incidental (it
+    # preserves what the reasoning is reconciled against).
+    # **A ledger-only org must still be able to record both lineages' judgments** — dropping a
+    # judgment because there is no GitHub leaves that org unable to use cross-harness. Where there is
+    # no repo the projection is skipped, and cmd_provisional says that nothing holds what it
+    # reconciles against.
     if a.cmd == "provisional" and getattr(a, "repo", None) is None:
         import os as _os
         sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
         import discover as _d
-        a.repo = _d.backlog_repo()          # 無ければ None のまま進む
+        a.repo = _d.backlog_repo()          # where there is none, proceed with None
         return cmd_provisional(a)
     if getattr(a, "repo", None) is None:
         import os as _os
