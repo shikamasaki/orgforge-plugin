@@ -59,7 +59,7 @@ def test_status_counts_risk_accepted_admits(tmp_path):
     ])
     p = subprocess.run([sys.executable, str(TOOLS / "status.py"), "status", str(led)],
                        capture_output=True, text=True, timeout=60)
-    assert "リスク付き admit: 1 件" in p.stdout + p.stderr
+    assert "admits carrying a risk: 1" in p.stdout + p.stderr
 
 
 def test_reject_after_admit_clears_the_admit(tmp_path):
@@ -72,7 +72,7 @@ def test_reject_after_admit_clears_the_admit(tmp_path):
     ])
     out = _status(led).stdout
     assert "no skeptic record" not in out, f"reject 後も admit 扱いのまま: {out}"
-    assert "rework 待ち" in out, f"reject されたまま放置されていることが見えない: {out}"
+    assert "awaiting rework" in out, f"reject されたまま放置されていることが見えない: {out}"
 
 
 def test_admit_after_reject_counts_as_admit(tmp_path):
@@ -133,4 +133,4 @@ def test_provisional_skeptic_refutation_is_not_reported_as_missing(tmp_path):
     ])
     out = _status(led).stdout
     assert "no skeptic record" not in out, out
-    assert "skeptic が refuted" in out, out
+    assert "the skeptic refuted it" in out, out

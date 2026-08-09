@@ -1,33 +1,35 @@
-"""read-only judge が再導出できない MUST を、judge を起動する **前に** 検出する。
+"""Detect the MUSTs a read-only judge cannot re-derive, **before** the judge is launched.
 
-## なぜ要るか（実測）
+## Why it is needed (measured)
 
-`enforcement.judges.read_only: true` の judge は、書き込みも実行も出来ないサンドボックスで走る。
-そのため「実際に走らせて緑を確かめる」類の MUST は **構造的に** 再導出できず、judge は park
-（判定不能）を返すしかない。park 自体は正しい振る舞い（測れないのに admit しない）だが、
-**それが分かるのが judge を起動して数分〜30分待った後**というのが問題だった。
+A judge under `enforcement.judges.read_only: true` runs in a sandbox that can neither write nor
+execute. So a MUST of the "actually run it and see it go green" kind **structurally** cannot be
+re-derived, and the judge can only return park (undecidable). The park itself is correct behaviour
+— do not admit what you cannot measure — but **learning that only after launching the judge and
+waiting minutes to half an hour** was the problem.
 
-judge.py はこれを人間向けの警告として「先に言う」だけで、時間の浪費は防いでいなかった:
+judge.py said this up front as advice for a human, which did not stop the waste:
 
-    実測: #34 は「静的には妥当だが『100回連続 green』を read-only サンドボックスで再導出
-    できない」として park を返した。
+    Measured: #34 returned park, on the grounds that it was statically sound but that "100
+    consecutive greens" could not be re-derived inside a read-only sandbox.
 
-cross-harness の judge は `codex exec` / `claude -p` を別プロセスとして起動し、既定の
-`ORG_JUDGE_TIMEOUT` は 1800 秒。gate → skeptic は直列なので、1 Issue の admission で
-これを 2 回踏む。**空振りの park 1 回が数分〜30分**を捨てる。
+A cross-harness judge launches `codex exec` / `claude -p` as a separate process, and the default
+`ORG_JUDGE_TIMEOUT` is 1800 seconds. gate → skeptic run in series, so one Issue's admission hits
+this twice. **One wasted park throws away minutes to half an hour.**
 
-ここは「その MUST は read-only では測れない」ことだけを **静的に** 指摘して、監督に実測を
-促す。judge を起動する前に止めるので、捨てる時間が 0 になる。
+This points out **statically** only that a MUST cannot be measured read-only, and prompts the
+supervisor to measure it. Stopping before the judge is launched makes the wasted time zero.
 
-## 越えない線（docs/03 §6.5）
+## The line this does not cross (docs/03 §6.5)
 
-**判定はしない。** admit / reject / park を決めるのは gate であって、この module ではない。
-ここが返すのは「この MUST は read-only judge の *再導出能力の外* にある」という
-**能力の話**だけで、その MUST を満たしているかどうかには一切触れない。
-forced invariant は正しいが forced judgment は判定の消滅、という線をここでも守る。
+**It does not judge.** admit / reject / park is the gate's decision, not this module's. What is
+returned here is purely **a statement about capability** — that this MUST lies *outside a read-only
+judge's power to re-derive* — and says nothing whatever about whether the MUST is met.
+A forced invariant is fine; a forced judgment is the disappearance of judgment. That line holds
+here too.
 
-だから既定は **助言（advice）** であって block ではない。`--strict-rederivability` を
-明示したときだけ exit 13 で止める（監督が「空振りを絶対に踏みたくない」と宣言した場合）。
+So the default is **advice**, not a block. Only with an explicit `--strict-rederivability` does it
+stop with exit 13 (for a supervisor who has declared they will not tolerate a wasted round).
 """
 
 from __future__ import annotations
@@ -35,50 +37,52 @@ from __future__ import annotations
 import re
 
 
-# read-only サンドボックスの *外* にある能力。「その MUST を確かめるには、書く / 動かす /
-# 外へ出る」必要があるもの。表現は日英どちらの SPEC でも拾えるようにする（この repo の
-# SPEC は実際に混在している）。
+# Capabilities that lie *outside* a read-only sandbox: MUSTs that can only be confirmed by
+# writing, running, or reaching outside. The patterns match both Japanese and English SPECs
+# deliberately — this repo's SPECs genuinely are mixed, so these alternatives are INPUT matching,
+# not source language.
 #
-# 語をここに足すときの基準は「read-only で **原理的に** 測れないか」であって、
-# 「難しそうか」ではない。静的に読めば分かるもの（型・命名・構造）は入れない。
+# The bar for adding a word here is "can this be measured read-only **in principle**", not "does
+# it look hard". Anything a static read settles (types, naming, structure) does not belong.
 _UNMEASURABLE = (
-    # 実行して緑を確かめる系
-    # 語順を固定しない。`consecutively 100 times` と `100 times consecutively` は同じことを
-    # 言っているのに、数字が前に来る形だけを見ていて後者を取りこぼしていた（cross-harness の
-    # judge が実地の判定でこの漏れを指摘した — 2周目 verdict=reject の根拠）。
+    # the "run it and see it go green" family
+    # Do not fix the word order. `consecutively 100 times` and `100 times consecutively` say the
+    # same thing, but only the number-first form was matched and the other was missed (a
+    # cross-harness judge raised this gap in a live judgment — the grounds for verdict=reject on
+    # the second round).
     (r"\b\d+\s*回連続|\b\d+\s*回\s*(?:繰り返|連続)"
      r"|consecutive(?:ly)?\s+\d+\s*(?:times)?|\b\d+\s+times\s+consecutive(?:ly)?"
      r"|\b\d+\s+times\s+in\s+a\s+row|\b\d+\s+consecutive\s+\w+",
-     "反復実行の実測（read-only では走らせられない）"),
+     "measuring repeated execution (a read-only judge cannot run it)"),
     (r"\bRED\s*→\s*GREEN|\bred\s*to\s*green|going\s+RED\b",
-     "テストを実際に RED→GREEN させる観測"),
+     "observing a test actually go RED→GREEN"),
     (r"\bCI\b.*\b(?:green|緑|pass)|\b(?:green|緑)\b.*\bCI\b|clean\s+clone.*\b(?:test|build)",
-     "CI / クリーンクローンでの実行結果"),
+     "the result of running in CI or from a clean clone"),
     (r"\bbenchmark|\bp9[59]\b|\blatency\b|\bthroughput\b|スループット|レイテンシ",
-     "性能の実測"),
+     "measuring performance"),
     (r"\bmutation\s+test|ミューテーション",
-     "ミューテーションを実際に効かせた観測"),
-    # 外部到達系
+     "observing a mutation actually take effect"),
+    # the "reach outside" family
     (r"\b(?:real|実)\s*(?:DB|database|データベース)|\bmigration\b.*\b(?:apply|適用)",
-     "実データベースへの到達"),
+     "reaching a real database"),
     (r"\bdeploy(?:ed|ment)?\b.*\b(?:verif|confirm|確認)|本番.*(?:到達|確認)",
-     "デプロイ先での確認"),
+     "confirming it at the deploy target"),
     (r"\bnetwork\b.*\b(?:call|request)|外部API.*(?:到達|呼び出)",
-     "ネットワーク越しの到達"),
-    # 書き込み系
+     "reaching across the network"),
+    # the "writes" family
     (r"\bwrites?\s+to\s+disk|ファイルに書き|\bidempotent\b.*\b(?:re-?run|再実行)",
-     "書き込みを伴う観測"),
+     "an observation that entails writing"),
 )
 
 _COMPILED = tuple((re.compile(pat, re.I), why) for pat, why in _UNMEASURABLE)
 
 
 def _must_lines(spec_text):
-    """SPEC 本文から MUST の各行を拾う。
+    """Collect the MUST lines from a SPEC body.
 
-    SPEC.md の形（`## MUST — acceptance criteria in EARS`）に従い、MUST 見出しから
-    次の見出しまでの箇条書きを対象にする。見出しが無い SPEC（自由記述）でも取りこぼさない
-    ように、本文中の `MUST` を含む行も拾う。
+    Following SPEC.md's shape (`## MUST — acceptance criteria in EARS`), the bullets from the MUST
+    heading to the next heading are the target. So that a SPEC without headings (free prose) is not
+    missed, lines containing `MUST` anywhere in the body are collected too.
     """
     if not spec_text:
         return []
@@ -94,17 +98,18 @@ def _must_lines(spec_text):
         if in_must and re.match(r"^[-*+]\s+|^\d+[.)]\s+", stripped):
             out.append(stripped)
         elif not in_must and re.search(r"\bMUST\b", stripped):
-            # 見出しの外に書かれた MUST（自由記述の SPEC）も対象にする。
+            # A MUST written outside any heading (a free-prose SPEC) counts too.
             out.append(stripped)
     return out
 
 
 def unmeasurable_musts(spec_text):
-    """read-only judge が再導出できない MUST を [(該当行, 理由), ...] で返す。
+    """Return the MUSTs a read-only judge cannot re-derive, as [(line, reason), ...].
 
-    **満たしているかは見ない。** 「その MUST を確かめる手段が read-only の外にある」
-    ことだけを返す。1行が複数の理由に当たる場合は最初の理由を採る（監督に伝えたいのは
-    「実測が要る」という一点で、理由の網羅ではない）。
+    **It does not look at whether they are met.** All it returns is that the means of confirming
+    that MUST lies outside read-only. Where a line matches several reasons, the first is taken —
+    what the supervisor needs to hear is the single point "this needs measuring", not an exhaustive
+    list of reasons.
     """
     found = []
     for line in _must_lines(spec_text):
@@ -116,15 +121,18 @@ def unmeasurable_musts(spec_text):
 
 
 def advisory(findings, role):
-    """監督に見せる助言文。judge を起動する前に出すので、待ち時間が発生しない。"""
+    """The advice shown to the supervisor. Emitted before the judge is launched, so no waiting is
+    incurred."""
     if not findings:
         return None
-    head = (f"[rederivability] read-only の {role} judge では再導出できない MUST が "
-            f"{len(findings)} 件ある。**このまま起動すると park が返る公算が高い**"
-            f"（judge 1回は数分〜{'30分'}かかる — その時間は判定を生まない）。\n")
+    head = (f"[rederivability] {len(findings)} MUST(s) cannot be re-derived by a read-only "
+            f"{role} judge. **Launch as things stand and park is the likely result** (one judge "
+            f"run takes minutes to half an hour — time that produces no judgment).\n")
     body = "".join(f"  - {why}\n      {line[:160]}\n" for line, why in findings)
-    tail = ("  対処: 監督が先に実測し、その **実出力** を evidence として渡してから judge を\n"
-            "  起動すること（憲章どおり、evidence は実際に走らせたコマンドとその出力）。\n"
-            "  この指摘は助言であって判定ではない。承知の上で起動するならそのまま進めてよい。\n"
-            "  空振りを絶対に踏みたくないなら `--strict-rederivability` を付けると、ここで止まる。\n")
+    tail = ("  What to do: measure it yourself first and hand the **actual output** over as\n"
+            "  evidence, then launch the judge (as the charter says, evidence is the command you\n"
+            "  actually ran and its output).\n"
+            "  This is advice, not a judgment. Knowing it, you may launch anyway.\n"
+            "  To rule out a wasted round entirely, add `--strict-rederivability` and it stops "
+            "here.\n")
     return head + body + tail

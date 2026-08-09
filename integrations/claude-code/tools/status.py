@@ -27,11 +27,12 @@ from _organ import OK, read_events   # noqa: E402
 
 
 def _reject_reason(issue):
-    """その Issue の最新 reject の理由を1行で。
+    """The reason for this Issue's latest reject, in one line.
 
-    理由は decide が Issue コメントに厚く書く（台帳が持つのは digest だけ — 設計どおり）。
-    board からそれが読めないと、CEO が見る唯一の画面に「何が問題か」が一行も出ない。
-    GitHub が見られなければ黙って None を返す（board は落とさない）。
+    decide writes the reason at length into an Issue comment (the ledger holds only a digest — by
+    design). If the board cannot read it, the one screen a CEO looks at carries not a line of
+    "what is wrong". Returns None quietly when GitHub cannot be reached (the board does not fall
+    over).
     """
     import subprocess
     try:
@@ -49,22 +50,22 @@ def _reject_reason(issue):
         m = re.search(r"\*\*Why \(the reasoning\):\*\*\s*\n(.+)", b)
         if m:
             s = " ".join(m.group(1).split())
-            # board は一望する画面なので、1件が数行を占めると一望でなくなる。
-            # 全文は Issue と `org_cycle show --issue N` にある。
+            # The board is a screen you take in at a glance, and one item spanning several lines
+            # ends that. The full text is on the Issue and in `org_cycle show --issue N`.
             return s[:70] + ("…" if len(s) > 70 else "")
     return None
 
 
 def _needs_human_issues():
-    """orgforge:needs-human ラベルの open Issue を「あなた待ち」として返す。
+    """Return open Issues labelled orgforge:needs-human as "waiting on you".
 
-    これが無いと board が嘘をつく: org が作れる作業だけを数えて GREEN と出すのに、実際は
-    人間の前提条件（アカウント作成・鍵の発行・ストア審査・ブランチ保護など）が未了で
-    着手できない、という状態が見えなかった。人間への依頼こそ忘れられると最も長く止まるので、
-    board の最上位に出す。
+    Without this the board lies: it counts only the work the org can produce, reports GREEN, and
+    hides a state where nothing can start because a human precondition is outstanding (an account
+    to create, a key to issue, a store review, branch protection). A request to a human is exactly
+    what stalls longest when forgotten, so it goes at the top of the board.
 
-    GitHub が見られない環境（ledger-only の org、gh 未認証、オフライン）では黙って空を返す —
-    board 自体は落とさない。"""
+    Where GitHub cannot be reached (a ledger-only org, gh unauthenticated, offline) it returns
+    empty quietly — the board itself does not fall over."""
     import subprocess
     try:
         here = os.path.dirname(os.path.abspath(__file__))
@@ -83,9 +84,9 @@ def _needs_human_issues():
         return []
     out = []
     for it in items[:5]:
-        out.append(f"あなたの作業待ち: #{it['number']} {it['title']}")
+        out.append(f"waiting on you: #{it['number']} {it['title']}")
     if len(items) > 5:
-        out.append(f"あなたの作業待ち: 他 {len(items) - 5} 件")
+        out.append(f"waiting on you: and {len(items) - 5} more")
     return out
 
 
@@ -204,15 +205,16 @@ def cmd_status(a):
 
     done = counts.get("cycle_completed", 0)
 
-    # リスク付き admit を board に出す。gate は --risk を書けば admit できるので、正直に書くほど
-    # 通りやすいという構造になっている。**それ自体は正しい運用**（書かれない穴より遥かによい）
-    # だが、書き得にしないために「何件溜まっているか」は見えている必要がある。
-    # **同一 deliverable は最新の判定が有効。** 集合で持つと reject が後から来ても admit が
-    # 残り続け、rework 中の成果物を「admit 済み」と数える。運用では admit → reject の順で
-    # 記録されたのに board が RED を出し続けた。台帳は追記型なので、
-    # 「一度でも admit があった」と「いま admit されている」は別物。
-    # correction{effect:voids} で無効化された記録は数えない。kind を organ ごとに解釈すると
-    # status と derive-admission が同じ台帳から違う現在値を作る（OBS-042）。
+    # Surface admits carrying a risk. The gate can admit as long as it writes --risk, so the
+    # structure rewards writing honestly. **That is the right way round** — far better than a hole
+    # nobody wrote down — but so that it is not a free pass, how many have accumulated has to be
+    # visible.
+    # **For one deliverable, the latest judgment is what holds.** Kept as a set, an admit survives
+    # a later reject and work in rework counts as "admitted". In operation, admit then reject was
+    # recorded and the board went on showing RED. The ledger is append-only, so "there was an admit
+    # at some point" and "it is admitted now" are different things.
+    # Records voided by correction{effect:voids} are not counted. Interpret kind per organ and
+    # status and derive-admission derive different present values from the same ledger (OBS-042).
     try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         from ledger import voided_seqs
@@ -233,7 +235,7 @@ def cmd_status(a):
             latest_admission[key] = ((e.get("seq") or 0), pl.get("verdict"))
     admits = {k for k, (_, v) in latest_admission.items() if v == "admit"}
 
-    # risk 付き admit も、後で reject された分は数えない（同上）
+    # An admit carrying a risk is likewise not counted once later rejected
     risky = []
     for e in events:
         if e["class"] != "admission_decided" or e.get("seq") in voided:
@@ -246,11 +248,12 @@ def cmd_status(a):
         if cur and cur[0] == (e.get("seq") or 0):
             risky.append(e)
     if risky:
-        amber.append(f"リスク付き admit: {len(risky)} 件（承知の上で残した穴）")
+        amber.append(f"admits carrying a risk: {len(risky)} (holes left open knowingly)")
 
-    # 二重記録の乖離を検出する。判断は「台帳の受領証」と「Issue の理由」の両方に書く決まりだが、
-    # 実地では skeptic が Issue にだけ書き、台帳に1件も無いまま統合されかけた。片側だけが
-    # 落ちるのが実際の失敗形なので、落ちた側を数える。
+    # Detect drift between the two records. A judgment is meant to be written both as a receipt in
+    # the ledger and as a reason on the Issue, but in the field a skeptic wrote only to the Issue
+    # and the work came close to being integrated with nothing in the ledger. One side going
+    # missing is the failure that actually happens, so the missing side is what is counted.
     refutes = {str((e.get("payload", {}) or {}).get("issue") or
                    (e.get("payload", {}) or {}).get("claim_id") or
                    (e.get("payload", {}) or {}).get("deliverable") or "")
@@ -272,15 +275,15 @@ def cmd_status(a):
     provisional_refutes.discard("")
     pending_refuted = sorted(admits & provisional_refutes - refutes)
     for issue in pending_refuted[:5]:
-        amber.append(f"#{issue} skeptic が refuted — joint記録またはrework反映待ち")
-    # reject されたまま放置されているものは board に出す。RED（あなたを待っている）ではなく
-    # AMBER（回っているが見ておくこと）— 差し戻しは正常な過程であって障害ではない。
-    # ただし黙って消えると、rework が止まっていることに誰も気づかない。
+        amber.append(f"#{issue} the skeptic refuted it — awaiting the joint record or the rework")
+    # Surface anything left sitting in reject. AMBER (turning, but keep an eye on it) rather than
+    # RED (waiting on you) — a send-back is a normal part of the process, not a fault. But let it
+    # disappear quietly and nobody notices the rework has stalled.
     rejected = sorted(k for k, (_, v) in latest_admission.items() if v == "reject")
     if rejected:
-        # **何が問題だったかを一行出す。** 件数だけでは CEO に何も伝わらない。
-        # 判定理由は decide で厚く書かれているのに board から読めないのは、
-        # 唯一の画面が要約を持たないということ。
+        # **Emit one line of what was wrong.** A count alone tells a CEO nothing. The reason is
+        # written at length by decide, and its being unreadable from the board means the one screen
+        # there is carries no summary.
         why_of = {}
         for e in events:
             if e["class"] != "admission_decided" or e.get("seq") in voided:
@@ -296,8 +299,8 @@ def cmd_status(a):
                     why_of[k] = w[:80] + ("…" if len(w) > 80 else "")
         for k in rejected[:5]:
             reason = why_of.get(k) or _reject_reason(k)
-            amber.append(f"#{k} rework 待ち" + (f" — {reason}" if reason else ""))
-        amber.append("詳細は `org_cycle.py show --issue N`")
+            amber.append(f"#{k} awaiting rework" + (f" — {reason}" if reason else ""))
+        amber.append("for detail: `org_cycle.py show --issue N`")
 
     unrefuted = {a for a in admits if a and a not in refutes and a not in provisional_refutes}
     if unrefuted:
@@ -305,8 +308,9 @@ def cmd_status(a):
                    f"({', '.join('#' + x for x in sorted(unrefuted)[:5])}) — "
                    f"one step away from being integrated without facing refutation")
 
-    # 人間待ちの Issue は定義上 RED — 「あなたを待っている」ものが board の意味そのもの。
-    # ledger には現れないので GitHub を見る（見られなければ黙って飛ばす。board は落とさない）。
+    # An Issue waiting on a human is RED by definition — "waiting on you" is what the board is
+    # for. It does not appear in the ledger, so GitHub is consulted (and skipped quietly when
+    # unreachable; the board does not fall over).
     for line in _needs_human_issues():
         red.append(line)
 
