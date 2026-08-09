@@ -37,10 +37,12 @@ ROOTS = ("tools", "tests", "integrations/common")
 # Remaining debt, measured 2026-08-08. Lower these as files are translated; never raise one.
 # A file that is not listed here must contain no Japanese at all.
 BUDGET = {
+    "integrations/claude-code/build.sh": 2,
+    "integrations/codex/build.sh": 1,
     "integrations/common/org_hook.py": 1,
     "tests/test_domain_surface.py": 18,
     "tests/test_ears_acceptance.py": 6,
-    "tests/test_github_sync.py": 163,
+    "tests/test_github_sync.py": 62,
     "tests/test_hook.py": 447,
     "tests/test_ledger.py": 450,
     "tests/test_organ_unit.py": 2,
@@ -57,6 +59,8 @@ BUDGET = {
     "tools/orgcycle/lens.py": 1,
     "tools/orgcycle/rederivability.py": 9,
     "tools/req_lint.py": 28,
+    "tools/writer-install.sh": 242,
+    "tools/writer-verify.sh": 124,
 }
 
 
@@ -73,8 +77,11 @@ def _sources():
         base = REPO / root
         if not base.is_dir():
             continue
-        for path in sorted(base.rglob("*.py")):
-            yield path.relative_to(REPO).as_posix(), path
+        # Shell is source too. The ratchet scanned only *.py, so 369 Japanese lines in the writer
+        # installer and verifier went uncounted while the budget read as though they did not exist.
+        for pattern in ("*.py", "*.sh"):
+            for path in sorted(base.rglob(pattern)):
+                yield path.relative_to(REPO).as_posix(), path
 
 
 def test_no_new_japanese_in_source():

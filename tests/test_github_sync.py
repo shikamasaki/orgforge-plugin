@@ -14,7 +14,8 @@ import pytest
 
 
 def _real_ids(org):
-    """その org の (org_id, ledger_id)。**書き込み先から決まる値**に receipt を合わせる。"""
+    """That org's (org_id, ledger_id). The receipt is matched to **the value the write target
+    determines**."""
     sys.path.insert(0, str(REPO / "tools"))
     import importlib
     led = importlib.import_module("ledger")
@@ -27,10 +28,11 @@ def _real_ids(org):
         _os.chdir(cwd)
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
-# github_sync は tools/ghsync/ に分割された（0.22.0）。テストは「どのモジュールに居るか」
-# ではなく振る舞いを見たいので、全モジュールの名前を1つの名前空間に集めたビューを使う。
-# `monkeypatch.setattr(GS, "gh", fake)` が全モジュールに効くよう、gh の差し替えは
-# 各モジュールにも伝播させる（下の _patch_gh_everywhere）。
+# github_sync was split into tools/ghsync/ (0.22.0). These tests want to see behaviour rather than
+# "which module something lives in", so they use a view gathering every module's names into one
+# namespace.
+# So that `monkeypatch.setattr(GS, "gh", fake)` reaches every module, the gh replacement is
+# propagated to each module too (_patch_gh_everywhere below).
 sys.path.insert(0, str(REPO / "tools"))
 import types as _types
 from ghsync import _core as _gh_core, backlog as _gh_backlog, record as _gh_record,     branch as _gh_branch, coverage as _gh_coverage
@@ -39,7 +41,7 @@ _GH_MODS = (_gh_core, _gh_backlog, _gh_record, _gh_branch, _gh_coverage)
 
 
 class _Facade(_types.ModuleType):
-    """全 ghsync モジュールの統合ビュー。setattr は全モジュールに伝播する。"""
+    """A unified view of every ghsync module. A setattr propagates to all of them."""
 
     def __getattr__(self, name):
         for m in _GH_MODS:
@@ -291,7 +293,7 @@ def test_log_is_idempotent_when_event_already_logged(monkeypatch):
 
 # ── ready: tasks by default, objectives excluded ─────────────────────────────
 def _git_org(tmp_path, name="r"):
-    """query-mode の branch 解決（#107）が実物の git を見るための最小 repo。"""
+    """The minimal repo that lets query-mode branch resolution (#107) look at a real git."""
     import subprocess
     repo = tmp_path / name
     repo.mkdir()
@@ -335,8 +337,9 @@ def test_branch_japanese_title_falls_back_to_stable_hash():
 
 
 def test_derived_branch_name_empty_title_is_genuinely_slugless():
-    """#107 rework (3a): タイトル不明の導出は本当に slug 無し。「slug を省く」と告知しながら
-    空文字の hash（te3b0c442…）を付けた幻の名前を出さない。"""
+    """#107 rework (3a): a derivation with an unknown title really has no slug. It must not announce
+    "the slug is omitted" while printing a phantom name carrying the hash of an empty string
+    (te3b0c442…)."""
     assert GS.derived_branch_name(9, "") == "feat/issue-9"
 
 
@@ -354,9 +357,9 @@ def test_branch_query_reports_worktree_head_not_stale_derived_name(tmp_path, mon
     cap = capsys.readouterr()
     assert rc == 0
     assert cap.out.strip() == "feat/issue-15-login-redirect", \
-        f"worktree の実 HEAD ではなく導出名を報告した: {cap.out!r}"
+        f"it reported the derived name rather than the worktree's real HEAD: {cap.out!r}"
     assert "feat/issue-15-google" in cap.err and "feat/issue-15-login-redirect" in cap.err, \
-        f"導出名と実在名の不一致が警告されていない: {cap.err!r}"
+        f"the mismatch between the derived and the real name is not warned about: {cap.err!r}"
 
 
 def test_branch_query_fails_closed_when_derived_branch_missing(tmp_path, monkeypatch, capsys):
@@ -368,10 +371,10 @@ def test_branch_query_fails_closed_when_derived_branch_missing(tmp_path, monkeyp
     monkeypatch.chdir(repo)
     rc = GS.cmd_branch(_ns(repo="o/r", issue=42, create=False, base=None))
     cap = capsys.readouterr()
-    assert rc != 0, "実在しない導出名を成功として印字した"
+    assert rc != 0, "it printed a non-existent derived name as a success"
     assert "feat/issue-42-add-login-endpoint" in cap.err, \
-        f"どの導出名が実在しないのか名指ししていない: {cap.err!r}"
-    assert "--worktree" in cap.err, f"直し方が書かれていない: {cap.err!r}"
+        f"it does not name which derived name does not exist: {cap.err!r}"
+    assert "--worktree" in cap.err, f"the fix is not written: {cap.err!r}"
 
 
 def test_slug_helper_distinct_titles_differ():
@@ -391,8 +394,9 @@ def test_split_check_flags_owns_spanning_territories(monkeypatch):
 
 
 def test_split_check_clean_on_single_territory(monkeypatch):
-    # DoD command は既定で必須（無い SPEC は gate に的が無く、周回が収束しない）。
-    # このテストが見たいのは territory の単一性なので、DoD は満たした上で確認する。
+    # A DoD command is required by default (a SPEC without one gives the gate no target and the
+    # rounds do not converge). What this test wants to see is the singleness of the territory, so it
+    # checks with the DoD satisfied.
     body = ("## Seam\\n- **owns:** `app/packages/auth/`\\n"
             "- **DoD command:** `npm test -- auth`\\n")
     fake = FakeGh(replies={"issue view": (0, '{"body": "' + body + '", "title": "ok"}')})
@@ -726,8 +730,8 @@ class CommentGh(FakeGh):
 
 @pytest.fixture(autouse=True)
 def _isolated_ledger(tmp_path, monkeypatch):
-    """decide は台帳にも書くようになったので（0.21.0 で二重打ちをやめた）、
-    テストごとに使い捨ての台帳ルートを与える。実 org の台帳を汚さない。"""
+    """decide now writes to the ledger too (0.21.0 ended the double typing), so each test is given a
+    disposable ledger root. A real org's ledger is not dirtied."""
     monkeypatch.setenv("ORG_LEDGER_ROOT", str(tmp_path / "led"))
     yield
 
@@ -891,10 +895,11 @@ def test_decide_allows_a_rejection_without_evidence(monkeypatch):
     assert rc == 0 and len(fake.posted) == 1
 
 
-# ── 人間タスクの構造化（docs/11 §0c）────────────────────────────────────────
-# org は自分が作れる作業だけを Issue にし、人間に頼むものを散文に落としていた。実地の founding で
-# 3件（Supabase 作成 / OAuth クライアント登録 / ブランチ保護設定）がセッションの文章にしか残らず、
-# /org が GREEN と出すのに実際は着手できない、という乖離が起きた。
+# ── giving human tasks a structure (docs/11 §0c) ────────────────────────────
+# The org filed only the work it could do itself as Issues and let what it needed from a human fall
+# into prose. In a founding in the field, three of them (creating Supabase, registering the OAuth
+# client, setting branch protection) survived only in the session's text, producing the gap where
+# /org reported GREEN while work could not actually be started.
 def test_needs_human_creates_a_labeled_issue(monkeypatch):
     fake = FakeGh(replies={"issue create": (0, "https://github.com/o/r/issues/25"),
                            "issue list": (0, "[]")})
@@ -908,7 +913,7 @@ def test_needs_human_creates_a_labeled_issue(monkeypatch):
 
 
 def test_needs_human_body_says_the_org_cannot_do_it(monkeypatch):
-    """人間がこの Issue を見たとき、なぜ自分に回ってきたのかが分かること。"""
+    """When a human looks at this Issue, why it came to them must be clear."""
     fake = FakeGh(replies={"issue create": (0, "https://github.com/o/r/issues/25"),
                            "issue list": (0, "[]")})
     monkeypatch.setattr(GS, "gh", fake)
@@ -917,11 +922,11 @@ def test_needs_human_body_says_the_org_cannot_do_it(monkeypatch):
     body = fake.calls_matching("issue create")[0][
         fake.calls_matching("issue create")[0].index("--body") + 1]
     assert "only the CEO (a human) can carry out" in body
-    assert "#10" in body and "#11" in body     # 何をブロックしているかが見える
+    assert "#10" in body and "#11" in body     # what it blocks is visible
 
 
 def test_needs_human_is_idempotent(monkeypatch):
-    """再実行で二重に立てない（founding をやり直しても増えない）。"""
+    """A re-run does not file it twice (redoing a founding does not multiply them)."""
     listing = ('[{"number": 25, "title": "T", "state": "OPEN", "labels": []}]')
     fake = FakeGh(replies={"issue list": (0, listing)})
     monkeypatch.setattr(GS, "gh", fake)
@@ -932,10 +937,11 @@ def test_needs_human_is_idempotent(monkeypatch):
 
 
 def test_split_check_ignores_digits_in_prose(monkeypatch):
-    """`depends_on` 行の散文中の数字を依存と誤検出しない。
+    """A number in the prose of a `depends_on` line is not misread as a dependency.
 
-    「実装コードは1行も入らない」の「1」が #1 として解釈され、存在しない依存が警告された
-    （実地で判明）。#N の形だけを依存とみなす。"""
+    The "1" of 「実装コードは1行も入らない」 ("not one line of implementation code goes in") was read
+    as #1 and a dependency that did not exist was warned about (found in the field). Only the #N shape
+    counts as a dependency."""
     body = json.dumps({"body": "## MUST\n- [ ] WHEN x THE system SHALL y\n"
                                "- **owns:** `app/a/`\n"
                                "- **DoD command:** `npm test -- a`\n"
@@ -947,46 +953,52 @@ def test_split_check_ignores_digits_in_prose(monkeypatch):
     assert "#1" not in out
 
 
-# ── 実地: log に検査が無く、判定だけが厚くなった ─────────────────────────
-# 同じ Issue で decide 経由は 3,506〜5,894字、log は 276〜473字。検査のある側だけが厚い。
+# ── in the field: log had no check, and only the judgments grew thick ───────
+# On the same Issue, what went through decide ran 3,506-5,894 characters and the logs 276-473. Only
+# the side with a check is thick.
 def test_log_milestone_requires_command_and_result(monkeypatch):
-    """マイルストーンの log は --command / --result を要求する（decide と同じ思想）。"""
+    """A milestone log requires --command / --result (the same thinking as decide)."""
     fake = FakeGh(replies={"issue view": (0, '{"comments": []}')})
     monkeypatch.setattr(GS, "gh", fake)
     rc = GS.cmd_log(_ns(repo="o/r", issue=7, event="cycle_completed",
                         detail="実装した", phase=None, event_id="e1",
                         command=None, result=None))
-    assert rc == 2, "--command 無しのマイルストーン log が通った"
+    assert rc == 2, "a milestone log with no --command passed"
     assert not fake.calls_matching("issue comment")
 
 
 def test_log_rejects_result_that_only_says_it_worked(monkeypatch):
-    """--result が「通った」の言い換えなら弾く。実出力でなければ再構成できない。"""
+    """A --result that merely paraphrases "it passed" is rejected. Without the real output nothing
+    can be reconstructed."""
     fake = FakeGh(replies={"issue view": (0, '{"comments": []}')})
     monkeypatch.setattr(GS, "gh", fake)
     rc = GS.cmd_log(_ns(repo="o/r", issue=7, event="cycle_completed",
                         detail="実装した", phase=None, event_id="e2",
                         command="npm test", result="ok"))
-    assert rc == 2, "実出力でない --result が通った"
+    assert rc == 2, "a --result that is not real output passed"
 
 
 def test_log_progress_stays_cheap(monkeypatch):
-    """途中の刻み（progress_recorded）には検査を掛けない — 軽く刻めることも大事。"""
+    """No check is applied to an interim note (progress_recorded) — being able to note things
+    lightly matters too."""
     fake = FakeGh(replies={"issue view": (0, '{"comments": []}')})
     monkeypatch.setattr(GS, "gh", fake)
     rc = GS.cmd_log(_ns(repo="o/r", issue=7, event="progress_recorded",
                         detail="調査中", phase=None, event_id="e3",
                         command=None, result=None))
-    assert rc == 0, "軽い刻みまで塞いだら、途中経過が書かれなくなる"
+    assert rc == 0, "block even the light notes and nothing interim gets written at all"
 
 
-# ── 0.24.0: 分割基準に「壊れ方」と「守る対象の偏り」を足す ────────────────
+# ── 0.24.0: add "how it breaks" and "a lopsided set of protected things" to the split
+#    criteria ──
 def test_split_check_flags_multiple_failure_modes(monkeypatch):
-    """`owns` が同じでも、壊れ方と検証手段が違えば別 Issue。
+    """Even with the same `owns`, a different way of breaking and a different means of verification
+    make it a different Issue.
 
-    実地の #11 は supabase/ に閉じていたため owns 基準では分割されなかったが、中身は
-    「スキーマの形（型・制約）」と「認可（攻撃シナリオ）」という別々の壊れ方だった。
-    結果 migration 5本が相互干渉し、12周しても終わらなかった。
+    #11 in the field was closed under supabase/ and so was not split by the owns criterion, while its
+    content held two separate ways of breaking: "the shape of the schema (types, constraints)" and
+    "authorization (attack scenarios)".
+    Five migrations ended up interfering with each other, and twelve rounds did not finish it.
     """
     body = ("## MUST\n"
             "- The system SHALL 全テーブルで ROW LEVEL SECURITY を有効にする\n"
@@ -1003,9 +1015,10 @@ def test_split_check_flags_multiple_failure_modes(monkeypatch):
 
 
 def test_split_check_flags_boundary_only_authz(monkeypatch):
-    """境界だけを定めて内側を定めていない要求を警告する。
+    """Warn about requirements that set only the boundary and never the inside.
 
-    「非メンバーが」は境界の話。部分一致で内側に数えると検査が丸ごと無効になる。
+    「非メンバーが」 ("a non-member") is about the boundary. Counting it as inside by substring voids
+    the check entirely.
     """
     body = ("## MUST\n"
             "- The system SHALL 全テーブルで ROW LEVEL SECURITY を有効にする\n"
@@ -1022,7 +1035,8 @@ def test_split_check_flags_boundary_only_authz(monkeypatch):
 
 
 def test_split_check_does_not_flag_a_single_concern(monkeypatch):
-    """関心事が1つの Issue は警告しない（実地の #8 / #10 は1〜2周で通った）。"""
+    """An Issue with a single concern draws no warning (#8 and #10 in the field passed in one or two
+    rounds)."""
     body = ("## MUST\n"
             "- WHEN 支出が3人で割られる THE system SHALL 合計が一致する配分を返す\n"
             "- IF 端数が出る THEN THE system SHALL 決定的な順序で配る\n"
@@ -1034,7 +1048,8 @@ def test_split_check_does_not_flag_a_single_concern(monkeypatch):
     assert "it can break in" not in out and "what can be done once inside" not in out, out
 
 
-# ── 0.27.0: 監督の記録も機械で検査する（4層目にだけ検査が無かった）──────────
+# ── 0.27.0: the supervisor's record is machine-checked too (the fourth layer alone had no
+#    check) ──
 def _cv(**kw):
     base = dict(repo="o/r", issue=5, event="design_decided", verdict="pass",
                 why="what was weighed and what decided it — a real account here",
@@ -1046,10 +1061,10 @@ def _cv(**kw):
 
 
 def test_verified_without_a_trace_of_running_is_flagged(monkeypatch, capsys):
-    """「確認した」と書くだけでは確かめたことにならない。
+    """Writing "confirmed" is not the same as having confirmed.
 
-    実地でこの org は「確かめていないことを確かめたかのように述べる」を8回検出した。
-    その失敗様式が**検出する側（監督）**に現れた。
+    In the field this org detected "stating something unverified as though it were verified" eight
+    times. That failure mode then appeared in **the side doing the detecting** — the supervisor.
     """
     fake = CommentGh(); monkeypatch.setattr(GS, "gh", fake)
     GS.cmd_decide(_cv(claimed="maker が client.ts を読んだと報告", verified="確認した"))
@@ -1058,10 +1073,11 @@ def test_verified_without_a_trace_of_running_is_flagged(monkeypatch, capsys):
 
 
 def test_dropped_condition_in_the_summary_is_flagged(monkeypatch, capsys):
-    """--claimed の条件節が --verified で触れられていないなら警告する。
+    """Warn where a qualifier in --claimed goes untouched by --verified.
 
-    実地の #32: maker は「このブランチにまだ存在せず」と正直に書いたが、監督の要約が
-    その条件を落とし、それが gate への指示に流れて reject 事由になった。
+    #32 in the field: the maker honestly wrote 「このブランチにまだ存在せず」 ("it does not exist on
+    this branch yet"), the supervisor's summary dropped that qualifier, and the loss flowed into the
+    instructions to the gate and became a reason for rejection.
     """
     fake = CommentGh(); monkeypatch.setattr(GS, "gh", fake)
     GS.cmd_decide(_cv(claimed="src/db/client.ts はこのブランチに存在せず feat/issue-11 側にある",
@@ -1071,7 +1087,8 @@ def test_dropped_condition_in_the_summary_is_flagged(monkeypatch, capsys):
 
 
 def test_carrying_the_condition_through_is_silent(monkeypatch, capsys):
-    """条件を運んでいれば黙る。語尾の違い（存在せず / 存在しない）で誤検出しないこと。"""
+    """It stays quiet where the qualifier is carried. A different inflection (存在せず / 存在しない)
+    must not produce a false positive."""
     fake = CommentGh(); monkeypatch.setattr(GS, "gh", fake)
     GS.cmd_decide(_cv(claimed="client.ts はこのブランチに存在せず feat/issue-11 側にある",
                       verified="git ls-files src/db/client.ts → 出力なし（存在しないことを確認）"))
@@ -1080,7 +1097,8 @@ def test_carrying_the_condition_through_is_silent(monkeypatch, capsys):
 
 
 def test_legacy_calls_without_claimed_verified_still_pass(monkeypatch, capsys, tmp_path):
-    """--claimed / --verified を渡さない旧来の呼び出しは通す（後方互換）。"""
+    """An older call passing neither --claimed nor --verified still passes (backward
+    compatible)."""
     led = tmp_path / "led"; led.mkdir()
     monkeypatch.setenv("ORG_LEDGER_ROOT", str(led))
     fake = CommentGh(); monkeypatch.setattr(GS, "gh", fake)
@@ -1089,30 +1107,33 @@ def test_legacy_calls_without_claimed_verified_still_pass(monkeypatch, capsys, t
     assert "trace of anything actually run" not in capsys.readouterr().err
 
 
-# ── 0.30.0: integration_admitted は gate の admit を前提とする ──────────────
+# ── 0.30.0: integration_admitted presupposes an admit from the gate ─────────
 def test_integration_admitted_requires_a_gate_admit(monkeypatch, tmp_path, capsys):
-    """gate も skeptic も通っていない Issue に `integration_admitted = pass` が通っていた。
+    """`integration_admitted = pass` used to pass on an Issue that had been through neither the gate
+    nor the skeptic.
 
-    台帳は `phase_started` に対して既に同じ検査をしている（design が admit されていなければ
-    implement を拒否）。**maker の報告の質は admit の代わりにならない。**
+    The ledger already runs this same check against `phase_started` (implement is refused unless
+    design was admitted). **The quality of the maker's report is no substitute for an admit.**
     """
     led = tmp_path / "led"; led.mkdir()
     monkeypatch.setenv("ORG_LEDGER_ROOT", str(led))
     fake = CommentGh(); monkeypatch.setattr(GS, "gh", fake)
     rc = GS.cmd_decide(_cv(issue=42, event="integration_admitted", verdict="pass"))
-    assert rc == 4, "gate の admit なしに統合の記録が通った"
+    assert rc == 4, "an integration record passed with no admit from the gate"
     err = capsys.readouterr().err
     assert "no admit from the gate" in err
-    assert "verify" in err and "--role gate" in err, "打つべきコマンドが示されていない"
-    assert not fake.posted, "Issue にも記録してはいけない"
+    assert "verify" in err and "--role gate" in err, "the command to type is not shown"
+    assert not fake.posted, "it must not be recorded on the Issue either"
 
 
 def test_integration_admitted_passes_after_an_admit(monkeypatch, tmp_path):
-    """admit があれば通す。"""
+    """With an admit, it passes."""
     led = tmp_path / "led2"; led.mkdir()
-    # **実際の append で seed する。** 手書きの偽イベント（hash / prev_hash 無し）を置くと、
-    # Writer Phase 0 の健全性検査が正しく拒否する — 鎖の無い台帳に追記できてはいけない。
-    # 偽の台帳で試験していたことは、Phase 0 を入れて初めて露見した。
+    # **Seed with a real append.** Placing a hand-written fake event (with no hash / prev_hash) is
+    # correctly refused by Writer Phase 0's soundness check — appending to a ledger with no chain
+    # must not be possible.
+    # That the tests had been running against a fake ledger only came to light once Phase 0 went
+    # in.
     import subprocess as _sp
     r = _sp.run([sys.executable, str(REPO / "tools" / "ledger.py"), "append", str(led),
                  "--actor", "gate", "--class", "admission_decided",
@@ -1123,19 +1144,21 @@ def test_integration_admitted_passes_after_an_admit(monkeypatch, tmp_path):
     monkeypatch.setenv("ORG_LEDGER_ROOT", str(led))
     fake = CommentGh(); monkeypatch.setattr(GS, "gh", fake)
     rc = GS.cmd_decide(_cv(issue=42, event="integration_admitted", verdict="pass"))
-    assert rc == 0, "admit 済みの統合が弾かれた"
+    assert rc == 0, "an integration with an admit was rejected"
 
 
-# ══ H1 — 判断した主体・記録した主体・確定した主体を分ける ══════════════════════
-# **`actor` は3つを混ぜていた。** 監督が judge の判定を代理で記録する運用では、観測される
-# actor は常に監督なので、actor 同士を比べる職務分離は「監督が監督を承認していない」しか
-# 言えない。decision_by は **検証済み receipt からのみ** 確定する。
+# ══ H1 — separate who judged, who recorded, and who settled it ══════════════
+# **`actor` mixed all three.** Where a supervisor proxy-records a judge's judgment, the observed
+# actor is always the supervisor, so a separation of duties comparing actors can only say "the
+# supervisor did not approve the supervisor". decision_by is settled **only from a verified
+# receipt**.
 
 import subprocess as _sp
 
 
 def _h1_org(tmp_path):
-    """receipt を検証できる使い捨て org。subject が動かないよう作業ツリーを固定する。"""
+    """A disposable org where a receipt can be verified. The working tree is fixed so the subject
+    does not move."""
     org = tmp_path / "org"
     (org / ".orgforge" / "ledger").mkdir(parents=True)
     (org / ".orgforge" / "trust").mkdir(parents=True)
@@ -1144,8 +1167,9 @@ def _h1_org(tmp_path):
     (org / "constitution.yaml").write_text(
         "enforcement:\n  judges:\n    lineage: cross-harness\n", encoding="utf-8")
     (org / "REQUIREMENTS.md").write_text("MUST: A\n", encoding="utf-8")
-    # **台帳と trust store を追跡から外す** — 実行で中身が変わると subject が動き、
-    # receipt と一致しなくなる（review_subject が作業ツリー全体を束ねる設計の帰結）。
+    # **Untrack the ledger and the trust store** — content changing during a run moves the subject
+    # and it stops matching the receipt (a consequence of review_subject bundling the whole working
+    # tree).
     (org / ".gitignore").write_text(".orgforge/\n", encoding="utf-8")
     for c in (["init", "-q"], ["config", "user.email", "t@t"], ["config", "user.name", "t"],
               ["add", "-A"], ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "i"]):
@@ -1163,15 +1187,15 @@ def _tool(org, script, *args, env=None):
                    cwd=org, capture_output=True, text=True, env=env or _h1_env(org))
 
 
-_H1_WHY = ("gate の判定理由。独立に再導出した範囲と、判定の決め手になった具体的な箇所を"
-           "書いている。")
+_H1_WHY = ("the gate's reason for its judgment. It writes the range it independently re-derived, "
+           "and the specific place that decided it.")
 
 
 def _h1_setup(tmp_path, keys=(("k-gate", "gate-signer"),)):
     org = _h1_org(tmp_path)
     for kid, sid in keys:
-        # **H1 の試験は Compatibility Mode を検査している。** 0.38.0 で keygen の既定が
-        # 非対称（Authenticated Mode）になったので、共有鍵を明示する。
+        # **The H1 tests check Compatibility Mode.** 0.38.0 made keygen's default asymmetric
+        # (Authenticated Mode), so the shared key is stated explicitly.
         r = _tool(org, "identity.py", "keygen", "--key-id", kid, "--signer-id", sid,
                   "--shared-secret")
         assert r.returncode == 0, r.stdout + r.stderr
@@ -1179,7 +1203,7 @@ def _h1_setup(tmp_path, keys=(("k-gate", "gate-signer"),)):
     from orgcycle._core import review_subject
     from ghsync.record import _reasoning_digest
     subj = review_subject(7, "gate", "implement", cwd=str(org))[0]
-    dig = _reasoning_digest(_H1_WHY, "見た証跡", "", "", "")
+    dig = _reasoning_digest(_H1_WHY, "the trace that was read", "", "", "")
     import hashlib as _h
     reqd = _h.sha256((org / "REQUIREMENTS.md").read_bytes()).hexdigest()[:16]
     return org, subj, dig, reqd
@@ -1187,8 +1211,9 @@ def _h1_setup(tmp_path, keys=(("k-gate", "gate-signer"),)):
 
 def _h1_receipt(org, subj, dig, reqd, key_id="k-gate", role="gate",
                 lineage="same-harness", verdict="admit", issue="7", out="r.json"):
-    # **org_id / ledger_id は書き込み先から決まる。** receipt もそれに合わせる —
-    # 合わせないと「別 org の receipt」として正しく拒否される（0.39.5 で束縛を完全化）。
+    # **org_id / ledger_id are determined by the write target.** The receipt is matched to them —
+    # without that it is correctly refused as "a receipt from another org" (0.39.5 completed the
+    # binding).
     _oid, _lid = _real_ids(org)
     r = _tool(org, "identity.py", "receipt", "--org-id", _oid, "--ledger-id", _lid,
               "--subject", subj, "--issue", issue, "--role", role, "--phase", "implement",
@@ -1206,7 +1231,7 @@ def _h1_prov(org, subj, receipt=None, role="gate", lineage="same-harness",
              verdict="admit", issue="7", env=None):
     args = ["provisional", "--issue", issue, "--role", role, "--lineage", lineage,
             "--verdict", verdict, "--subject", subj, "--why", _H1_WHY,
-            "--evidence", "見た証跡"]
+            "--evidence", "the trace that was read"]
     if receipt:
         args += ["--receipt", str(receipt)]
     return _tool(org, "github_sync.py", *args, env=env)
@@ -1221,26 +1246,26 @@ def _h1_events(org, cls="verdict_provisional"):
 
 
 def test_decision_by_comes_from_a_verified_receipt(tmp_path):
-    """`decision_by` は receipt からのみ。CLI に申告する引数は存在しない。"""
+    """`decision_by` comes only from a receipt. No CLI argument declares it."""
     org, subj, dig, reqd = _h1_setup(tmp_path)
     rc = _h1_receipt(org, subj, dig, reqd)
     r = _h1_prov(org, subj, rc)
     assert r.returncode == 0, r.stdout + r.stderr
     pl = _h1_events(org)[0]["payload"]
     assert pl["decision_by"] == "gate-signer"
-    assert pl["identity_assurance"] == "attested"     # 共有鍵なので authenticated ではない
+    assert pl["identity_assurance"] == "attested"     # a shared key, so not authenticated
     assert pl["signer_id"] == "gate-signer" and pl["key_id"] == "k-gate"
-    # **payload に書いたのではなく、書き手が receipt を検証して生成した**（0.39.4）
-    # CLI で decision_by を申告する経路が無いこと
+    # **Not written into the payload — the writer verified the receipt and generated it** (0.39.4)
+    # There must be no path for declaring decision_by on the CLI
     h = _tool(org, "github_sync.py", "provisional", "--help")
     assert "--decision-by" not in h.stdout
 
 
 def test_recorded_by_is_observed_and_decision_by_survives_proxy_recording(tmp_path):
-    """**代理記録でも判断者の identity は失われない。**
+    """**A proxy recording does not lose the judge's identity.**
 
-    監督が別 session で記録しても `decision_by` は judge のまま。それが「代理記録と認証は
-    両立する」の中身である。
+    Even where a supervisor records it from a different session, `decision_by` stays the judge. That
+    is what "proxy recording and authentication coexist" amounts to.
     """
     org, subj, dig, reqd = _h1_setup(tmp_path)
     rc = _h1_receipt(org, subj, dig, reqd)
@@ -1248,24 +1273,24 @@ def test_recorded_by_is_observed_and_decision_by_survives_proxy_recording(tmp_pa
     r = _h1_prov(org, subj, rc, env=env)
     assert r.returncode == 0, r.stdout + r.stderr
     pl = _h1_events(org)[0]["payload"]
-    assert pl["decision_by"] == "gate-signer"          # judge のまま
+    assert pl["decision_by"] == "gate-signer"          # still the judge
     assert pl["recorded_by"] == "session:supervisor-session-99"
     assert pl["recorder_assurance"] == "observed"
 
 
 def test_receipt_cannot_be_replayed_into_another_judgment(tmp_path):
-    """別の issue / subject / 血統への再利用を拒否する。"""
+    """Reuse against a different issue / subject / lineage is refused."""
     org, subj, dig, reqd = _h1_setup(tmp_path)
     rc = _h1_receipt(org, subj, dig, reqd)
     for kw in ({"issue": "9"}, {"lineage": "cross-harness"}, {"verdict": "reject"}):
         r = _h1_prov(org, subj, rc, **kw)
-        assert r.returncode == 4, f"{kw} で通った: {r.stdout + r.stderr}"
+        assert r.returncode == 4, f"it passed with {kw}: {r.stdout + r.stderr}"
         assert "does not match" in (r.stdout + r.stderr)
     assert _h1_events(org) == []
 
 
 def test_tampering_with_a_receipt_is_refused(tmp_path):
-    """束縛した値を書き換えると署名が合わない。"""
+    """Rewriting a bound value makes the signature stop matching."""
     org, subj, dig, reqd = _h1_setup(tmp_path)
     rc = _h1_receipt(org, subj, dig, reqd)
     d = json.loads(rc.read_text(encoding="utf-8"))
@@ -1278,18 +1303,19 @@ def test_tampering_with_a_receipt_is_refused(tmp_path):
 
 
 def test_a_revoked_key_is_refused(tmp_path):
-    """失効した鍵の receipt は受け付けない。"""
+    """A receipt from a revoked key is not accepted."""
     org, subj, dig, reqd = _h1_setup(tmp_path)
     rc = _h1_receipt(org, subj, dig, reqd)
     assert _tool(org, "identity.py", "revoke", "--key-id", "k-gate",
-                 "--reason", "検査").returncode == 0
+                 "--reason", "a check").returncode == 0
     r = _h1_prov(org, subj, rc)
     assert r.returncode == 4
     assert "has been revoked" in (r.stdout + r.stderr)
 
 
 def test_unreadable_trust_store_does_not_record_the_judgment(tmp_path):
-    """**読めないことを「信頼できる」と読まない。** 判断の主体を確かめられないなら記録しない。"""
+    """**"Unreadable" is never read as "trustworthy".** Where the judging principal cannot be
+    confirmed, nothing is recorded."""
     org, subj, dig, reqd = _h1_setup(tmp_path)
     rc = _h1_receipt(org, subj, dig, reqd)
     env = dict(_h1_env(org), ORG_TRUST_STORE="/nonexistent/keys.json")
@@ -1300,20 +1326,20 @@ def test_unreadable_trust_store_does_not_record_the_judgment(tmp_path):
 
 
 def test_without_a_receipt_identity_stays_claimed(tmp_path):
-    """receipt が無ければ `claimed` のまま — **昇格しない。**"""
+    """With no receipt it stays `claimed` — **nothing is promoted.**"""
     org, subj, dig, reqd = _h1_setup(tmp_path)
     r = _h1_prov(org, subj, None, role="skeptic", verdict="survives", issue="11")
     assert r.returncode == 0, r.stdout + r.stderr
     pl = _h1_events(org)[0]["payload"]
     assert pl["identity_assurance"] == "claimed"
-    assert pl["decision_by"] == "skeptic"          # legacy actor 相当（申告）
+    assert pl["decision_by"] == "skeptic"          # the legacy actor equivalent (declared)
 
 
 def test_same_signer_on_both_lineages_is_not_independent_review(tmp_path):
-    """**署名されていても、同じ signer が両方を作れるなら独立レビューではない。**
+    """**Signed or not, if one signer can produce both, it is not independent review.**
 
-    一致は成立するが、`reviewer_independence = same_signer` として記録され、警告される。
-    独立性の証拠として数えてはいけない。
+    The agreement still holds, but it is recorded as `reviewer_independence = same_signer` and
+    warned about. It must not be counted as evidence of independence.
     """
     org, subj, dig, reqd = _h1_setup(tmp_path)
     r1 = _h1_receipt(org, subj, dig, reqd, lineage="same-harness", out="r1.json")
@@ -1329,7 +1355,7 @@ def test_same_signer_on_both_lineages_is_not_independent_review(tmp_path):
 
 
 def test_distinct_signers_are_recorded_as_independent(tmp_path):
-    """血統ごとに別の signer なら `distinct_signer`。"""
+    """A different signer per lineage gives `distinct_signer`."""
     org, subj, dig, reqd = _h1_setup(tmp_path,
                                      keys=(("k-gate", "gate-signer"), ("k-two", "second-signer")))
     r1 = _h1_receipt(org, subj, dig, reqd, key_id="k-gate", lineage="same-harness", out="r1.json")
@@ -1341,7 +1367,8 @@ def test_distinct_signers_are_recorded_as_independent(tmp_path):
 
 
 def test_separation_of_duties_compares_decision_by_not_recorded_by(tmp_path):
-    """**職務分離は `decision_by` 同士を比べる。** recorded_by を比べると代理記録が全て違反になる。"""
+    """**The separation of duties compares `decision_by` values.** Comparing recorded_by makes every
+    proxy recording a violation."""
     sys.path.insert(0, str(REPO / "tools"))
     import importlib
     led = importlib.import_module("ledger")
@@ -1351,10 +1378,11 @@ def test_separation_of_duties_compares_decision_by_not_recorded_by(tmp_path):
     ev = {"class": "admission_decided", "actor": "supervisor",
           "payload": {"deliverable": "7", "verdict": "admit",
                       "decision_by": "maker-alice", "recorded_by": "session:sup"}}
-    assert led._distinct_actor_violation(ev, hist), "maker が自分の仕事を admit できている"
-    # 判断者が別なら通る（記録者が同じでも）
+    assert led._distinct_actor_violation(ev, hist), "a maker can admit its own work"
+    # A different judge passes (even where the recorder is the same)
     ev["payload"]["decision_by"] = "gate-signer"
-    assert led._distinct_actor_violation(ev, hist) is None, "代理記録が違反扱いになっている"
+    assert led._distinct_actor_violation(ev, hist) is None, (
+        "a proxy recording is being treated as a violation")
 
 
 # ── Issue #103: machine-readable dependencies, parked state, honest ready gating ─────────────
@@ -1380,7 +1408,8 @@ def _create_ns(**kw):
 
 
 def test_create_carved_from_appends_machine_readable_depends_on(monkeypatch):
-    # the carve-out invariant: 「carve out 先は元に依存する」は例外なく成り立つ — so the create
+    # the carve-out invariant: "a carve-out depends on its origin" holds without exception — so the
+    # create
     # path must WRITE it, not leave it to prose (Issue #103).
     fake = FakeGh(replies={"issue create": (0, "https://github.com/o/r/issues/80")})
     monkeypatch.setattr(GS, "gh", fake)
