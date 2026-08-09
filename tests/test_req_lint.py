@@ -1,10 +1,11 @@
-"""req_lint — 要求記述が標準に適合しているかの検査（docs/11 §0b）。
+"""req_lint — checking that requirements are written to the standard (docs/11 §0b).
 
-docs/11 §0a は founding 成果物の *ファイル名* を固定したが、*中身の書式* を規定していなかった。
-その結果 founding のたびに構成が発明され、同じ要求から違う構造の文書が出る — 「同じ spec ⇒
-同じプロセス」という中核主張が要求記述の層で破れていた。この検査がその穴を塞ぐ。
+docs/11 §0a fixed the *file names* of the founding artifacts but prescribed nothing about *the format
+of their content*. As a result the structure was invented afresh at every founding and the same
+requirements produced documents of different structure — the central claim, "same spec ⇒ same
+process", was broken at the layer where requirements are written. This check closes that hole.
 
-準拠: ISO/IEC/IEEE 29148:2018 tailored conformance（§4.5.2 が認める適合形態）+ EARS。
+Conformance: tailored conformance to ISO/IEC/IEEE 29148:2018 (the form §4.5.2 recognises) + EARS.
 """
 import pathlib
 import subprocess
@@ -50,17 +51,18 @@ def test_valid_document_passes(tmp_path):
 
 
 def test_template_conforms_to_its_own_rules(tmp_path):
-    """規約を定義したテンプレートが、その規約に違反していてはならない。
+    """A template that defines the rules must not violate them.
 
-    付録のチェックリストには禁止語が「例」として並ぶので、素朴に検査すると必ず落ちる —
-    規約を正しく説明している文書ほど違反数が多くなるという不合理が起きる。"""
+    The banned words line up in the appendix checklist as "examples", so a naive check always fails —
+    producing the absurdity that the better a document explains the rules, the more violations it
+    has."""
     r = subprocess.run([sys.executable, str(TOOL), "check",
                         str(REPO / "template" / "REQUIREMENTS.md")],
                        capture_output=True, text=True)
     assert r.returncode == 0, r.stdout + r.stderr
 
 
-# ── 必須セクション ───────────────────────────────────────────────────────────
+# ── the required sections ───────────────────────────────────────────────────
 def test_missing_section_is_held(tmp_path):
     code, out = run(tmp_path, VALID.replace("## 7. Out of Scope\nPayPay API決済（既知の死）\n", ""))
     assert code == 10
@@ -68,7 +70,7 @@ def test_missing_section_is_held(tmp_path):
 
 
 def test_japanese_headings_are_accepted(tmp_path):
-    """見出しは日英どちらでもよい。厳密一致にすると実用に耐えない。"""
+    """A heading may be in either Japanese or English. A strict match would not survive use."""
     ja = (VALID.replace("## 4. Acceptance", "## 4. 受入基準")
                .replace("## 5. Success Criteria", "## 5. 成功基準")
                .replace("## 6. Constraints", "## 6. 制約")
@@ -87,7 +89,7 @@ def test_requirement_without_shall_is_held(tmp_path):
 
 
 def test_japanese_shall_form_is_accepted(tmp_path):
-    """日本語の「〜すること」は shall 相当として認める。"""
+    """The Japanese 「〜すること」 is accepted as the equivalent of shall."""
     ja = VALID.replace(
         "| FR-001 | When a user submits a payment report, the system shall mark it as pending |",
         "| FR-001 | 送金報告を受けたとき、システムは確認待ちにすること |")
@@ -96,13 +98,13 @@ def test_japanese_shall_form_is_accepted(tmp_path):
 
 
 def test_acceptance_scenarios_are_not_checked_as_requirements(tmp_path):
-    """受入基準は GWT で書くのが正しい。shall が無いのは違反ではない。"""
+    """GWT is the correct notation for acceptance criteria. Having no shall is not a violation."""
     code, out = run(tmp_path, VALID)
     assert code == 0
     assert "Given" not in out or "EARS" not in out
 
 
-# ── §5.2.7 避けるべき語 ──────────────────────────────────────────────────────
+# ── §5.2.7 the words to avoid ───────────────────────────────────────────────
 def test_subjective_word_is_held(tmp_path):
     code, out = run(tmp_path, VALID.replace("立替の清算が滞留せずに完了する。",
                                             "使いやすいアプリを作る。"))
@@ -110,7 +112,7 @@ def test_subjective_word_is_held(tmp_path):
 
 
 def test_loophole_word_is_held(tmp_path):
-    """「可能であれば」は実装しない口実になる。"""
+    """「可能であれば」 ("if possible") becomes an excuse not to implement."""
     bad = VALID.replace("| FR-002 | 受領側が7日間応答しないとき、システムは自動で支払い済みとすること |",
                         "| FR-002 | 可能であれば、システムは自動で支払い済みとすること |")
     code, out = run(tmp_path, bad)
@@ -127,11 +129,12 @@ def test_universal_and_ambiguous_conjunction_are_held(tmp_path):
 
 
 def test_must_keyword_warns_but_does_not_hold(tmp_path):
-    """`must` は要求と誤解されるので避けるべき（§5.2.4）だが、警告に留める。"""
+    """`must` should be avoided as it is mistaken for a requirement (§5.2.4), but this stays a
+    warning."""
     doc = VALID.replace("金額は integer（円）", "金額は integer（円）。この制約は must 満たす")
     code, out = run(tmp_path, doc)
     assert "MUST" in out
-    assert code == 0, "must は警告であって違反ではない"
+    assert code == 0, "must is a warning, not a violation"
 
 
 # ── §5.2.6 Complete ──────────────────────────────────────────────────────────
@@ -140,18 +143,19 @@ def test_tbd_is_held(tmp_path):
     assert code == 10 and "TBX" in out
 
 
-# ── Spec Kit 由来: 未解決マーカー（最重要）────────────────────────────────────
+# ── from Spec Kit: the unresolved marker (the most important) ───────────────
 def test_unresolved_clarification_marker_is_held(tmp_path):
-    """曖昧なまま実装させないための最重要の歯。エージェントが推測で埋めるのが最大の失敗モード。"""
+    """The most important tooth, there so nothing is implemented while ambiguous. An agent filling
+    the gaps by guessing is the largest failure mode."""
     bad = VALID.replace("金額は integer（円）",
                         "[NEEDS CLARIFICATION: 通貨は円だけか?]")
     code, out = run(tmp_path, bad)
     assert code == 10 and "CLARIFICATION" in out
 
 
-# ── 運用 ─────────────────────────────────────────────────────────────────────
+# ── operation ───────────────────────────────────────────────────────────────
 def test_warn_only_does_not_hold(tmp_path):
-    """導入初期の drain 用（docs/11 §4e）。違反は報告するが exit 0。"""
+    """For the drain early after adoption (docs/11 §4e). It reports violations but exits 0."""
     code, out = run(tmp_path, VALID.replace("立替の清算が滞留せずに完了する。",
                                             "使いやすいアプリを作る。"), "--warn-only")
     assert code == 0
@@ -165,19 +169,23 @@ def test_missing_file_is_a_usage_error(tmp_path):
 
 
 def test_no_requirements_at_all_is_held(tmp_path):
-    """要求が1件もない文書は要求記述ではない。"""
+    """A document with no requirements at all is not a statement of requirements."""
     empty = "\n".join(l for l in VALID.split("\n") if "FR-0" not in l)
     code, out = run(tmp_path, empty)
     assert code == 10 and "not one requirement statement" in out
 
 
-# ── VOIDDEP は 0.25.1 で取り下げた（日本語の要求から目的語を切り出せない）──────
-# 実地の REQUIREMENTS.md にバッククォート識別子は 0 件で、検査が一度も発火しなかった。
-# 助詞で区切る実装も試したが `利用者が支出` と `メンバーが支出` が別物になり全件誤検出。
+# ── VOIDDEP was withdrawn at 0.25.1 (the object cannot be extracted from a Japanese
+#    requirement) ──
+# A REQUIREMENTS.md in the field held zero backtick identifiers, and the check never once fired.
+# Splitting on particles was tried too, and `利用者が支出` and `メンバーが支出` came out as different
+# things, making every finding a false positive.
 def test_voiddep_is_not_reintroduced_without_a_way_to_extract_objects():
-    """取り下げた理由を残す。再実装するなら、目的語を確実に取れる前提が要る。"""
+    """Leave the reason it was withdrawn. Reimplementing it presupposes that the object can be
+    obtained reliably."""
     src = (REPO / "tools" / "req_lint.py").read_text(encoding="utf-8")
     if "VOIDDEP" in src and '"code": "VOIDDEP"' in src:
-        # 復活させるなら、日本語の要求（識別子なし）で発火することをテストで示すこと
-        assert False, ("VOIDDEP を戻すなら、識別子を使わない日本語の要求で発火することを"
-                       "テストで示すこと — 前回はそれをせずに入れ、一度も発火しなかった")
+        # To revive it, show by test that it fires on a Japanese requirement (with no identifiers)
+        assert False, ("to bring VOIDDEP back, show by test that it fires on a Japanese requirement "
+                       "that uses no identifiers — last time it went in without that and never "
+                       "once fired")
