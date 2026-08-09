@@ -57,17 +57,18 @@ def org_root(start=None):
 
 
 def _is_worktree(d):
-    """`begin` が作った Issue ごとの作業ツリーか（`.orgforge/wt/issue-N/`）。
+    """Is this a per-Issue work tree created by `begin` (`.orgforge/wt/issue-N/`)?
 
-    **worktree を org root と誤認すると、迷子の台帳ができる。** doctrine と evidence を
-    git 追跡下に置いた結果、worktree にも `.orgforge/` が復元され、それが ORG_MARKERS に
-    当たって親の探索が止まる。そこで subagent が `ledger append` を打つと worktree 側の
-    空の台帳に書かれ、`appended seq=1` が返る — 実判定が本体の台帳から消える。
-    実地で1日に3回起き、実判定4件が迷子になった。
+    **Mistake a worktree for the org root and you get an orphaned ledger.** Putting doctrine and
+    evidence under git meant `.orgforge/` was restored inside worktrees too, where it matches
+    ORG_MARKERS and stops the search for a parent. A subagent running `ledger append` there writes
+    to the worktree's empty ledger and gets back `appended seq=1` — and the real judgment vanishes
+    from the real ledger. It happened three times in one day, losing four real judgments.
 
-    警告で防ぐ設計は破れる（gate が一度踏んだ）ので、構造で防ぐ: worktree の中からは
-    必ず親を辿る。判定は `git worktree` の実体（`.git` が**ファイル**でその中身が
-    `gitdir:` を指す）で行う — パス名ではなくツリーの性質で見る。
+    A design that prevents this with a warning can be broken (the gate walked into it once), so it
+    is prevented structurally: from inside a worktree, always walk up to the parent. The test is
+    what a `git worktree` actually is — `.git` being a **file** whose contents point at `gitdir:` —
+    rather than anything about the path name.
     """
     dotgit = os.path.join(d, ".git")
     if not os.path.isfile(dotgit):

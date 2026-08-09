@@ -1,4 +1,4 @@
-"""カバレッジ — coverage-manifest の must-have が Issue に降りているかの検査。"""
+"""Coverage — check that the coverage-manifest's must-haves have reached the Issues."""
 
 import hashlib
 import json

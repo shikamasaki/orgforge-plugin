@@ -171,35 +171,36 @@ def main(argv):
     sub = p.add_subparsers(dest="cmd", required=True)
 
     q = sub.add_parser("growth"); q.set_defaults(fn=cmd_growth)
-    q.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)"); q.add_argument("--now", default="2026-01-01")
+    q.add_argument("root", nargs="?", help="ledger root (omitted: auto-discovered from the cwd — .orgforge/ledger)"); q.add_argument("--now", default="2026-01-01")
 
     q = sub.add_parser("adopt"); q.set_defaults(fn=cmd_adopt)
-    q.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)"); q.add_argument("--scope", required=True)
+    q.add_argument("root", nargs="?", help="ledger root (omitted: auto-discovered from the cwd — .orgforge/ledger)"); q.add_argument("--scope", required=True)
     q.add_argument("--choice", required=True); q.add_argument("--owner", required=True)
     q.add_argument("--by", required=True); q.add_argument("--review-by", dest="review_by")
 
     q = sub.add_parser("conflict"); q.set_defaults(fn=cmd_conflict)
-    q.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)"); q.add_argument("--scope", required=True)
+    q.add_argument("root", nargs="?", help="ledger root (omitted: auto-discovered from the cwd — .orgforge/ledger)"); q.add_argument("--scope", required=True)
     q.add_argument("--choice", required=True)
 
     q = sub.add_parser("render"); q.set_defaults(fn=cmd_render)
-    q.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)"); q.add_argument("--role", required=True); q.add_argument("--out")
+    q.add_argument("root", nargs="?", help="ledger root (omitted: auto-discovered from the cwd — .orgforge/ledger)"); q.add_argument("--role", required=True); q.add_argument("--out")
 
     q = sub.add_parser("stale"); q.set_defaults(fn=cmd_stale)
-    q.add_argument("root", nargs="?", help="ledger root (省略時はカレントから自動発見: .orgforge/ledger)"); q.add_argument("--now", required=True)
+    q.add_argument("root", nargs="?", help="ledger root (omitted: auto-discovered from the cwd — .orgforge/ledger)"); q.add_argument("--now", required=True)
 
     a = p.parse_args(argv[1:])
-    # root は省略可能: 省略時は `.orgforge/conventions` を発見する（tools/discover.py）。
-    # ここは ledger とは別のストアで、以前は `${ORG_CONVENTIONS_ROOT:-$ORG_LEDGER_ROOT}` の
-    # ようなフォールバックで ledger に混入していた — 監査記録に別種のデータが混ざるので誤り。
+    # root is optional: when omitted, `.orgforge/conventions` is discovered (tools/discover.py).
+    # This is a separate store from the ledger. A fallback like
+    # `${ORG_CONVENTIONS_ROOT:-$ORG_LEDGER_ROOT}` used to let it bleed into the ledger — wrong,
+    # because it mixes a different kind of data into the audit record.
     if getattr(a, "root", None) is None:
         import os as _os
         sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
         import discover as _d
         a.root = _d._sub_root("conventions")
         if not a.root:
-            print("conventions の置き場が見つからない。org の中（.orgforge/ のあるディレクトリ）で "
-                  "実行するか、root を明示すること。", file=sys.stderr)
+            print("cannot find where conventions live. Run inside the org (a directory holding "
+                  ".orgforge/), or state the root explicitly.", file=sys.stderr)
             return 2
     return a.fn(a)
 

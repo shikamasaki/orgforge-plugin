@@ -1,6 +1,7 @@
-"""github_sync の共有部品 — gh の呼び出し、Issue のラベル/番号解決、冪等マーカー。
+"""Shared parts of github_sync — invoking gh, resolving Issue labels/numbers, idempotency
+markers.
 
-ここに置くのは「どのサブコマンドからも使う」ものだけ。"""
+Only what every subcommand uses belongs here."""
 
 import hashlib
 import json
@@ -13,9 +14,10 @@ import sys
 CLAIM_PREFIX = "orgforge:claimed:"
 
 
-# tools/ を指す。**このファイルは tools/ghsync/ に居るので親を1つ上る。**
-# パスの基点はここに集約する — 各所で `__file__` を解決し直すと、階層が変わったとき
-# 直し漏れが起きる（0.22.0 で _agents_dir と _seam が実際にそうなった）。
+# Points at tools/. **This file lives in tools/ghsync/, so go up one parent.**
+# The path origin is kept in one place — resolve `__file__` separately in each spot and a change of
+# hierarchy leaves some of them unfixed (which is what happened to _agents_dir and _seam in
+# 0.22.0).
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -171,8 +173,9 @@ def _already_logged(repo, issue, marker):
         return False
 
 
-# マイルストーン: ここで「何をしたか」が残らないと、後から再構成する手段が無くなる。
-# 途中経過（progress_recorded）は軽く刻めてよいが、サイクルの節目は監査点なので実出力を要求する。
+# Milestones: without "what was done" recorded here, there is no way to reconstruct it later.
+# Interim progress (progress_recorded) may be logged lightly, but a cycle's milestone is an audit
+# point, so real output is required.
 
 
 def _slug(text, maxlen=32):
@@ -192,7 +195,8 @@ def _slug(text, maxlen=32):
 
 
 def banner():
-    """実行しているバージョンと cwd を stderr に1行（org_cycle と同じ理由 — docs/11）。"""
+    """One line on stderr giving the running version and cwd (same reason as org_cycle —
+    docs/11)."""
     ver = "?"
     for c in (os.path.join(os.path.dirname(HERE), ".claude-plugin", "plugin.json"),
               os.path.join(HERE, "..", "integrations", "claude-code",
@@ -203,9 +207,10 @@ def banner():
             break
         except Exception:
             continue
-    # **機械可読な出力を汚さない。** stderr に書いていても、消費側が 2>&1 で混ぜると
-    # JSON が壊れる（実地でテストが JSONDecodeError で落ちた）。人間向けの補助なので、
-    # --json や ORG_QUIET のときは黙る — 「便利のために壊す」のは筋が通らない。
+    # **Do not pollute machine-readable output.** Even written to stderr, a consumer merging with
+    # 2>&1 ends up with broken JSON (a test failed with JSONDecodeError in practice). It is a
+    # convenience for humans, so it stays silent under --json or ORG_QUIET — breaking something for
+    # the sake of convenience does not add up.
     if "--json" in sys.argv or os.environ.get("ORG_QUIET"):
         return
     print(f"[orgforge {ver} @ {os.getcwd()}]", file=sys.stderr)
