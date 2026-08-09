@@ -38,7 +38,7 @@ ROOTS = ("tools", "tests", "integrations/common")
 # A file that is not listed here must contain no Japanese at all.
 BUDGET = {
     "tests/test_ledger.py": 452,
-    "tests/test_orgcycle.py": 481,
+    "tests/test_orgcycle.py": 439,
     "tests/test_hook.py": 447,
     "tools/orgcycle/judge.py": 2,
     "integrations/common/org_hook.py": 1,
@@ -47,9 +47,8 @@ BUDGET = {
     "tests/test_github_sync.py": 173,
     "tools/orgcycle/_core.py": 159,
     "tools/req_lint.py": 134,
-    "tools/orgcycle/ship.py": 127,
     "tools/orgcycle/inspect.py": 106,
-    "tools/orgcycle/cycle.py": 107,
+    "tools/orgcycle/cycle.py": 106,
     "tools/org_cycle.py": 99,
     "tools/orgcycle/lens.py": 1,
     "tools/github_sync.py": 70,

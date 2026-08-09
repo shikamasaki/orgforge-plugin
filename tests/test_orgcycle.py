@@ -365,37 +365,41 @@ def test_complete_requires_command_and_result():
 
 
 def test_begin_log_carries_facts_the_tool_already_knows():
-    """begin の log に branch / worktree / parent / candidate_id が自動で入る（B）。
+    """begin's log carries branch / worktree / parent / candidate_id automatically (B).
 
-    実地で人が書いた 276 字にはブランチ名も worktree のパスも無かったが、org_cycle は
-    両方知っていた。知っている事実を人に書かせない。
+    In the field, 276 characters written by a person held neither the branch name nor the worktree
+    path — while org_cycle knew both. A fact the tool knows is never left for a person to write.
     """
     src = _cycle_src()
     seg = src[src.index("def _steps_begin"):src.index("def _steps_complete")]
     for token in ("worktree:", "branch:", "parent:", "candidate_id:", "--command", "--result"):
-        assert token in seg, f"begin の log に {token} が入っていない"
+        assert token in seg, f"begin's log does not carry {token}"
 
 
 def test_handback_puts_closes_in_pr_body():
-    """PR body の `Closes #N` が Issue ↔ PR ↔ コミットを繋ぎ、統合時に Issue を閉じる（C）。"""
+    """`Closes #N` in the PR body ties Issue ↔ PR ↔ commit and closes the Issue on integration
+    (C)."""
     src = _cycle_src()
     seg = src[src.index("def cmd_handback"):]
-    assert 'f"Closes #{a.issue}"' in seg, "PR body に Closes が無い — Issue が OPEN のまま残る"
+    assert 'f"Closes #{a.issue}"' in seg, \
+        "the PR body has no Closes — the Issue is left OPEN"
     assert "gh pr create" in seg
 
 
-# ── 実地: 予算 cap が日常の後片付けを止めていた（1日5回発火・実害ゼロ）───────
+# ── field report: the budget cap was stopping everyday tidying up
+# ──               (fired five times a day, zero real harm) ──────────────────
 
 
 def test_begin_records_attention_allocated():
-    """6件着手して選択の記録が1件だけだった。選んだ結果を残すのは配管。"""
+    """Six were started and only one record of the choice existed. Recording what was chosen is
+    plumbing."""
     src = _cycle_src()
     seg = src[src.index("def _steps_begin"):src.index("def _steps_complete")]
     assert "attention_allocated" in seg
 
 
 def test_doctrine_propose_warns_on_incomplete_provenance():
-    """propose は省略でき admit は必須にする、という不整合で必ず詰まっていた。"""
+    """It always jammed on the inconsistency that propose may omit what admit requires."""
     root = None
     import tempfile
     with tempfile.TemporaryDirectory() as d:
@@ -408,16 +412,17 @@ def test_doctrine_propose_warns_on_incomplete_provenance():
 
 
 def test_complete_proposes_learning_to_doctrine():
-    """学びの蓄積口がサイクルに繋がっていること（propose まで。admit は gate）。"""
+    """The intake for accumulated learning is wired into the cycle (as far as propose; the admit is
+    the gate's)."""
     src = _cycle_src()
     seg = src[src.index("def cmd_complete"):src.index("def cmd_plan")]
     assert "doctrine.py" in seg and "propose" in seg
     assert "--retrieved-at" in seg and "--review-by" in seg, \
-        "provenance を埋めないと gate が admit できず、学びは pending のまま死ぬ"
+        "without provenance filled in the gate cannot admit, and the learning dies pending"
 
 
 def test_gc_keeps_unmerged_and_dirty_worktrees(tmp_path):
-    """gc は統合済みだけを消す。未統合・未コミットは残す。"""
+    """gc removes only what is integrated. Unintegrated or uncommitted work is kept."""
     import importlib.util
     repo = tmp_path / "r"; repo.mkdir()
     def g(*a, cwd=repo):
@@ -433,49 +438,52 @@ def test_gc_keeps_unmerged_and_dirty_worktrees(tmp_path):
     cwd = os.getcwd(); os.chdir(repo)
     try:
         m.cmd_gc(argparse.Namespace(base="develop", all=False))
-        assert wt.is_dir(), "develop に未統合の worktree を消した"
+        assert wt.is_dir(), "it removed a worktree not yet integrated into develop"
     finally:
         os.chdir(cwd)
 
 
 def test_decide_writes_the_receipt_itself():
-    """受領証は decide が自分で書く（0.21.0）。
+    """decide writes the receipt itself (0.21.0).
 
-    以前は雛形を印字して人に打たせていたため、実地で3回片側落ちした
-    （#8 の refutation / #11 の1回目の reject / progress_recorded）。
-    actor は --by で渡っているので、分ける理由が無い。
+    It used to print a template for a person to type, and one side went missing three times in the
+    field (#8's refutation, #11's first reject, a progress_recorded). The actor arrives through
+    --by, so there is no reason to separate them.
     """
     src = _gh_src()
     seg = src[src.index("def cmd_decide"):]
     assert "ledger.py" in seg and "--natural-key" in seg
     assert '"issue": a.issue' in seg
-    assert "NEXT: 台帳の受領証をこのまま打つこと" not in seg, "人に打たせる雛形が残っている"
+    assert "NEXT: type the ledger receipt as it stands" not in seg, \
+        "a template for a person to type is still there"
 
 
-# ── 実地: 検出器が「学習が使われている」と嘘をついた ─────────────────────
+# ── field report: the detector lied that "learning is being used" ───────────
 
 
 def test_verify_template_has_no_undefined_shell_var():
-    """雛形は貼ってそのまま動くこと。$P は未定義で、打てない雛形は打たれない。"""
+    """A template must run as pasted. $P is undefined, and a template that cannot be typed is not
+    typed."""
     src = _cycle_src()
-    assert "$P/tools" not in src, "未定義の $P が雛形に残っている"
+    assert "$P/tools" not in src, "an undefined $P is still in the template"
 
 
-# ── 0.19.0: 実務で「無くて困った」もの ──────────────────────────────────
+# ── 0.19.0: things whose absence hurt in practice ───────────────────────────
 
 
 def test_begin_warns_but_does_not_block_on_unready_deps():
-    """事前チェックは見せるだけ。判断は人がする。"""
+    """A preflight check only shows. The judgment is a person's."""
     src = _cycle_src()
     seg = src[src.index("def _readiness"):src.index("def cmd_begin")]
     assert "needs-human" in seg and "rework" in seg
     body = src[src.index("def cmd_begin"):src.index("def _steps_complete")] \
         if "def _steps_complete" in src[src.index("def cmd_begin"):] else src[src.index("def cmd_begin"):]
-    assert "止めない" in src, "警告が停止になっている（begin は判断しない）"
+    assert "It does not stop" in src, \
+        "the warning has become a stop (begin does not judge)"
 
 
 def test_seam_guard_accepts_a_referenced_file(tmp_path):
-    """seam contract をファイルで渡せる。ガード自身が読んで検証する。"""
+    """A seam contract can be passed as a file. The guard itself reads and verifies it."""
     import importlib.util
     hook = TOOLS.parent / "integrations" / "common" / "org_hook.py"
     spec = importlib.util.spec_from_file_location("org_hook_s", hook)
@@ -486,26 +494,33 @@ def test_seam_guard_accepts_a_referenced_file(tmp_path):
         good.write_text("# HAND-OFF\n## Your slice\nX\nInputs you receive: A\n"
                         "Outputs you MUST produce: B\n", encoding="utf-8")
         assert h.spawn_needs_seam_or_independence(
-            "Task", {"prompt": f"契約は {good} を読むこと"}) is None, "seam 入りファイルが弾かれた"
+            "Task", {"prompt": f"for the contract, read {good}"}) is None, \
+        "a file carrying a seam was rejected"
 
         bad = tmp_path / "memo.md"
-        bad.write_text("ただのメモ", encoding="utf-8")
+        bad.write_text("just a note", encoding="utf-8")
         assert h.spawn_needs_seam_or_independence(
-            "Task", {"prompt": f"手順は {bad}"}) is not None, "seam の無いファイルが通った"
+            "Task", {"prompt": f"the procedure is {bad}"}) is not None, \
+        "a file with no seam got through"
         assert h.spawn_needs_seam_or_independence(
-            "Task", {"prompt": "手順は /etc/passwd"}) is not None, "org 外のファイルを読んだ"
+            "Task", {"prompt": "the procedure is /etc/passwd"}) is not None, \
+        "it read a file outside the org"
         assert h.spawn_needs_seam_or_independence(
-            "Task", {"prompt": "いい感じにやって"}) is not None, "契約なしが通った"
+            "Task", {"prompt": "just do something sensible"}) is not None, \
+        "one with no contract got through"
     finally:
         os.chdir(cwd)
 
 
-# ── 0.20.0: rework 履歴 / 統合の事前確認 / 本番資産 / 公開面 ─────────────
+# ── 0.20.0: rework history / integration preflight / production assets /
+# ──         the public surface ──────────────────────────────────────────────
 
 
-# ── 0.20.0: rework 履歴 / 統合の事前確認 / 本番資産 / 公開面 ─────────────
+# ── 0.20.0: rework history / integration preflight / production assets /
+# ──         the public surface ──────────────────────────────────────────────
 def test_verify_passes_rework_history_to_gate():
-    """gate に過去の判定を渡す。渡さないと毎回「初回判定」として扱う。"""
+    """Hand the gate the past judgments. Without them it treats every round as a first
+    judgment."""
     src = _cycle_src()
     seg = src[src.index("def cmd_verify"):]
     assert "Judgment history" in seg and "judgment number" in seg
@@ -514,10 +529,10 @@ def test_verify_passes_rework_history_to_gate():
 
 
 def test_integrate_plan_executes_nothing_and_warns_on_overlap(tmp_path):
-    """--plan は何も実行せず、並行 worktree との重複を予告する。"""
+    """--plan executes nothing and forewarns of overlap with a parallel worktree."""
     src = _cycle_src("ship")
     seg = src[src.index("def _integrate_preview"):src.index("def cmd_integrate")]
-    assert "同じファイルを変更しています" in seg
+    assert "is changing the same files" in seg
     body = src[src.index("def cmd_integrate"):]
     assert 'if getattr(a, "plan", False):' in body
     assert body.index('if getattr(a, "plan", False):') < body.index("git\", \"merge"), \
@@ -574,7 +589,7 @@ def test_integrate_branch_resolution_stops_on_tracking_only_candidate(tmp_path, 
     monkeypatch.chdir(repo)
     monkeypatch.setattr(ship, "_branch_for", lambda _issue: "feat/issue-51-renamed-title")
     branch, subject_sha, error = ship._resolve_integration_branch(51)
-    assert branch is None and subject_sha is None and "tracking ref のみ" in error
+    assert branch is None and subject_sha is None and "exists only as a tracking ref" in error
 
 
 def test_integrate_branch_resolution_stops_on_local_tracking_divergence(tmp_path, monkeypatch):
@@ -592,7 +607,7 @@ def test_integrate_branch_resolution_stops_on_local_tracking_divergence(tmp_path
     monkeypatch.chdir(repo)
     monkeypatch.setattr(ship, "_branch_for", lambda _issue: actual)
     branch, subject_sha, error = ship._resolve_integration_branch(51)
-    assert branch is None and subject_sha is None and "分岐している" in error
+    assert branch is None and subject_sha is None and "have diverged" in error
     assert "local=" in error and "tracking=" in error
 
 
@@ -617,7 +632,7 @@ def test_integrate_branch_resolution_stops_when_missing(tmp_path, monkeypatch):
     monkeypatch.chdir(repo)
     monkeypatch.setattr(ship, "_branch_for", lambda _issue: "feat/issue-51-missing")
     branch, subject_sha, error = ship._resolve_integration_branch(51)
-    assert branch is None and subject_sha is None and "候補も無い" in error
+    assert branch is None and subject_sha is None and "candidate among the local or tracking refs either" in error
 
 
 def test_integrate_branch_resolution_stops_on_ambiguity(tmp_path, monkeypatch):
@@ -627,7 +642,7 @@ def test_integrate_branch_resolution_stops_on_ambiguity(tmp_path, monkeypatch):
     monkeypatch.chdir(repo)
     monkeypatch.setattr(ship, "_branch_for", lambda _issue: "feat/issue-51-missing")
     branch, subject_sha, error = ship._resolve_integration_branch(51)
-    assert branch is None and subject_sha is None and "候補が複数" in error
+    assert branch is None and subject_sha is None and "there are several candidates" in error
     assert all(candidate in error for candidate in candidates)
 
 
@@ -1440,9 +1455,9 @@ def test_integrate_plan_flags_a_conditional_ci_job(tmp_path):
                         "--issue", "42", "--plan", "--base", "develop"],   # #106: 明示（fixture に宣言が無い）
                        capture_output=True, text=True, cwd=str(repo), timeout=60)
     out = p.stdout + p.stderr
-    assert "CI を触っている" in out, out
-    assert "db-test（if: 条件付き）" in out, out
-    assert "条件を満たさない間その検査は一度も走らない" in out
+    assert "it touches CI" in out, out
+    assert "db-test (if: conditional)" in out, out
+    assert "that check never runs once while the condition is unmet" in out
 
 
 def test_integrate_plan_lists_only_real_jobs(tmp_path):
