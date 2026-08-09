@@ -10,7 +10,7 @@ repeated_failure:
   recurrence: 2
 expected:
   learning_returncode: 10
-  escalation_marker: "NEXT: この死因を doctrine に上げること"
+  escalation_marker: "NEXT: raise this cause into doctrine"
   outcome: observe_only
   gaps: []
 blast_radius:

@@ -37,7 +37,7 @@ def test_distinct_roots_stay_clean_with_basis(tmp_path):
          {"candidate_id": "B", "cause": "y", "root": "declaration_drift"}, ts="2026-07-16T02:00:00Z")
     code, out = run("learning.py", "repeats", str(tmp_path))
     assert code == 0 and "clean" in out, out
-    assert "判定基準" in out and "2 件" in out, out
+    assert "decided on:" in out and "2 by" in out, out
 
 
 # ── MUST 3(b) / MUST 2: root の無いレガシー記録は文字列一致 + 基準の明示 ─────────
@@ -59,8 +59,8 @@ def test_legacy_unclassified_clean_states_basis_and_limitation(tmp_path):
          {"candidate_id": "B", "cause": "テスト硬化"}, ts="2026-07-16T02:00:00Z")
     code, out = run("learning.py", "repeats", str(tmp_path))
     assert code == 0 and "clean" in out, out
-    assert "判定基準" in out and "未分類" in out and "2 件" in out, out
-    assert "文字列" in out, f"文字列一致の限界の明示が消えた: {out}"
+    assert "decided on:" in out and "unclassified" in out and "2 by" in out, out
+    assert "**string**" in out, f"the statement of the string-match limit is gone: {out}"
 
 
 def test_mixed_clean_reports_unclassified_count(tmp_path):
@@ -73,7 +73,7 @@ def test_mixed_clean_reports_unclassified_count(tmp_path):
          {"candidate_id": "B", "cause": "y"}, ts="2026-07-16T02:00:00Z")
     code, out = run("learning.py", "repeats", str(tmp_path))
     assert code == 0 and "clean" in out, out
-    assert "根分類（root）1 件" in out and "1 件" in out, out
+    assert "1 by root classification" in out and "1 by" in out, out
 
 
 # ── MUST 3(c): 不正な root は記録時に拒否される（schema enum、ledger.py append）──
@@ -255,7 +255,7 @@ def test_limitation_warning_survives_migration_mix(tmp_path):
          ts="2026-07-16T02:00:00Z")
     code, out = run("learning.py", "repeats", str(tmp_path))
     assert code == 0 and "clean" in out, out
-    assert "注意" in out and "文字列" in out, \
+    assert "note:" in out and "**string**" in out, \
         f"移行期（未分類1件）で限界警告が消えた: {out}"
 
 
