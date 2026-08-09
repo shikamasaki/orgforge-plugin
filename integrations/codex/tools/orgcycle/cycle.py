@@ -128,7 +128,7 @@ def _steps_complete(a, cid):
 
 
 def _readiness(issue):
-    """着手前に「本当に始めてよいか」を見る。**止めない — 見せる。**
+    """Look, before starting, at whether it should really begin. **It does not stop — it shows.**
 
     begin は無条件に開始していた。依存が rework 中でも、前提の人間タスクが残っていても
     始まる。github_sync ready は Issue 番号の依存しか見ておらず、rework 中の依存も
