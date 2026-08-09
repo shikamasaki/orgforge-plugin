@@ -1,6 +1,6 @@
-"""バックログの操作 — 作成・claim・ステージ遷移・分割の検査。
+"""Backlog operations — creation, claim, stage transitions, and the split check.
 
-Issue を「働ける状態」に保つ側。判断は含まない。"""
+The side that keeps an Issue in a workable state. It holds no judgment."""
 
 import hashlib
 import json
@@ -25,14 +25,16 @@ from ._core import (
 
 STAGES = ("ready", "in-progress", "blocked", "needs-human", "done")
 
-# PARKED は「仕事として存在するが、いま着手させない」の機械可読な語彙。Tatekae で
-# `[PARKED]` というタイトル散文しか手段が無く、`ready` が止めた仕事を maker に渡した
-# （OBS-051 / Issue #103）。ラベルは park/unpark が ensure する（label-ensure list の一部）。
+# PARKED is the machine-readable vocabulary for "the work exists, but do not start it now". On
+# Tatekae the only means available was the title prose `[PARKED]`, and `ready` handed work that had
+# been stopped to a maker (OBS-051 / Issue #103). park/unpark ensure the label (part of the
+# label-ensure list).
 PARKED_LABEL = "orgforge:parked"
 PARKED_COLOR = "ededed"
 
-# ready 名簿から外す「着手不能」状態。`orgforge:ready` と同居していても（rework 中や
-# ラベル片寄せ漏れ）、こちらが立っている Issue は startable ではない。
+# The "cannot be started" states, struck from the ready roster. Even where one sits alongside
+# `orgforge:ready` (mid-rework, or a label sweep that was missed), an Issue carrying one of these is
+# not startable.
 _NON_STARTABLE_LABELS = (PARKED_LABEL, "orgforge:in-progress", "orgforge:blocked",
                          "orgforge:needs-human")
 _PLACEHOLDER_BODIES = frozenset({"(no body)", "no body", "tbd", "todo", "placeholder",
@@ -79,8 +81,9 @@ def _composed_body(a):
     depends = getattr(a, "depends", None)
     if depends:
         dep_refs += [d.strip().lstrip("#") for d in depends.split(",") if d.strip()]
-    # carve-out 経路: rework 中に範囲外発見を切り出した Issue は、例外なく元 Issue に依存する
-    # （部品は元の worktree にしか無い）。散文に任せると ready が見えない（Issue #103）。
+    # The carve-out path: an Issue split off mid-rework for an out-of-scope finding depends on the
+    # original without exception (the parts exist only in the original worktree). Left to prose,
+    # ready cannot see it (Issue #103).
     carved = getattr(a, "carved_from", None)
     if carved:
         dep_refs.append(str(carved).strip().lstrip("#"))
@@ -93,19 +96,23 @@ def _composed_body(a):
     return body
 
 
-# `Depends on:` 行の見出し。正書法は `Depends on: #n, #m`（_composed_body が書く形）だが、
-# 人間は markdown 装飾（**強調**・リスト・引用）、`Depends-on`/`depends_on`、コロン前の空白を
-# 付けて書く — 実地で全部観測された（#103 rework 2）。読みは寛容に、書きは正書法のまま。
+# The heading of a `Depends on:` line. The orthography is `Depends on: #n, #m` (the form
+# _composed_body writes), but humans write it with markdown decoration (**emphasis**, lists,
+# quotes), as `Depends-on`/`depends_on`, and with a space before the colon — all of it observed in
+# the field (#103 rework 2). Read generously, write in the orthography.
 _DEP_HEADER = re.compile(r"^[>*_\s•-]*depends[\s_-]*on\s*:\s*(.*)$", re.I)
 
 
 def _depends_refs(body):
-    """body の全 Depends-on 行から機械可読な Issue 参照（`#N`、および裸の番号 token）を集める。
+    """Collect the machine-readable Issue references (`#N`, and bare number tokens) from every
+    Depends-on line in the body.
 
-    参照は `#(\\d+)` で回収する — 注釈付き token（`#63 (main 未統合)`）や and 連結を黙って
-    捨てない。**捨てた結果が OBS-051 の再現だった**（skeptic の refutation, #103 rework 2）:
-    docs が指示する手書きの行に人間が注釈を足しただけで、ready が依存ゼロ扱いにした。
-    参照が1つも無い行（`Depends on: none`）は「依存なし」の明示宣言 — 静かに通す。"""
+    References are recovered with `#(\\d+)` — an annotated token (`#63 (main 未統合)`) or an
+    and-joined pair is not silently discarded. **Discarding them was what reproduced OBS-051** (the
+    skeptic's refutation, #103 rework 2): a human merely added an annotation to the hand-written
+    line the docs prescribe, and ready treated it as having no dependencies.
+    A line carrying no reference at all (`Depends on: none`) is an explicit declaration of "no
+    dependencies" — let it through quietly."""
     refs = []
     for line in str(body or "").splitlines():
         m = _DEP_HEADER.match(line)
@@ -116,29 +123,34 @@ def _depends_refs(body):
         for tok in rest.split(","):
             tok = tok.strip().strip("*_` ")
             if re.fullmatch(r"\d+", tok):
-                line_refs.append(tok)   # 裸の番号 token（`Depends on: 63`）も従来どおり受理
+                line_refs.append(tok)   # a bare number token (`Depends on: 63`) is accepted as
+                                        # before
         refs += line_refs
     return list(dict.fromkeys(refs))
 
 
-# GitHub の closing keyword（Fixes/Closes/Resolves #N）は「閉じる先」の参照であって依存ではない。
-# これを prose-WARN の引き金にすると偽陽性が operator に警告を読み飛ばす訓練をさせる。
+# A GitHub closing keyword (Fixes/Closes/Resolves #N) references what will be closed, not a
+# dependency. Making it trigger the prose WARN trains the operator, through false positives, to skim
+# past warnings.
 _CLOSING_REF = re.compile(r"\b(?:clos(?:e[sd]?)|fix(?:e[sd])?|resolv(?:e[sd]?))\s*:?\s*#(\d+)", re.I)
 
 
 def _prose_dependency_warning(a):
-    """Body が他 Issue を `#N` で参照しているのに `Depends on:` 行が無いときの警告文（無ければ None）。
+    """The warning for a body that references another Issue as `#N` while carrying no `Depends on:`
+    line (None where there is none).
 
-    Tatekae の実測（OBS-051）: carve-out された4 Issue すべてが依存を本文の散文にしか書いておらず、
-    `ready` は散文を読まないので着手不能な仕事が maker に渡った。散文を自動で依存に解釈は**しない**
-    — 推測は警告より悪い（`#63 を置き換える` は依存ではない）。人間に見える形で大声で言うだけ。"""
+    Measured on Tatekae (OBS-051): all four carved-out Issues wrote their dependencies only in the
+    body's prose, and since `ready` does not read prose, work that could not be started was handed to
+    a maker. Prose is **not** automatically read as a dependency — a guess is worse than a warning
+    (`replaces #63` is not a dependency). This only says it loudly, where a human can see it."""
     raw = _normalized_body(getattr(a, "body", None))
     closing = set(_CLOSING_REF.findall(raw))
     refs = [r for r in dict.fromkeys(re.findall(r"#(\d+)", raw)) if r not in closing]
     if not refs:
         return None
-    # 宣言があれば黙る — ただし宣言とは**参照を運ぶ**宣言のこと。`Depends on: none` は
-    # 「依存なし」の明示であって、散文が #63 を語っているならその矛盾こそ表に出す。
+    # Stay quiet where there is a declaration — but a declaration means one that **carries a
+    # reference**. `Depends on: none` is an explicit "no dependencies", so where the prose talks
+    # about #63 it is that contradiction which should surface.
     declared = bool(getattr(a, "depends", None)) or bool(getattr(a, "carved_from", None)) or \
         bool(_depends_refs(raw))
     if declared:
@@ -152,11 +164,11 @@ def _prose_dependency_warning(a):
 
 
 def _issue_state(repo, issue):
-    """GitHub Issue の open/closed 状態。
+    """A GitHub Issue's open/closed state.
 
-    stage label は backlog の投影だが、GitHub の Issue state も同じ投影の一部である。
-    片方だけ動かすと `ready` なのに CLOSED、または `done` なのに OPEN という二つの真実が
-    生まれるので、stage 遷移の入口で両方を見る。
+    The stage label is a projection of the backlog, and GitHub's Issue state is part of that same
+    projection. Moving only one produces two truths — CLOSED while `ready`, or OPEN while `done` —
+    so both are read at the entrance to a stage transition.
     """
     code, out = gh(["issue", "view", str(issue), "--repo", repo, "--json", "state"])
     if code != 0:
@@ -281,7 +293,7 @@ def cmd_create(a):
                   f"identifiers — not the objective's prose. The full sentence belongs in --title "
                   f"and --body.\n"
                   f"    --objective self-dogfood-poc      # an id: label-safe, stable, greppable\n"
-                  f"    --objective \"自製品資料を…する\"   # prose: exceeds "
+                  f"    --objective \"do … with our own product material\"   # prose: exceeds "
                   f"{GITHUB_LABEL_MAX} characters and is refused\n"
                   f"  Nothing was created; re-run with a shorter identifier.", file=sys.stderr)
         return 2
@@ -385,9 +397,10 @@ def cmd_stage(a):
         print(f"gh error reading issue state: {err}", file=sys.stderr)
         return 2
 
-    # ready/in-progress/blocked/needs-human はすべて「まだ仕事として存在する」状態。
-    # CLOSED のまま label だけ戻すと `ready --state open` から永久に見えない。rework の
-    # 正式経路も stage ready を通るので、ここで state と label を同じ投影として揃える。
+    # ready / in-progress / blocked / needs-human are all states where the work still exists.
+    # Returning only the label while it stays CLOSED makes it permanently invisible to
+    # `ready --state open`. The formal rework path also goes through stage ready, so state and label
+    # are brought into line here as one projection.
     reopened = False
     if a.stage != "done" and state == "CLOSED":
         rc, ro = gh(["issue", "reopen", str(a.issue), "--repo", a.repo])
@@ -440,14 +453,16 @@ def cmd_ready(a):
         return 2
     kind = getattr(a, "kind", None) or "task"   # default: only TASKS are workable ready items
     ready = []
-    # 依存の状態が**確認できなかった**せいで withhold した Issue。空の ready と「gh が半分
-    # 死んでいて確認できない」を同じ {"ready": []} にすると、org は原因の観測手段なく黙って
-    # 止まる — この Issue が潰しに来た machine-invisible-state と同じ類（#103 rework）。
+    # Issues withheld because the state of a dependency **could not be confirmed**. Rendering an
+    # empty ready and "gh is half dead and cannot be checked" as the same {"ready": []} stops the org
+    # silently, with no means of observing the cause — the same class of machine-invisible-state this
+    # Issue set out to kill (#103 rework).
     withheld_unverifiable = []
     withheld_prose = []
     withheld_domain = []
-    # 逃げ道は残すが、**既定は閉じる**。既存 org には散文 SPEC の在庫があり、いきなり全部が
-    # ready から消えると仕事が止まる。移行中はこれで開けられるようにしておく。
+    # An escape hatch is left, but **the default is closed**. An existing org holds a stock of prose
+    # SPECs, and having them all vanish from ready at once stops the work. This keeps it openable
+    # during the migration.
     _READY_SKIP_EARS = os.environ.get("ORG_READY_SKIP_EARS") == "1"
     for it in issues:
         names = [l["name"] for l in it.get("labels", [])]
@@ -485,13 +500,15 @@ def cmd_ready(a):
                 continue
             blocked = True
             if state == "OPEN":
-                # 健全な withhold — 警報ではないが、**観測はできる形で**残す。空の ready と
-                # 「依存待ちで空」を stderr で区別できないと、org は原因の観測手段なく止まる。
+                # A healthy withhold — not an alarm, but left **in an observable form**. Where an
+                # empty ready cannot be told from "empty because it waits on a dependency" on
+                # stderr, the org stops with no means of observing the cause.
                 print(f"withheld: issue #{it['number']} waits on open dependency #{num}",
                       file=sys.stderr)
             else:
-                # OPEN でも CLOSED でもない = 「確認できなかった」。startable の証明が無いので
-                # 渡さないが、gh の劣化と「仕事なし」を区別できるよう警報として外に出す。
+                # Neither OPEN nor CLOSED = "could not be confirmed". There is no proof it is
+                # startable, so it is not handed over, but it goes out as an alarm so gh degrading
+                # can be told from "there is no work".
                 withheld_unverifiable.append(it["number"])
                 print(f"WARN: issue #{it['number']} withheld from ready — dependency #{num} could "
                       f"not be verified ({o.strip()[:80] or 'unparseable state'}). Unknown is not "
@@ -500,37 +517,41 @@ def cmd_ready(a):
             break
         if blocked:
             continue
-        # **散文 acceptance の Issue を maker に渡さない。**
+        # **Do not hand an Issue with prose acceptance to a maker.**
         #
-        # split-check は起票時に同じ検査をするが、`/org-decompose` の案内は「このコマンドを
-        # 打て」であって強制ではなく、打たなければ素通りした。実地の #170 は acceptance
-        # 10件中9件が散文のまま maker に渡り、gate が毎回「どう確かめるか」の設計から始めて
-        # 基準が周回ごとにブレ、**12周**した（CI 12回・判定12回）。
+        # split-check runs the same check at filing time, but `/org-decompose`'s guidance is "type
+        # this command" rather than compulsion, and not typing it let the Issue through. In the field
+        # #170 reached a maker with nine of its ten acceptance items still prose; the gate began each
+        # round by designing how to confirm them, the standard wobbled from round to round, and it
+        # took **twelve rounds** (twelve CI runs, twelve judgments).
         #
-        # 「検査を呼ぶかどうかを、検査される側が決める」構造をここで閉じる。的の無い SPEC は
-        # ready に載らない — gate を速くするのではなく、**gate に的を与える**のが収束の条件。
-        # 直し方は SPEC を EARS に書き直すこと。緩めることではない。
+        # The structure where "whoever is checked decides whether the check runs" is closed here. A
+        # SPEC with no target does not make it onto ready — convergence comes from **giving the gate
+        # a target**, not from making the gate faster.
+        # The fix is to rewrite the SPEC in EARS. It is not to loosen this.
         if not _READY_SKIP_EARS:
             prose = _non_ears_acceptance(it.get("body") or "")
             if prose:
                 withheld_prose.append(it["number"])
-                print(f"withheld: issue #{it['number']} — acceptance {len(prose)} 件が EARS でない"
-                      f"（例: “{prose[0][:60]}”）。的の無い SPEC を maker に渡すと gate が毎回"
-                      f"基準を作り直し、周回が収束しない。EARS に書き直してから ready にすること"
-                      f"（緊急時は ORG_READY_SKIP_EARS=1 で一時的に無効化できる）。",
+                print(f"withheld: issue #{it['number']} — {len(prose)} acceptance item(s) are not "
+                      f"EARS (e.g. \u201c{prose[0][:60]}\u201d). Hand a SPEC with no target to a "
+                      f"maker and the gate rebuilds the standard every round, so the rounds never "
+                      f"converge. Rewrite them in EARS before making it ready (in an emergency, "
+                      f"ORG_READY_SKIP_EARS=1 disables this temporarily).",
                       file=sys.stderr)
                 continue
-            # ドメインに触れる仕事は、人と AI が合意する面（ドメインモデル / ユースケース /
-            # 認可規則）を持ってから渡す。宣言が無い org では paths が空なので何も起きない。
+            # Work that touches the domain is handed over only once it carries the surface a human
+            # and the AI agree on (domain model / use case / authorization rules). In an org with no
+            # declaration, paths is empty and nothing happens.
             _p, _r = ([], []) if os.environ.get("ORG_READY_SKIP_DOMAIN") == "1" \
                 else _domain_surface()
             if _touches_domain_surface(it.get("body") or "", _p):
                 _miss = _missing_domain_sections(it.get("body") or "", _r)
                 if _miss:
                     withheld_domain.append(it["number"])
-                    print(f"withheld: issue #{it['number']} — domain surface に触れるのに "
-                          f"{'/'.join(_miss)} が無い。人が見る面を先に書くこと"
-                          f"（ORG_READY_SKIP_DOMAIN=1 で一時的に無効化できる）。",
+                    print(f"withheld: issue #{it['number']} — it touches the domain surface but "
+                          f"has no {'/'.join(_miss)}. Write the surface a human reads first "
+                          f"(ORG_READY_SKIP_DOMAIN=1 disables this temporarily).",
                           file=sys.stderr)
                     continue
         ready.append(it["number"])
@@ -544,18 +565,20 @@ def cmd_ready(a):
 
 
 def cmd_park(a):
-    """Issue を PARKED にする — 機械可読なラベルで（タイトル散文 `[PARKED]` の置き換え、Issue #103）。
+    """Park an Issue — with a machine-readable label (replacing the title prose `[PARKED]`, Issue
+    #103).
 
-    parked は「仕事として存在するが、いま着手させない」。`ready` はこのラベルを見て除外する。
-    --why は Issue にコメントとして残す — 止めた理由が散文のまま消えると、誰も解除できなくなる。"""
+    parked means "the work exists, but do not start it now". `ready` reads this label and excludes
+    it. --why is left on the Issue as a comment — where the reason for stopping vanishes as prose,
+    nobody can lift it again."""
     labels, err = issue_labels(a.repo, a.issue)
     if labels is None:
         print(f"gh error: {err}", file=sys.stderr)
         return 2
     why = _normalized_body(getattr(a, "why", None))
     if PARKED_LABEL in labels:
-        # ラベルは冪等 no-op でよいが、--why を黙って捨ててはいけない — 理由こそ、後で
-        # unpark する側が要る部分（#103 rework の gate residual）。
+        # The label may be an idempotent no-op, but --why must not be silently discarded — the
+        # reason is exactly what whoever unparks it later needs (the gate residual of #103 rework).
         if why:
             code, out = gh(["issue", "comment", str(a.issue), "--repo", a.repo,
                             "--body", f"⏸️ **Still parked** — reason updated.\n\nwhy: {why}"])
@@ -587,7 +610,8 @@ def cmd_park(a):
 
 
 def cmd_unpark(a):
-    """PARKED を解除して Issue を通常の backlog 判定に戻す（`ready` から再び見える）。"""
+    """Lift PARKED and return the Issue to the ordinary backlog judgment (visible to `ready`
+    again)."""
     labels, err = issue_labels(a.repo, a.issue)
     if labels is None:
         print(f"gh error: {err}", file=sys.stderr)
@@ -612,24 +636,27 @@ def cmd_unpark(a):
 
 
 def cmd_needs_human(a):
-    """CEO（人間）にしか実行できない前提条件を Issue として立てる（docs/11 §0c）。
+    """File a precondition only the CEO (a human) can carry out as an Issue (docs/11 §0c).
 
-    **なぜ専用のコマンドが要るのか。** org は自分が作れる作業だけを Issue にし、人間に頼むものは
-    コマンドの散文に落としていた。実地の founding で3件（Supabase プロジェクト作成 / Google OAuth
-    クライアント登録 / GitHub のブランチ保護設定）がセッションの文章の中にしか存在せず、Issue にも
-    台帳にも残らなかった。結果:
+    **Why a dedicated command is needed.** The org filed only the work it could do itself as Issues
+    and let what it needed from a human fall into a command's prose. In a founding in the field,
+    three of them (creating the Supabase project, registering the Google OAuth client, setting
+    GitHub's branch protection) existed only in the session's text and were left neither on an Issue
+    nor in the ledger. The result:
 
-      - セッションが切れたら消える（/org-resume でも復元されない）
-      - `/org` が GREEN と出すのに、実際は人間待ちで着手できない Issue がある
-      - `ready` がブロック済みのタスクを maker に渡す（人間待ちを表現する手段がなかった）
-      - coverage-check は「Issue になったか」しか見ないので 66/66 と表示される
+      - they vanish when the session ends (/org-resume does not restore them either)
+      - `/org` reports GREEN while Issues that cannot be started sit waiting on a human
+      - `ready` hands a blocked task to a maker (there was no means of expressing "waiting on a
+        human")
+      - coverage-check only asks "did it become an Issue", so it displays 66/66
 
-    **人間への依頼こそ、忘れられると最も長く止まる。** `orgforge:needs-human` ラベルは
-    `/org-init` が作っていたのに、それを立てる手順がどのコマンドにも無く、使用実績は 0 件だった。
-    このコマンドがその穴を埋める。
+    **A request to a human is exactly what stops things longest when it is forgotten.**
+    `/org-init` created the `orgforge:needs-human` label, yet no command carried a step that raised
+    it, and it had never once been used. This command fills that hole.
 
-    立てた Issue は通常の task と同じ形なので、下流タスクの `--depends` で縛れる — 人間の作業が
-    終わって close されるまで、それに依存する task は `ready` に出てこない。"""
+    The Issue it files has the same shape as an ordinary task, so a downstream task can bind to it
+    with `--depends` — until the human's work is done and it is closed, whatever depends on it does
+    not appear in `ready`."""
     labels = ["orgforge:needs-human", "orgforge:kind:task"]
     ensure = [("orgforge:needs-human", "d93f0b"), ("orgforge:kind:task", "bfd4f2")]
     if a.objective:
@@ -641,11 +668,12 @@ def cmd_needs_human(a):
         return 0
     _ensure_labels(a.repo, ensure)
     body = a.body or ""
-    body += ("\n\n---\n**これは CEO（人間）にしか実行できない作業です。** org は着手できません。\n"
-             "完了したらこの Issue を close してください — 下流のタスクが自動的に ready になります。")
+    body += ("\n\n---\n**This is work only the CEO (a human) can carry out.** The org cannot start "
+             "it.\nClose this Issue once it is done — the downstream tasks then become ready "
+             "automatically.")
     if a.blocks:
         blocked = ", ".join(f"#{b.strip().lstrip('#')}" for b in a.blocks.split(",") if b.strip())
-        body += f"\n\n**この作業が終わるまで着手できないもの:** {blocked}"
+        body += f"\n\n**What cannot be started until this is done:** {blocked}"
     args = ["issue", "create", "--repo", a.repo, "--title", a.title, "--body", body]
     for l in labels:
         args += ["--label", l]
@@ -659,32 +687,36 @@ def cmd_needs_human(a):
         ok, detail = _link_sub_issue(a.repo, int(str(a.parent).lstrip("#")), n)
         print(detail if ok else f"WARN: {detail}", file=(sys.stdout if ok else sys.stderr))
     if n:
-        print(f"\nNEXT: これに依存する task の body に `Depends on: #{n}` を書くこと。"
-              f"そうすれば人間の作業が終わるまで `ready` に出てこない。")
+        print(f"\nNEXT: write `Depends on: #{n}` into the body of every task that depends on this. "
+              f"It then stays out of `ready` until the human's work is done.")
     return 0
 
 
 def _non_ears_acceptance(body):
-    """acceptance / MUST の行のうち、EARS で書かれていないものを返す。
+    """Return the acceptance / MUST lines that are not written in EARS.
 
-    **判定基準は req_lint に一本化する。** EARS の定義を2箇所に持つと必ずずれ、「起票時は
-    通ったのに gate では散文扱い」のような食い違いが出る。req_lint を import できない環境
-    （organ 単体実行など）では検査を **見送る** — 誤って全部を違反と言うより、黙るほうが安全。
+    **The standard lives in req_lint alone.** Holding the definition of EARS in two places is certain
+    to drift and produces mismatches like "it passed at filing time but the gate read it as prose".
+    Where req_lint cannot be imported (running an organ standalone, say) the check is **skipped** —
+    staying quiet is safer than wrongly calling everything a violation.
 
-    見るのは acceptance セクションの箇条書きだけ。本文全体を見ると、別の節の "IF ANY" や
-    コードブロックの `if` / SQL の `WHERE` に当たって素通りする（旧実装の実害）。
+    Only the bullets in the acceptance section are read. Reading the whole body makes it walk past on
+    an "IF ANY" in another section, an `if` in a code block, or a SQL `WHERE` (the real harm the old
+    implementation did).
     """
     if not body:
         return []
     try:
-        # 基点は _core.HERE に集約する（tools/ を指す）。`__file__` をここで解決し直すと、
-        # パッケージの階層が変わったときに直し漏れる — 実際に 0.22.0 の分割でそれが起きた。
+        # The base point is kept in _core.HERE alone (it points at tools/). Re-resolving `__file__`
+        # here gets missed when the package hierarchy changes — which is what happened in the 0.22.0
+        # split.
         sys.path.insert(0, HERE)
         from req_lint import EARS_PATTERNS, _strip_noise
     except Exception:
-        return []                       # 基準を読めないなら検査しない（黙る）
+        return []                       # where the standard cannot be read, do not check (stay
+                                        # quiet)
 
-    text = _strip_noise(body)           # 引用・コードブロック・付録を落とす
+    text = _strip_noise(body)           # drop quotes, code blocks, and appendices
     heading = re.compile(
         r"^#{1,6}\s*.*(?:acceptance|MUST|受け入れ|required\s+outcome|required\s+change"
         r"|proposed\s+acceptance)", re.I)
@@ -701,10 +733,11 @@ def _non_ears_acceptance(body):
         item = re.sub(r"^(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s*)?", "", s)
         if not item:
             continue
-        # seam contract のメタ行は acceptance ではない。SPEC.md では `provides` / `owns` /
-        # `depends_on` / `boundary` / `tools` / `example` / `DoD` が MUST 節と同じ箇条書きで
-        # 並ぶので、これを要求文と数えると **正しく書かれた SPEC ほど違反が多くなる**
-        # （実際に既存テスト3件がそれで落ちた）。ラベル行は検査対象から外す。
+        # A seam contract's meta line is not acceptance. In SPEC.md, `provides` / `owns` /
+        # `depends_on` / `boundary` / `tools` / `example` / `DoD` sit in the same bullet list as the
+        # MUST section, so counting them as requirement statements means **the better a SPEC is
+        # written, the more violations it has** (three existing tests actually failed that way).
+        # Label lines are excluded from the check.
         if re.match(r"^\*{0,2}(?:provides|owns|depends_on|boundary|tools?/?sources?|example|"
                     r"DoD[^:]*|完了の判定|検証|verification)\b\*{0,2}\s*[:：(]", item, re.I):
             continue
@@ -714,12 +747,13 @@ def _non_ears_acceptance(body):
 
 
 def _domain_surface():
-    """`enforcement.domain_surface` を読む → (paths, require)。宣言が無ければ ([], [])。
+    """Read `enforcement.domain_surface` → (paths, require). ([], []) where there is no declaration.
 
-    **プラグインはパスを推測しない。** ドメイン層を `src/domain/` に置くか `app/models/` に
-    置くかはプロジェクトの選択で、当てにいくと別レイアウトの org で誤検知する（稼働中の org
-    だけでも src/domain/ · src/usecase/ · src/db/ · supabase/migrations/ が併存していた）。
-    宣言が無い org では検査が動かない — 黙って全 Issue を止めるより、そのほうが安全。
+    **The plugin does not guess paths.** Whether the domain layer sits in `src/domain/` or
+    `app/models/` is the project's choice, and guessing produces false positives in an org with a
+    different layout (among running orgs alone, src/domain/, src/usecase/, src/db/, and
+    supabase/migrations/ coexisted). In an org with no declaration the check does not run — safer
+    than silently stopping every Issue.
     """
     try:
         sys.path.insert(0, HERE)
@@ -738,15 +772,16 @@ def _domain_surface():
         return [], []
 
 
-# 節の見出しをどう見分けるか。日英どちらの書き方でも拾う（SPEC.md は両方を併記している）。
+# How a section heading is recognised. Both the Japanese and English wordings are picked up
+# (SPEC.md carries both).
 _SECTION_PATTERNS = {
     "domain_model": r"ドメインモデル|domain\s*model|entities?\s*/\s*data-model",
     "use_case": r"ユースケース|use[-\s]*case",
     "authorization": r"認可|authoriz(?:ation|ed)|access\s*control",
 }
 
-# 反例（placebo / null）は見出しではなく **Verification 節の中のラベル行** として書かれる。
-# 節ではなくラベルを探すのはそのため。
+# A counterexample (placebo / null) is written as **a label line inside the Verification section**,
+# not as a heading. That is why a label is looked for rather than a section.
 _COUNTEREXAMPLE_LABELS = {
     "placebo": r"\*{0,2}placebo\*{0,2}\s*[（(:：]",
     "null": r"\*{0,2}null\*{0,2}\s*[（(:：]",
@@ -754,18 +789,19 @@ _COUNTEREXAMPLE_LABELS = {
 
 
 def _missing_counterexamples(body):
-    """placebo / null の反例のうち、**中身のあるものが無い** ものを返す。
+    """Return the placebo / null counterexamples for which **nothing with substance exists**.
 
-    意図そのものは言語化しきれないが、「これは違う」の例は書ける。反例があれば gate は
-    「その placebo を入れたらテストは赤くなるか」を実際に試せる — 判定者の想像ではなく、
-    Issue に書かれた事実に対して検査できる。
+    Intent itself cannot be written whole, but an example of "this is not it" can be. Given a
+    counterexample the gate can actually try "does the test go red if I put that placebo in" — it
+    checks against a fact written on the Issue rather than against a judge's imagination.
 
-    反例が無いと gate は placebo を毎回自分で発明し、周回ごとに厳しさが変わる。しかも
-    2.3.1 で role charter の全文注入をやめて以降、judge へ渡る材料に placebo/null の指示は
-    **一切含まれていない**（`_focused_review_contract` にその語は無い）。判定者側の記憶に
-    頼れなくなった分、仕様側に置く必要がある。
+    Without one the gate invents the placebo itself every round and the strictness shifts from round
+    to round. And since 2.3.1 stopped injecting the role charter in full, **nothing** in what reaches
+    a judge mentions placebo/null (`_focused_review_contract` does not carry the word). What can no
+    longer rest on the judge's memory has to sit in the specification instead.
 
-    **内容の当否は見ない** — その反例が良いかは人と gate の仕事。
+    **Whether the content is right is not read** — whether a counterexample is a good one is the work
+    of a human and the gate.
     """
     if not body:
         return list(_COUNTEREXAMPLE_LABELS)
@@ -779,10 +815,10 @@ def _missing_counterexamples(body):
             if not re.search(pat, s, re.I):
                 continue
             vals = re.findall(r"`([^`]*)`", s)
-            # テンプレのまま（`<...>`）は実体として数えない。
+            # Left as the template (`<...>`) does not count as substance.
             if vals and all(v.strip().startswith("<") for v in vals):
                 continue
-            # ラベルの後ろに実体があるか（バッククォート無しの散文も許す）
+            # Is there substance after the label (prose without backticks is allowed too)
             rest = re.split(pat, s, maxsplit=1, flags=re.I)[-1].strip(" ：:）)")
             if rest:
                 found = True
@@ -793,7 +829,7 @@ def _missing_counterexamples(body):
 
 
 def _touches_domain_surface(body, paths):
-    """SPEC の owns / seam に、宣言された domain surface の prefix が現れるか。"""
+    """Does a declared domain-surface prefix appear in the SPEC's owns / seam?"""
     if not body or not paths:
         return False
     quoted = re.findall(r"`([^`]+)`", body)
@@ -802,11 +838,12 @@ def _touches_domain_surface(body, paths):
 
 
 def _missing_domain_sections(body, require):
-    """要求された節のうち、**中身のあるものが無い** ものを返す。
+    """Return the required sections for which **nothing with substance exists**.
 
-    見出しがあるだけでは通さない — テンプレを貼っただけの SPEC が一番危ない（書いた気に
-    なるが、人と AI が合意した実体が無い）。箇条書きが1つ以上あり、それがプレースホルダ
-    （`<...>`）でないことまで見る。**内容の当否は見ない** — それは人と judge の仕事。
+    A heading alone does not pass — a SPEC that merely pastes the template is the most dangerous kind
+    (it feels written, while nothing a human and the AI agreed on is there). It checks that at least
+    one bullet exists and that it is not a placeholder (`<...>`). **Whether the content is right is
+    not read** — that is the work of a human and a judge.
     """
     if not body:
         return list(require)
@@ -826,7 +863,7 @@ def _missing_domain_sections(body, require):
                 continue
             if re.match(r"^(?:[-*+]|\d+[.)])\s+", s):
                 item = re.sub(r"^(?:[-*+]|\d+[.)])\s+", "", s)
-                # `**ラベル:** `<...>`` はテンプレのまま。実体として数えない。
+                # ``**label:** `<...>``` is still the template. It does not count as substance.
                 vals = re.findall(r"`([^`]*)`", item)
                 if vals and all(v.strip().startswith("<") for v in vals):
                     continue
@@ -839,10 +876,11 @@ def _missing_domain_sections(body, require):
 
 
 def _has_dod_command(body):
-    """SPEC に「走らせられる DoD command」があるか。
+    """Does the SPEC carry a DoD command that can be run?
 
-    見るのは *コマンドらしさ* であって、正しさではない（正しいかは走らせた gate が知る）。
-    テンプレのプレースホルダ（`<the exact command …>`）を実物と数えないことだけ気をつける。
+    What is read is *whether it looks like a command*, not whether it is correct (the gate that runs
+    it is what knows that). The one thing to be careful of is not counting the template's placeholder
+    (`<the exact command …>`) as the real thing.
     """
     if not body:
         return False
@@ -852,7 +890,7 @@ def _has_dod_command(body):
         for code in re.findall(r"`([^`]+)`", line):
             code = code.strip()
             if code.startswith("<") or not code:
-                continue            # テンプレの穴が埋まっていない
+                continue            # the template's blank is unfilled
             if re.search(r"\b(npm|pnpm|yarn|make|pytest|python3?|go|cargo|bash|sh|npx|"
                          r"docker|supabase|deno|bun)\b", code):
                 return True
@@ -891,10 +929,12 @@ def cmd_split_check(a):
     # (b) depends_on referencing an OPEN Issue — the single-unit assertion (docs/11 §4b) fails
     for line in body.splitlines():
         if line.lower().lstrip().startswith(("depends_on", "depends on", "- **depends_on")):
-            # `#N` の形だけを依存とみなす。数字を全部拾うと散文が誤検出される —
-            # 「実装コードは1行も入らない」の「1」が として解釈された（実地で判明）。
-            # 同じ依存が本文の複数行に出ると同じ警告が並ぶ（実地で3行出た）。
-            # 一度言えば足りる — 同じことを繰り返す警告は、読み飛ばされる側に回る。
+            # Only the `#N` shape counts as a dependency. Picking up every number produces false
+            # positives on prose — the "1" of "not one line of implementation code goes in" was read
+            # as a reference (found in the field).
+            # Where the same dependency appears on several lines of the body, the same warning lines
+            # up repeatedly (three lines of it in the field). Saying it once is enough — a warning
+            # that repeats itself joins the ones that get skimmed past.
             for num in dict.fromkeys(re.findall(r"#(\d+)", line.split(":", 1)[-1])):
                 if num and not any(f"depends_on #{num} " in w for w in warnings):
                     c, o = gh(["issue", "view", num, "--repo", a.repo, "--json", "state"])
@@ -904,126 +944,151 @@ def cmd_split_check(a):
     # (c) MUST written in EARS? A body with a MUST/acceptance section but no EARS keyword is prose
     # ("auth works") the gate can't test (docs/11 §4b).
     #
-    # **本文のどこかに keyword があれば通す、という見方をしてはいけない。** 旧実装は
-    # `any(kw in body for kw in ("WHEN ","WHILE ","IF ","WHERE "))` で本文全体を見ており、
-    # acceptance が全部散文でも、別の節の "IF ANY" や コードブロックの `if x:` / SQL の
-    # `WHERE id = 1` に当たって **素通り** した（実測で再現）。実地の #170 は acceptance
-    # 10件中9件が散文のまま起票され、gate が毎回「どう確かめるか」の設計から始める羽目に
-    # なり、12周した。**検査を素通りさせることが、収束しないループの入口だった。**
+    # **Never read this as "pass it if a keyword appears anywhere in the body".** The old
+    # implementation read the whole body with
+    # `any(kw in body for kw in ("WHEN ","WHILE ","IF ","WHERE "))`, so with every acceptance item in
+    # prose it still **walked past** on an "IF ANY" in another section, an `if x:` in a code block,
+    # or a SQL `WHERE id = 1` (reproduced by measurement). In the field #170 was filed with nine of
+    # its ten acceptance items in prose, the gate was left beginning each round by designing how to
+    # confirm them, and it took twelve rounds. **Letting the check be walked past was the entrance to
+    # the loop that would not converge.**
     #
-    # 正しくは **acceptance の各行だけ**を、req_lint と同じ EARS 判定にかける。判定基準は
-    # 1箇所（req_lint.EARS_PATTERNS）に置く — 2箇所に別の EARS 定義があると必ずずれる。
+    # Correctly, **only each acceptance line** goes through the same EARS check as req_lint. The
+    # standard sits in one place (req_lint.EARS_PATTERNS) — two separate definitions of EARS are
+    # certain to drift.
     bad_lines = _non_ears_acceptance(body)
     if bad_lines:
         shown = "; ".join(f"“{l[:60]}”" for l in bad_lines[:3])
-        more = f"（他 {len(bad_lines) - 3} 件）" if len(bad_lines) > 3 else ""
+        more = f" (and {len(bad_lines) - 3} more)" if len(bad_lines) > 3 else ""
         warnings.append(
-            f"acceptance のうち {len(bad_lines)} 件が EARS でない: {shown}{more} — "
-            "散文（「auth works」）は gate がテストできない。WHEN/WHILE/IF/WHERE…SHALL "
-            "（日本語なら「〜のとき…すること」）に書き直すこと（docs/11 §4b）。"
-            "**ここを緩めると gate に的が無くなり、周回ごとに基準がブレて収束しなくなる。**")
-    # (c2) DoD command — 「これを走らせて緑なら完了」が無い SPEC は、gate に的を与えていない。
-    # gate.md は「maker の『verified it』を信じず自分で再導出せよ」と命じるので、走らせる
-    # コマンドが SPEC に無いと gate は **確認方法の設計から** 始める。それが判定 1回あたり
-    # 約100秒（実測）の主因であり、周回ごとに違う設計をするので基準がブレる。
-    # ここは warn に留める（ready は止めない）— 探索的な Issue で DoD を先に確定できない
-    # ことは実際にあり、EARS 違反ほど機械的に黒ではない。
-    # 既定は **オン**。在庫の Issue が一斉に警告を出すのは承知の上で、そちらを書き直させる
-    # ほうを選ぶ — DoD command の無い SPEC は gate に的を与えておらず、それが周回の原因
-    # だった（#170 は 12周）。狼少年になるのは「警告が読み捨てられるとき」であって、
-    # 「直すべきものを直せと言っているとき」ではない。降ろしたい org は ORG_REQUIRE_DOD=0。
-    # (c3) ドメインに触れる仕事は、**人と AI が合意する面**を持っていること。
-    # diff レビューは見落としが黙って通るが、ドメインモデル / ユースケース / 認可規則の
-    # 照合は「両者が同じものを述べているか」なので不一致が見える。宣言された domain surface
-    # に触れる Issue にだけ効かせる（プラグインはパスを推測しない）。
+            f"{len(bad_lines)} acceptance item(s) are not EARS: {shown}{more} — "
+            "the gate cannot test prose (\u201cauth works\u201d). Rewrite them as "
+            "WHEN/WHILE/IF/WHERE…SHALL (docs/11 §4b). "
+            "**Loosen this and the gate has no target: the standard wobbles from round to round and "
+            "the rounds stop converging.**")
+    # (c2) DoD command — a SPEC with no "run this, and green means done" has given the gate no
+    # target. gate.md orders it to re-derive rather than believe the maker's "verified it", so with
+    # no command to run in the SPEC the gate starts **by designing how to confirm it**. That is the
+    # main reason a single judgment takes around a hundred seconds (measured), and since the design
+    # differs every round the standard wobbles.
+    # This stays a warn (it does not stop ready) — an exploratory Issue genuinely may not be able to
+    # settle its DoD first, and this is not mechanically black the way an EARS violation is.
+    # The default is **on**. The stock of existing Issues all warning at once is accepted, and having
+    # them rewritten is chosen instead — a SPEC with no DoD command has given the gate no target, and
+    # that was the cause of the rounds (#170 took twelve). Crying wolf is "when warnings get thrown
+    # away unread", not "when it says fix what should be fixed". An org that wants it off sets
+    # ORG_REQUIRE_DOD=0.
+    # (c3) Work that touches the domain must carry **the surface a human and the AI agree on**.
+    # A diff review lets an oversight through silently, whereas reconciling the domain model, the use
+    # cases, and the authorization rules asks "do the two state the same thing", so a mismatch is
+    # visible. This applies only to Issues touching the declared domain surface (the plugin does not
+    # guess paths).
     _ds_paths, _ds_require = _domain_surface()
     if _touches_domain_surface(body, _ds_paths):
         _missing = _missing_domain_sections(body, _ds_require)
         if _missing:
-            _label = {"domain_model": "ドメインモデル", "use_case": "ユースケースシナリオ",
-                      "authorization": "認可規則"}
+            _label = {"domain_model": "a domain model", "use_case": "use-case scenarios",
+                      "authorization": "authorization rules"}
             warnings.append(
-                "domain surface に触れるのに "
+                "it touches the domain surface but has no "
                 + " / ".join(_label.get(m, m) for m in _missing)
-                + " が無い（見出しだけ・テンプレのままも「無い」と数える）。"
-                "**人が見るのはここ** — 実装してから何を作るはずだったか思い出す順序にすると、"
-                "MUST は満たすのに求めていたものと違う成果物が通る。"
-                "認可は技術的セキュリティではなくドメインの一部として書くこと"
-                "（守る資産・規則・守らないもの）。")
-        # 反例（placebo / null）。MUST を満たすのに求めていたものと違う、を捕まえる唯一の材料。
-        # 2.3.1 で role charter の全文注入をやめて以降、judge に placebo/null の指示は届いて
-        # いないので、判定者の記憶ではなく **Issue に書かれた事実** として置く必要がある。
+                + " (a heading alone, or the template left as-is, also counts as none). "
+                "**This is what a human reads** — put it in the order of remembering what was to be "
+                "built only after implementing it, and a deliverable that satisfies every MUST while "
+                "differing from what was wanted passes. "
+                "Write authorization as part of the domain rather than as technical security (the "
+                "assets protected, the rules, and what is not protected).")
+        # The counterexamples (placebo / null). The only material that catches "satisfies the MUSTs
+        # while differing from what was wanted".
+        # Since 2.3.1 stopped injecting the role charter in full, no placebo/null instruction reaches
+        # a judge, so it has to sit as **a fact written on the Issue** rather than in a judge's
+        # memory.
         _ce = _missing_counterexamples(body)
         if _ce:
             warnings.append(
-                "反例が無い（" + " / ".join(_ce) + "）。"
-                "**意図は言語化しきれないが「これは違う」の例は書ける。** "
-                "placebo（MUST の文言は満たすが意図を裏切る実装）と null（本物の利用者なら"
-                "拒否する出力）を1つずつ書くこと。あれば gate は「その placebo を入れたら"
-                "テストが赤くなるか」を実際に試せる — 無いと毎回 placebo を発明し直すので、"
-                "周回ごとに厳しさが変わる。")
+                "there is no counterexample (" + " / ".join(_ce) + "). "
+                "**Intent cannot be written whole, but an example of \u201cthis is not it\u201d "
+                "can be.** Write one placebo (an implementation that satisfies the MUSTs' wording "
+                "while betraying their intent) and one null (an output a real user would reject). "
+                "Given those, the gate can actually try \u201cdoes the test go red if I put that "
+                "placebo in\u201d — without them it reinvents the placebo every round, so the "
+                "strictness shifts from round to round.")
     if os.environ.get("ORG_REQUIRE_DOD") != "0" and not _has_dod_command(body):
         warnings.append(
-            "SPEC に DoD command（これを走らせて緑なら完了、と言える具体的なコマンド）が無い。"
-            "gate は同じコマンドを走らせて再導出するので、無いと **確認方法の設計から始める** "
-            "— 判定が遅くなるだけでなく、周回ごとに基準が変わって収束しなくなる。"
-            "`cd app && npm test -- expense` のように、実際に打てる形で書くこと。")
-    # (d) 守る対象の偏り — 認可を扱う deliverable なのに、**何が守られているか**が偏っていないか。
+            "the SPEC carries no DoD command (a concrete command of which it can be said: run this, "
+            "and green means done). "
+            "The gate re-derives by running that same command, so without one it **starts by "
+            "designing how to confirm it** — which not only makes the judgment slow but changes the "
+            "standard from round to round until the rounds stop converging. "
+            "Write it in a form that can actually be typed, like `cd app && npm test -- expense`.")
+    # (d) A lopsided set of protected things — in a deliverable that handles authorization, is
+    # **what is protected** lopsided?
     #
-    # 運用で見つかった形: 12件の MUST のうち認可を定めているのは2件だけで、その1件は「あだ名」
-    # （装飾的なテキスト列）だった。金額・支払者・債務の向き・グループ所有権については
-    # 一行も無い。skeptic の言葉では「装飾的なテキスト列を守り、金額・支払者・債務の向き・
-    # グループ所有権を無防備にしていた」。結果、後半6周の rework は Issue のどの MUST にも
-    # 対応しない作業になった。
+    # The shape found in operation: of twelve MUSTs only two set authorization, and one of those two
+    # was about the nickname (a decorative text column). Not one line covered the amount, the payer,
+    # the direction of the debt, or group ownership. In the skeptic's words, it "protected a
+    # decorative text column while leaving the amount, the payer, the direction of the debt, and
+    # group ownership undefended". As a result the last six rounds of rework were work that answered
+    # no MUST on the Issue at all.
     #
-    # **起票時に気づける材料**を出す（判定はしない — 何を守るべきかは人が決める）。
+    # Put out **material that can be noticed at filing time** (it does not judge — what should be
+    # protected is a human's call).
     must_lines = [l for l in body.splitlines()
                   if re.search(r"\bSHALL\b|しなければならない|するものとする", l)]
     AUTHZ_DOMAIN = ("RLS", "ROW LEVEL SECURITY", "権限", "認可", "policy", "grant",
                     "SECURITY DEFINER", "拒否", "許可")
     if len(must_lines) >= 6 and sum(1 for w in AUTHZ_DOMAIN if w in body) >= 2:
         authz_musts = [l for l in must_lines if any(k in l for k in AUTHZ_DOMAIN)]
-        # 「入った後に何ができるか」を定めた MUST があるか。**内側の主体**が出てくるかで見る。
-        # 資産名（金額・支払）で判定すると `SUM(shares.amount) = expenses.amount` のような
-        # 整合性制約を「金額を守っている」と誤読する — あれは認可ではない。
+        # Is there a MUST setting what can be done once inside? This is read by whether **an
+        # inside subject** appears. Deciding by asset name (amount, payment) misreads a consistency
+        # constraint like `SUM(shares.amount) = expenses.amount` as "it protects the amount" — that
+        # is not authorization.
         INSIDE = ("メンバーが", "メンバー同士", "他のメンバー", "他人の", "作成者", "所有者",
                   "自分以外", "owner", "creator", "member who", "書き換え")
-        # 「非メンバーが」は境界の話。部分一致で内側に数えると、境界しか定めていない Issue が
-        # 「内側も定めている」ことになり、この検査が丸ごと無効になる（運用の例では がそうだった）。
+        # "a non-member" is about the boundary. Counting it as inside by substring makes an Issue
+        # that sets only the boundary count as "it sets the inside too", which voids this check
+        # entirely (that is what happened in the operational example).
         OUTSIDE = ("非メンバー", "non-member", "未認証", "unauthenticated", "anonymous")
         guarded = [l for l in authz_musts
                    if any(k in l for k in INSIDE) and not any(o in l for o in OUTSIDE)]
-        # あだ名・表示名だけを守っているなら、それは「守っている」に数えない（運用で観測）
+        # Protecting only the nickname or display name does not count as protecting (observed in
+        # operation)
         DECORATIVE = ("あだ名", "表示名", "nickname", "display_name", "アイコン", "avatar")
         substantive = [l for l in guarded if not any(d in l for d in DECORATIVE)]
         if authz_musts and not substantive:
             warnings.append(
-                f"MUST {len(must_lines)} 件中、認可を定めているのは {len(authz_musts)} 件だが、"
-                f"**「入った後に何ができるか」を定めたものが無い**"
-                + (f"（内側に触れているのは装飾的な列だけ: "
-                   f"{', '.join(l.strip()[:28] for l in guarded[:2])}…）" if guarded else "") + "。"
-                f"実地では、この形の Issue が「装飾的なテキスト列を守り、金額・支払者・債務の向き・"
-                f"所有権を無防備にする」状態を生み、12周の rework になった。"
-                f"認可は「誰が入れるか」と「入った後に何ができるか」の両方で成立する — "
-                f"**内側の規則**が要求として書かれているか確認すること。")
+                f"of {len(must_lines)} MUST(s), {len(authz_musts)} set authorization, but "
+                f"**none of them sets what can be done once inside**"
+                + (f" (the only inside thing touched is a decorative column: "
+                   f"{', '.join(l.strip()[:28] for l in guarded[:2])}…)" if guarded else "") + ". "
+                f"In the field an Issue of this shape produced a state that \u201cprotected a "
+                f"decorative text column while leaving the amount, the payer, the direction of the "
+                f"debt, and ownership undefended\u201d, and became twelve rounds of rework. "
+                f"Authorization holds only through both \u201cwho may enter\u201d and \u201cwhat "
+                f"can be done once inside\u201d — check that **the inside rules** are written as "
+                f"requirements.")
 
-    # (e) 壊れ方が何種類あるか — `owns` が同じでも、**壊れ方と検証手段が違えば別 Issue**。
-    # 運用では「スキーマの形（型・制約）」と「認可（攻撃シナリオ）」を1つに束ねており、
-    # gate が毎回両方を見ることになり、一方の修正が他方を壊し続けた（migration 5本が相互干渉）。
+    # (e) How many ways it can break — even with the same `owns`, **a different way of breaking and
+    # a different means of verification make it a different Issue**.
+    # In operation "the shape of the schema (types, constraints)" and "authorization (attack
+    # scenarios)" were bundled into one, which left the gate reading both every round while a fix to
+    # one kept breaking the other (five migrations interfering with each other).
     FAILURE_MODES = {
-        "スキーマ/型の誤り": ("型", "制約", "schema", "column", "not null", "型検査", "migration"),
-        "認可の穴": ("RLS", "権限", "認可", "policy", "grant", "SECURITY DEFINER", "非メンバー"),
-        "計算の誤り": ("端数", "合計", "配分", "計算", "金額が一致", "SUM"),
-        "配信/実行環境": ("Service Worker", "PWA", "CI", "ビルド", "デプロイ", "キャッシュ"),
+        "schema/type errors": ("型", "制約", "schema", "column", "not null", "型検査", "migration"),
+        "authorization holes": ("RLS", "権限", "認可", "policy", "grant", "SECURITY DEFINER",
+                                "非メンバー"),
+        "calculation errors": ("端数", "合計", "配分", "計算", "金額が一致", "SUM"),
+        "delivery/runtime": ("Service Worker", "PWA", "CI", "ビルド", "デプロイ", "キャッシュ"),
     }
     hit = [k for k, kws in FAILURE_MODES.items() if sum(1 for w in kws if w in body) >= 2]
     if len(hit) > 1:
         warnings.append(
-            f"壊れ方が {len(hit)} 種類ある: {' / '.join(hit)}。"
-            f"**`owns` が同じでも、壊れ方と検証手段が違えば別 Issue** — 束ねると gate が毎回"
-            f"「どこを見るか」から始めることになり、一方の修正が他方を壊す"
-            f"（相互に干渉するマイグレーションを生む）。"
-            f"「この deliverable が壊れたとき、壊れ方は1種類か」を問うこと。")
+            f"it can break in {len(hit)} distinct ways: {' / '.join(hit)}. "
+            f"**Even with the same `owns`, a different way of breaking and a different means of "
+            f"verification make it a different Issue** — bundled together, the gate begins every "
+            f"round with \u201cwhere do I look\u201d and a fix to one breaks the other (it "
+            f"produces migrations that interfere with each other). "
+            f"Ask: when this deliverable breaks, is there only one way it breaks?")
 
     if warnings:
         print(f"RE-SPLIT / RESHAPE CANDIDATE — issue #{a.issue} may not be ready for a no-context maker:")
