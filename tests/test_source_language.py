@@ -43,7 +43,7 @@ BUDGET = {
     "tests/test_domain_surface.py": 18,
     "tests/test_ears_acceptance.py": 6,
     "tests/test_github_sync.py": 62,
-    "tests/test_hook.py": 447,
+    "tests/test_hook.py": 1,
     "tests/test_ledger.py": 3,
     "tests/test_organ_unit.py": 2,
     "tests/test_orgcycle.py": 424,
