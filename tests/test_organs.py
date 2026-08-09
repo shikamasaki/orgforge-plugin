@@ -1,4 +1,4 @@
-"""その他の器官 — doctrine / handoff / reconcile / alignment / tick / sensors。"""
+"""The remaining organs — doctrine / handoff / reconcile / alignment / tick / sensors."""
 import argparse
 import json
 import os
@@ -702,21 +702,23 @@ def test_deliverable_int_and_string_are_the_same_deliverable(tmp_path):
     assert code == 0, out
 
 
-# ── views はスキーマを単一の情報源とする（docs/11 §0c の申し送り A-1）─────────
-# 以前は ledger.py に13件をハードコードしていたが、スキーマは26件を宣言していた。実害:
-# /org-work が parts_inventory を引けず起動せず、gate の context_pack 3件と skeptic の 2件が
-# すべて未実装で、SoD の checker が判断材料を取得できないのに org_lint は pass していた。
+# ── the schema is the single source for views (handover A-1 of docs/11 §0c) ──
+# ledger.py used to hard-code thirteen of them while the schema declared twenty-six. The real harm:
+# /org-work could not fetch parts_inventory and would not start, all three of the gate's context_pack
+# views and both of the skeptic's were unimplemented, and the SoD checker could not obtain what it
+# was to judge by — yet org_lint passed.
 def test_every_schema_view_is_resolvable(tmp_path):
-    """スキーマが定義するビューは、すべて ledger.py が引けること。"""
+    """Every view the schema defines must be fetchable by ledger.py."""
     import yaml
     schema = yaml.safe_load((TEMPLATE / "ledger-schema.yaml").read_text(encoding="utf-8"))
     for vid in (schema.get("views") or {}):
         code, out = run("ledger.py", "view", str(tmp_path), vid)
-        assert code == 0, f"view '{vid}' が引けない: {out}"
+        assert code == 0, f"the view '{vid}' cannot be fetched: {out}"
 
 
 def test_gate_and_skeptic_context_packs_are_resolvable(tmp_path):
-    """SoD の checker が判断材料を引けること — これが引けないなら maker≠checker は空文。"""
+    """The SoD checker must be able to fetch what it judges by — without that, maker≠checker is an
+    empty sentence."""
     import yaml
     org = yaml.safe_load((TEMPLATE / "organization.yaml").read_text(encoding="utf-8"))
     universal = {"intent_block", "doctrine"}
@@ -727,7 +729,7 @@ def test_gate_and_skeptic_context_packs_are_resolvable(tmp_path):
             if v in universal:
                 continue
             code, out = run("ledger.py", "view", str(tmp_path), v)
-            assert code == 0, f"{r['id']} の context_pack '{v}' が引けない: {out}"
+            assert code == 0, f"{r['id']}'s context_pack '{v}' cannot be fetched: {out}"
 
 
 def test_unknown_view_is_still_rejected(tmp_path):
@@ -735,13 +737,15 @@ def test_unknown_view_is_still_rejected(tmp_path):
     assert code == 2 and "unknown view" in out
 
 
-# ── phase の親継承（申し送り B-2）────────────────────────────────────────────
-# founding は objective 単位で requirements/design を admit するが、/org-work は task Issue 番号を
-# deliverable にする。別の文字列なので連鎖せず、指示どおり進めても task #1 が弾かれた。
+# ── a phase inherits from its parent (handover B-2) ─────────────────────────
+# founding admits requirements/design per objective, while /org-work makes the task Issue number the
+# deliverable. Being different strings they did not chain, and task #1 was rejected even when the
+# instructions were followed exactly.
 
 
 def test_a_task_without_a_parent_is_still_gated(tmp_path):
-    """継承は親を明示した場合だけ。無関係な task が素通りしてはならない。"""
+    """Inheritance applies only where the parent is stated. An unrelated task must not walk
+    past."""
     seed(tmp_path, "sup", "phase_started", {"deliverable": "1", "phase": "requirements", "role": "s"})
     seed(tmp_path, "gate", "phase_admitted",
          {"deliverable": "1", "phase": "requirements", "verdict": "pass",
@@ -752,14 +756,17 @@ def test_a_task_without_a_parent_is_still_gated(tmp_path):
     assert code == 3, out
 
 
-# ── org_cycle: 配管の自動化（docs/11 §0d）─────────────────────────────────────
-# 実地で Issue 2件あたり11コマンドを手打ちしており、18 Issue で約90回になっていた。
-# とりわけ parent を目で拾って手打ちしていたため、親継承（§2）の実装が活きていなかった。
+# ── org_cycle: automating the plumbing (docs/11 §0d) ────────────────────────
+# In the field eleven commands were typed by hand per two Issues, coming to around ninety across
+# eighteen. parent in particular was picked out by eye and typed in, which left the implementation of
+# parent inheritance (§2) doing nothing.
 
 
-# ── 実地: 予算 cap が日常の後片付けを止めていた（1日5回発火・実害ゼロ）───────
+# ── in the field: the budget cap was stopping everyday cleanup (firing five times a day, with
+#    zero real harm) ──
 def test_regenerable_cleanup_is_not_metered():
-    """cap は irreversibility を測る。作り直せる対象は「取り消せない影響」ではない。"""
+    """The cap measures irreversibility. Something that can be rebuilt is not "an effect that
+    cannot be undone"."""
     import importlib.util
     hook = TOOLS.parent / "integrations" / "common" / "org_hook.py"
     spec = importlib.util.spec_from_file_location("org_hook_c", hook)
@@ -767,11 +774,12 @@ def test_regenerable_cleanup_is_not_metered():
     for cmd in ("rm -rf .orgforge/wt/issue-7", "rm -rf node_modules",
                 "rm -rf dist/", "rm -rf __pycache__"):
         dim, w = h._asset_dimension("Bash", {"command": cmd})
-        assert w == 0, f"後片付けが課金されている: {cmd} -> {w}"
+        assert w == 0, f"cleanup is being charged for: {cmd} -> {w}"
 
 
 def test_irreversible_deletes_stay_metered():
-    """緩めたのは再生成できるものだけ。実ソースも / も遡上も重いまま。"""
+    """Only what can be regenerated was loosened. Real sources, and anything reaching upstream, stay
+    heavy."""
     import importlib.util
     hook = TOOLS.parent / "integrations" / "common" / "org_hook.py"
     spec = importlib.util.spec_from_file_location("org_hook_i", hook)
@@ -779,31 +787,33 @@ def test_irreversible_deletes_stay_metered():
     for cmd in ("rm -rf src/", "rm -rf /", "rm -rf ~",
                 "rm -rf .orgforge/wt/../../", "DROP TABLE users"):
         dim, w = h._asset_dimension("Bash", {"command": cmd})
-        assert w > 0, f"取り消せない操作が無料になった: {cmd}"
+        assert w > 0, f"an operation that cannot be undone became free: {cmd}"
 
 
-# ── 実地: log が Issue にだけ書き、台帳の progress_recorded が0件だった ──────
+# ── in the field: log wrote only to the Issue, and the ledger held zero progress_recorded ──
 
 
-# ── 実地: 検出器が「学習が使われている」と嘘をついた ─────────────────────
+# ── in the field: the detector lied that "the learning is being used" ───────
 def test_learning_reads_reason_and_rework(tmp_path):
-    """rework_requested の `reason` を死因として読む（以前は対象ですらなかった）。"""
+    """rework_requested's `reason` is read as a cause of death (it was not even in scope
+    before)."""
     led = tmp_path / "l2"; led.mkdir()
     rows = [{"seq": i, "class": "rework_requested",
-             "payload": {"issue": 7, "reason": "同じ死因"}} for i in (1, 2)]
+             "payload": {"issue": 7, "reason": "the same cause of death"}} for i in (1, 2)]
     (led / "ledger.jsonl").write_text(
         "\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
     p = subprocess.run([sys.executable, str(TOOLS / "learning.py"), "repeats", str(led)],
                        capture_output=True, text=True, timeout=60)
     out = p.stdout + p.stderr
-    assert "clean" not in out, f"同じ死因が2回あるのに clean と報告した: {out}"
+    assert "clean" not in out, (
+        f"it reported clean although the same cause of death occurred twice: {out}")
 
 
 def test_learning_says_unknown_not_clean_when_causes_unreadable(tmp_path):
-    """死因が読めないとき「繰り返していない」と言わない。
+    """Where the cause of death cannot be read, it does not say "it is not repeating".
 
-    「繰り返していない」と「見えていない」は別。混同すると誤った安心になり、
-    検出器が無いより悪い（実地でこれが起きた）。
+    "It is not repeating" and "I cannot see it" are different. Confusing them produces false comfort
+    and is worse than having no detector (this happened in the field).
     """
     led = tmp_path / "l3"; led.mkdir()
     rows = [{"seq": 1, "class": "rework_requested", "payload": {"issue": 7}},
@@ -817,10 +827,13 @@ def test_learning_says_unknown_not_clean_when_causes_unreadable(tmp_path):
 
 
 def test_learning_warns_that_matching_is_by_string(tmp_path):
-    """clean を「同じ失敗をしていない」証明として読ませない（文字列一致の限界を明示）。"""
+    """clean must not be read as proof that the same failure is not happening (it states the limits
+    of string matching)."""
     led = tmp_path / "l4"; led.mkdir()
-    rows = [{"seq": 1, "class": "rework_requested", "payload": {"issue": 7, "reason": "端数の偏り"}},
-            {"seq": 2, "class": "rework_requested", "payload": {"issue": 7, "reason": "テスト硬化"}}]
+    rows = [{"seq": 1, "class": "rework_requested",
+             "payload": {"issue": 7, "reason": "rounding bias"}},
+            {"seq": 2, "class": "rework_requested",
+             "payload": {"issue": 7, "reason": "test hardening"}}]
     (led / "ledger.jsonl").write_text(
         "\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
     p = subprocess.run([sys.executable, str(TOOLS / "learning.py"), "repeats", str(led)],
@@ -828,76 +841,80 @@ def test_learning_warns_that_matching_is_by_string(tmp_path):
     assert "**string**" in p.stdout + p.stderr
 
 
-# ── 0.17.0: 識別子の別名を台帳から推移的に解決する ──────────────────────
+# ── 0.17.0: an identifier's aliases resolve transitively from the ledger ────
 
 
 def test_gate_cannot_also_be_skeptic(tmp_path):
-    """admit した gate が同じ成果物を refute できない（skeptic ≠ gate）。"""
+    """The gate that admitted cannot refute the same deliverable (skeptic ≠ gate)."""
     env = _led(tmp_path)
     _append(env, "gate", "admission_decided", {"verdict": "admit", "deliverable": "5", "issue": 5})
     p = _append(env, "gate", "refutation_attempted",
                 {"verdict": "survives", "deliverable": "5", "issue": 5})
-    assert p.returncode != 0, "gate が自分の admit を自分で refute できた"
+    assert p.returncode != 0, "the gate could refute its own admit"
     q = _append(env, "skeptic", "refutation_attempted",
                 {"verdict": "survives", "deliverable": "5", "issue": 5})
-    assert q.returncode == 0, f"独立した skeptic まで止めた: {q.stderr}"
+    assert q.returncode == 0, f"it stopped even an independent skeptic: {q.stderr}"
 
 
 def test_report_up_requires_conformance_review(tmp_path):
-    """一度も使っていなかった層。委譲→検証→報告の順序が強制されること。"""
+    """A layer never once used. The order delegate → verify → report must be enforced."""
     env = _led(tmp_path)
     p = _append(env, "sup", "conformance_reviewed",
                 {"supervisor": "sup", "subordinate": "sub", "verdict": "conforms"})
-    assert p.returncode != 0, "委譲していない仕事を conformance_reviewed できた"
+    assert p.returncode != 0, "work that was never delegated could be conformance_reviewed"
     q = _append(env, "sup", "report_up", {"supervisor": "sup"})
-    assert q.returncode != 0, "検証していない仕事を report_up できた"
+    assert q.returncode != 0, "work that was never verified could be report_up'd"
     _append(env, "sup", "spec_delegated",
             {"supervisor": "sup", "subordinate": "sub", "spec_ref": "5",
              "contract_ref": "5", "intent_basis_ref": "R.md"})
     r = _append(env, "sup", "conformance_reviewed",
                 {"supervisor": "sup", "subordinate": "sub", "verdict": "conforms"})
-    assert r.returncode == 0, f"正しい順序が通らない: {r.stderr}"
+    assert r.returncode == 0, f"the correct order does not pass: {r.stderr}"
 
 
 def test_learning_prints_the_doctrine_command(tmp_path):
-    """「doctrine に強化せよ」と言うだけでは強化されない。打つコマンドを出す。"""
+    """Saying "strengthen the doctrine" strengthens nothing. It prints the command to type."""
     led = tmp_path / "l5" / "ledger"; led.mkdir(parents=True)
     rows = [{"seq": i, "class": "rework_requested",
-             "payload": {"issue": 7, "reason": "同じ死因"}} for i in (1, 2)]
+             "payload": {"issue": 7, "reason": "the same cause of death"}} for i in (1, 2)]
     (led / "ledger.jsonl").write_text(
         "\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
     p = subprocess.run([sys.executable, str(TOOLS / "learning.py"), "repeats", str(led)],
                        capture_output=True, text=True, timeout=60)
     out = p.stdout + p.stderr
-    assert "doctrine.py" in out and "propose" in out, "蓄積の経路が示されていない"
-    assert "admit" in out, "admit されるまで配られないことが伝わっていない"
+    assert "doctrine.py" in out and "propose" in out, (
+        "the path by which it accumulates is not shown")
+    assert "admit" in out, "it does not convey that nothing is distributed until it is admitted"
 
 
-# ── 0.18.0: 判定は最新が有効（追記型の台帳で reject が後から来る）─────────
+# ── 0.18.0: the latest judgment is the live one (in an append-only ledger a reject arrives
+#    later) ──
 
 
-# ── 0.19.0: 実務で「無くて困った」もの ──────────────────────────────────
+# ── 0.19.0: what was missed in practice ────────────────────────────────────
 def test_correction_voids_a_probe(tmp_path):
-    """correction{kind: probe} で無効化した記録は board が数えない。
+    """A record voided by correction{kind: probe} is not counted by the board.
 
-    追記型なので過去は消せない。自由記述の note では機械が読めず、実地では検証用プローブ
-    4件が実判定として数えられ board が現実と食い違った。
+    Being append-only, the past cannot be erased. A free-text note is unreadable by machine, and in
+    the field four verification probes were counted as real judgments, putting the board out of step
+    with reality.
     """
     led = _write_ledger(tmp_path, "c1", [
         {"seq": 1, "class": "admission_decided", "payload": {"issue": 11, "verdict": "admit"}},
         {"seq": 2, "class": "correction",
-         "payload": {"corrects": [1], "kind": "probe", "reason": "仕様検証",
+         "payload": {"corrects": [1], "kind": "probe", "reason": "verifying the specification",
                      "corrected_by": "supervisor"}},
     ])
     out = _status(led).stdout
-    assert "skeptic の記録が無い" not in out, f"訂正済みのプローブを実判定として数えた: {out}"
+    assert "no record from the skeptic" not in out, (
+        f"it counted a corrected probe as a real judgment: {out}")
 
 
 def test_asset_touched_records_authority():
-    """本番資産の変更は「誰の権限で入れたか」ごと残す。"""
+    """A change to a production asset is left together with "under whose authority it went in"."""
     src = _cycle_src()
     seg = src[src.index("def cmd_touched"):]
     assert "authority" in seg and "reversible" in seg and "rollback" in seg
 
 
-# ── 0.21.0: 二重管理をやめる / 冪等キーによる統制の迂回 ────────────────
+# ── 0.21.0: end the double bookkeeping / bypassing the controls via the idempotency key ──

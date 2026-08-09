@@ -1,8 +1,9 @@
-"""learning.py repeats — 死因再発の検出（Issue #104 / OBS-052）。
+"""learning.py repeats — detecting a recurring cause of death (Issue #104 / OBS-052).
 
-実地（Tatekae）では、同じ根の失敗が別の言葉で記録され、文字列完全一致の検出器が
-3回連続で clean を出した。修正: 記録時に閉じた語彙 `root` で分類し、再発は root の
-一致で数える。root の無いレガシー記録は従来どおり文字列完全一致（後方互換）。
+In the field (Tatekae) failures with the same root were recorded in different words, and a detector
+matching whole strings reported clean three times running. The fix: classify with the closed
+vocabulary `root` at recording time, and count recurrence by matching roots. A legacy record with no
+root still matches whole strings as before (backward compatible).
 """
 import json
 import sys
@@ -15,22 +16,23 @@ sys.path.insert(0, str(TOOLS))
 import learning  # noqa: E402
 
 
-# ── MUST 3(a): 別の文言・同じ root → 再発として検出（clean と言わない）──────────
+# ── MUST 3(a): different wording, same root → detected as a recurrence (never called clean) ──
 def test_same_root_different_wording_detected(tmp_path):
     seed(tmp_path, "gate", "result_retired",
-         {"candidate_id": "A", "cause": "端数の偏りを検証していない",
+         {"candidate_id": "A", "cause": "the rounding bias is not verified",
           "root": "placebo_test"}, ts="2026-07-16T01:00:00Z")
     seed(tmp_path, "gate", "result_retired",
-         {"candidate_id": "B", "cause": "テスト硬化（fixtureが本番経路を迂回）",
+         {"candidate_id": "B", "cause": "test hardening (the fixture bypasses the real path)",
           "root": "placebo_test"}, ts="2026-07-16T02:00:00Z")
     code, out = run("learning.py", "repeats", str(tmp_path))
-    assert code == 10, f"同根2件（別文言）を見逃した: {out}"
+    assert code == 10, f"it missed two same-root deaths worded differently: {out}"
     assert "REPEATED DEATH" in out and "placebo_test" in out
     assert "clean" not in out
 
 
 def test_distinct_roots_stay_clean_with_basis(tmp_path):
-    # 根が違えば再発ではない。clean は判定基準（root 分類 n 件 / 文字列一致 m 件）を明示する。
+    # Different roots are not a recurrence. clean states the basis (n classified by root, m by
+    # string match).
     seed(tmp_path, "gate", "result_retired",
          {"candidate_id": "A", "cause": "x", "root": "placebo_test"}, ts="2026-07-16T01:00:00Z")
     seed(tmp_path, "gate", "result_retired",
@@ -40,9 +42,9 @@ def test_distinct_roots_stay_clean_with_basis(tmp_path):
     assert "decided on:" in out and "2 by" in out, out
 
 
-# ── MUST 3(b) / MUST 2: root の無いレガシー記録は文字列一致 + 基準の明示 ─────────
+# ── MUST 3(b) / MUST 2: a legacy record with no root matches strings, and states the basis ──
 def test_legacy_unclassified_falls_back_to_exact_string(tmp_path):
-    # 同一文字列は従来どおり検出される
+    # An identical string is still detected, as before
     for cid, ts in (("A", "2026-07-16T01:00:00Z"), ("B", "2026-07-16T02:00:00Z")):
         seed(tmp_path, "gate", "result_retired",
              {"candidate_id": cid, "cause": "null hypothesis not rejected"}, ts=ts)
@@ -51,12 +53,12 @@ def test_legacy_unclassified_falls_back_to_exact_string(tmp_path):
 
 
 def test_legacy_unclassified_clean_states_basis_and_limitation(tmp_path):
-    # 別文言・root 無し → 従来どおり素通り（後方互換）だが、clean は
-    # (1) 判定基準と未分類の件数、(2) 文字列一致の限界、を明示する。
+    # Different wording with no root → it walks past as before (backward compatible), but clean
+    # states (1) the basis and how many are unclassified, and (2) the limits of string matching.
     seed(tmp_path, "gate", "result_retired",
-         {"candidate_id": "A", "cause": "端数の偏り"}, ts="2026-07-16T01:00:00Z")
+         {"candidate_id": "A", "cause": "rounding bias"}, ts="2026-07-16T01:00:00Z")
     seed(tmp_path, "gate", "result_retired",
-         {"candidate_id": "B", "cause": "テスト硬化"}, ts="2026-07-16T02:00:00Z")
+         {"candidate_id": "B", "cause": "test hardening"}, ts="2026-07-16T02:00:00Z")
     code, out = run("learning.py", "repeats", str(tmp_path))
     assert code == 0 and "clean" in out, out
     assert "decided on:" in out and "unclassified" in out and "2 by" in out, out
@@ -64,8 +66,9 @@ def test_legacy_unclassified_clean_states_basis_and_limitation(tmp_path):
 
 
 def test_mixed_clean_reports_unclassified_count(tmp_path):
-    # 分類済み1件 + 未分類1件、再発なし → clean だが未分類件数が読める
-    # （root=other は判別する根ではないため「分類済み」に数えない — 判別根を使う）
+    # One classified, one unclassified, no recurrence → clean, but the unclassified count is
+    # readable (root=other is not a discriminating root, so it does not count as "classified" —
+    # a discriminating root is used)
     seed(tmp_path, "gate", "result_retired",
          {"candidate_id": "A", "cause": "x", "root": "declaration_drift"},
          ts="2026-07-16T01:00:00Z")
@@ -76,13 +79,13 @@ def test_mixed_clean_reports_unclassified_count(tmp_path):
     assert "1 by root classification" in out and "1 by" in out, out
 
 
-# ── MUST 3(c): 不正な root は記録時に拒否される（schema enum、ledger.py append）──
+# ── MUST 3(c): an invalid root is refused at recording time (the schema enum, ledger.py append) ──
 def test_invalid_root_rejected_at_record_time(tmp_path):
     code, out = run("ledger.py", "append", str(tmp_path), "--actor", "gate",
                     "--class", "result_retired",
                     "--payload", json.dumps({"candidate_id": "A", "cause": "x",
                                              "root": "test_flaky"}))
-    assert code != 0, "不正な root が記録できてしまった"
+    assert code != 0, "an invalid root could be recorded"
     assert "root" in out and "is not an allowed value" in out, out
 
 
@@ -94,7 +97,8 @@ def test_valid_root_accepted_and_stored(tmp_path):
     assert rec["payload"]["root"] == "integration_base_moved"
 
 
-# ── 語彙の単一性: learning.DEATH_ROOTS と schema enum が同一（乖離＝検査の嘘）────
+# ── one vocabulary: learning.DEATH_ROOTS and the schema enum are identical (drift = the check
+#    lying) ──
 def test_vocabulary_matches_schema_enum():
     doc = yaml.safe_load((TEMPLATE / "ledger-schema.yaml").read_text(encoding="utf-8"))
     enums = doc["validation"]["enums"]
@@ -103,42 +107,44 @@ def test_vocabulary_matches_schema_enum():
             "self_written_premise", "other"} == expected
     for cls in ("result_retired", "rework_requested", "refutation_attempted"):
         assert set(enums[cls]["root"]) == expected, \
-            f"{cls} の root enum が learning.DEATH_ROOTS と乖離: {enums.get(cls)}"
+            f"{cls}'s root enum has drifted from learning.DEATH_ROOTS: {enums.get(cls)}"
 
 
 def test_death_roots_have_ja_descriptions():
     for k, v in learning.DEATH_ROOTS.items():
-        assert isinstance(v, str) and v.strip(), f"{k} に説明が無い"
+        assert isinstance(v, str) and v.strip(), f"{k} has no explanation"
 
 
-# ── REWORK（gate指摘）: `other` は「根の同一性」を主張できない ─────────────────────
+# ── REWORK (raised by the gate): `other` cannot claim "the roots are the same" ──────────
 def test_two_unrelated_other_records_do_not_escalate_as_same_root(tmp_path):
-    """`other` は判別する根ではない — 無関係な2つの死が両方 `other` なだけで
-    「文言は違っても根は同じ」と主張して escalate してはならない（それは記録されて
-    いない意味一致の捏造で、escalation チャネルを無視する訓練になる）。
-    選択(a): `other` は文字列一致にフォールバックし、単独で root 再発グループを作らない。"""
+    """`other` is not a discriminating root — two unrelated deaths both being `other` must never
+    escalate as "the wording differs but the root is the same" (that fabricates a semantic match
+    nobody recorded, and trains people to ignore the escalation channel).
+    Choice (a): `other` falls back to string matching and never forms a root recurrence group on its
+    own."""
     seed(tmp_path, "gate", "result_retired",
-         {"candidate_id": "A", "cause": "依存パッケージのライセンス問題",
+         {"candidate_id": "A", "cause": "a licensing problem in a dependency",
           "root": "other"}, ts="2026-07-16T01:00:00Z")
     seed(tmp_path, "gate", "result_retired",
-         {"candidate_id": "B", "cause": "顧客要件の撤回",
+         {"candidate_id": "B", "cause": "the customer withdrew the requirement",
           "root": "other"}, ts="2026-07-16T02:00:00Z")
     code, out = run("learning.py", "repeats", str(tmp_path))
     assert code == 0 and "clean" in out, \
-        f"無関係な other 2件を『根は同じ』として escalate した: {out}"
+        f"it escalated two unrelated others as \"the same root\": {out}"
     assert "REPEATED DEATH" not in out
 
 
 def test_same_string_other_records_still_detected(tmp_path):
-    # フォールバック先の文字列一致は生きている: other + 同一文言 → 検出
+    # The string match it falls back to is alive: other + identical wording → detected
     for cid, ts in (("A", "2026-07-16T01:00:00Z"), ("B", "2026-07-16T02:00:00Z")):
         seed(tmp_path, "gate", "result_retired",
-             {"candidate_id": cid, "cause": "同じ死因", "root": "other"}, ts=ts)
+             {"candidate_id": cid, "cause": "the same cause of death", "root": "other"}, ts=ts)
     code, out = run("learning.py", "repeats", str(tmp_path))
     assert code == 10 and "REPEATED DEATH" in out, out
 
 
-# ═══ REWORK #2（skeptic指摘: 修正が休眠 — 本番の書き手が root を運べない）═══════════
+# ═══ REWORK #2 (raised by the skeptic: the fix lay dormant — the real writers could not carry
+#     root) ═══
 import argparse
 import importlib
 import os
@@ -151,14 +157,14 @@ def _mod(name):
     return importlib.import_module(name)
 
 
-# ── 変更1a: org_cycle rework が --root を台帳 payload まで運ぶ ─────────────────────
+# ── change 1a: org_cycle rework carries --root through to the ledger payload ────────────
 def test_org_cycle_rework_carries_root_into_payload(monkeypatch):
     m = _mod("orgcycle.judge")
     calls = []
     monkeypatch.setattr(m, "_gh_sync", lambda *a: (calls.append(("gh",) + a) or (0, "ok")))
     monkeypatch.setattr(m, "_ledger", lambda *a: (calls.append(("ledger",) + a) or (0, "ok")))
     ns = argparse.Namespace(issue=32, after="refuted", by="supervisor",
-                            reason="placebo テストを直す", to="maker", round=2,
+                            reason="fix the placebo test", to="maker", round=2,
                             root="placebo_test")
     assert m.cmd_rework(ns) == 0
     led = [c for c in calls if c[0] == "ledger"][0]
@@ -175,9 +181,9 @@ def test_org_cycle_rework_rejects_unknown_root(monkeypatch, capsys):
                             reason="x", to="maker", round=2, root="totally_made_up_root")
     rc = m.cmd_rework(ns)
     out = capsys.readouterr()
-    assert rc == 2, f"未知の root が拒否されなかった (rc={rc})"
-    assert not calls, "拒否したのに副作用（gh/ledger）が走った"
-    assert "placebo_test" in out.err + out.out, "許される値の一覧が出ていない"
+    assert rc == 2, f"an unknown root was not refused (rc={rc})"
+    assert not calls, "it refused, yet a side effect (gh/ledger) ran"
+    assert "placebo_test" in out.err + out.out, "the list of permitted values is not printed"
 
 
 def test_org_cycle_rework_help_offers_root():
@@ -186,10 +192,11 @@ def test_org_cycle_rework_help_offers_root():
     assert p.returncode == 0 and "--root" in p.stdout, p.stdout + p.stderr
 
 
-# ── 変更1b: github_sync decide が --root を台帳 payload まで運ぶ ────────────────────
+# ── change 1b: github_sync decide carries --root through to the ledger payload ───────────
 def _decide_ns(**kw):
     base = dict(repo="o/r", issue=5, event="refutation_attempted", verdict="refuted",
-                why="スケルトンの検査は fixture 経由で本番経路を迂回しており、性質が壊れる場所を測っていない。",
+                why="the skeleton's check goes through a fixture and bypasses the real path, so it "
+                    "does not measure where the property breaks.",
                 by="skeptic", phase=None, evidence=None, alternatives=None,
                 standard=None, risk=None, event_id="ev-r1", lineage=None,
                 claimed=None, verified=None, root=None)
@@ -230,10 +237,10 @@ def test_github_sync_decide_rejects_unknown_root(monkeypatch, tmp_path, capsys):
     monkeypatch.setenv("ORG_LEDGER_ROOT", str(led))
     rc = rec.cmd_decide(_decide_ns(root="totally_made_up_root"))
     out = capsys.readouterr()
-    assert rc == 2, f"未知の root が拒否されなかった (rc={rc})"
+    assert rc == 2, f"an unknown root was not refused (rc={rc})"
     assert not posted and not (led / "ledger.jsonl").exists(), \
-        "拒否したのに Issue / 台帳に書いた"
-    assert "placebo_test" in out.err + out.out, "許される値の一覧が出ていない"
+        "it refused, yet wrote to the Issue / the ledger"
+    assert "placebo_test" in out.err + out.out, "the list of permitted values is not printed"
 
 
 def test_github_sync_decide_help_offers_root():
@@ -242,37 +249,42 @@ def test_github_sync_decide_help_offers_root():
     assert p.returncode == 0 and "--root" in p.stdout, p.stdout + p.stderr
 
 
-# ── 変更2 (M4): 移行期でも限界警告は消えない（unclassified >= 1 で出す）──────────────
+# ── change 2 (M4): the limits warning does not vanish during migration (printed at
+#    unclassified >= 1) ──
 def test_limitation_warning_survives_migration_mix(tmp_path):
-    """skeptic lab2: 分類済み1 + 未分類1（根は同じだが片方に root が無い）→ clean のまま
-    だが、文字列一致の限界警告は**出続けなければならない**。移行期に警告が消えると、
-    未分類の1件が同根の再発でも黙って clean に見える。"""
+    """skeptic lab2: one classified and one unclassified (the same root, but one carries no root) →
+    it stays clean, yet the warning about the limits of string matching **must keep appearing**. If
+    the warning vanishes during migration, an unclassified death silently looks clean even when it
+    is a recurrence of the same root."""
     seed(tmp_path, "gate", "result_retired",
-         {"candidate_id": "A", "cause": "検査が本番経路を測っていない",
+         {"candidate_id": "A", "cause": "the check does not measure the real path",
           "root": "placebo_test"}, ts="2026-07-16T01:00:00Z")
     seed(tmp_path, "gate", "result_retired",
-         {"candidate_id": "B", "cause": "テスト硬化（同じ根、root 無し）"},
+         {"candidate_id": "B", "cause": "test hardening (same root, no root field)"},
          ts="2026-07-16T02:00:00Z")
     code, out = run("learning.py", "repeats", str(tmp_path))
     assert code == 0 and "clean" in out, out
     assert "note:" in out and "**string**" in out, \
-        f"移行期（未分類1件）で限界警告が消えた: {out}"
+        f"the limits warning vanished during migration (one unclassified): {out}"
 
 
-# ── 変更3 (M5): 語彙の外の root で再発を捏造しない（旧 schema 経由でしか書けない値）────
+# ── change 3 (M5): a root outside the vocabulary does not fabricate a recurrence (a value
+#    writable only through the old schema) ──
 def test_unknown_root_string_does_not_fabricate_recurrence(tmp_path):
-    """skeptic lab4: enum の無い旧 schema（main 相当）の下でだけ書ける未知の root 文字列は、
-    root グループを形成してはならない — 無関係な死2件が `totally_made_up_root` を共有する
-    だけで「根は同じ」と escalate するのは再発の捏造。文字列一致にフォールバックする。"""
+    """skeptic lab4: an unknown root string, writable only under the old schema that has no enum
+    (equivalent to main), must never form a root group — escalating "the root is the same" merely
+    because two unrelated deaths share `totally_made_up_root` fabricates a recurrence. It falls back
+    to string matching."""
     old_schema = tmp_path / "old-schema.yaml"
-    # main（#104 以前）の形: result_retired は宣言されているが root の enum が無い
+    # The shape on main (before #104): result_retired is declared, but there is no root enum
     old_schema.write_text(
         "event_classes:\n"
         "  result_retired: {candidate_id, cause, observed_outcome, root}\n"
         "validation: {}\n", encoding="utf-8")
     env = {**os.environ, "ORG_LEDGER_SCHEMA": str(old_schema)}
-    for cid, cause, ts in (("A", "依存ライセンス問題", "2026-07-16T01:00:00Z"),
-                           ("B", "顧客要件の撤回", "2026-07-16T02:00:00Z")):
+    for cid, cause, ts in (("A", "a dependency licensing problem", "2026-07-16T01:00:00Z"),
+                           ("B", "the customer withdrew the requirement",
+                            "2026-07-16T02:00:00Z")):
         p = subprocess.run(
             [sys.executable, str(TOOLS / "ledger.py"), "append", str(tmp_path),
              "--actor", "gate", "--class", "result_retired", "--ts", ts,
@@ -282,7 +294,7 @@ def test_unknown_root_string_does_not_fabricate_recurrence(tmp_path):
         assert p.returncode == 0, p.stdout + p.stderr
     code, out = run("learning.py", "repeats", str(tmp_path))
     assert code == 0 and "clean" in out, \
-        f"語彙に無い root 文字列の共有だけで再発を escalate した: {out}"
+        f"it escalated a recurrence from a shared out-of-vocabulary root string: {out}"
     assert "REPEATED DEATH" not in out
 
 
