@@ -684,8 +684,8 @@ def test_show_lists_every_judgment_with_correction_marks():
     """One Issue's verdict history at a glance — which round, and which verdict."""
     src = _cycle_src()
     seg = src[src.index("def cmd_show"):]
-    assert "訂正済み" in seg and "backfill" in seg
-    assert "次:" in seg, "いま何待ちかが出ない"
+    assert "corrected" in seg and "backfill" in seg
+    assert "next:" in seg, "what it now waits on is not printed"
 
 
 def test_round_count_uses_the_larger_of_ledger_and_issue():

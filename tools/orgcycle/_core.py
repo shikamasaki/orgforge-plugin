@@ -1,7 +1,7 @@
-"""org_cycle の共有部品 — 実行・台帳・GitHub・識別子の解決。
+"""org_cycle's shared parts — execution, the ledger, GitHub, and resolving identifiers.
 
-ここに置くのは「どのサブコマンドからも使う」ものだけ。特定のサブコマンド専用の
-ヘルパは、そのサブコマンドのモジュールに置く（core が肥大すると分割の意味が消える）。"""
+Only what every subcommand uses belongs here. A helper for one particular subcommand goes in that
+subcommand's module (a bloated core makes the split pointless)."""
 
 import hashlib
 import json
@@ -11,21 +11,21 @@ import subprocess
 import sys
 
 
-# tools/ を指す。**このファイルは tools/orgcycle/ に居るので、親を1つ上る。**
-# 分割時にここを直し忘れ、_gh_sync が github_sync.py を見失って `_branch_for` が
-# slug 無しのブランチ名を返した（実地で show の実装行と integrate --plan の変更一覧が
-# 黙って空になった）。組み立て系のツールは「見つからない」を静かに素通りするので、
-# パスの基点は分割で最初に壊れる場所になる。
+# Points at tools/. **This file lives in tools/orgcycle/, so go up one parent.**
+# Forgetting to fix this during the split made _gh_sync lose sight of github_sync.py and
+# `_branch_for` return a branch name with no slug (in the field, show's implementation lines and
+# integrate --plan's change list silently went empty). Assembly-style tools walk past "not found"
+# quietly, which makes the base of a path the first thing a split breaks.
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, HERE)
 
 
 def _run(args, capture=True):
-    """python3 <tool> ... を実行。(code, out) を返す。
+    """Run python3 <tool> ... and return (code, out).
 
-    戻り値は stdout+stderr を混ぜたものなので、**呼ばれた側の banner が混ざる**。
-    `_branch_for` は先頭行を取るので今は無事だが、混ざりうる構造そのものを消す
-    （0.22.1 で「静かに壊れる」経路を1つ踏んだばかりである）。
+    The return value mixes stdout and stderr, so **the callee's banner mixes in**. `_branch_for`
+    takes the first line and is safe for now, but the structure that allows the mixing is removed
+    outright (0.22.1 had just stepped on one "breaks quietly" path).
     """
     env = dict(os.environ, ORG_QUIET="1")
     p = subprocess.run([sys.executable] + args, capture_output=capture, text=True,
@@ -34,7 +34,8 @@ def _run(args, capture=True):
 
 
 def _raw(args):
-    """外部コマンドをそのまま実行。(code, out) — _run は python3 を前置するので gh には使えない。"""
+    """Run an external command as-is. (code, out) — _run prefixes python3, so it cannot be used for
+    gh."""
     try:
         p = subprocess.run(args, capture_output=True, text=True, timeout=60)
         return p.returncode, (p.stdout or "")
@@ -56,13 +57,14 @@ def _repo():
 
 
 def resolve_integration_base(explicit=None, start=None):
-    """統合先 ref を決める。明示 --base > constitution の enforcement.judges.integration_ref。
+    """Decide the integration ref. An explicit --base beats the constitution's
+    enforcement.judges.integration_ref.
 
-    どちらも無ければ ``(None, 理由)`` を返す — **develop を推測しない**（#106）。
-    Tatekae 実測では constitution が `integration_ref: origin/main` を宣言しているのに
-    begin/show/gc/integrate が develop を hard-code し、「統合先はどこか」への答えが
-    1製品内に複数あった（OBS-048/053/054/057）。verify が使う解決
-    （review_freshness.integration_ref_policy — #81）をそのまま共有し、第二のパーサは書かない。
+    With neither, return ``(None, reason)`` — **develop is not guessed** (#106). Measured on Tatekae,
+    the constitution declared `integration_ref: origin/main` while begin/show/gc/integrate hard-coded
+    develop, so one product held several answers to "where does this integrate"
+    (OBS-048/053/054/057). The resolution verify uses (review_freshness.integration_ref_policy — #81)
+    is shared as-is; no second parser is written.
     """
     if explicit:
         return str(explicit), None
@@ -74,22 +76,23 @@ def resolve_integration_base(explicit=None, start=None):
     from review_freshness import integration_ref_policy
     declared, ref, err = integration_ref_policy(path)
     if err:
-        return None, f"integration ref policy が不正: {err}"
+        return None, f"the integration ref policy is invalid: {err}"
     if declared and ref:
         return ref, None
-    return None, ("統合先が決まらない。develop があるというだけで推測はしない（#106）。\n"
-                  "  constitution.yaml に `enforcement.judges.integration_ref: origin/main` "
-                  "のように宣言するか、\n"
-                  "  今回だけ `--base <ref>` を明示すること。")
+    return None, ("the integration target is undecided. The mere existence of develop is not a "
+                  "reason to guess (#106).\n"
+                  "  Either declare it in constitution.yaml, as "
+                  "`enforcement.judges.integration_ref: origin/main`,\n"
+                  "  or state `--base <ref>` explicitly for this run.")
 
 
 def local_branch_for(ref, cwd=None):
-    """checkout / PR base に使える branch 名。remote-tracking ref（origin/X）は X に写す。
+    """A branch name usable for checkout / a PR base. A remote-tracking ref (origin/X) maps to X.
 
-    integration_ref は「どこへ統合するか」の宣言なので origin/main のような remote-tracking
-    形で書かれる。`git checkout origin/main` は detached HEAD、`gh pr create --base origin/main`
-    はエラーになるので、実際に checkout / PR する文脈だけ branch 名に写す（判定・diff は
-    ref のまま使う）。"""
+    integration_ref declares where work integrates, so it is written in remote-tracking form like
+    origin/main. `git checkout origin/main` gives a detached HEAD and
+    `gh pr create --base origin/main` errors, so only the contexts that actually check out or open a
+    PR map it to a branch name (judgments and diffs keep the ref)."""
     code, _ = _raw(["git"] + (["-C", cwd] if cwd else [])
                    + ["rev-parse", "--verify", "--quiet", f"refs/remotes/{ref}"])
     if code == 0 and "/" in ref:
@@ -98,8 +101,9 @@ def local_branch_for(ref, cwd=None):
 
 
 def _execute(steps, label):
-    """順に実行し、最初の失敗で止める。**部分適用のまま黙って進まない**こと —
-    台帳の整合が崩れた状態を「成功」と報告するのが最悪なので、どこで止まったかを言う。"""
+    """Run in order and stop at the first failure. **Never proceed quietly half-applied** — the
+    worst outcome is reporting a ledger left inconsistent as "success", so it says where it
+    stopped."""
     print(f"— {label} —")
     for i, (desc, fn) in enumerate(steps, 1):
         code, out = fn()
@@ -108,25 +112,27 @@ def _execute(steps, label):
             print(f"  {i}. ✓ {desc}")
         elif code == 10:
             print(f"  {i}. ⚠ {desc} — contended: {tail}", file=sys.stderr)
-            print(f"\n止めた（{i}/{len(steps)} まで実行）。別のセッションが持っている。",
+            print(f"\nstopped (ran through {i}/{len(steps)}). Another session holds it.",
                   file=sys.stderr)
             return 10
         else:
             print(f"  {i}. ✗ {desc}\n      {tail}", file=sys.stderr)
-            print(f"\n止めた（{i-1}/{len(steps)} まで実行済み）。ここから先は打っていない。\n"
-                  f"台帳が拒否したなら順序違反（docs/11 §2）— 前提を満たしてから再実行すること。\n"
-                  f"再実行は安全: 各イベントは natural-key で冪等なので、済んだ分は no-op になる。",
+            print(f"\nstopped ({i-1}/{len(steps)} already ran). Nothing beyond this was typed.\n"
+                  f"A refusal from the ledger means an order violation (docs/11 §2) — satisfy the "
+                  f"precondition and run it again.\n"
+                  f"Re-running is safe: each event is idempotent by natural key, so what is done "
+                  f"becomes a no-op.",
                   file=sys.stderr)
             return 3
-    print(f"  完了（{len(steps)} 件）")
+    print(f"  done ({len(steps)} step(s))")
     return 0
 
 
 
-# ── verify（案2）: 配管だけを引き受ける ──────────────────────────────────────
-# ここが持ってよいのは「gate/skeptic を正しい材料つきで起動する」ことだけ。
-# verdict / why / risk / どのミューテーションを試すか は一切決めない。
-# ツールが判定した瞬間に gate は形骸化するので、その線は越えない。
+# ── verify (design 2): it takes on the plumbing only ────────────────────────
+# All this may hold is "start gate/skeptic with the right material".
+# It decides nothing about verdict, why, risk, or which mutation to try.
+# The moment a tool judges, the gate becomes a formality, so that line is not crossed.
 
 
 def _today():
@@ -135,8 +141,8 @@ def _today():
 
 
 def _plus_days(n):
-    """doctrine の TTL。既定は 180 日 — 「いつまで信じてよいか」の無い doctrine は、
-    古い前提のまま残って害になる（docs/06 §3）。"""
+    """The doctrine TTL. The default is 180 days — doctrine with no "how long may this be believed"
+    lingers on old premises and does harm (docs/06 §3)."""
     for fmt in (["date", "-u", "-v", f"+{n}d", "+%Y-%m-%d"],
                 ["date", "-u", "-d", f"+{n} days", "+%Y-%m-%d"]):
         code, out = _raw(fmt)
@@ -146,7 +152,7 @@ def _plus_days(n):
 
 
 def _sub(kind):
-    """doctrine / conventions のルート。discovery に任せる（環境変数の設定を要求しない）。"""
+    """The doctrine / conventions root. Left to discovery (it demands no environment variable)."""
     try:
         sys.path.insert(0, HERE)
         from discover import _sub_root
@@ -156,7 +162,8 @@ def _sub(kind):
 
 
 def _issue_body(issue, repo=None):
-    """task Issue の title/body（= SPEC / MUST）。ここが検証対象の仕様そのもの。"""
+    """A task Issue's title/body (= the SPEC / MUSTs). This is the specification under
+    verification."""
     args = ["gh", "issue", "view", str(issue), "--json", "title,body"]
     r = repo or _repo()
     if r:
@@ -172,7 +179,7 @@ def _issue_body(issue, repo=None):
 
 
 def _branch_for(issue):
-    """その Issue のブランチ名。github_sync が決定的に導出するので、それを借りる。"""
+    """That Issue's branch name. github_sync derives it deterministically, so borrow that."""
     code, out = _gh_sync("branch", "--issue", str(issue))
     if code == 0 and out.strip():
         return out.strip().split("\n")[0]
@@ -180,7 +187,8 @@ def _branch_for(issue):
 
 
 def _events_for(issue):
-    """#issue に関係する台帳イベントを時系列で返す（訂正で無効化されたものは除く）。"""
+    """Return the ledger events relating to #issue in chronological order (excluding those voided by
+    a correction)."""
     root = None
     try:
         sys.path.insert(0, HERE)
@@ -212,13 +220,14 @@ def _events_for(issue):
 
 
 def _decision_for(issue, cls):
-    """#issue に対する `cls` の判定を台帳から探す。
+    """Find the `cls` judgment for #issue in the ledger.
 
-    identity は Issue 番号だが、実地では deliverable に "settle()"（関数名）が入った記録が
-    生まれた。**Issue 番号は payload の `issue` にも入っている**ので、片方だけ見て「無い」と
-    言うのは、揃っている情報を取りこぼしているだけ。両方見る。
+    identity is the Issue number, but in the field a record was produced with "settle()" (a function
+    name) in deliverable. **The Issue number is also in the payload's `issue`**, so reading one and
+    declaring "there is none" merely drops information that was there. Both are read.
 
-    返り値: (verdict, seq, near) — near は「番号は合わないが近い記録」（原因の特定用）。
+    Returns: (verdict, seq, near) — near is "a close record whose number does not match" (for
+    identifying the cause).
     """
     root = None
     try:
@@ -240,7 +249,7 @@ def _decision_for(issue, cls):
         if e.get("class") != cls:
             continue
         pl = e.get("payload", {}) or {}
-        # claim_id は refutation_attempted の識別子（candidate_id を指す）
+        # claim_id is refutation_attempted's identifier (it points at candidate_id)
         ids = [str(pl.get(k, "")).lstrip("#")
                for k in ("deliverable", "issue", "claim_id") if pl.get(k) is not None]
         if want in ids:
@@ -251,39 +260,41 @@ def _decision_for(issue, cls):
 
 
 def _admission_for(issue):
-    """gate の admission。詳細は _decision_for を見ること。"""
+    """The gate's admission. See _decision_for for the details."""
     return _decision_for(issue, "admission_decided")
 
 
 def _refutation_for(issue):
-    """skeptic の反証試行。**admission と同じ強度で照合する** —
+    """The skeptic's refutation attempt. **Reconciled with the same strength as an admission.**
 
-    docs/11 / agents/gate.md は「skeptic の反証を生き延びたものだけが deploy 可」と定めており、
-    台帳の requires_prior は `result_deployed` にそれを課している。しかし統合はその手前にあり、
-    実地では refutation_attempted が台帳に1件も無いまま develop へ統合されかけた
-    （Issue にはコメントがあったので、二重記録の片側だけが落ちていた）。
-    最も抜けやすいのは統合の直前なので、そこで照合する。
+    docs/11 and agents/gate.md set that only what survives the skeptic's refutation may deploy, and
+    the ledger's requires_prior imposes that on `result_deployed`. Integration, however, sits ahead
+    of that, and in the field work came close to being integrated into develop with not one
+    refutation_attempted in the ledger (the Issue carried a comment, so only one side of the double
+    record had gone missing).
+    The likeliest place for it to slip is just before integration, so that is where it reconciles.
     """
     return _decision_for(issue, "refutation_attempted")
 
 
 def resolve_parent(issue, repo=None):
-    """task Issue の親 objective 番号を **自動で** 解決する。
+    """Resolve a task Issue's parent objective number **automatically**.
 
-    人が目で拾って手打ちしていたのがここ。`github_sync create --parent` は body に `Parent: #N` を
-    書くので、そこから読める。GitHub のネイティブ sub-issue API も併用する（どちらか取れればよい）。
-    取れなければ None — 親を持たない deliverable は従来どおり自分の admit だけを見る。"""
+    This is what a human used to pick out by eye and type in. `github_sync create --parent` writes
+    `Parent: #N` into the body, so it can be read from there. GitHub's native sub-issue API is used
+    alongside it (either one succeeding is enough).
+    None where neither works — a deliverable with no parent reads only its own admit, as before."""
     repo = repo or _repo()
     if not repo:
         return None
-    # 1) ネイティブの親子関係（あれば最も確か）
+    # 1) the native parent/child relation (the most certain, where it exists)
     code, out = _run(["-c", "import subprocess,sys,json;"
                       "p=subprocess.run(['gh','api',f'repos/{sys.argv[1]}/issues/{sys.argv[2]}',"
                       "'--jq','.sub_issue_of.number // empty'],capture_output=True,text=True);"
                       "print(p.stdout.strip())", repo, str(issue)])
     if code == 0 and out.strip().isdigit():
         return out.strip()
-    # 2) body の `Parent: #N`（github_sync create が書く）
+    # 2) the body's `Parent: #N` (written by github_sync create)
     p = subprocess.run(["gh", "issue", "view", str(issue), "--repo", repo, "--json", "body",
                         "-q", ".body"], capture_output=True, text=True, timeout=30)
     if p.returncode == 0:
@@ -294,7 +305,7 @@ def resolve_parent(issue, repo=None):
 
 
 def _candidate_id(issue, repo=None):
-    """Issue body の `candidate_id:` トレーラを読む。無ければ Issue 番号を使う。"""
+    """Read the Issue body's `candidate_id:` trailer. Where there is none, use the Issue number."""
     repo = repo or _repo()
     if repo:
         p = subprocess.run(["gh", "issue", "view", str(issue), "--repo", repo, "--json", "body",
@@ -307,26 +318,28 @@ def _candidate_id(issue, repo=None):
     return f"issue-{issue}"
 
 
-# ── verify（案2）: 配管だけを引き受ける ──────────────────────────────────────
-# ここが持ってよいのは「gate/skeptic を正しい材料つきで起動する」ことだけ。
-# verdict / why / risk / どのミューテーションを試すか は一切決めない。
-# ツールが判定した瞬間に gate は形骸化するので、その線は越えない。
+# ── verify (design 2): it takes on the plumbing only ────────────────────────
+# All this may hold is "start gate/skeptic with the right material".
+# It decides nothing about verdict, why, risk, or which mutation to try.
+# The moment a tool judges, the gate becomes a formality, so that line is not crossed.
 
 def _agents_dir():
-    """agents/*.md の場所。プラグインとして入っている場合と、この repo を直接使う場合の両方。"""
+    """Where agents/*.md live — both installed as a plugin and using this repo directly."""
     # Codex injects PLUGIN_ROOT; Claude Code injects CLAUDE_PLUGIN_ROOT.  The
     # launcher can also invoke a bundled tool without either host variable, so
     # retain the tool-relative root as a final fallback.
     plugin_roots = [os.environ[name] for name in ("PLUGIN_ROOT", "CLAUDE_PLUGIN_ROOT")
                     if os.environ.get(name)]
-    # HERE は tools/ を指す（このファイルは tools/orgcycle/ に居る）。その親が
-    # プラグインルート / repo ルート。**分割時に `__file__` の階層が1つ深くなったのに
-    # ここを直さず、探索先が全部1階層ずれて憲章を見失った**（0.22.0 の実害）。
-    # 基点は HERE に集約する — `__file__` を各所で解決し直すと、また同じ穴を掘る。
+    # HERE points at tools/ (this file lives in tools/orgcycle/). Its parent is the plugin root /
+    # repo root. **During the split `__file__` went one level deeper and this was not fixed, so every
+    # search location shifted by one level and the charters were lost** (the real harm of 0.22.0).
+    # The base point is kept in HERE alone — re-resolving `__file__` all over digs the same hole
+    # again.
     bases = plugin_roots + [os.path.dirname(HERE)]
     for base in bases:
-        # プラグインとして入った形（agents/ は tools/ の兄弟）と、この repo を直接使う形の両方。
-        # 片方しか見ないと、バンドル側で憲章を見失って verify が成り立たなくなる。
+        # Both the installed-plugin shape (agents/ is a sibling of tools/) and using this repo
+        # directly. Reading only one loses the charters on the bundle side and verify stops
+        # holding.
         for d in (os.path.join(base, "agents"),
                   os.path.join(base, "integrations", "claude-code", "agents")):
             if os.path.isdir(d):
@@ -335,12 +348,13 @@ def _agents_dir():
 
 
 def banner():
-    """実行しているバージョンと cwd を stderr に1行出す。
+    """Print one line to stderr with the running version and the cwd.
 
-    **どのコピーを動かしているかが見えないと、古いパスを流用しても気づけない。**
-    実地で 0.26.0 のリリース後も 0.25.2 のパスを打っており（直前に使ったものを流用した）、
-    さらに `cd` が持続しない前提のコマンドの exit=1 を「塞がった証拠」と読みかけた。
-    可変値を流用したときに、次の行で気づける材料を置く。
+    **Without seeing which copy is running, reusing an old path goes unnoticed.**
+    In the field the 0.25.2 path was still being typed after 0.26.0 shipped (reused from what was
+    last used), and an exit=1 from a command that assumed `cd` persists came close to being read as
+    "evidence it is blocked".
+    This puts material on the next line that makes reusing a variable value noticeable.
     """
     ver = "?"
     for c in (os.path.join(os.path.dirname(HERE), ".claude-plugin", "plugin.json"),
@@ -353,26 +367,29 @@ def banner():
             break
         except Exception:
             continue
-    # **機械可読な出力を汚さない。** stderr に書いていても、消費側が 2>&1 で混ぜると
-    # JSON が壊れる（実地でテストが JSONDecodeError で落ちた）。人間向けの補助なので、
-    # --json や ORG_QUIET のときは黙る — 「便利のために壊す」のは筋が通らない。
+    # **Do not dirty machine-readable output.** Written to stderr or not, a consumer mixing streams
+    # with 2>&1 breaks the JSON (in the field a test failed with JSONDecodeError). This is a
+    # convenience for humans, so it stays quiet under --json or ORG_QUIET — "break it for
+    # convenience" does not hold up.
     if "--json" in sys.argv or os.environ.get("ORG_QUIET"):
         return
     print(f"[orgforge {ver} @ {os.getcwd()}]", file=sys.stderr)
 
 
 def _worktree_tree_sha(cwd=None):
-    """作業ツリー全体（tracked / staged / unstaged / **untracked**）を1つの tree SHA に束ねる。
+    """Bundle the whole working tree (tracked / staged / unstaged / **untracked**) into one tree SHA.
 
-    `git diff HEAD` は未追跡ファイルの内容を含まない。名前だけ拾って中身を見ないと、
-    **未追跡ファイルの内容を丸ごと差し替えても同じ id になる**（監査が実証）。judge が
-    未追跡ファイルを読んで判定していれば、別の成果物を「同じもの」として一致させられる。
+    `git diff HEAD` does not include the content of untracked files. Picking up names without reading
+    content means **replacing an untracked file's content entirely still yields the same id**
+    (demonstrated in an audit). Where a judge read untracked files to judge, two different
+    deliverables could be made to agree as "the same thing".
 
-    そこで **一時 index** に作業ツリーを読み込んで `git write-tree` する。`GIT_INDEX_FILE` で
-    別ファイルを指すので、**実 index は変更しない** — 監督の staging 状態を壊さない。
+    So the working tree is read into a **temporary index** and `git write-tree` run over it. Since
+    `GIT_INDEX_FILE` points at a separate file, **the real index is not modified** — the supervisor's
+    staging state is not broken.
 
-    .gitignore された生成物は含めない（`--exclude-standard`）。ビルド出力やのモジュール群で
-    id が毎回変わるなら、同じレビューを2度行えなくなる。
+    Artifacts excluded by .gitignore are left out (`--exclude-standard`). If build output and module
+    trees changed the id every time, the same review could never be performed twice.
     """
     import tempfile as _tf
     def _git(*args, env=None):
@@ -388,10 +405,10 @@ def _worktree_tree_sha(cwd=None):
 
     fd, idx = _tf.mkstemp(prefix="orgforge-index-")
     os.close(fd)
-    os.unlink(idx)                       # git は存在しないパスに新規 index を作る
+    os.unlink(idx)                       # git creates a fresh index at a path that does not exist
     env = {"GIT_INDEX_FILE": idx}
     try:
-        # HEAD の内容を土台にし、作業ツリーの実状態を重ねる
+        # Take HEAD's content as the base and lay the working tree's real state over it
         _git("read-tree", "HEAD", env=env)
         _git("add", "-A", "--", ".", env=env)
         code, tree = _git("write-tree", env=env)
@@ -405,12 +422,14 @@ def _worktree_tree_sha(cwd=None):
 
 
 def issue_worktree(issue, cwd=None):
-    """`begin` が作る Issue worktree の正準パス `.orgforge/wt/issue-<N>` を解決する。
+    """Resolve the canonical path `.orgforge/wt/issue-<N>` of the Issue worktree `begin` creates.
 
-    レイアウトの出所は `ghsync.branch._make_worktree`（primary checkout の toplevel 直下）。
-    第2のレイアウトを発明しない — ここは**解決だけ**を再現する。linked worktree の中から
-    呼ばれても primary に解決する（`git worktree list --porcelain` の先頭は常に primary）。
-    解決できなければ None（呼び手が fail-closed にする — cwd で代用しない）。
+    The layout originates in `ghsync.branch._make_worktree` (directly under the primary checkout's
+    toplevel). No second layout is invented — this reproduces **the resolution only**. Called from
+    inside a linked worktree it still resolves to the primary (`git worktree list --porcelain` always
+    lists the primary first).
+    None where it cannot be resolved (the caller fails closed — the cwd is not used as a
+    substitute).
     """
     d = os.path.abspath(cwd or os.getcwd())
     try:
@@ -428,19 +447,23 @@ def issue_worktree(issue, cwd=None):
 
 
 def resolve_issue_branch(issue, derived=None, cwd=None):
-    """Issue の**実在する** branch を2段で解決する（#107）。``(branch, warn, err)`` を返す。
+    """Resolve the Issue's **actually existing** branch in two stages (#107). Returns
+    ``(branch, warn, err)``.
 
-    タイトル slug から導出した名前は**作成時の規約**であって恒久 identity ではない —
-    タイトル変更や手動命名で実在名とずれる。Tatekae 実測（OBS-012 / OBS-048欠陥6 /
-    OBS-057原因2）では導出名 `feat/issue-15-google` が実在せず（実在は
-    `feat/issue-15-login-redirect`）、`git branch --merged --list <導出名>` が常に空になり、
-    gc が統合済み worktree を「未統合」として永久に残した。
+    A name derived from the title slug is **a convention at creation time**, not a permanent identity
+    — a retitling or a manual name puts it out of step with the real one. Measured on Tatekae
+    (OBS-012 / OBS-048 defect 6 / OBS-057 cause 2), the derived name `feat/issue-15-google` did not
+    exist (the real one was `feat/issue-15-login-redirect`),
+    `git branch --merged --list <derived name>` was therefore always empty, and gc left an integrated
+    worktree standing forever as "unintegrated".
 
-    (a) Issue worktree（`.orgforge/wt/issue-N`、issue_worktree が解決）が実在するなら、
-        その HEAD branch が**常に真** — 実際に作業されたのはそこである。
-        導出名とずれていれば warn で言う（黙ってどちらかを選ばない）。
-    (b) 無ければ、導出名が**実在する場合に限り**使う（`git rev-parse --verify`）。
-    (c) どちらも無ければ err — **実在しない導出名を黙って信じない**（fail-closed）。
+    (a) Where the Issue worktree (`.orgforge/wt/issue-N`, resolved by issue_worktree) exists, its
+        HEAD branch is **always true** — that is where the work actually happened.
+        Where it differs from the derived name, say so with a warn (never pick one silently).
+    (b) Otherwise use the derived name, **only where it actually exists**
+        (`git rev-parse --verify`).
+    (c) Where neither exists, err — **a derived name that does not exist is not silently believed**
+        (fail-closed).
     """
     try:
         wt = issue_worktree(issue, cwd)
@@ -451,33 +474,35 @@ def resolve_issue_branch(issue, derived=None, cwd=None):
     if head:
         warn = None
         if derived and derived != head:
-            warn = (f"導出名 `{derived}` と worktree の実 branch `{head}` が一致しない"
-                    f"（タイトル変更か手動命名）。worktree "
-                    f".orgforge/wt/issue-{issue} の HEAD を採用する（#107）。")
+            warn = (f"the derived name `{derived}` does not match the worktree's real branch "
+                    f"`{head}` (a retitling or a manual name). The HEAD of the worktree "
+                    f".orgforge/wt/issue-{issue} is taken (#107).")
         return head, warn, None
     if derived:
         code, _out = _raw(["git"] + (["-C", cwd] if cwd else [])
                           + ["rev-parse", "--verify", "--quiet", f"refs/heads/{derived}"])
         if code == 0:
             return derived, None, None
-    # 事実だけを言う: worktree が「無い」のか「在るが branch を指していない（detached HEAD）」
-    # のかは別の状態で、直し方も違う。嘘の診断は直し方まで誤らせる。
-    wt_state = (f"worktree .orgforge/wt/issue-{issue} は在るが detached HEAD で"
-                f"（branch を指していない）" if wt_exists
-                else f"worktree .orgforge/wt/issue-{issue} も無い")
+    # State the facts alone: "there is no worktree" and "there is one but it points at no branch (a
+    # detached HEAD)" are different states with different fixes. A false diagnosis misdirects the fix
+    # as well.
+    wt_state = (f"the worktree .orgforge/wt/issue-{issue} exists but is a detached HEAD "
+                f"(it points at no branch)" if wt_exists
+                else f"there is no worktree .orgforge/wt/issue-{issue} either")
     return None, None, (
-        f"Issue #{issue} の branch を解決できない: 導出名 `{derived or '(導出できず)'}` は"
-        f"実在の branch ではなく、{wt_state}。\n"
-        f"  実在の候補は `git branch --list 'feat/issue-{issue}*'` で探せる。\n"
-        f"  これから作るなら `github_sync branch --issue {issue} --worktree` で"
-        f"branch ごと worktree を作ること。")
+        f"cannot resolve the branch for Issue #{issue}: the derived name "
+        f"`{derived or '(could not be derived)'}` is not a branch that exists, and {wt_state}.\n"
+        f"  Existing candidates can be found with `git branch --list 'feat/issue-{issue}*'`.\n"
+        f"  To create one now, use `github_sync branch --issue {issue} --worktree`, which makes the "
+        f"worktree together with the branch.")
 
 
 def issue_worktree_head(issue, cwd=None):
-    """Issue worktree（.orgforge/wt/issue-N）が実在するなら、その HEAD branch 名。
+    """The HEAD branch name of the Issue worktree (.orgforge/wt/issue-N) where it exists.
 
-    無い / 偽 worktree / detached HEAD なら None。実在する Issue worktree の HEAD が
-    その Issue の branch の**真値**である（#107）— 実際に作業されたのはそこだから。"""
+    None where there is none, where it is a fake worktree, or where it is a detached HEAD. The HEAD
+    of an Issue worktree that exists is **the true value** of that Issue's branch (#107) — because
+    that is where the work actually happened."""
     try:
         wt = issue_worktree(issue, cwd)
     except Exception:
@@ -490,19 +515,20 @@ def issue_worktree_head(issue, cwd=None):
 
 
 def worktree_rooted_at(path):
-    """`path` が「**まさにそこを toplevel とする**実 worktree」かを実体で確かめる。
+    """Confirm by substance that `path` is a real worktree **whose own toplevel is exactly there**.
 
-    `os.path.isdir` だけでは偽 worktree が通る（skeptic が実証）: 失敗した
-    `git worktree add` が残す空ディレクトリ・prune せず再作成されたディレクトリ・
-    repo root への symlink は、どれも primary repo の**内側**に居るので `git -C` が
-    primary に解決し、subject が primary の tree（ahead=0・relation=current）として
-    警告なしに mint される — OBS-071 の偽造がそのまま再現する。
+    `os.path.isdir` alone lets a fake worktree through (demonstrated by a skeptic): the empty
+    directory a failed `git worktree add` leaves behind, a directory recreated without pruning, and a
+    symlink to the repo root all sit **inside** the primary repo, so `git -C` resolves to the primary
+    and the subject is minted without warning as the primary's tree (ahead=0, relation=current) —
+    reproducing the OBS-071 forgery exactly.
 
-    判定は2段: (1) canonical path 自体が symlink なら偽（実体が別の場所にある worktree
-    は worktree ではない）。(2) `git rev-parse --show-toplevel` の実体が path の実体と
-    一致して初めて「そこに worktree がある」— 空ディレクトリや残骸は toplevel が
-    primary root に解決するので、ここで落ちる。祖先の symlink（/var → /private/var 等）
-    は両辺 realpath なので誤検出しない。
+    The check has two stages: (1) a canonical path that is itself a symlink is fake (a worktree
+    whose substance lives elsewhere is not a worktree). (2) only once the substance of
+    `git rev-parse --show-toplevel` matches the substance of path is there "a worktree there" — an
+    empty directory or leftovers resolve their toplevel to the primary root and fail here. A symlink
+    among the ancestors (/var → /private/var and the like) produces no false positive, since both
+    sides are realpath'd.
     """
     if not path or os.path.islink(path) or not os.path.isdir(path):
         return False
@@ -518,29 +544,32 @@ def worktree_rooted_at(path):
 
 
 def review_subject(issue, role, phase=None, cwd=None, integration_ref=None):
-    """**判定対象の同一性**を1つの digest に束ねる。`verify` が一度だけ生成する。
+    """Bundle **the identity of what is judged** into one digest. `verify` generates it exactly once.
 
-    0.32.1 の一致要求は (issue, role, lineage, verdict) だけで一致を判定していた。そのため
-    **同一ハーネスが revision A を admit し、別ハーネスが revision B を admit しても joint が
-    生成された**（監査が実証）。judge が別の成果物を見ていたなら、それは一致ではない。
+    0.32.1's agreement requirement decided agreement from (issue, role, lineage, verdict) alone. So
+    **a joint was generated even where one harness admitted revision A and another admitted revision
+    B** (demonstrated in an audit). Where the judges looked at different deliverables, that is not
+    agreement.
 
-    束ねるもの:
+    What is bundled:
 
-        issue                その Issue
-        role                 gate か skeptic か（判定の種類）
-        phase                どのフェーズの判定か
-        integration_ref     統合先 ref
-        integration_head_sha 判定時点の統合先 head
-        base_sha             分岐元（何からの差分を見ているのか）
-        reviewed_tree_sha    **実際にレビューされた木**。commit ではなく tree にする —
-                             同じ内容の commit を作り直しても対象は変わらない
-        requirements_digest  受け入れ基準の内容。**基準が変われば別の判定である**
+        issue                that Issue
+        role                 gate or skeptic (the kind of judgment)
+        phase                which phase the judgment belongs to
+        integration_ref      the integration ref
+        integration_head_sha the integration target's head at judgment time
+        base_sha             where it branched from (a difference from what?)
+        reviewed_tree_sha    **the tree actually reviewed**. A tree rather than a commit — rebuilding
+                             a commit with the same content does not change the subject
+        requirements_digest  the content of the acceptance criteria. **Different criteria make it a
+                             different judgment**
 
-    `dirty` は隠さない。作業ツリーに未コミットの変更があるなら、reviewed_tree_sha は
-    **その時点の index/worktree** を指すべきで、「clean だったふり」をしてはいけない。
+    `dirty` is not hidden. Where the working tree carries uncommitted changes, reviewed_tree_sha
+    should point at **the index/worktree as it stands**, never pretending it was clean.
 
-    judge にこの値を作らせない。judge が subject を書けるなら、別の成果物を見た2件を
-    「同じものを見た」と申告して一致を作れる。**verify が観測し、judge は運ぶだけ。**
+    A judge does not produce this value. If a judge could write the subject, two judgments that
+    looked at different deliverables could be declared as "having looked at the same thing" and made
+    to agree. **verify observes it; the judge only carries it.**
     """
     def _git(*args):
         try:
@@ -551,9 +580,9 @@ def review_subject(issue, role, phase=None, cwd=None, integration_ref=None):
             return ""
 
     head_tree = _git("rev-parse", "HEAD^{tree}")
-    # **実際にレビューされた木**。commit ではなく tree にするのは、同じ内容の commit を
-    # 作り直しても対象は変わらないからである。未コミット・未追跡も含めて1つの id に束ねる
-    # （`git diff HEAD` は未追跡の内容を含まないので、それでは足りない）。
+    # **The tree actually reviewed.** A tree rather than a commit, because rebuilding a commit with
+    # the same content does not change the subject. Uncommitted and untracked content is bundled into
+    # the one id as well (`git diff HEAD` does not include untracked content, so it is not enough).
     tree = _worktree_tree_sha(cwd) or head_tree
     dirty = "1" if tree != head_tree else ""
     from review_freshness import integration_observation, subject_digest
