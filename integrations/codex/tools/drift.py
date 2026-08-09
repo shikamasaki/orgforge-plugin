@@ -1,23 +1,25 @@
 #!/usr/bin/env python3
-"""drift — 却下事由を横断して、共通因子を数える。**判定はしない。**
+"""drift — count the common factors across reasons for refusal. **It does not judge.**
 
-## なぜ「1件ごとの検査」だけでは足りないか
+## Why per-item checks are not enough on their own
 
-orgforge の検査（gate / skeptic / repro_lint / intake）はすべて **1件ごとの判定** である。
-1件ずつは正しく効いていても、「今夜 reject が18回出た、その事由の共通因子は何か」を見る組織が
-無い。**同じ因子で18回落ちているなら、直すべきは18件の成果物ではなく、その因子を生んでいる
-指示・spec・慣習の側である。**
+Every check orgforge runs (gate / skeptic / repro_lint / intake) is a **per-item judgment**. Each
+may be working correctly and still nobody is asking "there were 18 rejects tonight — what do their
+reasons have in common?" **If 18 fell to the same factor, what needs fixing is not 18 deliverables
+but whatever is producing that factor: the instructions, the spec, the conventions.**
 
-レジリエンスエンジニアリングの言い方では、**意図された仕事（WAI）と実際に行われた仕事（WAD）の
-乖離**を、個々の因果ではなく「日常の変動をファクターへ解体し、共通点を見る」ことで掘り出す。
-このコマンドはその材料を出す係で、**どう直すかは監督が決める**。
+In resilience-engineering terms, this digs out the gap between **work-as-imagined and
+work-as-done** — not by tracing individual causation, but by decomposing everyday variation into
+factors and looking at what they share. This command produces that material; **how to fix it is the
+supervisor's decision.**
 
-## 台帳だけでは数えられない
+## The ledger alone cannot count it
 
-`admission_decided` / `refutation_attempted` の payload は `reasoning_sha256`（ハッシュ）しか
-持たず、**散文の why は Issue コメントにしか存在しない**。したがって台帳で「どの Issue が何回
-落ちたか」を確定させ、事由の本文は Issue から読む。台帳だけを見て「事由を数えた」と言うことは
-できない — 数えられないものを数えたと言わないのが、この道具の役目でもある。
+The payload of `admission_decided` / `refutation_attempted` carries only `reasoning_sha256` — a
+hash — and **the prose of the why exists solely in an Issue comment**. So the ledger settles which
+Issue fell how many times, and the reason itself is read from the Issue. Looking only at the ledger
+and claiming to have counted reasons is not possible — and not claiming to have counted what cannot
+be counted is part of this tool's job.
 """
 
 import argparse
@@ -30,28 +32,31 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
-# 却下事由のファクター。**成果物の欠陥ではなく、乖離の型**で切る。
-# 「テストが無い」ではなく「MUST の文言は満たしたが意図を満たしていない」のような、
-# 指示や spec の側に手を入れられる粒度にする — でなければ材料にならない。
+# The factors a refusal falls into. Cut by **the shape of the gap, not the defect in the
+# deliverable**: not "there are no tests" but "it satisfied the MUST's wording while betraying its
+# intent" — a grain at which the instructions or the spec can actually be changed. Anything coarser
+# is not material to act on.
+# The patterns themselves keep their Japanese alternatives: they match the prose a judge wrote, and
+# this org's judges write Japanese. That is INPUT matching, not source language.
 _FACTORS = (
-    ("意図と文言の乖離",
+    ("intent vs wording",
      r"文言(?:だけ|のみ)|意図を裏切|placebo|プラセボ|形だけ|体裁|見せかけ|"
      r"満たしているように見え|字面"),
-    ("未測定のまま断定",
+    ("asserted without measuring",
      r"未測定|測っていな|計測していな|再導出できな|確認していな|検証していな|"
      r"実行していな|エビデンスが無|証跡が無"),
-    ("土台の欠落（後続が乗れない）",
+    ("missing foundation (nothing can be built on it)",
      r"依存(?:関係)?が無|インストールされていな|package\.json に無|"
      r"環境が無|設定が無|後続|土台|基盤が"),
-    ("範囲の逸脱・取りこぼし",
+    ("out of scope, or missed within it",
      r"範囲外|スコープ外|out_of_scope|MUST の一部|漏れ|抜け落ち|含まれていな"),
-    ("再現性の欠落",
+    ("not reproducible",
      r"再現できな|repro|手順が無|同じ結果にならな|環境依存"),
-    ("既存の壊し",
+    ("broke something that worked",
      r"回帰|regression|既存の.*壊|落ちるようになった|失敗するようになった"),
-    ("権限・認可",
+    ("permission and authorisation",
      r"RLS|認可|権限|policy|ポリシー|漏洩|他人の|越境"),
-    ("型・静的検査の逃げ",
+    ("escaping the type or static check",
      r"ignoreBuildErrors|any 型|as any|@ts-|型を逃|typecheck を"),
 )
 
@@ -65,13 +70,14 @@ def _sh(cmd):
 
 
 def _ledger_rejections(window_days):
-    """台帳から (issue, class, verdict, actor, ts) を集める。訂正済みは数えない。"""
+    """Collect (issue, class, verdict, actor, ts) from the ledger. Corrected records are not
+    counted."""
     from discover import ledger_root
     from ledger import voided_seqs
     root = ledger_root()
     path = os.path.join(root, "ledger.jsonl") if root else None
     if not path or not os.path.isfile(path):
-        print("台帳が見つからない。org のルートで実行すること。", file=sys.stderr)
+        print("cannot find the ledger. Run this from the org root.", file=sys.stderr)
         return None
     evs = []
     for line in open(path, encoding="utf-8"):
@@ -100,17 +106,20 @@ def _ledger_rejections(window_days):
 
 
 def _issue_reasons(issue):
-    """その Issue のコメントから **判定の事由だけ** を取り出す。台帳には無い部分である。
+    """Extract **only the reason for the judgment** from an Issue's comments — the part the ledger
+    does not hold.
 
-    コメントを丸ごと連結して正規表現を当ててはいけない。maker の報告・rework の指示・監督の
-    メモまで拾い、**8因子のうち4つが「全 Issue に該当」になって分布が消える**（実測。最初の
-    実装がそうなった）。判定コメントは
+    Never concatenate the comments and run the regex over the lot. It picks up the maker's report,
+    the rework instruction and the supervisor's notes as well, and **four of the eight factors come
+    out matching every Issue, so the distribution disappears** (measured — the first implementation
+    did exactly that). A judgment comment has the structure
 
         ## ⛔ admission_decided — `reject`
-        **Why (the reasoning):**   ← ここが事由
-        **Evidence consulted:**    ← ここから先は別の話
+        **Why (the reasoning):**   ← the reason is here
+        **Evidence consulted:**    ← from here on it is a different matter
 
-    という構造を持っているので、`Why` 節だけを切り出す。**構造があるものを本文検索で当てない。**
+    so only the `Why` section is cut out. **Never match by full-text search something that has a
+    structure.**
     """
     raw = _sh(["gh", "issue", "view", str(issue), "--json", "comments"])
     if not raw:
@@ -122,7 +131,7 @@ def _issue_reasons(issue):
     hits = []
     for c in cs:
         b = c.get("body") or ""
-        # 判定コメントの見出しを持つものだけ
+        # only those carrying a judgment comment's heading
         if not re.search(r"^##\s*\S*\s*(?:admission_decided|refutation_attempted)\s*—\s*`?"
                          r"(?:reject|refuted)`?", b, re.I | re.M):
             continue
@@ -138,22 +147,23 @@ def cmd_factors(a):
     if rows is None:
         return 3
     if not rows:
-        print("却下・反証の記録が台帳に無い。数える材料が無い。")
+        print("the ledger holds no refusals or refutations. There is nothing to count.")
         return 0
 
     by_issue = {}
     for r in rows:
         by_issue.setdefault(r["issue"], []).append(r)
 
-    print(f"— 却下・反証 {len(rows)} 件 / Issue {len(by_issue)} 件")
-    print(f"  台帳が持つのは判定の事実と reasoning_sha256 まで。"
-          f"**事由の散文は Issue コメントにしか無い**ので、そちらから読む。\n")
+    print(f"— {len(rows)} refusal(s)/refutation(s) across {len(by_issue)} Issue(s)")
+    print(f"  The ledger holds the fact of the judgment and reasoning_sha256, no further. "
+          f"**The prose of the reason exists only in an Issue comment**, so it is read from "
+          f"there.\n")
 
     factor_hits, unmatched, read = {}, [], 0
     for iss in sorted(by_issue, key=lambda x: -len(by_issue[x])):
         bodies = _issue_reasons(iss)
         if not bodies:
-            unmatched.append((iss, len(by_issue[iss]), "Issue コメントを読めなかった"))
+            unmatched.append((iss, len(by_issue[iss]), "the Issue comments could not be read"))
             continue
         read += 1
         text = "\n".join(bodies)
@@ -163,34 +173,40 @@ def cmd_factors(a):
                 factor_hits.setdefault(name, []).append(iss)
                 matched = True
         if not matched:
-            unmatched.append((iss, len(by_issue[iss]), "既知のファクターに当たらない"))
+            unmatched.append((iss, len(by_issue[iss]), "matches no known factor"))
 
-    print(f"===== 却下事由の共通因子（Issue {read} 件のコメントから）=====")
+    print(f"===== common factors across the reasons (from the comments of {read} Issue(s)) =====")
     if not factor_hits:
-        print("  共通因子として数えられたものが無い。")
+        print("  nothing could be counted as a common factor.")
     for name, isses in sorted(factor_hits.items(), key=lambda kv: -len(kv[1])):
         bar = "█" * len(isses)
         print(f"  {len(isses):>3} Issue  {bar:<12} {name}")
         print(f"            #{'  #'.join(sorted(isses, key=lambda x: int(x) if x.isdigit() else 0))}")
 
     if unmatched:
-        # **数えられなかったものを黙って落とさない。** 落としたぶんは「共通因子はこれだけ」の
-        # 読みを狂わせる — 道具は「見ていない」ことを言う（docs/11）。
-        print(f"\n===== 数えられなかった {len(unmatched)} 件 =====")
+        # **Never drop what could not be counted, silently.** Whatever is dropped distorts the
+        # reading "these are the common factors" — the tool says what it has not looked at
+        # (docs/11).
+        print(f"\n===== {len(unmatched)} that could not be counted =====")
         for iss, n, why in unmatched:
-            print(f"  #{iss}（却下 {n} 回）— {why}")
-        print("  この分は上の集計に入っていない。**「共通因子はこれだけ」と読まないこと。**")
+            print(f"  #{iss} ({n} refusal(s)) — {why}")
+        print("  These are not in the totals above. **Do not read them as \"these are the common "
+              "factors\".**")
 
     top = max(factor_hits.items(), key=lambda kv: -(-len(kv[1]))) if factor_hits else None
-    print(f"\n===== 材料はここまで。判断は監督のもの =====")
+    print(f"\n===== the material ends here. The judgment is the supervisor's =====")
     if top and len(top[1]) >= 2:
-        print(f"  最も多いのは「{top[0]}」が {len(top[1])} Issue。\n"
-              f"  同じ因子で複数落ちているなら、**直すべきは個々の成果物ではなく、その因子を"
-              f"生んでいる側**かもしれない — spec の書き方、gate に渡している基準、\n"
-              f"  conventions、あるいは分割の粒度。**どれなのかはこの道具には分からない。**")
+        print(f"  The largest is \"{top[0]}\", across {len(top[1])} Issue(s).\n"
+              f"  Where several fell to the same factor, **what needs fixing may not be the "
+              f"individual deliverables but whatever is producing that factor** — how the spec is "
+              f"written, the standard handed to the gate,\n"
+              f"  the conventions, or the grain of the decomposition. **Which of them it is, this "
+              f"tool cannot tell.**")
     else:
-        print("  複数の Issue に跨る因子は出ていない。個別の欠陥として扱うのが自然。")
-    print("  この読みを org の資産にするなら conventions に書くこと（次の maker が読む）:\n"
+        print("  No factor spans several Issues. Treating them as individual defects is the "
+              "natural reading.")
+    print("  To make this reading an asset of the org, write it into conventions (the next maker "
+          "reads it):\n"
           f'    python3 "{os.path.join(HERE, "doctrine.py")}" --help')
     return 0
 
@@ -198,11 +214,14 @@ def cmd_factors(a):
 def main():
     p = argparse.ArgumentParser(
         prog="drift",
-        description="却下事由を横断して共通因子を数える。判定はしない — 材料を出すだけ。")
+        description="count the common factors across reasons for refusal. It does not judge — it "
+                    "only produces the material.")
     sub = p.add_subparsers(dest="cmd", required=True)
-    f = sub.add_parser("factors", help="却下・反証の事由をファクターに解体して数える")
+    f = sub.add_parser("factors", help="decompose the reasons for refusal/refutation into factors "
+                                       "and count them")
     f.add_argument("--window", type=int, default=0,
-                   help="遡る日数（0 = 全期間。既定は全期間 — 少ないうちは絞ると何も出ない）")
+                   help="how many days back (0 = all time, the default — narrowing it while there "
+                        "is little data yields nothing)")
     f.set_defaults(fn=cmd_factors)
     a = p.parse_args()
     return a.fn(a)

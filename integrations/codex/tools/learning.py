@@ -33,18 +33,21 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _organ import ESCALATE, OK, read_events, emit_event   # noqa: E402
 
-# ── 死因の「根」の分類語彙（closed vocabulary、Issue #104 / OBS-052）────────────────
-# 実地（Tatekae）では、同じ根の失敗が別の言葉で記録され、文字列完全一致の検出器が
-# 3回連続で clean を出した。**自由文の意味一致を機械に推測させない** — 記録する側が
-# 記録時に分類する。語彙は ledger-schema.yaml validation.enums の `root` と同一で
-# なければならない（tests/test_learning.py が突き合わせる）。
+# ── the closed vocabulary for the "root" of a death (Issue #104 / OBS-052) ──────────
+# In the field (Tatekae), failures with the same root were recorded in different words and a
+# detector matching whole strings reported clean three times running. **Never make a machine guess
+# that two pieces of free prose mean the same thing** — whoever records classifies at record time.
+# The vocabulary must be identical to `root` in ledger-schema.yaml's validation.enums
+# (tests/test_learning.py reconciles them).
 DEATH_ROOTS = {
-    "placebo_test":          "検査が本番経路を測っていない（テスト硬化・placebo テスト）",
-    "declaration_drift":     "宣言と実装が乖離した",
-    "integration_base_moved": "統合先が動いて前提が崩れた",
-    "self_written_premise":  "検査される当事者が検査の前提を書ける",
-    "other":                 "上記のどれでもない（自由文 cause で根を補足すること。判別する根では"
-                             "ないので再発は文字列一致でしか見えない — root グループを形成しない）",
+    "placebo_test":          "the check does not measure the path used in production (a hardened "
+                             "or placebo test)",
+    "declaration_drift":     "the declaration and the implementation drifted apart",
+    "integration_base_moved": "the integration target moved and the premise collapsed",
+    "self_written_premise":  "the party being checked can write the premise of the check",
+    "other":                 "none of the above (add the root in the free-prose cause. This is not "
+                             "a root that discriminates, so a recurrence is visible only by string "
+                             "match — it forms no root group)",
 }
 
 
@@ -155,13 +158,15 @@ def cmd_repeats(a):
     times, naming the deaths, so "learning lifts quality" is a checked fact, not a hope. Silent when every
     death cause is distinct (no lesson was ignored).
 
-    再発は記録時の根分類 `root`（DEATH_ROOTS）で数え、root の無いレガシー記録だけ文字列完全一致に
-    フォールバックする（Issue #104: 完全一致は同根の言い換えを素通りした）。"""
+    A recurrence is counted by the `root` classified at record time (DEATH_ROOTS); only legacy
+    records with no root fall back to matching whole strings (Issue #104: whole-string matching let
+    a rewording of the same root straight through)."""
     events = read_events(a.root)
     by_key = {}
-    # 「死因」を運ぶフィールドは書き手によって揺れる。以前は `cause` しか読まず、
-    # rework_requested は対象ですらなかったため、**同じ失敗を3回した org に対して
-    # 「学習が使われている」と報告した**。検出器が読むキーは、実際に書かれるキーに合わせる。
+    # The field carrying "the cause of death" varies by writer. Reading only `cause`, and not
+    # treating rework_requested as a subject at all, meant **reporting "learning is being used" to
+    # an org that had made the same mistake three times**. The keys the detector reads are matched
+    # to the keys actually written.
     _CAUSE_KEYS = ("cause", "hypothesized_cause", "reason", "why", "checklist_ref")
     _DEATH_CLASSES = ("result_retired", "rework_requested", "refutation_attempted")
 
@@ -172,25 +177,28 @@ def cmd_repeats(a):
                 return v
         return None
 
-    # 再発は **記録時の根分類（`root`、DEATH_ROOTS）** で数える。文字列一致は、root の無い
-    # レガシー記録への後方互換フォールバック（Issue #104: 完全一致は同根の言い換えを素通りした）。
-    classified = 0        # root が付いた死
-    unclassified = 0      # 自由文しか無い死（文字列完全一致でしか見えない）
+    # A recurrence is counted by **the root classified at record time** (`root`, DEATH_ROOTS).
+    # String matching is a backward-compatible fallback for legacy records with no root (Issue
+    # #104: whole-string matching let a rewording of the same root straight through).
+    classified = 0        # deaths carrying a root
+    unclassified = 0      # deaths with only free prose (visible solely by whole-string match)
     for e in events:
         p = e.get("payload", {})
         if e["class"] not in _DEATH_CLASSES:
             continue
         if e["class"] == "refutation_attempted" and p.get("verdict") != "refuted":
-            continue      # survives は死ではない
+            continue      # a survives is not a death
         root = str(p.get("root") or "").strip()
         cause = _cause_text_of(p)
-        # `other` は判別する根ではない — 「上記のどれでもない」が2件あっても、根が同じ
-        # ことは何も記録されていない。root グループにすると、無関係な死2件を「文言は
-        # 違っても根は同じ」と escalate する（意味一致の捏造。gate が実測で検出）。
-        # `other` は **マーカー付きの未分類** として文字列一致にフォールバックする。
-        # 同じ理由で **語彙（DEATH_ROOTS）の外の文字列も root グループにしない** —
-        # enum の無い旧 schema 経由でしか書けない値で、共有していても根の同一性は
-        # 何も記録されていない（skeptic が実測で検出）。文字列一致に落とす。
+        # `other` is not a root that discriminates — two records of "none of the above" record
+        # nothing about their roots being the same. Made into a root group, it would escalate two
+        # unrelated deaths as "different wording, same root" (a fabricated semantic match; caught by
+        # the gate through measurement). `other` falls back to string matching, as **marked
+        # unclassified**.
+        # For the same reason **a string outside the vocabulary (DEATH_ROOTS) forms no root group
+        # either** — it can only be written through an older schema without the enum, and sharing
+        # it records nothing about roots being identical (caught by the skeptic through
+        # measurement). It falls back to string matching.
         if root and root != "other" and root in DEATH_ROOTS:
             classified += 1
             key = ("root", root)
@@ -198,7 +206,7 @@ def cmd_repeats(a):
             unclassified += 1
             key = ("cause", str(cause).strip().lower())
         else:
-            continue      # 死因を読み取れない（下の unknown 分岐で数える）
+            continue      # the cause cannot be read (counted in the unknown branch below)
         by_key.setdefault(key, []).append({"seq": e["seq"], "cause": cause, "root": root or None,
                                            "candidate_id": p.get("candidate_id")})
     readable = classified + unclassified
@@ -208,35 +216,42 @@ def cmd_repeats(a):
                           and e.get("payload", {}).get("verdict") != "refuted"))
     if not repeated:
         if deaths and not readable:
-            # **読めるものが1件も無いのに clean と言わない。** 「繰り返していない」と
-            # 「見えていない」は別で、混同すると誤った安心になる — 検出器が嘘をつくのは、
-            # 検出器が無いより悪い（実地でまさにこれが起きた）。
-            print(f"unknown: {deaths} 件の差し戻し/反証があるが、死因を読み取れたものが0件。"
-                  f"繰り返しの有無は判定できていない。\n"
-                  f"  payload に {' / '.join(_CAUSE_KEYS)} のいずれかで死因を書き、あわせて "
-                  f"`root`（{'/'.join(DEATH_ROOTS)}）で根を分類すること。"
-                  f"書かれていない限り、同じ失敗を何度繰り返してもこの検出器は気づけない。")
+            # **Never say clean when not one record could be read.** "It has not recurred" and
+            # "we cannot see" are different things, and conflating them manufactures false comfort
+            # — a detector that lies is worse than no detector, which is exactly what happened in
+            # the field.
+            print(f"unknown: there are {deaths} send-back(s)/refutation(s), and the cause could "
+                  f"be read for none of them. Whether anything recurred has not been decided.\n"
+                  f"  Write the cause into the payload under one of "
+                  f"{' / '.join(_CAUSE_KEYS)}, and classify the root alongside it with `root` "
+                  f"({'/'.join(DEATH_ROOTS)}).\n"
+                  f"  Until that is written, this detector cannot notice the same failure however "
+                  f"many times it repeats.")
             return OK
         print(f"clean: no death cause recurred >= {a.recurrence} times — accumulated learning is being "
               f"used, no known mistake re-made. Silent."
-              + (f" ({readable} 件の死因を読んだ)" if readable else ""))
+              + (f" (read the cause of {readable})" if readable else ""))
         if readable:
-            # clean の判定基準を明示する — root 分類で見た件数と、文字列一致でしか
-            # 見えていない未分類の件数を分けて言う（両者の保証は同じではない）。
-            print(f"  判定基準: 根分類（root）{classified} 件 / 文字列完全一致（root 未分類）"
-                  f"{unclassified} 件。")
+            # State what clean was decided on — the count seen by root classification and the
+            # unclassified count seen only by string match, said separately (they do not carry the
+            # same guarantee).
+            print(f"  decided on: {classified} by root classification / {unclassified} by "
+                  f"whole-string match (root unclassified).")
         if unclassified >= 1:
-            # **移行期でも警告は消えない**（unclassified が1件でも出す）。分類済みが増えて
-            # 未分類が recurrence 未満に減った途端に警告が消えると、残った未分類の1件が
-            # 同根の再発でも黙って clean に見える（skeptic が実測で検出）。
-            # root の無い記録は完全一致でしか繰り返しを見ない。実地では「端数の偏り」と
-            # 「テスト硬化」という別々の文言で記録された2件が、根は同じ（性質が壊れる場所を
-            # 検証していない）だった。clean を「同じ失敗をしていない」証明として読ませない
-            # ために、限界を明示する。
-            print(f"  注意: root 未分類の {unclassified} 件は死因の**文字列**でしか見ていない。"
-                  f"同じ根の失敗が別の言葉で書かれていれば、この検出器は素通りする。"
-                  f"並べて読み直し、`root`（{'/'.join(DEATH_ROOTS)}）を付けて記録し直す価値が"
-                  f"ある（`ledger.py view` / Issue のコメント）。")
+            # **The warning does not disappear during migration either** (it is emitted for even
+            # one unclassified record). If it vanished the moment the classified count rose and the
+            # unclassified fell below the recurrence threshold, a single remaining unclassified
+            # record would look clean even when it is a recurrence of the same root (caught by the
+            # skeptic through measurement).
+            # A record with no root is only seen by whole-string match. In the field, two records
+            # written as "skew in the remainder" and "hardened test" had the same root — nothing
+            # verified where the property actually breaks. The limit is stated so that clean is
+            # never read as proof that the same mistake was not made.
+            print(f"  note: the {unclassified} record(s) with no root are seen only by the "
+                  f"**string** of their cause. A failure with the same root written in different "
+                  f"words goes straight past this detector. It is worth reading them side by side "
+                  f"and recording them again with a `root` ({'/'.join(DEATH_ROOTS)}) attached "
+                  f"(`ledger.py view` / the Issue comments).")
         return OK
     for key, hits in sorted(repeated.items(), key=lambda kv: -len(kv[1])):
         emit_event("repeated_death_detected", {
@@ -249,9 +264,10 @@ def cmd_repeats(a):
         root = wkey[1]
         cause = whits[0]["cause"] or DEATH_ROOTS.get(root, root)
         wordings = sorted({str(h["cause"]) for h in whits if h["cause"]})
-        print(f"REPEATED DEATH: root {root!r}（{DEATH_ROOTS.get(root, '未知の分類')}）recurred "
-              f"{len(whits)} times (candidates {[h['candidate_id'] for h in whits]}) — 文言は"
-              f"違っても根は同じ: {wordings}. The org re-made a mistake it had already recorded. "
+        print(f"REPEATED DEATH: root {root!r} ({DEATH_ROOTS.get(root, 'an unknown class')}) "
+              f"recurred {len(whits)} times (candidates {[h['candidate_id'] for h in whits]}) — "
+              f"different wording, same root: {wordings}. The org re-made a mistake it had already "
+              f"recorded. "
               f"Accumulated learning was NOT fed forward; strengthen the death into doctrine and "
               f"inject it before the next attempt (docs/06). This is the org's core purpose "
               f"failing — escalate.", file=sys.stderr)
@@ -262,18 +278,19 @@ def cmd_repeats(a):
               f"already recorded. Accumulated learning was NOT fed forward; strengthen the death into "
               f"doctrine and inject it before the next attempt (docs/06). This is the org's core purpose "
               f"failing — escalate.", file=sys.stderr)
-    # 「doctrine に強化せよ」と散文で言うだけでは強化されない。実地では検出も蓄積も配布も
-    # 動かないまま同じ失敗を3回繰り返した。**打つべきコマンドを出す** — 経路が無い指示は、
-    # 指示ではなく願望になる。何を doctrine にするか（文言・対象役割）は人が決める。
+    # Saying "harden this into doctrine" in prose does not harden anything. In the field, neither
+    # detection nor accumulation nor distribution moved, and the same failure repeated three times.
+    # **Emit the command to run** — an instruction with no route is a wish, not an instruction.
+    # What becomes doctrine (the wording, the roles it applies to) is a person's decision.
     here = os.path.dirname(os.path.abspath(__file__))
     droot = os.path.join(os.path.dirname(a.root.rstrip("/")), "doctrine")
-    print(f"\nNEXT: この死因を doctrine に上げること（配布は handoff.py が役割ごとに行う）:\n"
+    print(f"\nNEXT: raise this cause into doctrine (handoff.py distributes it per role):\n"
           f'  python3 "{os.path.join(here, "doctrine.py")}" propose "{droot}" <role> \\\n'
           f'      --claim "{str(cause)[:80]}" --source "repeated-death" --confidence 0.9 \\\n'
           f'      --retrieved-at $(date -u +%Y-%m-%d) --review-by $(date -u -v+180d +%Y-%m-%d) \\\n'
-          f'      --affects <この失敗が効く役割をカンマ区切りで>\n'
-          f'  そのうえで gate が admit する: doctrine.py admit "{droot}" <role> <claim-id> --by gate\n'
-          f"  admit されるまで次のサイクルには渡らない。", file=sys.stderr)
+          f'      --affects <the roles this failure bears on, comma-separated>\n'
+          f'  Then the gate admits it: doctrine.py admit "{droot}" <role> <claim-id> --by gate\n'
+          f"  Until it is admitted, it does not reach the next cycle.", file=sys.stderr)
     return ESCALATE
 
 

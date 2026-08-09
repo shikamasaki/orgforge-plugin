@@ -825,7 +825,7 @@ def test_learning_warns_that_matching_is_by_string(tmp_path):
         "\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
     p = subprocess.run([sys.executable, str(TOOLS / "learning.py"), "repeats", str(led)],
                        capture_output=True, text=True, timeout=60)
-    assert "文字列" in p.stdout + p.stderr
+    assert "**string**" in p.stdout + p.stderr
 
 
 # ── 0.17.0: 識別子の別名を台帳から推移的に解決する ──────────────────────
