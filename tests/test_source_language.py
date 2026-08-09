@@ -55,7 +55,7 @@ BUDGET = {
     "tests/test_hook.py": 1,
     "tests/test_ledger.py": 1,
     "tests/test_organ_unit.py": 2,
-    "tests/test_orgcycle.py": 422,
+    "tests/test_orgcycle.py": 48,
     "tests/test_rederivability.py": 1,
     "tests/test_req_lint.py": 30,
     "tests/test_source_language.py": 1,

@@ -536,7 +536,7 @@ def test_integrate_plan_executes_nothing_and_warns_on_overlap(tmp_path):
     body = src[src.index("def cmd_integrate"):]
     assert 'if getattr(a, "plan", False):' in body
     assert body.index('if getattr(a, "plan", False):') < body.index("git\", \"merge"), \
-        "--plan がマージ手順より後にある（実行してしまう）"
+        "--plan comes after the merge steps (it would execute them)"
 
 
 def _ship_module():
@@ -668,15 +668,17 @@ def test_integrate_explicit_nonstandard_branch_and_sha_are_supported(tmp_path, m
     assert branch == sha and subject_sha == sha and error is None
 
 
-# ── #107 rework: integrate も worktree の実 HEAD を候補に入れる ────────────────
-# skeptic の反証: retitle 後の begin 再実行が新 slug の branch を切り、実作業は旧 branch の
-# worktree に居る形で、_resolve_integration_branch の add() が `feat/issue-N*` しか候補に
-# 入れないため worktree 解決済みの非規約 branch が捨てられ、迷子の規約名 branch が
-# sole candidate として**未レビューのまま exit 0 で merge** された。
+# ── #107 rework: integrate puts the worktree's real HEAD among the candidates ──
+# The skeptic's refutation: re-running begin after a retitle cuts a branch under the new slug while
+# the real work sits in the worktree on the old branch, and since _resolve_integration_branch's
+# add() admits only `feat/issue-N*` as candidates, the worktree-resolved non-convention branch was
+# discarded and the stray convention-named branch became the sole candidate — **merged at exit 0,
+# unreviewed**.
 
 
 def _worktree_repo(tmp_path, work_branch, *stray_branches):
-    """実作業が worktree の branch に載っている repo（+ 迷子の規約名 branch）。"""
+    """A repo whose real work sits on the worktree's branch (plus a stray convention-named
+    branch)."""
     repo = _branch_repo(tmp_path, *stray_branches)
     wt = repo / ".orgforge" / "wt" / "issue-42"
     subprocess.run(["git", "worktree", "add", "-q", "-b", work_branch, str(wt), "main"],
@@ -689,8 +691,9 @@ def _worktree_repo(tmp_path, work_branch, *stray_branches):
 
 def test_integrate_plan_stops_on_worktree_vs_conventional_split_brain(
         tmp_path, monkeypatch, capsys):
-    """(a) skeptic の split-brain shape: worktree の実 branch と迷子の規約名 branch が併存 →
-    integrate --plan は迷子を黙って選ばず、両方を名指しして止まる。"""
+    """(a) The skeptic's split-brain shape: the worktree's real branch and a stray convention-named
+    branch coexist → integrate --plan does not silently pick the stray, but names both and
+    stops."""
     ship = _ship_module()
     repo, _wt = _worktree_repo(tmp_path, "fix/login-redirect", "feat/issue-42-old-title")
     subprocess.run(["git", "update-ref", "refs/remotes/origin/main", "main"],
@@ -703,27 +706,31 @@ def test_integrate_plan_stops_on_worktree_vs_conventional_split_brain(
     rc = ship.cmd_integrate(argparse.Namespace(issue=42, branch=None, plan=True,
                                                base=None, test=None))
     cap = capsys.readouterr()
-    assert rc != 0, \
-        "迷子の feat/issue-42-old-title を sole candidate として選び、素通りで統合できてしまう"
+    assert rc != 0, (
+        "it picks the stray feat/issue-42-old-title as the sole candidate and integrates it "
+        "straight through")
     assert "fix/login-redirect" in cap.err and "feat/issue-42-old-title" in cap.err, \
-        f"両方の branch を名指しして止まっていない: {cap.err!r}"
+        f"it does not name both branches and stop: {cap.err!r}"
 
 
 def test_integrate_branch_resolution_targets_worktree_head_without_stray(
         tmp_path, monkeypatch):
-    """(b) worktree の実 branch（非規約名）だけがある → それが統合対象になる。"""
+    """(b) Only the worktree's real branch exists (under a non-convention name) → that becomes what
+    is integrated."""
     ship = _ship_module()
     repo, _wt = _worktree_repo(tmp_path, "fix/login-redirect")
     monkeypatch.chdir(repo)
     monkeypatch.setattr(ship, "_branch_for", lambda _i: "feat/issue-42-new-title")
     branch, subject_sha, error = ship._resolve_integration_branch(42)
-    assert error is None, f"worktree の実 branch を候補に入れていない: {error!r}"
+    assert error is None, (
+        f"the worktree's real branch is not among the candidates: {error!r}")
     assert branch == "fix/login-redirect" and len(subject_sha) == 40
 
 
 def test_integrate_explicit_branch_keeps_current_behavior_despite_worktree(
         tmp_path, monkeypatch):
-    """明示 --branch は従来どおり — worktree 解決に上書きされない（operator override）。"""
+    """An explicit --branch behaves as before — the worktree resolution does not override it (an
+    operator override)."""
     ship = _ship_module()
     repo, _wt = _worktree_repo(tmp_path, "fix/login-redirect", "feat/issue-42-old-title")
     monkeypatch.chdir(repo)
@@ -779,7 +786,7 @@ def test_surface_detection_ranks_security_definer_first():
 
 
 def test_surface_detection_skips_test_files():
-    """テストヘルパを拾いすぎると、確認してほしい1件が埋もれる。"""
+    """Picking up too many test helpers buries the one that needs looking at."""
     src = _cycle_src()
     seg = src[src.index("def _new_public_surfaces"):]
     assert "tests?" in seg and "spec" in seg
@@ -794,87 +801,89 @@ def test_complete_blocks_until_surfaces_declared(tmp_path):
     assert "authorization hole" in seg
 
 
-# ── 0.22.0: 分割で持ち込んだ穴を塞ぐ ────────────────────────────────────
+# ── 0.22.0: close the holes the split brought in ───────────────────────────
 def test_core_HERE_points_at_tools_not_the_package():
-    """HERE は tools/ を指すこと。
+    """HERE must point at tools/.
 
-    分割時にここを直し忘れ、_gh_sync が github_sync.py を見失って _branch_for が
-    slug 無しのブランチ名を返した。組み立て系のツールは「見つからない」を静かに
-    素通りするので、show の実装行と integrate --plan の変更一覧が**黙って空**になった。
-    パスの基点は分割で最初に壊れる場所。
+    Forgetting to fix this during the split made _gh_sync lose sight of github_sync.py and
+    _branch_for return a branch name with no slug. Assembly-style tools walk past "not found"
+    quietly, so show's implementation lines and integrate --plan's change list **silently went
+    empty**.
+    The base of a path is the first thing a split breaks.
     """
     m = _cycle_mod("_core")
     assert os.path.isfile(os.path.join(m.HERE, "github_sync.py")), \
-        f"HERE={m.HERE} から github_sync.py が見えない"
+        f"github_sync.py is not visible from HERE={m.HERE}"
     assert os.path.isfile(os.path.join(m.HERE, "ledger.py"))
 
 
 def test_bundle_includes_subpackages():
-    """build.sh が tools/ のサブパッケージも同期すること。
+    """build.sh must sync tools/'s subpackages too.
 
-    `tools/*.py` だけを見ていると、分割したモジュールがバンドルに入らず、
-    プラグインとして入れた瞬間に ImportError で死ぬ。
+    Reading only `tools/*.py` leaves the split-out modules out of the bundle, and it dies with an
+    ImportError the moment it is installed as a plugin.
     """
     bundled = TOOLS.parent / "integrations" / "claude-code" / "tools"
     if not bundled.is_dir():
         return
     for src in (TOOLS / "orgcycle").glob("*.py"):
         dst = bundled / "orgcycle" / src.name
-        assert dst.is_file(), f"バンドルに {src.name} が無い（build.sh の同期漏れ）"
+        assert dst.is_file(), (
+            f"the bundle has no {src.name} (build.sh missed it)")
         assert dst.read_text(encoding="utf-8") == src.read_text(encoding="utf-8"), \
-            f"{src.name} がバンドルと食い違っている"
+            f"{src.name} diverges from the bundle"
 
 
 def test_every_subcommand_still_dispatches():
-    """分割後も全サブコマンドが起動すること（import の取りこぼし検出）。"""
+    """Every subcommand must still start after the split (detecting a missed import)."""
     for c in ("begin", "complete", "plan", "verify", "handback",
               "integrate", "gc", "record", "show", "touched"):
         p = subprocess.run([sys.executable, str(TOOLS / "org_cycle.py"), c, "--help"],
                            capture_output=True, text=True, timeout=60)
-        assert p.returncode == 0, f"{c} が起動しない: {p.stderr[:200]}"
+        assert p.returncode == 0, f"{c} does not start: {p.stderr[:200]}"
 
 
 def test_ghsync_core_HERE_points_at_tools():
-    """ghsync も tools/ を基点にすること（org_cycle で踏んだのと同じ穴）。
+    """ghsync must take tools/ as its base too (the same hole org_cycle stepped on).
 
-    record.py が ledger.py を見失うと、判断が Issue にだけ残り台帳が欠ける —
-    まさに 0.21.0 で塞いだ片側落ちが、分割によって再発する。
+    Where record.py loses sight of ledger.py, a judgment stays on the Issue alone and the ledger
+    goes missing — exactly the one-sided loss 0.21.0 closed, recurring through the split.
     """
     src = _gh_src("_core")
     assert "HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))" in src, \
-        "tools/ を基点にしていない（ledger.py を見失う）"
-    # record.py は HERE を使うこと（自前で解決し直さない）
+        "it does not take tools/ as its base (it loses sight of ledger.py)"
+    # record.py must use HERE (rather than resolving it itself)
     assert "HERE" in _gh_src("record")
 
 
 def test_ghsync_every_subcommand_still_dispatches():
-    """分割後も全サブコマンドが起動すること。"""
+    """Every subcommand must still start after the split."""
     for c in ("claim", "release", "create", "stage", "log", "decide", "branch",
               "split-check", "candidate-id", "coverage-check", "needs-human", "ready"):
         p = subprocess.run([sys.executable, str(TOOLS / "github_sync.py"), c, "--help"],
                            capture_output=True, text=True, timeout=60)
-        assert p.returncode == 0, f"{c} が起動しない: {p.stderr[:200]}"
+        assert p.returncode == 0, f"{c} does not start: {p.stderr[:200]}"
 
 
 def test_bundle_includes_ghsync():
-    """build.sh が ghsync/ も同期すること。"""
+    """build.sh must sync ghsync/ too."""
     bundled = TOOLS.parent / "integrations" / "claude-code" / "tools" / "ghsync"
     if not (TOOLS / "ghsync").is_dir():
         return
     for src in (TOOLS / "ghsync").glob("*.py"):
         dst = bundled / src.name
-        assert dst.is_file(), f"バンドルに {src.name} が無い"
+        assert dst.is_file(), f"the bundle has no {src.name}"
         assert dst.read_text(encoding="utf-8") == src.read_text(encoding="utf-8")
 
 
 def test_path_base_is_resolved_in_exactly_one_place():
-    """`__file__` からのパス解決は各パッケージ1箇所（HERE）に集約すること。
+    """Resolving a path from `__file__` must live in one place per package (HERE).
 
-    0.22.0 の分割で `tools/` → `tools/orgcycle/` と階層が1つ深くなったとき、各所に散った
-    `os.path.dirname(os.path.abspath(__file__))` のうち直し漏れが2箇所出た:
-    `_agents_dir`（憲章を見失い verify が gate/skeptic とも死ぬ）と `_seam`（handoff.py を
-    見失い seam contract が生成できない）。**基点が散っていると、階層が変わるたびに
-    直し漏れが起きる。**
+    When the 0.22.0 split took `tools/` one level deeper to `tools/orgcycle/`, two of the scattered
+    `os.path.dirname(os.path.abspath(__file__))` calls went unfixed: `_agents_dir` (losing the
+    charters, so verify died for both gate and skeptic) and `_seam` (losing handoff.py, so no seam
+    contract could be generated). **With the base scattered, something is missed every time the
+    hierarchy changes.**
     """
     for pkg in ("orgcycle", "ghsync"):
         d = TOOLS / pkg
@@ -886,30 +895,34 @@ def test_path_base_is_resolved_in_exactly_one_place():
                 if "__file__" in line and not line.lstrip().startswith("#"):
                     hits.append(f"{f.name}:{i}")
         assert len(hits) == 1, \
-            f"{pkg}: __file__ の解決が {len(hits)} 箇所にある（HERE に集約すること）: {hits}"
+            f"{pkg}: __file__ is resolved in {len(hits)} places (keep it in HERE): {hits}"
 
 
 def test_verify_finds_handoff_for_the_seam_contract(tmp_path):
-    """seam contract の生成（handoff.py）も見失っていないこと。
+    """Generating the seam contract (handoff.py) must not be lost either.
 
-    憲章と同じ穴を _seam も踏んでいた。ヘルパ単体ではなく、verify の出力に
-    Boundary contract が入ることで見る。
+    _seam had stepped on the same hole as the charters. This reads it through the Boundary contract
+    appearing in verify's output, rather than through the helper alone.
     """
     p = subprocess.run([sys.executable, str(TOOLS / "org_cycle.py"), "verify",
                         "--issue", "1", "--role", "gate"],
                        capture_output=True, text=True, cwd=str(tmp_path), timeout=60)
     out = p.stdout + p.stderr
-    assert "seam contract の生成に失敗" not in out, f"handoff.py を見失っている: {out[:300]}"
+    assert "could not generate the seam contract" not in out, (
+        f"it has lost sight of handoff.py: {out[:300]}")
 
 
-# ── 0.23.0: worktree の迷子台帳 / 周回の性質 / 未撃領域の引き渡し ──────────
+# ── 0.23.0: a worktree's stray ledger / the character of the rounds / handing over the unfired
+#    areas ──
 def test_worktree_is_not_mistaken_for_the_org_root(tmp_path):
-    """worktree の中からは親を辿ること。
+    """From inside a worktree, follow the parent.
 
-    doctrine / evidence を git 追跡下に置いた結果、worktree にも `.orgforge/` が復元され、
-    それが ORG_MARKERS に当たって探索が止まった。そこで subagent が ledger append を打つと
-    worktree 側の空の台帳に書かれ、`appended seq=1` が返る — **実判定が本体から消える**。
-    実地で1日3回起き、実判定4件が迷子になった。警告で防ぐ設計は破れる（gate が踏んだ）。
+    Putting doctrine and evidence under git made `.orgforge/` restore into the worktree too, that
+    matched ORG_MARKERS, and the search stopped there. A subagent typing a ledger append then wrote
+    to the worktree's empty ledger and got back `appended seq=1` — **the real judgment disappears
+    from the main tree**.
+    It happened three times in one day in the field, and four real judgments went astray. A design
+    that prevents it with a warning breaks (a gate stepped on it).
     """
     import importlib, sys as _s
     if str(TOOLS) not in _s.path:
@@ -927,12 +940,13 @@ def test_worktree_is_not_mistaken_for_the_org_root(tmp_path):
     wt = repo / ".orgforge" / "wt" / "issue-3"
     wt.parent.mkdir(parents=True, exist_ok=True)
     g("worktree", "add", "-q", "-b", "feat/issue-3", str(wt), "develop")
-    assert (wt / ".orgforge").is_dir(), "前提: worktree に .orgforge が復元される"
+    assert (wt / ".orgforge").is_dir(), (
+        "premise: .orgforge is restored into the worktree")
 
     saved = os.environ.pop("ORG_LEDGER_ROOT", None)
     try:
         assert disc.org_root(str(wt)) == str(repo.resolve()), \
-            "worktree を org root と誤認した（迷子台帳ができる）"
+            "it mistook the worktree for the org root (a stray ledger appears)"
         assert disc.ledger_root(str(wt)) == os.path.join(str(repo.resolve()),
                                                          ".orgforge", "ledger")
     finally:
@@ -1002,11 +1016,11 @@ def test_external_worktree_uses_primary_governance_but_keeps_its_subject(tmp_pat
 
 
 def test_integrate_passes_its_own_test_output_to_the_log():
-    """integrate 自身が log の必須検査に引っかかっていた。
+    """integrate was itself tripping log's mandatory check.
 
-    マイルストーンの log は --command/--result を要求するのに integrate はそれを渡さず、
-    統合は完了するのに Issue へのログだけ落ちた。自分で走らせた結果を持っているのだから、
-    人に書かせる理由が無い。
+    A milestone log requires --command/--result and integrate passed neither, so the integration
+    completed while only the log to the Issue went missing. It holds the result of what it ran
+    itself, so there is no reason to make a human write it.
     """
     src = _cycle_src("ship")
     seg = src[src.index("def cmd_integrate"):]
@@ -1014,59 +1028,65 @@ def test_integrate_passes_its_own_test_output_to_the_log():
 
 
 def test_show_reports_what_the_rounds_are_about():
-    """周回の回数だけでなく、直近が何を問題にしているかを出す。"""
+    """Print not only the number of rounds but what the latest ones take issue with."""
     src = _cycle_src("inspect")
     assert "rounds:" in src and "last 3" in src
-    # 周回ごとに違う理由を見ること（1件だけ引くと全部同じに見える）
+    # Read a different reason per round (fetching one makes them all look alike)
     assert "_issue_reasons" in src
     assert "material for a judgment, not a" in src, (
         "the board must never judge \"cut it\"")
 
 
 def test_verify_hands_the_unshot_areas_to_skeptic():
-    """gate が「今回撃っていない」と書いた領域を skeptic に標的として渡す。"""
+    """Hand the skeptic, as targets, the areas the gate wrote it had not fired at this time."""
     src = _cycle_src("judge")
     assert "not probed this round" in src and "Known risk accepted" in src
     assert "candidate targets" in src
 
 
-# ── 0.25.2: 指示と権限の食い違いを解消（subagent は記録しない）──────────────
+# ── 0.25.2: resolve the mismatch between instructions and permissions (a subagent does not
+#    record) ──
 def test_verify_does_not_tell_subagent_to_record():
-    """subagent に打てないコマンドを渡さない。
+    """Do not hand a subagent a command it cannot type.
 
-    実地で gate と skeptic が計7回、判定を出した後に「記録は監督に委ねます」と述べて止まり、
-    一度は判定そのものが台帳に入らず失われかけた。subagent には ORG_GITHUB_REPO も台帳の
-    パスも渡っていないのに「二重に記録せよ」と指示していた — **指示と権限の食い違い**。
+    In the field gate and skeptic together did this seven times: a judgment was produced, then "I
+    leave the recording to the supervisor", and once the judgment itself never entered the ledger
+    and came close to being lost. A subagent is given neither ORG_GITHUB_REPO nor the ledger path,
+    and it was still being told to "record it in both places" — **a mismatch between the
+    instructions and the permissions**.
     """
     src = _cycle_src("judge")
     seg = src[src.index("def cmd_verify"):]
-    # subagent 向け（stdout）の節には記録コマンドを載せない
+    # The section for the subagent (stdout) carries no recording command
     assert "What to return (**you decide the judgment; the supervisor records it**)" in seg
     assert "You do not need to run any recording command" in seg
-    # 監督向け（stderr）には、値を流し込むコマンドを出す — 配管が判定を運べないと本末転倒
+    # The supervisor side (stderr) gets the command with the values fed in — plumbing that cannot
+    # carry the judgment defeats the purpose
     assert "The command you (the supervisor) run" in seg
     assert "file=sys.stderr" in seg
 
 
 def test_agent_charters_do_not_demand_recording():
-    """agents/*.md 側も「判定を返すまで」に揃えること（片方だけ直すと食い違いが残る）。"""
+    """The agents/*.md side must agree on "as far as returning the judgment" too (fixing one side
+    leaves the mismatch)."""
     d = _cycle_mod("_core")._agents_dir()
     if not d:
         return
     for role in ("gate", "skeptic"):
         body = pathlib.Path(d, f"{role}.md").read_text(encoding="utf-8")
-        assert "記録は監督" in body, f"{role}.md がまだ subagent に記録を求めている"
+        assert "The supervisor does the recording" in body, (
+            f"{role}.md still asks the subagent to record")
         assert "$ORG_GITHUB_REPO" not in body, \
-            f"{role}.md が渡っていない環境変数を参照している"
+            f"{role}.md references an environment variable it is not given"
 
 
 def test_repro_lint_admits_it_has_no_baseline():
-    """baseline を読んでいないなら「判定していない」と言う。
+    """Where the baseline was not read, say "it has not been decided".
 
-    実地で gate がこの断定（「baseline に無い＝この変更で新たに悪化した」）を額面どおり
-    受け取り、既存の負債を新規の悪化と読んで判定を止めた — 対象の Issue は、まさにその
-    項目を緑にする作業だった。道具が見ていない領域については、道具は「見ていない」と
-    言うべきである。
+    In the field a gate took this assertion ("not in the baseline = newly broken by this change")
+    at face value, read pre-existing debt as a new regression, and stopped the judgment — while the
+    Issue in question was the work of turning that very item green. About a region the tool has not
+    looked at, the tool should say "I have not looked".
     """
     src = (TOOLS / "repro_lint.py").read_text(encoding="utf-8")
     seg = src[src.index("HELD: {len(failed)} required artifact"):]
@@ -1074,32 +1094,37 @@ def test_repro_lint_admits_it_has_no_baseline():
     assert "if baseline is None:" in src
 
 
-# ── 0.26.0: 範囲外の発見を Issue に積み増さない ──────────────────────────
+# ── 0.26.0: do not pile out-of-scope findings onto an Issue ────────────────
 def test_skeptic_charter_splits_in_scope_from_out_of_scope():
-    """skeptic は仕事として必ず何かを見つける。範囲を切らないと Issue が終わらない。
+    """A skeptic always finds something — it is its work. Without cutting the scope an Issue never
+    ends.
 
-    実地では8周 rework した Issue の**4回目以降の発見が、すべて spec の MUST に無いもの**
-    だった。実在の欠陥でも、それは次の Issue の仕事。
+    In the field, **every finding from the fourth round onward** of an Issue that reworked eight
+    times **was absent from the spec's MUSTs**. A real defect it may be, but it is the next
+    Issue's work.
     """
     d = _cycle_mod("_core")._agents_dir()
     if not d:
         return
     body = pathlib.Path(d, "skeptic.md").read_text(encoding="utf-8")
-    assert "Issue 化を推奨" in body, "範囲外の発見の扱いが書かれていない"
-    assert "refuted` の根拠にする" in body or "refuted の根拠" in body
-    # 判断が難しいものは skeptic に決めさせない
-    assert "supervisor に返す" in body or "監督" in body
+    assert "recommended as its own Issue" in body, (
+        "how an out-of-scope finding is handled is not written")
+    assert "grounds for `refuted`" in body
+    # What is hard to place is not left for the skeptic to decide
+    assert "return them to the supervisor" in body
 
 
 def test_verify_asks_skeptic_for_out_of_scope_separately():
-    """「返すもの」にも out_of_scope を入れる（憲章だけ直すとプロンプトと食い違う）。"""
+    """out_of_scope goes into "what to return" as well (fixing only the charter leaves it at odds
+    with the prompt)."""
     src = _cycle_src("judge")
     assert "out_of_scope" in src
     assert "do not count towards " in src
 
 
 def test_verify_scopes_blockers_and_repeated_findings():
-    """gate の実行時材料が、変更契約外の無限ラリーを明示的に防ぐ。"""
+    """The gate's runtime material explicitly prevents an endless rally outside the change
+    contract."""
     src = _cycle_src("judge")
     assert "The scope of judgment, and the discipline of a review rally" in src
     assert "handoff seam contract" in src
@@ -1108,34 +1133,40 @@ def test_verify_scopes_blockers_and_repeated_findings():
 
 
 def test_spec_template_states_when_done():
-    """完了の判定を spec 側に書く — maker / gate / skeptic の3者が同じ条件を見る。"""
+    """The judgment of done is written on the spec side — maker, gate, and skeptic all read the
+    same condition."""
     body = (TOOLS.parent / "template" / "SPEC.md").read_text(encoding="utf-8")
     assert "The judgment of done" in body
     assert "becomes another one" in body
 
 
 def test_show_warns_on_repeated_rework_but_not_on_many_rounds():
-    """rework の回数で見る。判定を重ねること自体は悪くない（#7 は7周・rework 2回で収束）。"""
+    """Read it by the number of reworks. Stacking up judgments is not itself bad (#7 converged in
+    seven rounds and two reworks)."""
     src = _cycle_src("inspect")
     seg = src[src.index("rounds:"):]
-    assert "len(reworks) > 3" in seg, "rework の回数で判定していない"
-    assert "len(rounds) > 5" not in seg, "判定回数で警告すると、丁寧に見た Issue まで警告される"
+    assert "len(reworks) > 3" in seg, "it does not decide by the number of reworks"
+    assert "len(rounds) > 5" not in seg, (
+        "warning by the number of judgments warns even on an Issue that was looked at carefully")
 
 
-# ── 0.27.0: 監督の記録漏れを塞ぐ ────────────────────────────────────────
+# ── 0.27.0: close the supervisor's gaps in recording ───────────────────────
 def test_rework_has_a_dedicated_command():
-    """rework_requested を記録する専用コマンドが無いことが記録漏れの一因だった。
+    """Part of why the records went missing was that no dedicated command recorded
+    rework_requested.
 
-    実地で reject/refuted 28件に対し rework_requested が台帳に無かった（#32 は4回 reject で
-    記録0件）。監督は `ledger.py append --payload '{...}'` を手で組む必要があり、しかも発注は
-    「判定 → 検証 → decide → **発注** → 記録」の順で、発注した subagent の通知が来ると流れる。
-    副作用として show の rework 警告（0.26.0）が沈黙していた。
+    In the field there was no rework_requested in the ledger against twenty-eight rejects and
+    refutations (#32 had four rejects and zero records). A supervisor had to assemble
+    `ledger.py append --payload '{...}'` by hand, and commissioning runs "judge → verify → decide →
+    **commission** → record", so the record gets washed away when the commissioned subagent's
+    notification arrives.
+    As a side effect, show's rework warning (0.26.0) had gone silent.
     """
     p = subprocess.run([sys.executable, str(TOOLS / "org_cycle.py"), "rework", "--help"],
                        capture_output=True, text=True, timeout=60)
     assert p.returncode == 0, p.stderr
     for flag in ("--after", "--reason", "--by"):
-        assert flag in p.stdout, f"{flag} が無い"
+        assert flag in p.stdout, f"{flag} is missing"
 
 
 def _rework_args():
@@ -1168,7 +1199,8 @@ def test_rework_does_not_advance_ledger_when_reopen_fails(monkeypatch):
 
 
 def test_verify_offers_the_rework_command_on_reject():
-    """判定の記録と**同じ場所**に rework の発注コマンドを置く（順序が逆転する）。"""
+    """The rework command sits in **the same place** as the judgment's record (the order otherwise
+    inverts)."""
     src = _cycle_src("judge")
     seg = src[src.index("def cmd_verify"):]
     assert "rework --issue" in seg
@@ -1176,14 +1208,14 @@ def test_verify_offers_the_rework_command_on_reject():
 
 
 def test_banner_shows_version_and_cwd():
-    """どのコピーを動かしているかが見えないと、古いパスを流用しても気づけない。
+    """Without seeing which copy is running, reusing an old path goes unnoticed.
 
-    実地で 0.26.0 のリリース後も 0.25.2 のパスを打ち、さらに `cd` が持続しない前提の
-    コマンドの exit=1 を「塞がった証拠」と読みかけた。
+    In the field the 0.25.2 path was still being typed after 0.26.0 shipped, and an exit=1 from a
+    command that assumed `cd` persists came close to being read as "evidence it is blocked".
     """
     for tool in ("org_cycle.py", "github_sync.py", "ledger.py"):
         src = (TOOLS / tool).read_text(encoding="utf-8")
-        assert "banner" in src.lower(), f"{tool} が版と cwd を出さない"
+        assert "banner" in src.lower(), f"{tool} does not print the version and the cwd"
     p = subprocess.run([sys.executable, str(TOOLS / "org_cycle.py"), "plan",
                         "--role", "r", "--issue", "1"],
                        capture_output=True, text=True, timeout=60)
@@ -1192,11 +1224,13 @@ def test_banner_shows_version_and_cwd():
 
 
 def test_banner_never_pollutes_machine_readable_output(tmp_path):
-    """人間向けの1行が、機械が読む出力を壊してはいけない。
+    """A line for humans must not break output a machine reads.
 
-    banner を足した直後、`ledger view`（JSON を返す）の出力に混ざって JSONDecodeError で
-    テストが落ちた。stderr に書いていても、消費側が 2>&1 で混ぜれば同じである。
-    **便利のために壊すのは筋が通らない** — view / census / digest では黙る。
+    Right after the banner went in it mixed into `ledger view`'s output (which returns JSON) and a
+    test failed with JSONDecodeError. Writing to stderr changes nothing where the consumer mixes
+    the streams with 2>&1.
+    **Breaking it for convenience does not hold up** — it stays quiet for view, census, and
+    digest.
     """
     led = tmp_path / "l"; led.mkdir()
     subprocess.run([sys.executable, str(TOOLS / "ledger.py"), "append",
@@ -1210,39 +1244,40 @@ def test_banner_never_pollutes_machine_readable_output(tmp_path):
             args.append("work_in_progress")
         p = subprocess.run(args, capture_output=True, text=True, timeout=60)
         merged = p.stdout + p.stderr
-        assert "[orgforge " not in merged, f"{sub} の出力に banner が混ざった"
-        json.loads(p.stdout)          # 混ざっていれば例外になる
+        assert "[orgforge " not in merged, f"the banner mixed into {sub}'s output"
+        json.loads(p.stdout)          # this raises if anything mixed in
 
 
 def test_internal_calls_suppress_the_banner():
-    """内部呼び出し（_run）は stdout+stderr を混ぜて返すので、banner を出させない。
+    """An internal call (_run) returns stdout and stderr mixed, so no banner is printed.
 
-    `_branch_for` は先頭行を取るので今は無事だが、混ざりうる構造そのものを消す
-    （0.22.1 で「静かに壊れる」経路を1つ踏んだばかりである）。
+    `_branch_for` takes the first line and is safe for now, but the structure that allows the
+    mixing is removed outright (0.22.1 had just stepped on one "breaks quietly" path).
     """
     src = _cycle_src("_core")
     seg = src[src.index("def _run("):src.index("def _raw(")]
-    assert "ORG_QUIET" in seg, "_run が banner を抑制していない"
+    assert "ORG_QUIET" in seg, "_run does not suppress the banner"
 
 
-# ── 0.27.1: プロンプトの重複を削る（実測で総時間の21%が1回の待ち時間）──────
+# ── 0.27.1: cut the duplication in the prompt (measured: 21% of the total time was one wait) ──
 def test_verify_does_not_repeat_the_prior_judgment_twice():
-    """判定履歴と「gate が既に見たこと」が同じ本文を2回出していた。
+    """The judgment history and "what the gate already looked at" printed the same body twice.
 
-    実測で skeptic のプロンプト457行のうち、gate の最新判定の全文が2箇所に現れていた
-    （同じ26行と20行超）。プロンプトの長さは読む時間に直結する。
+    Measured: of the skeptic's 457-line prompt, the full text of the gate's latest judgment
+    appeared in two places (the same 26 lines, and over 20 more). A prompt's length translates
+    directly into reading time.
     """
     src = _cycle_src("judge")
     seg = src[src.index("def cmd_verify"):]
     assert "if prior and not (history or issue_rounds):" in seg, \
-        "履歴を出したうえで prior も出すと、同じ本文が2回並ぶ"
+        "printing the history and then prior as well lines the same body up twice"
 
 
 def test_verify_still_hands_over_the_unshot_areas():
-    """重複を削っても「gate が撃っていない領域」の引き渡しは残すこと。
+    """Cutting the duplication must keep handing over "the areas the gate did not fire at".
 
-    実地では gate が「1件も当てていない」と書いた領域から実バグが出た。これは
-    prior から Known risk の節を抜き出すので、prior の取得自体は消してはいけない。
+    In the field a real bug came out of an area the gate had written it "had not hit once". This
+    extracts the Known risk section from prior, so fetching prior itself must not be removed.
     """
     src = _cycle_src("judge")
     seg = src[src.index("def cmd_verify"):]
@@ -1250,13 +1285,14 @@ def test_verify_still_hands_over_the_unshot_areas():
     assert "candidate targets" in seg
 
 
-# ── 0.28.0: 報告の切断 / worktree 運用での --create / seam の案内 ────────────
+# ── 0.28.0: a truncated report / --create under worktree operation / the seam guidance ──
 def test_intake_catches_a_truncated_report():
-    """subagent の turn が作業の途中で終わることがある（実地で1晩に3件）。
+    """A subagent's turn sometimes ends mid-work (three times in one night in the field).
 
-    status は completed で返り、result は「Now the key attack:」のような宣言1文だけ。
-    **気づけない形が危ない** — 「MUST 2 は防がれました」で切れていたら、それを verdict として
-    読んで admit しかねない。
+    status returns completed and result holds a single declarative sentence like "Now the key
+    attack:".
+    **The dangerous shape is the one you cannot notice** — a report cut off at "MUST 2 is defended"
+    could be read as a verdict and admitted.
     """
     for report, role in (("I verified MUST 1 and 2. Now the key attack:", "skeptic"),
                          ("MUST 2 で要求されている防御は実装されており、防がれました。", "skeptic"),
@@ -1264,12 +1300,13 @@ def test_intake_catches_a_truncated_report():
         p = subprocess.run([sys.executable, str(TOOLS / "org_cycle.py"), "intake",
                             "--issue", "27", "--role", role, "--report", report],
                            capture_output=True, text=True, timeout=60)
-        assert p.returncode == 10, f"不完全な報告を通した: {report!r}"
+        assert p.returncode == 10, f"an incomplete report passed: {report!r}"
         assert "the report is incomplete" in p.stderr
 
 
 def test_intake_passes_a_complete_report():
-    """必須要素が揃っていれば通す。途中で 'Now ...' と書いていても完走とみなす。"""
+    """It passes where the required elements are all present. Writing 'Now ...' partway still
+    counts as having run to completion."""
     for report, role in (
             (json.dumps({"verdict": "survives",
                          "why": "静的な境界分析と実テストの結果から、反例が成立しないことを確認した。",
@@ -1281,14 +1318,15 @@ def test_intake_passes_a_complete_report():
         p = subprocess.run([sys.executable, str(TOOLS / "org_cycle.py"), "intake",
                             "--issue", "27", "--role", role, "--report", report],
                            capture_output=True, text=True, timeout=60)
-        assert p.returncode == 0, f"完全な報告を弾いた: {report!r} / {p.stderr[:200]}"
+        assert p.returncode == 0, (
+            f"a complete report was rejected: {report!r} / {p.stderr[:200]}")
 
 
 def test_branch_create_does_not_move_main_in_a_worktree_org(tmp_path):
-    """worktree で並列運用している org では、メインのブランチを切り替えない。
+    """In an org running in parallel over worktrees, the main branch is not switched.
 
-    実地で --create がメインを develop から離し、気づかなければ develop での統合テストが
-    別 Issue のブランチ上で走っていた。
+    In the field --create moved main off develop, and unnoticed, the integration tests for develop
+    would have run on another Issue's branch.
     """
     repo = tmp_path / "r"; repo.mkdir()
     def g(*a, cwd=repo):
@@ -1304,22 +1342,24 @@ def test_branch_create_does_not_move_main_in_a_worktree_org(tmp_path):
                         "--issue", "9", "--create", "--base", "develop", "--repo", "o/n"],
                        capture_output=True, text=True, cwd=str(repo), timeout=60)
     cur = g("branch", "--show-current").stdout.strip()
-    assert cur == "develop", f"メインが {cur} に切り替わった（worktree 運用の org）"
-    assert (repo / ".orgforge" / "wt" / "issue-9").is_dir(), "worktree が作られていない"
+    assert cur == "develop", (
+        f"main switched to {cur} (an org that operates over worktrees)")
+    assert (repo / ".orgforge" / "wt" / "issue-9").is_dir(), "no worktree was created"
 
 
 def test_seam_gate_message_leads_with_the_shortest_path():
-    """通る道を、実際に短い順で書く（実地では INDEPENDENT: だけで通した）。"""
+    """Write the ways through in the order they are actually shortest (in the field INDEPENDENT:
+    alone got it through)."""
     src = (TOOLS.parent / "integrations" / "common" / "org_hook.py").read_text(encoding="utf-8")
     i = src.index("carries no seam contract")
     seg = src[i:i + 1600]
     assert seg.index("INDEPENDENT") < seg.index("handoff.py"), \
-        "handoff.py が先に読める（実際に通るのは INDEPENDENT: の方が短い）"
+        "handoff.py reads as the first option (while INDEPENDENT: is the shorter way through)"
     assert "waives the `owns` declaration" in seg, \
         "does not say that INDEPENDENT: waives the owns check"
 
 
-# ── 0.28.1: 宣言は行頭に限る / パイプ経由でも判定できる ──────────────────
+# ── 0.28.1: a declaration only at the start of a line / decidable through a pipe too ──
 def _spawn_verdict(prompt):
     import importlib.util, pathlib as _p
     hook = TOOLS.parent / "integrations" / "common" / "org_hook.py"
@@ -1329,40 +1369,45 @@ def _spawn_verdict(prompt):
 
 
 def test_negation_is_not_read_as_a_declaration():
-    """全文の部分一致だと**否定文が宣言として通る**。
+    """A substring match over the whole text lets **a negation pass as a declaration**.
 
-    実地のプローブ: 「contract も INDEPENDENT: も付けていません」がそのまま (A) として一致した。
-    実害のある形は「この作業は independent ではないので contract を付ける」と書いた (B) の
-    spawn が (A) と誤判定されること — **(A) は `owns` の宣言を免除する**ので、偶然の一致で
-    免除が取れる。ガードの文面自身が「冒頭に1行書く」と言っているので、検査を文面に合わせる。
+    A probe in the field: 「contract も INDEPENDENT: も付けていません」 ("I attached neither a
+    contract nor INDEPENDENT:") matched as (A) verbatim. The harmful shape is a spawn written as (B)
+    — 「この作業は independent ではないので contract を付ける」 ("this work is not independent, so I
+    attach a contract") — being misjudged as (A): **(A) exempts the `owns` declaration**, so a
+    chance match takes the exemption. The guard's own wording says "write one line at the top", so
+    the check is matched to the wording.
     """
     for prompt in ("contract も INDEPENDENT: も付けていません",
                    "この作業は independent ではないので contract を付ける",
                    "no seam contract is attached",
                    "seam contract を書き忘れました"):
-        assert _spawn_verdict(prompt) is not None, f"否定文が宣言として通った: {prompt!r}"
+        assert _spawn_verdict(prompt) is not None, (
+            f"a negation passed as a declaration: {prompt!r}")
 
 
 def test_declaration_at_the_start_of_a_line_passes():
-    """行頭の宣言は通す（前の空白・2行目でも可）。"""
+    """A declaration at the start of a line passes (leading spaces and a second line are fine)."""
     for prompt in ("INDEPENDENT: 調査のみ。出力はマージされない",
                    "independent: research only",
                    "  INDEPENDENT: 前に空白があってもよい",
                    "前置き\nINDEPENDENT: 2行目の行頭でもよい"):
-        assert _spawn_verdict(prompt) is None, f"正当な宣言を弾いた: {prompt!r}"
+        assert _spawn_verdict(prompt) is None, (
+            f"a legitimate declaration was rejected: {prompt!r}")
 
 
 def test_seam_contract_structure_still_passes():
-    """seam 側は**構造**を見る（単なる語ではない）ので、handoff.py の出力は通る。"""
+    """The seam side reads **structure** (not a bare word), so handoff.py's output passes."""
     assert _spawn_verdict("## Your slice\nX\nInputs you receive: A\n"
                           "Outputs you MUST produce: B") is None
 
 
 def test_intake_emits_a_machine_readable_verdict_line():
-    """`| tail` を通すとシェルの終了コードは最後のコマンドのものになり、10 が消える。
+    """Through `| tail` the shell's exit code becomes the last command's, and the 10 disappears.
 
-    実地でそう観測された（実装は 10 を返していたが、観測経路が 0 を見せた）。
-    パイプで読む経路でも判定できるように INCOMPLETE を出力に置く。
+    That is what was observed in the field (the implementation returned 10 while the observation
+    path showed 0).
+    INCOMPLETE is put in the output so the decision can also be made through a pipe.
     """
     p = subprocess.run([sys.executable, str(TOOLS / "org_cycle.py"), "intake",
                         "--issue", "30", "--role", "skeptic",
@@ -1398,7 +1443,7 @@ def test_intake_rejects_prose_mutation_claims(claim):
     assert "structured JSON" in result.stderr
 
 
-# ── 0.29.0: CI を触る統合で job 構成を見せる ──────────────────────────────
+# ── 0.29.0: show the job structure for an integration that touches CI ──────
 def _ci_repo(tmp_path, ci_yaml):
     repo = tmp_path / "r"; repo.mkdir()
     def g(*a, cwd=repo):
@@ -1446,15 +1491,16 @@ jobs:
 
 
 def test_integrate_plan_flags_a_conditional_ci_job(tmp_path):
-    """YAML が妥当でテストが緑でも、条件付き job に入ったステップは走らない。
+    """Valid YAML and green tests notwithstanding, a step that lands in a conditional job does not
+    run.
 
-    運用では union でのマージ結果が条件付き job の末尾に入り、依存する Issue が未統合の間、
-    追加した検査が一度も走っていなかった。step の `if:` は `- if:` の形でも書けるので、
-    ハイフンを見落とすと**まさに捕まえたい形**を落とす。
+    In operation a union merge put its result at the end of a conditional job, and while the Issue
+    it depended on stayed unintegrated the added check never ran once. A step's `if:` can also be
+    written as `- if:`, so missing the hyphen drops **exactly the shape this means to catch**.
     """
     repo = _ci_repo(tmp_path, _CI_CONDITIONAL)
     p = subprocess.run([sys.executable, str(TOOLS / "org_cycle.py"), "integrate",
-                        "--issue", "42", "--plan", "--base", "develop"],   # #106: 明示（fixture に宣言が無い）
+                        "--issue", "42", "--plan", "--base", "develop"],   # #106: stated (the fixture declares none)
                        capture_output=True, text=True, cwd=str(repo), timeout=60)
     out = p.stdout + p.stderr
     assert "it touches CI" in out, out
@@ -1463,35 +1509,38 @@ def test_integrate_plan_flags_a_conditional_ci_job(tmp_path):
 
 
 def test_integrate_plan_lists_only_real_jobs(tmp_path):
-    """`on:` の子（pull_request / push）を job と誤認しないこと。条件が無ければ黙る。"""
+    """A child of `on:` (pull_request / push) must not be mistaken for a job. With no condition it
+    stays quiet."""
     repo = _ci_repo(tmp_path, _CI_PLAIN)
     p = subprocess.run([sys.executable, str(TOOLS / "org_cycle.py"), "integrate",
-                        "--issue", "42", "--plan", "--base", "develop"],   # #106: 明示（fixture に宣言が無い）
+                        "--issue", "42", "--plan", "--base", "develop"],   # #106: stated (the fixture declares none)
                        capture_output=True, text=True, cwd=str(repo), timeout=60)
     out = p.stdout + p.stderr
     assert "job: test" in out, out
     for wrong in ("pull_request", "push", "permissions"):
-        assert wrong not in out.split("job:")[1].split("\n")[0], f"{wrong} を job と誤認した"
-    assert "条件付きの job がある" not in out, "条件が無いのに警告した"
+        assert wrong not in out.split("job:")[1].split("\n")[0], (
+            f"{wrong} was mistaken for a job")
+    assert "a conditional job" not in out, "it warned although there is no condition"
 
 
-# ── 0.31.0: 別ハーネスを judge として使う（血統を実際に分ける）──────────────
+# ── 0.31.0: use another harness as the judge (actually separating the lineage) ──
 def test_verdict_schemas_satisfy_structured_outputs():
-    """Structured Outputs は `additionalProperties: false` のとき全キーを required に要求する。
+    """Under `additionalProperties: false`, Structured Outputs requires every key in required.
 
-    実測で 400 invalid_json_schema: "'required' is required to be supplied and to be an array
-    including every key in properties. Missing 'note'." 任意の項目は required から外すのではなく
-    `"type": ["string", "null"]` で表現する。
+    Measured as 400 invalid_json_schema: "'required' is required to be supplied and to be an array
+    including every key in properties. Missing 'note'." An optional field is expressed as
+    `"type": ["string", "null"]` rather than by dropping it from required.
     """
     base = TOOLS.parent / "template" / "schemas"
-    assert base.is_dir(), "verdict スキーマが無い"
+    assert base.is_dir(), "there are no verdict schemas"
 
     def check(node, path="root"):
         if isinstance(node, dict):
             if node.get("type") == "object" and "properties" in node:
-                assert node.get("additionalProperties") is False, f"{path}: 追加プロパティを許している"
+                assert node.get("additionalProperties") is False, (
+                    f"{path}: it allows additional properties")
                 assert set(node.get("required", [])) == set(node["properties"]), \
-                    f"{path}: required が properties 全キーを含んでいない"
+                    f"{path}: required does not contain every key in properties"
             for k, v in node.items():
                 check(v, f"{path}.{k}")
         elif isinstance(node, list):
@@ -1502,14 +1551,14 @@ def test_verdict_schemas_satisfy_structured_outputs():
         d = json.loads((base / f"{role}-verdict.json").read_text(encoding="utf-8"))
         check(d, role)
         assert "verdict" in d["properties"], role
-        assert d["properties"]["verdict"].get("enum"), f"{role}: verdict が enum でない"
+        assert d["properties"]["verdict"].get("enum"), f"{role}: verdict is not an enum"
 
 
 def test_intake_reads_a_structured_verdict():
-    """構造化された返り値は、正規表現ではなく構造で見る。
+    """A structured return is read by its structure, not by a regex.
 
-    スキーマが required にしていても、値が空文字なら埋まっていない。形（スキーマ）と
-    中身（intake）で2層にする。
+    Required in the schema or not, an empty string is not filled in. It is layered in two: the shape
+    (the schema) and the content (intake).
     """
     ok = json.dumps({
         "verdict": "survives",
@@ -1530,7 +1579,7 @@ def test_intake_reads_a_structured_verdict():
     q = subprocess.run([sys.executable, str(TOOLS / "org_cycle.py"), "intake",
                         "--issue", "11", "--role", "skeptic", "--report", "-"],
                        input=empty, capture_output=True, text=True, timeout=60)
-    assert q.returncode == 10, "欄が空の構造化返り値を通した"
+    assert q.returncode == 10, "a structured return with an empty field passed"
 
 
 @pytest.mark.parametrize("mutation", [
@@ -1617,7 +1666,7 @@ def test_cross_harness_verdict_schemas_are_bundled_and_resolved():
 
 
 def test_verify_offers_the_headless_route():
-    """別ハーネスで judge を回す形を、そのまま打てる形で出すこと。"""
+    """Print the shape for running a judge in another harness in a form that can be typed as-is."""
     src = _cycle_src("judge")
     seg = src[src.index("def cmd_verify"):]
     assert "--output-schema" in seg and "intake" in seg
@@ -1625,22 +1674,23 @@ def test_verify_offers_the_headless_route():
 
 
 def test_claude_judge_receives_the_declared_effort():
-    """Claude Codeもconstitutionのmodel/effortを実行引数へ投影する。"""
+    """Claude Code projects the constitution's model/effort onto its run arguments too."""
     src = _cycle_src("judge")
     branch = src[src.index('elif cli == "claude":'):src.index('else:', src.index('elif cli == "claude":'))]
     assert '["--model", str(model)]' in branch
     assert '["--effort", str(effort)]' in branch
 
 
-# ── judges.lineage（スイスチーズ層）─────────────────────────────────────
-# **既定が変わらないことを、まず固定する。** 別ハーネスの契約・CLI・認証を前提にすると、
-# 持っていない環境で org が回らなくなる。層を増やすのは選択であって前提ではない。
+# ── judges.lineage (the Swiss-cheese layers) ────────────────────────────────
+# **First, pin that the default does not change.** Presupposing another harness's subscription,
+# CLI, and credentials stops the org from running anywhere that lacks them. Adding a layer is a
+# choice, not a premise.
 
 def test_judge_lineage_defaults_to_same_harness(tmp_path, monkeypatch):
-    """constitution が judges を宣言していなければ same-harness。"""
+    """Where the constitution declares no judges, it is same-harness."""
     sys.path.insert(0, str(TOOLS))
     from orgcycle.judge import _judge_lineage
-    (tmp_path / ".orgforge" / "ledger").mkdir(parents=True)   # org_root は .orgforge/ で判定
+    (tmp_path / ".orgforge" / "ledger").mkdir(parents=True)   # org_root is decided by .orgforge/
     (tmp_path / "constitution.yaml").write_text("enforcement:\n  caps: {}\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
     assert _judge_lineage("gate") == ("same-harness", None)
@@ -1746,25 +1796,28 @@ def test_active_harness_rejects_ambiguous_nested_signals(monkeypatch):
 
 
 def test_headless_reports_missing_cli_instead_of_falling_back(tmp_path, monkeypatch):
-    """CLI が無いとき、**黙って same-harness に落ちない**。
+    """With no CLI, **it does not fall back to same-harness silently**.
 
-    「別血統で検査した」と思っているのに実際は同じ血統だった、が最悪の状態である
-    （信号が壊れていることが分からない）。非 0 を返して言うこと。
+    Believing "it was checked under a different lineage" while the lineage was in fact the same is
+    the worst state there is
+    (nobody can tell the signal is broken). Return non-zero and say so.
     """
     sys.path.insert(0, str(TOOLS))
     from orgcycle.judge import _run_headless
     schema = TEMPLATE / "schemas" / "gate-verdict.json"
-    rc = _run_headless("gate", 1, "材料", {"cli": "no-such-cli-xyz"}, str(schema))
+    rc = _run_headless("gate", 1, "the material", {"cli": "no-such-cli-xyz"}, str(schema))
     assert rc != 0
 
 
 def test_headless_empty_output_is_fail_closed_and_diagnosable(tmp_path, monkeypatch, capsys):
-    """空返しは fail-closed のまま、**切り分けられる材料**を残す（Issue #166）。
+    """An empty return stays fail-closed while leaving **material that separates the causes**
+    (Issue #166).
 
-    実地では `claude -p` が exit 0・stdout も stderr も空で返り、CLI が落ちたのか、認証が
-    切れたのか、tool-use の途中で黙って終わったのかを区別できなかった。判定は得られて
-    いないので admission は生成しない（そこは変えない）が、次に何を試すかは言えるはず。
-    材料そのもの（判定対象）は出さないこと — 長さだけを言う。
+    In the field `claude -p` returned exit 0 with both stdout and stderr empty, and there was no
+    telling whether the CLI had died, the credentials had expired, or it had quietly ended midway
+    through a tool use. No judgment was obtained, so no admission is generated (that does not
+    change) — but what to try next can still be said.
+    Do not print the material itself (what is being judged) — state only its length.
     """
     sys.path.insert(0, str(TOOLS))
     from orgcycle import judge as J
@@ -1777,18 +1830,19 @@ def test_headless_empty_output_is_fail_closed_and_diagnosable(tmp_path, monkeypa
     material = "SECRET-MATERIAL-" + "x" * 200
     rc = J._run_headless("gate", 1, material, {"cli": "claude"}, str(schema))
     err = capsys.readouterr().err
-    assert rc == 7, "判定が無いのに 0 を返してはいけない"
-    assert "exit=0" in err and "stdout=0B" in err          # 切り分けの材料
+    assert rc == 7, "it must not return 0 with no judgment"
+    assert "exit=0" in err and "stdout=0B" in err          # material for separating the causes
     assert "material=" in err
-    assert "SECRET-MATERIAL" not in err, "判定対象そのものを診断に漏らさない"
-    assert "Reply with exactly: OK" in err                 # 次に試すことを言う
+    assert "SECRET-MATERIAL" not in err, (
+        "what is being judged must not leak into the diagnostics")
+    assert "Reply with exactly: OK" in err                 # it says what to try next
 
 
 def test_decide_requires_both_lineages_for_admit(tmp_path, monkeypatch):
-    """cross-harness の org では、片側だけの admit を記録できない。
+    """In a cross-harness org, a one-sided admit cannot be recorded.
 
-    verify が両方の判定を並べて監督が読むだけなら、監督は都合のいい方を採れる —
-    検査を増やしたのに緩くなる。だから **decide が持つ**。
+    If verify merely lined both judgments up for a supervisor to read, the supervisor could take
+    whichever suited — more checking, and yet looser. So **decide holds it**.
     """
     sys.path.insert(0, str(TOOLS))
     import importlib
@@ -1801,14 +1855,15 @@ def test_decide_requires_both_lineages_for_admit(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("ORG_LEDGER_ROOT", str(led))
     assert rec._org_lineage() == "cross-harness"
-    # 台帳が空 → どちらの血統の admit も無い
+    # An empty ledger → there is no admit from either lineage
     assert rec._has_lineage_verdict(7, "admission_decided", "same-harness") is False
-    # reject は一致を要求しない（否は片方で足りる）
+    # A reject demands no agreement (one side is enough for a negative)
     assert rec._has_lineage_verdict(7, "admission_decided", "cross-harness") is False
 
 
 def test_drift_reads_only_the_why_section(monkeypatch):
-    """判定の Why 節だけを読む。コメント全体を検索すると分布が消える（実測）。"""
+    """Read only the judgment's Why section. Searching the whole comment loses the distribution
+    (measured)."""
     sys.path.insert(0, str(TOOLS))
     import importlib
     drift = importlib.import_module("drift")
@@ -1824,7 +1879,7 @@ def test_drift_reads_only_the_why_section(monkeypatch):
 
 
 def test_drift_skips_non_judgment_comments(monkeypatch):
-    """maker の報告や rework 指示は事由ではない。"""
+    """A maker's report or a rework instruction is not a cause."""
     sys.path.insert(0, str(TOOLS))
     import importlib
     drift = importlib.import_module("drift")
@@ -1833,17 +1888,18 @@ def test_drift_skips_non_judgment_comments(monkeypatch):
     assert drift._issue_reasons(1) == []
 
 
-# ══ 0.32.1: cross-harness の一巡を、実 CLI で空 Ledger から通す ═══════════════
-# **受け入れ条件7。** 0.32.0 はこれを持たず、片側が拒否されることだけを確かめて
-# 「通せるか」を確かめなかったため、admit が永久に作れないデッドロックを push した。
-# 判定関数の単体テストではこれを捕まえられない — 実 CLI を空の台帳から走らせること。
+# ══ 0.32.1: take a full cross-harness round through the real CLI from an empty ledger ══
+# **Acceptance criterion 7.** 0.32.0 lacked this: it confirmed only that one side is refused and
+# never confirmed that anything could get through, so it pushed a deadlock where an admit could
+# never be produced.
+# A unit test of the deciding function cannot catch this — run the real CLI from an empty ledger.
 
 def _xh_org(tmp_path, lineage="cross-harness"):
-    """cross-harness を宣言した空の org を作る。"""
+    """Create an empty org that declares cross-harness."""
     (tmp_path / ".orgforge" / "ledger").mkdir(parents=True)
     (tmp_path / "constitution.yaml").write_text(
         f"enforcement:\n  judges:\n    lineage: {lineage}\n"
-        "    integration_ref: origin/main\n"     # #106: show 等は統合先の宣言を要求する
+        "    integration_ref: origin/main\n"     # #106: show and friends require the declaration
         "    judgment_corrections:\n      authority_roles: [supervisor]\n",
         encoding="utf-8")
     (tmp_path / "organization.yaml").write_text(
@@ -1888,7 +1944,7 @@ def _prov(tmp_path, lineage, verdict, issue=7, role="gate", why=None, extra=(),
                "--verdict", verdict, "--subject", subject,
                "--why", why or f"{lineage} の {role} として実際に見て決めた。"
                                f"再導出した範囲と、決め手になった箇所を書いている。",
-               "--evidence", "実行したコマンドと出力の要旨", *extra,
+               "--evidence", "the commands run and a summary of the output", *extra,
                cwd=str(tmp_path))
 
 
@@ -1909,16 +1965,17 @@ def _events(tmp_path, cls):
 @pytest.mark.parametrize("first,second", [("same-harness", "cross-harness"),
                                           ("cross-harness", "same-harness")])
 def test_xh_admission_from_empty_ledger_either_order(tmp_path, first, second):
-    """受け入れ条件1+3: 空 Ledger から**どちらの順序でも**通り、一致が admission を生む。"""
+    """Acceptance criteria 1 and 3: it passes from an empty ledger **in either order**, and
+    agreement produces the admission."""
     org = _xh_org(tmp_path)
     c1, o1 = _prov(org, first, "admit")
     assert c1 == 0, o1
-    # 1件目では admission はまだ無い（受け入れ条件2）
+    # After the first there is still no admission (acceptance criterion 2)
     assert _events(org, "admission_decided") == []
     c2, o2 = _prov(org, second, "admit")
     assert c2 == 0, o2
     adm = _events(org, "admission_decided")
-    assert len(adm) == 1, f"一致したのに admission が生成されていない: {o2}"
+    assert len(adm) == 1, f"they agree and no admission was generated: {o2}"
     pl = adm[0]["payload"]
     assert pl["verdict"] == "admit" and pl["lineage"] == "joint"
     assert sorted(pl["agreed_by"]) == ["cross-harness", "same-harness"]
@@ -1926,7 +1983,7 @@ def test_xh_admission_from_empty_ledger_either_order(tmp_path, first, second):
 
 
 def test_xh_single_lineage_does_not_admit(tmp_path):
-    """受け入れ条件2: 片側だけでは admit されない。"""
+    """Acceptance criterion 2: one side alone is not admitted."""
     org = _xh_org(tmp_path)
     assert _prov(org, "same-harness", "admit")[0] == 0
     assert _events(org, "admission_decided") == []
@@ -1934,7 +1991,8 @@ def test_xh_single_lineage_does_not_admit(tmp_path):
 
 
 def test_xh_disagreement_blocks_admission_and_is_recorded(tmp_path):
-    """受け入れ条件4: 不一致は admission を生まず、食い違いそのものが記録される。"""
+    """Acceptance criterion 4: a disagreement produces no admission, and the disagreement itself is
+    recorded."""
     org = _xh_org(tmp_path)
     assert _prov(org, "same-harness", "admit")[0] == 0
     c, o = _prov(org, "cross-harness", "reject")
@@ -1947,25 +2005,26 @@ def test_xh_disagreement_blocks_admission_and_is_recorded(tmp_path):
 
 
 def test_xh_lineage_cannot_rewrite_its_own_verdict(tmp_path):
-    """受け入れ条件4: 同じ血統が verdict を書き換えて一致を作れない。"""
+    """Acceptance criterion 4: one lineage cannot rewrite its verdict to manufacture agreement."""
     org = _xh_org(tmp_path)
     assert _prov(org, "same-harness", "reject")[0] == 0
-    c, o = _prov(org, "same-harness", "admit")        # 反転を試みる
+    c, o = _prov(org, "same-harness", "admit")        # attempt the flip
     assert c == 4, o
     assert "correction" in o
     assert _events(org, "admission_decided") == []
 
 
 def test_xh_other_issue_does_not_satisfy_agreement(tmp_path):
-    """受け入れ条件4: 別 Issue の判定は一致に数えない。"""
+    """Acceptance criterion 4: a judgment on another Issue does not count toward agreement."""
     org = _xh_org(tmp_path)
     assert _prov(org, "same-harness", "admit", issue=7)[0] == 0
     assert _prov(org, "cross-harness", "admit", issue=8)[0] == 0
-    assert _events(org, "admission_decided") == []   # #7 も #8 も片側だけ
+    assert _events(org, "admission_decided") == []   # both #7 and #8 have only one side
 
 
 def test_xh_skeptic_and_gate_do_not_cross_satisfy(tmp_path):
-    """受け入れ条件4: gate の判定は skeptic の一致に使えない（for_event で分ける）。"""
+    """Acceptance criterion 4: the gate's judgment cannot serve the skeptic's agreement (they are
+    kept apart by for_event)."""
     org = _xh_org(tmp_path)
     assert _prov(org, "same-harness", "admit", role="gate")[0] == 0
     assert _prov(org, "cross-harness", "survives", role="skeptic")[0] == 0
@@ -1974,28 +2033,31 @@ def test_xh_skeptic_and_gate_do_not_cross_satisfy(tmp_path):
 
 
 def test_broken_constitution_fails_closed_no_downgrade(tmp_path):
-    """受け入れ条件5+6: 設定を読めないなら非ゼロで止まり、same-harness に降格しない。"""
+    """Acceptance criteria 5 and 6: where the configuration cannot be read it stops non-zero and
+    does not degrade to same-harness."""
     org = _xh_org(tmp_path)
     (org / "constitution.yaml").write_text("enforcement: [not: valid: yaml", encoding="utf-8")
     c, o = _prov(org, "same-harness", "admit")
     assert c != 0
     both = o
     assert "cannot parse constitution.yaml" in both or "cannot be read" in both
-    # **降格していないこと** — 台帳に何も入っていない
+    # **It did not degrade** — nothing entered the ledger
     assert _events(org, "verdict_provisional") == []
     assert _events(org, "admission_decided") == []
 
 
 def test_bad_lineage_value_fails_closed(tmp_path):
-    """受け入れ条件5: lineage の値が不正なら止まる（黙って既定に倒さない）。"""
-    org = _xh_org(tmp_path, lineage="cross_harness")     # アンダースコアは不正
+    """Acceptance criterion 5: an invalid lineage value stops it (it does not fall to the default
+    silently)."""
+    org = _xh_org(tmp_path, lineage="cross_harness")     # an underscore is invalid
     c, o = _prov(org, "same-harness", "admit")
     assert c != 0
     assert "lineage" in o
 
 
 def test_same_harness_org_rejects_provisional(tmp_path):
-    """same-harness の org で provisional は使えない（一致を数える相手が居ない）。"""
+    """A provisional cannot be used in a same-harness org (there is nobody to count agreement
+    with)."""
     org = _xh_org(tmp_path, lineage="same-harness")
     c, o = _prov(org, "same-harness", "admit")
     assert c == 2
@@ -2003,7 +2065,7 @@ def test_same_harness_org_rejects_provisional(tmp_path):
 
 
 def test_xh_pass_requires_evidence(tmp_path):
-    """通過には evidence が必要 — 何も参照していない通過は判子である。"""
+    """A pass needs evidence — a pass that referred to nothing is a rubber stamp."""
     org = _xh_org(tmp_path)
     code, out = run("github_sync.py", "provisional",
                     "--issue", "7", "--role", "gate", "--lineage", "same-harness",
@@ -2014,15 +2076,17 @@ def test_xh_pass_requires_evidence(tmp_path):
     assert "evidence" in out
 
 
-# ══ 0.32.2: 判定対象の同一性と、訂正からの脱出経路 ═════════════════════════════
-# 監査が 0.32.1 で見つけたもの: (a) 案内していた correction の payload 形が実物と違い、
-# 打っても無効化されないので拒否から抜け出せない、(b) 別の revision を見た2判定が一致扱いに
-# なる、(c) joint が片方の reasoning しか持たない、(d) 同じ verdict なら重複を積める。
+# ══ 0.32.2: the identity of what is judged, and the way out of a correction ══
+# What the audit found in 0.32.1: (a) the correction payload shape being advised differed from the
+# real one, so typing it voided nothing and there was no way out of a refusal; (b) two judgments of
+# different revisions counted as agreement; (c) a joint held only one side's reasoning; (d)
+# duplicates could be stacked as long as the verdict matched.
 #
-# **条件5+6 が核心である** — 0.32.0/0.32.1 で2回、拒否だけ確かめて脱出を確かめなかった。
+# **Criteria 5 and 6 are the crux** — twice, in 0.32.0 and 0.32.1, the refusal was confirmed and
+# the way out was not.
 
 def test_xh_different_subjects_do_not_agree(tmp_path):
-    """条件3: 別の対象を見た2つの通過は一致ではない。"""
+    """Criterion 3: two passes that looked at different subjects are not agreement."""
     org = _xh_org(tmp_path)
     assert _prov(org, "same-harness", "admit", subject="rev-A")[0] == 0
     c, o = _prov(org, "cross-harness", "admit", subject="rev-B")
@@ -2032,7 +2096,7 @@ def test_xh_different_subjects_do_not_agree(tmp_path):
 
 
 def test_xh_same_subject_agrees(tmp_path):
-    """条件3の対: 同じ対象なら一致し、joint に subject が載る。"""
+    """The counterpart to criterion 3: the same subject agrees, and the joint carries it."""
     org = _xh_org(tmp_path)
     assert _prov(org, "same-harness", "admit", subject="rev-A")[0] == 0
     assert _prov(org, "cross-harness", "admit", subject="rev-A")[0] == 0
@@ -2042,15 +2106,16 @@ def test_xh_same_subject_agrees(tmp_path):
 
 
 def test_xh_exact_retry_is_noop_but_rejudge_is_refused(tmp_path):
-    """条件4: 完全に同じ再実行だけが no-op。理由を変えた再判定は拒否。"""
+    """Criterion 4: only an exactly identical re-run is a no-op. A re-judgment with a changed reason
+    is refused."""
     org = _xh_org(tmp_path)
     why = "同一性の検査のために、十分な長さの理由をここに書いておく。決め手はこの箇所である。"
     assert _prov(org, "same-harness", "admit", why=why)[0] == 0
-    # 完全に同じ → no-op（重複して積まれない）
+    # Exactly identical → a no-op (no duplicate is stacked)
     c, o = _prov(org, "same-harness", "admit", why=why)
     assert c == 0, o
     assert len(_events(org, "verdict_provisional")) == 1
-    # 同じ verdict だが理由が違う → 拒否（0.32.1 はこれを通していた）
+    # The same verdict with a different reason → refused (0.32.1 let this through)
     c, o = _prov(org, "same-harness", "admit",
                  why="同じ verdict のまま理由だけを差し替えた場合。これは重複として積めてはいけない。")
     assert c == 4, o
@@ -2058,10 +2123,11 @@ def test_xh_exact_retry_is_noop_but_rejudge_is_refused(tmp_path):
 
 
 def test_xh_rejudge_hands_back_to_declared_authority_and_that_path_works(tmp_path):
-    """Judgeには自己訂正コマンドを与えず、宣言済み第三者の脱出経路を実CLIで通す。"""
+    """No self-correction command is given to a judge; the declared third party's way out is taken
+    through the real CLI."""
     org = _xh_org(tmp_path)
     assert _prov(org, "same-harness", "reject")[0] == 0
-    c, o = _prov(org, "same-harness", "admit")     # 差し替えを試みる → 拒否
+    c, o = _prov(org, "same-harness", "admit")     # attempt the swap → refused
     assert c == 4
     assert "Authority roles declared by the constitution: supervisor" in o
     assert "--actor <あなたの役割>" not in o
@@ -2074,7 +2140,7 @@ def test_xh_rejudge_hands_back_to_declared_authority_and_that_path_works(tmp_pat
     code, lout = run("ledger.py", "append", "--class", "correction",
                      "--actor", "supervisor", "--payload", payload, "--receipt", str(receipt),
                      cwd=str(org))
-    assert code == 0, f"authority の correction が通らない: {lout}"
+    assert code == 0, f"the authority's correction does not pass: {lout}"
     assert ("effect=voids" in lout and "authority=supervisor" in lout
             and "assurance=authenticated" in lout)
     code, shown = run("org_cycle.py", "show", "--issue", "7", cwd=str(org))
@@ -2083,18 +2149,18 @@ def test_xh_rejudge_hands_back_to_declared_authority_and_that_path_works(tmp_pat
             and "principal=supervisor-principal" in shown
             and "assurance=authenticated" in shown)
 
-    # **効いていること** — 無効化されたので、新しい判定が入る
+    # **It took effect** — the old one is void, so a new judgment enters
     c, o = _prov(org, "same-harness", "admit")
-    assert c == 0, f"correction を打っても差し替えられない:\n{o}"
+    assert c == 0, f"it cannot be replaced even after a correction:\n{o}"
     provs = _events(org, "verdict_provisional")
-    assert len(provs) == 2                                  # 元の reject と、新しい admit
-    # そして cross-harness が揃えば joint になる（脱出経路が最後まで通る）
+    assert len(provs) == 2                                  # the original reject and the new admit
+    # And once cross-harness is complete it becomes a joint (the way out runs to the end)
     assert _prov(org, "cross-harness", "admit")[0] == 0
     assert len(_events(org, "admission_decided")) == 1
 
 
 def test_xh_joint_carries_both_lineages_reasoning(tmp_path):
-    """条件7: joint が両血統の reasoning_sha256 と ref を持つ。"""
+    """Criterion 7: the joint carries both lineages' reasoning_sha256 and ref."""
     org = _xh_org(tmp_path)
     assert _prov(org, "same-harness", "admit", why="同一ハーネス側の judge の理由。独立に再導出した範囲と、判定の決め手になった箇所を書いている。")[0] == 0
     assert _prov(org, "cross-harness", "admit", why="別ハーネス側の judge の理由。独立に見た範囲と、判定の決め手になった具体的な箇所を書いている。")[0] == 0
@@ -2105,14 +2171,15 @@ def test_xh_joint_carries_both_lineages_reasoning(tmp_path):
         assert by[lin]["reasoning_sha256"]
         assert by[lin]["reasoning_ref"]
         assert by[lin]["seq"]
-    # 両者の digest は異なり、joint の digest はそのどちらでもない（2つから作る）
+    # The two digests differ, and the joint's is neither of them (it is built from both)
     ds = {by[l]["reasoning_sha256"] for l in by}
     assert len(ds) == 2
     assert pl["reasoning_sha256"] not in ds
 
 
 def test_review_subject_binds_tree_and_requirements(tmp_path):
-    """review_subject が木と受け入れ基準に依存すること（judge が作れない値であること）。"""
+    """review_subject must depend on the tree and the acceptance criteria (a value no judge can
+    produce)."""
     sys.path.insert(0, str(TOOLS))
     from orgcycle._core import review_subject
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
@@ -2122,21 +2189,23 @@ def test_review_subject_binds_tree_and_requirements(tmp_path):
     subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
                     "commit", "-qm", "one"], cwd=tmp_path, check=True)
     s1, p1 = review_subject(7, "gate", "implement", cwd=str(tmp_path))
-    # 受け入れ基準が変われば別の判定である
+    # Different acceptance criteria make it a different judgment
     (tmp_path / "REQUIREMENTS.md").write_text("MUST: A and B", encoding="utf-8")
     s2, p2 = review_subject(7, "gate", "implement", cwd=str(tmp_path))
     assert s1 != s2
     assert p1["requirements_digest"] != p2["requirements_digest"]
-    # role が違えば別の判定である
+    # A different role makes it a different judgment
     s3, _ = review_subject(7, "skeptic", "implement", cwd=str(tmp_path))
     assert s3 != s2
 
 
 def test_non_pass_verdict_does_not_enter_agreement(tmp_path):
-    """park / reject は通過ではないので、subject 比較や相手待ちに進まない。
+    """park and reject are not passes, so they proceed to neither a subject comparison nor waiting
+    on a peer.
 
-    実測: #34 の park に対して「別の対象を見ている」という無関係な警告が出た。
-    否は片方でも出れば否なので、一致を作る話に入る前に終えるべきである。
+    Measured: a park on #34 drew the irrelevant warning "they are looking at different subjects".
+    A negative from either side is negative, so it should end before the question of agreement
+    arises.
     """
     org = _xh_org(tmp_path)
     c, o = _prov(org, "same-harness", "park")
@@ -2147,10 +2216,11 @@ def test_non_pass_verdict_does_not_enter_agreement(tmp_path):
 
 
 def test_print_subject_does_not_launch_a_judge(tmp_path, monkeypatch):
-    """--print-subject は subject だけ出して終わる（cross-harness でも judge を起動しない）。
+    """--print-subject prints the subject and stops (it starts no judge, even under
+    cross-harness).
 
-    実測: 記録のために subject を知ろうとして verify を打ち、headless judge が走って
-    2分でタイムアウトした。記録の手順が判定の実行を要求してはいけない。
+    Measured: verify was typed to learn the subject for a record, a headless judge ran, and it
+    timed out after two minutes. A recording procedure must not require a judgment to be run.
     """
     org = _xh_org(tmp_path)
     subprocess.run(["git", "init", "-q"], cwd=org, check=True)
@@ -2158,10 +2228,11 @@ def test_print_subject_does_not_launch_a_judge(tmp_path, monkeypatch):
     subprocess.run(["git", "add", "-A"], cwd=org, check=True)
     subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
                     "commit", "-qm", "x"], cwd=org, check=True)
-    # PATH から codex を外す — 起動しようとしたなら落ちるので、起動していないことが分かる
+    # Take codex off PATH — an attempt to start it would fail, so success proves it did not
     monkeypatch.setenv("PATH", "/nonexistent")
-    # #101 以降、subject は Issue の worktree（か明示の --subject-root）から mint する。
-    # この org に worktree は無いので、逃げ道を明示する — cwd への暗黙 fallback は無い。
+    # From #101 the subject is minted from the Issue's worktree (or an explicit --subject-root).
+    # This org has no worktree, so the escape hatch is stated — there is no implicit fallback to
+    # the cwd.
     code, out = run("org_cycle.py", "verify", "--issue", "7", "--role", "gate",
                     "--print-subject", "--subject-root", str(org), cwd=str(org))
     assert code == 0, out
@@ -2170,10 +2241,10 @@ def test_print_subject_does_not_launch_a_judge(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("first,second", [("admit", "reject"), ("reject", "admit")])
 def test_xh_disagreement_recorded_in_either_order(tmp_path, first, second):
-    """食い違いは **どちらが先でも** 記録される。
+    """A disagreement is recorded **whichever comes first**.
 
-    0.32.2 で park/reject を早期に返すようにしたとき、admit → reject の順では
-    judges_disagreed が残らなくなった。片方の順序だけ確かめると通ってしまう形である。
+    When 0.32.2 made park/reject return early, the admit → reject order stopped leaving a
+    judges_disagreed. It is the shape that passes when only one order is checked.
     """
     org = _xh_org(tmp_path)
     assert _prov(org, "same-harness", first)[0] == 0
@@ -2186,7 +2257,7 @@ def test_xh_disagreement_recorded_in_either_order(tmp_path, first, second):
     assert dis[0]["payload"]["cross_harness"] == second
 
 
-# ══ 2.0.15: judge dispatch 前の bounded environment preflight ═══════════════
+# ══ 2.0.15: a bounded environment preflight before judge dispatch ══════════
 
 def _preflight_constitution(tmp_path, preflights):
     import yaml
@@ -2291,8 +2362,8 @@ def test_verify_stops_before_any_judge_work_when_preflight_fails(monkeypatch, ca
                         lambda *args, **kwargs: (False, ['{"id":"db","status":"fail"}']))
     monkeypatch.setattr(judge, "_seam",
                         lambda *args: pytest.fail("seam/judge material was built after failure"))
-    # #101: subject は worktree（か明示の --subject-root）から。issue-36 の worktree は
-    # 無いので明示する — このテストの主題は「preflight 失敗で judge を起動しない」。
+    # #101: the subject comes from the worktree (or an explicit --subject-root). issue-36 has no
+    # worktree, so it is stated — this test's subject is "a failed preflight starts no judge".
     args = argparse.Namespace(issue=36, role="gate", phase="implement", print_subject=False,
                               subject_root=os.getcwd())
     assert judge.cmd_verify(args) == 8
@@ -2322,7 +2393,7 @@ def test_org_lint_rejects_invalid_preflight_before_first_judge():
                for error in lint.errs), lint.errs
 
 
-# ══ 0.32.3: review_subject が作業ツリー全体を束ねる ═══════════════════════════
+# ══ 0.32.3: review_subject bundles the whole working tree ══════════════════
 
 def _repo(tmp_path):
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
@@ -2341,11 +2412,12 @@ def _sub(path, issue=7, role="gate", phase="implement"):
 
 
 def test_subject_changes_when_untracked_content_changes(tmp_path):
-    """**監査が実証した欠陥。** 未追跡ファイルの内容を差し替えても id が同じだった。
+    """**A defect the audit demonstrated.** Replacing an untracked file's content left the id
+    unchanged.
 
-    `git diff HEAD` は未追跡の内容を含まないので、名前だけ拾って中身を見ていなかった。
-    judge が未追跡ファイルを読んで判定していれば、別の成果物を「同じもの」として
-    一致させられる。
+    `git diff HEAD` does not include untracked content, so names were picked up without reading
+    what was in them. Where a judge read untracked files to judge, two different deliverables could
+    be made to agree as "the same thing".
     """
     org = _repo(tmp_path)
     (org / "untracked.txt").write_text("first\n", encoding="utf-8")
@@ -2356,14 +2428,14 @@ def test_subject_changes_when_untracked_content_changes(tmp_path):
 
 
 def test_subject_is_reproducible_for_the_same_tree(tmp_path):
-    """同じ状態なら同じ id。でなければ同じレビューを2度行えない。"""
+    """The same state gives the same id. Otherwise the same review cannot be performed twice."""
     org = _repo(tmp_path)
     (org / "untracked.txt").write_text("x\n", encoding="utf-8")
     assert _sub(org) == _sub(org)
 
 
 def test_subject_ignores_gitignored_build_output(tmp_path):
-    """生成物で id が動くと、同じレビューを2度行えない。"""
+    """An id that moves with build output makes the same review impossible to perform twice."""
     org = _repo(tmp_path)
     (org / ".gitignore").write_text("build/\n", encoding="utf-8")
     subprocess.run(["git", "add", "-A"], cwd=org, check=True)
@@ -2376,18 +2448,19 @@ def test_subject_ignores_gitignored_build_output(tmp_path):
 
 
 def test_subject_changes_for_staged_and_unstaged_alike(tmp_path):
-    """tracked の staged / unstaged いずれの変更でも id は動く。"""
+    """The id moves for a tracked change whether it is staged or unstaged."""
     org = _repo(tmp_path)
     base = _sub(org)
     (org / "t.txt").write_text("tracked\nunstaged\n", encoding="utf-8")
     unstaged = _sub(org)
     assert unstaged != base
     subprocess.run(["git", "add", "t.txt"], cwd=org, check=True)
-    assert _sub(org) == unstaged        # 同じ内容なので id は同じ（staging は対象ではない）
+    assert _sub(org) == unstaged        # the same content gives the same id (staging is not the
+                                        # subject)
 
 
 def test_subject_does_not_touch_the_real_index(tmp_path):
-    """一時 index を使うので、監督の staging 状態を壊さない。"""
+    """It uses a temporary index, so the supervisor's staging state is not broken."""
     org = _repo(tmp_path)
     (org / "untracked.txt").write_text("x\n", encoding="utf-8")
     (org / "t.txt").write_text("tracked\nmodified\n", encoding="utf-8")
@@ -2397,11 +2470,11 @@ def test_subject_does_not_touch_the_real_index(tmp_path):
     after = subprocess.run(["git", "status", "--porcelain"], cwd=org,
                            capture_output=True, text=True).stdout
     assert before == after
-    assert "?? untracked.txt" in after       # staged にされていない
+    assert "?? untracked.txt" in after       # it was not staged
 
 
 def test_subject_records_dirty_and_head_tree_separately(tmp_path):
-    """dirty かどうかと、HEAD の木が何かを、両方残す（後から追える形）。"""
+    """Both whether it is dirty and what HEAD's tree is are kept (in a form traceable later)."""
     sys.path.insert(0, str(TOOLS))
     from orgcycle._core import review_subject
     org = _repo(tmp_path)
@@ -2414,14 +2487,15 @@ def test_subject_records_dirty_and_head_tree_separately(tmp_path):
     assert dirty["reviewed_tree_sha"] != dirty["head_tree_sha"]
 
 
-# ── #101: verify の subject は Issue の worktree を記述する ──────────────────
-# 本体（リポジトリ直下）から `verify --issue N` を打つと cwd の tree が subject に
-# なり、どの Issue でも同一 subject（ahead=0 の main）が mint された（OBS-031/055/071）。
-# joint admission は subject の一致を「二血統が同じものを見た」証拠に使うので、
-# subject が cwd 依存だと独立判定の同一性が壊れる。
+# ── #101: verify's subject describes the Issue's worktree ──────────────────
+# Typing `verify --issue N` from the main tree (the repository root) made the cwd's tree the
+# subject, and every Issue minted the same one (main at ahead=0) (OBS-031/055/071).
+# A joint admission uses matching subjects as evidence that "the two lineages looked at the same
+# thing", so a cwd-dependent subject breaks the identity of an independent judgment.
 
 def _subject_org(tmp_path, issues=(7, 8)):
-    """scratch org: main+develop を持つ primary と、Issue ごとの worktree（各1コミット先行）。"""
+    """A scratch org: a primary holding main and develop, plus a worktree per Issue (each one
+    commit ahead)."""
     repo = tmp_path / "org"
     repo.mkdir()
     def g(*a, cwd=repo):
@@ -2443,7 +2517,7 @@ def _subject_org(tmp_path, issues=(7, 8)):
 
 
 def _print_subject(repo, issue, *extra, cwd=None):
-    """verify --print-subject を叩き、(returncode, sid, parts, stderr) を返す。"""
+    """Run verify --print-subject and return (returncode, sid, parts, stderr)."""
     p = subprocess.run([sys.executable, str(TOOLS / "org_cycle.py"), "verify",
                         "--issue", str(issue), "--role", "gate", "--print-subject", *extra],
                        capture_output=True, text=True, cwd=str(cwd or repo))
@@ -2454,61 +2528,69 @@ def _print_subject(repo, issue, *extra, cwd=None):
 
 
 def test_verify_subject_is_the_issue_worktree_not_cwd(tmp_path):
-    """回帰そのもの: 本体 cwd から打っても、subject は Issue worktree の tree を記述する。"""
+    """The regression itself: typed from the main tree's cwd, the subject still describes the Issue
+    worktree's tree."""
     repo, g = _subject_org(tmp_path)
     wt_tree = g("rev-parse", "HEAD^{tree}",
                 cwd=repo / ".orgforge" / "wt" / "issue-7").stdout.strip()
     root_tree = g("rev-parse", "HEAD^{tree}").stdout.strip()
-    assert wt_tree != root_tree, "前提: worktree は本体より先行している"
+    assert wt_tree != root_tree, "premise: the worktree is ahead of the main tree"
 
     code, sid, parts, err = _print_subject(repo, 7)
     assert code == 0, err
     assert parts["reviewed_tree_sha"] == wt_tree, \
-        "cwd（本体）の tree が subject になっている — #101 の回帰"
+        "the cwd's (the main tree's) tree became the subject — the #101 regression"
     assert parts["reviewed_tree_sha"] != root_tree
-    assert parts["ahead"] == "1", "worktree は develop より1コミット先行のはず（ahead=0 は cwd 観測）"
+    assert parts["ahead"] == "1", (
+        "the worktree should be one commit ahead of develop (ahead=0 means it observed the cwd)")
 
-    # cwd がその worktree 自身のときは従来どおり（同じ subject）
+    # With the cwd inside that worktree it behaves as before (the same subject)
     code2, sid2, _, err2 = _print_subject(repo, 7,
                                           cwd=repo / ".orgforge" / "wt" / "issue-7")
     assert code2 == 0, err2
-    assert sid2 == sid, "worktree 内から打った場合と subject が一致しない"
+    assert sid2 == sid, "the subject differs from the one typed inside the worktree"
 
 
 def test_verify_subjects_differ_across_issues(tmp_path):
-    """worktree が異なる2つの Issue は、同じ cwd から打っても別 subject になる。"""
+    """Two Issues with different worktrees give different subjects, even typed from the same
+    cwd."""
     repo, _ = _subject_org(tmp_path)
     code7, sid7, p7, err7 = _print_subject(repo, 7)
     code8, sid8, p8, err8 = _print_subject(repo, 8)
     assert code7 == 0 and code8 == 0, err7 + err8
-    assert sid7 != sid8, "別 Issue が同一 subject — 「同じ対象を見た」偽証拠が作れてしまう"
+    assert sid7 != sid8, (
+        "different Issues share a subject — false evidence of \"they looked at the same thing\" "
+        "could be manufactured")
     assert p7["reviewed_tree_sha"] != p8["reviewed_tree_sha"]
 
 
 def test_verify_fails_closed_when_worktree_is_missing(tmp_path):
-    """worktree が無ければ非ゼロ exit。cwd への暗黙 fallback で subject を mint しない。"""
+    """With no worktree it exits non-zero. It does not mint a subject through an implicit fallback
+    to the cwd."""
     repo, _ = _subject_org(tmp_path, issues=())
     code, sid, _, err = _print_subject(repo, 42)
     assert code != 0
-    assert sid is None, "worktree 不在でも subject が mint された — fail-open"
+    assert sid is None, "a subject was minted with no worktree present — fail-open"
     assert os.path.join(".orgforge", "wt", "issue-42") in err, \
-        "期待した worktree のパスがエラーに出ていない"
+        "the expected worktree path does not appear in the error"
     assert "--subject-root" in err
 
 
 def test_verify_subject_root_override(tmp_path):
-    """--subject-root は worktree 運用でないレイアウトの明示的な逃げ道。印字にも残る。"""
+    """--subject-root is the explicit escape hatch for a layout that does not use worktrees. It
+    stays in what is printed."""
     repo, g = _subject_org(tmp_path, issues=())
     root_tree = g("rev-parse", "HEAD^{tree}").stdout.strip()
     code, sid, parts, err = _print_subject(repo, 42, "--subject-root", str(repo))
     assert code == 0, err
     assert sid and parts["reviewed_tree_sha"] == root_tree
     assert parts.get("subject_root") == os.path.abspath(str(repo)), \
-        "どの checkout を意図して判定したかが印字に残っていない"
+        "which checkout the judgment was intended for does not appear in what is printed"
 
 
 def test_verify_rejects_issue_worktree_with_unbound_branch(tmp_path):
-    """Issue worktree が detached/別branchなら issue の成果物として受理しない。"""
+    """A detached, or differently-branched, Issue worktree is not accepted as that Issue's
+    deliverable."""
     repo, g = _subject_org(tmp_path, issues=(7,))
     wt = repo / ".orgforge" / "wt" / "issue-7"
     g("checkout", "--detach", "develop", cwd=wt)
@@ -2518,36 +2600,41 @@ def test_verify_rejects_issue_worktree_with_unbound_branch(tmp_path):
     assert "branch" in err and "binding convention" in err
 
 
-# ── #101 rework: isdir では偽 worktree が通る（skeptic の反証）─────────────────
-# 空の残骸ディレクトリ・prune せず再作成されたディレクトリ・repo root への symlink は
-# どれも primary の内側に居るので、git -C が primary に解決し、subject が primary の
-# tree（ahead=0・relation=current）として警告なしに mint される — OBS-071 の偽造の再現。
-# 「まさにそこを toplevel とする実 worktree」まで確かめて初めて fail-closed になる。
+# ── #101 rework: isdir lets a fake worktree through (the skeptic's refutation) ──
+# An empty leftover directory, a directory recreated without pruning, and a symlink to the repo
+# root all sit inside the primary, so `git -C` resolves to the primary and the subject is minted
+# without warning as the primary's tree (ahead=0, relation=current) — reproducing the OBS-071
+# forgery.
+# Only confirming "a real worktree whose own toplevel is exactly there" makes it fail-closed.
 
 def test_verify_rejects_empty_stub_at_worktree_path(tmp_path):
-    """失敗した `git worktree add` が残す空ディレクトリでは subject を mint しない。"""
+    """No subject is minted from the empty directory a failed `git worktree add` leaves behind."""
     repo, g = _subject_org(tmp_path, issues=())
     fake = repo / ".orgforge" / "wt" / "issue-42"
     fake.mkdir(parents=True)
     code, sid, _, err = _print_subject(repo, 42)
-    assert code != 0, "残骸ディレクトリで verify が成功した — primary の tree が偽造される"
-    assert sid is None, "残骸ディレクトリから subject が mint された（OBS-071 の偽造）"
+    assert code != 0, (
+        "verify succeeded on a leftover directory — the primary's tree gets forged")
+    assert sid is None, (
+        "a subject was minted from a leftover directory (the OBS-071 forgery)")
     assert os.path.join(".orgforge", "wt", "issue-42") in err
 
 
 def test_verify_rejects_symlink_at_worktree_path(tmp_path):
-    """canonical path が repo root への symlink でも subject を mint しない。"""
+    """No subject is minted where the canonical path is a symlink to the repo root either."""
     repo, g = _subject_org(tmp_path, issues=())
     (repo / ".orgforge" / "wt").mkdir(parents=True, exist_ok=True)
     (repo / ".orgforge" / "wt" / "issue-43").symlink_to(repo)
     code, sid, _, err = _print_subject(repo, 43)
-    assert code != 0, "symlink 経由で verify が成功した — primary の tree が偽造される"
+    assert code != 0, (
+        "verify succeeded through a symlink — the primary's tree gets forged")
     assert sid is None
     assert os.path.join(".orgforge", "wt", "issue-43") in err
 
 
 def test_verify_fails_after_worktree_replaced_with_plain_dir(tmp_path):
-    """実 worktree が消え、同じパスに素のディレクトリが再作成された遷移でも黙らない。"""
+    """It does not stay quiet through the transition where a real worktree vanishes and a plain
+    directory is recreated at the same path."""
     import shutil
     repo, g = _subject_org(tmp_path)
     wt = repo / ".orgforge" / "wt" / "issue-7"
@@ -2555,21 +2642,26 @@ def test_verify_fails_after_worktree_replaced_with_plain_dir(tmp_path):
     code, sid, parts, err = _print_subject(repo, 7)
     assert code == 0 and parts["reviewed_tree_sha"] == wt_tree, err
     shutil.rmtree(wt)
-    wt.mkdir()                     # rm -rf 後に prune せず再作成（実地で起きる形）
+    wt.mkdir()                     # recreated after rm -rf without pruning (the shape that happens
+                                   # in the field)
     code2, sid2, _, err2 = _print_subject(repo, 7)
-    assert code2 != 0, "worktree 消失後も verify が成功した — primary の tree に黙って差し替わる"
+    assert code2 != 0, (
+        "verify still succeeded after the worktree vanished — it silently swaps to the primary's "
+        "tree")
     assert sid2 is None
 
 
-# ── #106: 統合先は constitution の integration_ref から解決する（develop を推測しない）──
-# Tatekae 実測: constitution が integration_ref: origin/main を宣言しているのに、
-# begin(OBS-053)/show(OBS-054)/gc(OBS-057)/integrate(OBS-048) が develop を hard-code し、
-# 1つの製品の中で「統合先はどこか」への答えが複数あった。verify が既に使っている解決
-# （review_freshness.integration_ref_policy）を全 subcommand で共有する。
+# ── #106: the integration target resolves from the constitution's integration_ref (develop is not
+#    guessed) ──
+# Measured on Tatekae: the constitution declared integration_ref: origin/main while begin
+# (OBS-053), show (OBS-054), gc (OBS-057), and integrate (OBS-048) hard-coded develop, so one
+# product held several answers to "where does this integrate". The resolution verify already uses
+# (review_freshness.integration_ref_policy) is shared across every subcommand.
 
 
 def _declared_org(tmp_path, integration_ref="origin/main", develop=False, name="org106"):
-    """constitution が統合先を宣言する（あるいはしない）git 付き org。develop 無しが既定。"""
+    """A git-backed org whose constitution declares the integration target (or does not). No develop
+    by default."""
     org = tmp_path / name
     org.mkdir()
 
@@ -2584,8 +2676,9 @@ def _declared_org(tmp_path, integration_ref="origin/main", develop=False, name="
     judges = f"    integration_ref: {integration_ref}\n" if integration_ref else ""
     (org / "constitution.yaml").write_text(
         "enforcement:\n  judges:\n" + (judges or "    {}\n"), encoding="utf-8")
-    # 統治ファイルは main に**コミットしてから** branch を切る — 後続の `add -A` が
-    # constitution を feature branch に巻き込み、checkout で消える事故を防ぐ。
+    # The governing files are **committed to main before** any branch is cut — this prevents the
+    # accident where a later `add -A` sweeps the constitution onto a feature branch and a checkout
+    # makes it disappear.
     g("add", "-A")
     g("commit", "-qm", "seed")
     g("update-ref", "refs/remotes/origin/main", "main")
@@ -2596,27 +2689,32 @@ def _declared_org(tmp_path, integration_ref="origin/main", develop=False, name="
 
 
 def test_resolve_integration_base_explicit_wins_and_constitution_is_default(tmp_path, monkeypatch):
-    """明示 --base > constitution の integration_ref > fail-closed（develop は推測しない）。"""
+    """An explicit --base beats the constitution's integration_ref, which beats fail-closed (develop
+    is not guessed)."""
     core = _cycle_mod("_core")
     org, _ = _declared_org(tmp_path, integration_ref="origin/main", develop=True)
     monkeypatch.chdir(org)
     assert core.resolve_integration_base("develop") == ("develop", None)   # operator override
     ref, err = core.resolve_integration_base(None)
-    assert (ref, err) == ("origin/main", None), f"constitution の宣言を読んでいない: {err}"
+    assert (ref, err) == ("origin/main", None), (
+        f"it is not reading the constitution's declaration: {err}")
 
 
 def test_resolve_integration_base_fails_closed_naming_both_options(tmp_path, monkeypatch):
-    """(d) develop があり integration_ref が無い legacy org → 黙って develop に落ちない。"""
+    """(d) A legacy org with a develop and no integration_ref → it does not fall to develop
+    silently."""
     core = _cycle_mod("_core")
     org, _ = _declared_org(tmp_path, integration_ref=None, develop=True)
     monkeypatch.chdir(org)
     ref, err = core.resolve_integration_base(None)
-    assert ref is None, f"integration_ref 無しで {ref} を推測した"
-    assert "--base" in err and "integration_ref" in err, f"両方の選択肢を名指ししていない: {err}"
+    assert ref is None, f"it guessed {ref} with no integration_ref"
+    assert "--base" in err and "integration_ref" in err, (
+        f"it does not name both options: {err}")
 
 
 def test_gc_collects_worktree_merged_to_constitution_ref(tmp_path, monkeypatch):
-    """(a) OBS-057: origin/main に統合済みの worktree を、develop 無しの org で gc が消せる。"""
+    """(a) OBS-057: gc can remove a worktree already integrated into origin/main, in an org with no
+    develop."""
     org, g = _declared_org(tmp_path, integration_ref="origin/main", develop=False)
     wt = org / ".orgforge" / "wt" / "issue-3"
     g("worktree", "add", "-q", "-b", "feat/issue-3", str(wt), "origin/main")
@@ -2624,11 +2722,12 @@ def test_gc_collects_worktree_merged_to_constitution_ref(tmp_path, monkeypatch):
     m = _cycle_mod("inspect")
     rc = m.cmd_gc(argparse.Namespace(base=None, all=False))
     assert rc == 0
-    assert not wt.is_dir(), "origin/main に統合済みの worktree が「未統合」として残った"
+    assert not wt.is_dir(), (
+        "a worktree already integrated into origin/main was left as \"unintegrated\"")
 
 
 def test_gc_explicit_base_overrides_constitution(tmp_path, monkeypatch):
-    """(b) 明示 --base は constitution より強い（operator override）。"""
+    """(b) An explicit --base beats the constitution (an operator override)."""
     org, g = _declared_org(tmp_path, integration_ref="origin/main", develop=True)
     g("checkout", "-q", "develop")
     (org / "d.txt").write_text("d", encoding="utf-8")
@@ -2640,48 +2739,52 @@ def test_gc_explicit_base_overrides_constitution(tmp_path, monkeypatch):
     g("worktree", "add", "-q", "-b", "feat/issue-4", str(wt), "develop")
     monkeypatch.chdir(org)
     m = _cycle_mod("inspect")
-    # constitution（origin/main）基準では未統合 → 残る
+    # Unintegrated against the constitution (origin/main) → it stays
     assert m.cmd_gc(argparse.Namespace(base=None, all=False)) == 0
     assert wt.is_dir()
-    # 明示 --base develop なら統合済み → 消える
+    # Integrated under an explicit --base develop → it is removed
     assert m.cmd_gc(argparse.Namespace(base="develop", all=False)) == 0
-    assert not wt.is_dir(), "明示 --base が constitution に負けた"
+    assert not wt.is_dir(), "an explicit --base lost to the constitution"
 
 
-# ── #107: 導出 branch 名を実在の branch と突合する ────────────────────────────
-# Tatekae 実測（OBS-012 / OBS-048欠陥6 / OBS-057原因2）: 導出名 feat/issue-15-google が
-# 実在せず（実在は feat/issue-15-login-redirect）、gc の `--merged --list <導出名>` が
-# 常に空 → 統合済み worktree が「未統合」として永久に残った。worktree の HEAD が常に真。
+# ── #107: reconcile the derived branch name against the branch that exists ──
+# Measured on Tatekae (OBS-012 / OBS-048 defect 6 / OBS-057 cause 2): the derived name
+# feat/issue-15-google did not exist (the real one was feat/issue-15-login-redirect), so gc's
+# `--merged --list <derived name>` was always empty → an integrated worktree stood forever as
+# "unintegrated". The worktree's HEAD is always true.
 
 
 def test_gc_collects_merged_worktree_whose_real_branch_differs_from_derived(
         tmp_path, monkeypatch, capsys):
-    """(a) Tatekae shape: worktree は feat/issue-15-login-redirect（origin/main に統合済み）、
-    タイトル導出名は feat/issue-15-google → gc は実 HEAD で merged 判定して片付ける。"""
+    """(a) The Tatekae shape: the worktree is on feat/issue-15-login-redirect (already integrated
+    into origin/main) while the title-derived name is feat/issue-15-google → gc decides merged from
+    the real HEAD and cleans it up."""
     org, g = _declared_org(tmp_path, integration_ref="origin/main", develop=False, name="org107")
     wt = org / ".orgforge" / "wt" / "issue-15"
     g("worktree", "add", "-q", "-b", "feat/issue-15-login-redirect", str(wt), "origin/main")
     (wt / "fix.txt").write_text("done", encoding="utf-8")
     g("add", "-A", cwd=wt)
     g("commit", "-qm", "fix login redirect", cwd=wt)
-    # 統合済みにする: origin/main を branch の先端まで進める（merge 済みの形）
+    # Make it integrated: advance origin/main to the branch tip (the shape of a completed merge)
     g("update-ref", "refs/remotes/origin/main", "feat/issue-15-login-redirect")
     monkeypatch.chdir(org)
     m = _cycle_mod("inspect")
-    # 導出名はタイトル由来（タイトル変更後の形）— 実在しない
+    # The derived name comes from the title (the shape after a retitle) — it does not exist
     monkeypatch.setattr(m, "_branch_for", lambda i: f"feat/issue-{i}-google")
     rc = m.cmd_gc(argparse.Namespace(base=None, all=False))
     assert rc == 0
-    assert not wt.is_dir(), \
-        "統合済み worktree が残った — 導出名 feat/issue-15-google で merged を問うている（#107）"
-    # (b) 不一致は黙らない — どちらを採用したかを警告で言う
+    assert not wt.is_dir(), (
+        "an integrated worktree was left — it asks about merged under the derived name "
+        "feat/issue-15-google (#107)")
+    # (b) A mismatch is not passed over quietly — a warning says which was taken
     err = capsys.readouterr().err
     assert "feat/issue-15-google" in err and "feat/issue-15-login-redirect" in err, \
-        f"導出名と実在名の不一致が警告されていない: {err!r}"
+        f"the mismatch between the derived and the real name is not warned about: {err!r}"
 
 
 def test_gc_keeps_worktree_when_branch_cannot_be_resolved(tmp_path, monkeypatch, capsys):
-    """(d) fail-closed: worktree が detached HEAD で導出名も実在しない → 消さずに残して言う。"""
+    """(d) fail-closed: a detached-HEAD worktree with a derived name that does not exist → it is
+    left standing and said so."""
     org, g = _declared_org(tmp_path, integration_ref="origin/main", develop=False, name="org107d")
     wt = org / ".orgforge" / "wt" / "issue-9"
     g("worktree", "add", "-q", "--detach", str(wt), "origin/main")
@@ -2690,17 +2793,20 @@ def test_gc_keeps_worktree_when_branch_cannot_be_resolved(tmp_path, monkeypatch,
     monkeypatch.setattr(m, "_branch_for", lambda i: f"feat/issue-{i}-ghost")
     rc = m.cmd_gc(argparse.Namespace(base=None, all=False))
     assert rc == 0
-    assert wt.is_dir(), "実在 branch を特定できないのに worktree を消した"
+    assert wt.is_dir(), (
+        "it removed the worktree without identifying the branch that exists")
     captured = capsys.readouterr()
     err = captured.err
-    assert "feat/issue-9-ghost" in err, f"何を解決できなかったのか名指ししていない: {err!r}"
+    assert "feat/issue-9-ghost" in err, (
+        f"it does not name what could not be resolved: {err!r}")
     out = captured.out
     assert "a detached HEAD, so it is not removed automatically" in out
     assert f"git worktree remove {wt}" in out
 
 
 def test_resolve_issue_branch_worktree_head_is_authoritative(tmp_path):
-    """(a)(b) worktree が実在するなら HEAD が真。導出名とずれたら warn（黙らない）。"""
+    """(a)(b) Where the worktree exists its HEAD is true. A divergence from the derived name warns
+    (it is not passed over quietly)."""
     core = _cycle_mod("_core")
     org, g = _declared_org(tmp_path, integration_ref="origin/main", develop=False, name="org107r")
     wt = org / ".orgforge" / "wt" / "issue-15"
@@ -2708,14 +2814,14 @@ def test_resolve_issue_branch_worktree_head_is_authoritative(tmp_path):
     br, warn, err = core.resolve_issue_branch(15, derived="feat/issue-15-google", cwd=str(org))
     assert (br, err) == ("feat/issue-15-login-redirect", None)
     assert warn and "feat/issue-15-google" in warn and "feat/issue-15-login-redirect" in warn
-    # (e) 導出名 == 実在名なら従来どおり — warn も出ない
+    # (e) Where the derived name equals the real one it behaves as before — no warn either
     br2, warn2, err2 = core.resolve_issue_branch(
         15, derived="feat/issue-15-login-redirect", cwd=str(org))
     assert (br2, warn2, err2) == ("feat/issue-15-login-redirect", None, None)
 
 
 def test_resolve_issue_branch_uses_existing_derived_without_worktree(tmp_path):
-    """(c) worktree 無し + 導出名が実在 → 実在確認の上でそのまま使う。"""
+    """(c) No worktree, and the derived name exists → it is used, once confirmed to exist."""
     core = _cycle_mod("_core")
     org, g = _declared_org(tmp_path, integration_ref="origin/main", develop=False, name="org107c")
     g("branch", "feat/issue-7-add-login")
@@ -2724,52 +2830,58 @@ def test_resolve_issue_branch_uses_existing_derived_without_worktree(tmp_path):
 
 
 def test_resolve_issue_branch_names_detached_worktree_truthfully(tmp_path):
-    """#107 rework (3b): worktree が在るのに「worktree も無い」と嘘を言わない —
-    在るが detached HEAD で branch を指していない、と事実を言う。"""
+    """#107 rework (3b): with a worktree present it does not lie that "there is no worktree either"
+    — it states the fact that one exists but is a detached HEAD pointing at no branch."""
     core = _cycle_mod("_core")
     org, g = _declared_org(tmp_path, integration_ref="origin/main", develop=False, name="org107t")
     wt = org / ".orgforge" / "wt" / "issue-9"
     g("worktree", "add", "-q", "--detach", str(wt), "origin/main")
     br, warn, err = core.resolve_issue_branch(9, derived="feat/issue-9-ghost", cwd=str(org))
     assert br is None and err
-    assert "も無い" not in err, f"worktree が在るのに「無い」と診断した: {err!r}"
-    assert "detached" in err, f"実状態（detached HEAD）を言っていない: {err!r}"
+    assert "either" not in err, (
+        f"it diagnosed \"there is none\" while a worktree exists: {err!r}")
+    assert "detached" in err, f"it does not state the real state (a detached HEAD): {err!r}"
 
 
 def test_resolve_issue_branch_fails_closed_when_nothing_exists(tmp_path):
-    """(d) worktree 無し + 導出名も実在しない → 黙って導出名を信じず、直し方を名指しする。"""
+    """(d) No worktree, and the derived name does not exist either → it does not silently believe
+    the derived name, and it names the fix."""
     core = _cycle_mod("_core")
     org, g = _declared_org(tmp_path, integration_ref="origin/main", develop=False, name="org107f")
     br, warn, err = core.resolve_issue_branch(7, derived="feat/issue-7-add-login", cwd=str(org))
     assert br is None
-    assert err and "feat/issue-7-add-login" in err, "実在しない導出名を名指ししていない"
+    assert err and "feat/issue-7-add-login" in err, (
+        "it does not name the derived name that does not exist")
     assert "--worktree" in err or "git branch --list" in err, \
-        f"直し方が書かれていない: {err!r}"
+        f"the fix is not written: {err!r}"
 
 
 def test_gc_fails_closed_when_nothing_declares_the_base(tmp_path):
-    """(c)(d) integration_ref 無し・--base 無し → develop があっても非ゼロで両方を名指し。"""
+    """(c)(d) No integration_ref and no --base → non-zero, naming both, even with a develop
+    present."""
     org, g = _declared_org(tmp_path, integration_ref=None, develop=True)
     (org / ".orgforge" / "wt").mkdir(parents=True, exist_ok=True)
     code, out = run("org_cycle.py", "gc", cwd=str(org))
-    assert code != 0, "統合先が宣言されていないのに gc が黙って進んだ"
+    assert code != 0, (
+        "gc proceeded quietly although no integration target is declared")
     assert "--base" in out and "integration_ref" in out, out
 
 
 def test_begin_fails_closed_and_writes_nothing_without_declared_base(tmp_path):
-    """(c) begin: 統合先が決まらないなら、台帳に何も書く前に非ゼロで止まる。"""
+    """(c) begin: where the integration target is undecided, it stops non-zero before writing
+    anything to the ledger."""
     org, g = _declared_org(tmp_path, integration_ref=None, develop=True)
     code, out = run("org_cycle.py", "begin", "--role", "r", "--issue", "5",
                     "--parent", "9", "--candidate-id", "cid", "--no-check", cwd=str(org))
-    assert code != 0, "worktree の base が決まらないのに begin が進んだ"
+    assert code != 0, "begin proceeded although the worktree base is undecided"
     assert "--base" in out and "integration_ref" in out, out
     ledger = org / ".orgforge" / "ledger" / "ledger.jsonl"
     assert not ledger.exists() or not ledger.read_text().strip(), \
-        "fail-closed の前に台帳へ書いてしまった"
+        "it wrote to the ledger before failing closed"
 
 
 def test_begin_worktree_base_comes_from_constitution(tmp_path, monkeypatch):
-    """(a) OBS-053: begin の worktree は constitution の integration_ref から切られる。"""
+    """(a) OBS-053: begin's worktree is cut from the constitution's integration_ref."""
     org, _ = _declared_org(tmp_path, integration_ref="origin/main", develop=False)
     monkeypatch.chdir(org)
     m = _cycle_mod("cycle")
@@ -2781,9 +2893,10 @@ def test_begin_worktree_base_comes_from_constitution(tmp_path, monkeypatch):
         candidate_id="cid-5", base=None, why=None, no_check=True, no_worktree=False))
     assert rc == 0
     branch_calls = [c for c in calls if c and c[0] == "branch"]
-    assert branch_calls, "worktree を用意する branch 呼び出しが無い"
-    assert "--base" in branch_calls[0] and "origin/main" in branch_calls[0], \
-        f"begin が constitution の統合先を worktree base に渡していない: {branch_calls[0]}"
+    assert branch_calls, "there is no branch call preparing a worktree"
+    assert "--base" in branch_calls[0] and "origin/main" in branch_calls[0], (
+        f"begin does not pass the constitution's integration target as the worktree base: "
+        f"{branch_calls[0]}")
 
 
 def test_begin_mints_new_candidate_identity_after_rework(monkeypatch):
@@ -2802,9 +2915,10 @@ def test_begin_mints_new_candidate_identity_after_rework(monkeypatch):
 
 
 def test_show_attributes_nothing_when_clean_against_constitution_ref(tmp_path):
-    """(a) OBS-054: origin/main 基準で差分ゼロなら、不可逆変更を誤帰属しない。"""
+    """(a) OBS-054: with a zero diff against origin/main, no irreversible change is
+    misattributed."""
     org, g = _declared_org(tmp_path, integration_ref="origin/main", develop=False)
-    g("branch", "feat/issue-7")          # origin/main と同一 commit（差分ゼロ）
+    g("branch", "feat/issue-7")          # the same commit as origin/main (a zero diff)
     code, out = run("org_cycle.py", "show", "--issue", "7", cwd=str(org))
     assert code == 0, out
     assert "irrev." not in out, (
@@ -2812,24 +2926,31 @@ def test_show_attributes_nothing_when_clean_against_constitution_ref(tmp_path):
 
 
 def test_show_without_declared_base_prints_status_warns_and_skips_attribution(tmp_path):
-    """rework #106: show は読み取り専用の orientation — 基準が無くても台帳由来の状態は出す。
+    """rework #106: show is read-only orientation — it prints the state from the ledger even with no
+    reference.
 
-    fail-closed は base を**消費する判断**（帰属ブロック）にだけかける: ブロックを省き、
-    warn-don't-stop（cmd_plan と同じ形）で警告する。develop の推測はしない。
+    fail-closed applies only to a judgment that **consumes** the base (the attribution block): the
+    block is omitted and a warning follows warn-don't-stop (the same shape as cmd_plan). develop is
+    not guessed.
     """
     org, _ = _declared_org(tmp_path, integration_ref=None, develop=True)
     code, out = run("org_cycle.py", "show", "--issue", "7", cwd=str(org))
-    assert code == 0, f"基準が無いだけで orientation 全体を閉め出した:\n{out}"
+    assert code == 0, (
+        f"a missing reference shut out the whole orientation:\n{out}")
     assert "verdicts" in out and "next:" in out, (
         f"the state that comes from the ledger is not printed:\n{out}")
-    assert "--base" in out and "integration_ref" in out, f"警告が両方の選択肢を名指ししていない:\n{out}"
-    # 帰属ブロックの行ラベルは「不可逆:」。警告文（不可逆な変更の帰属は表示しない）とは区別する。
-    assert "不可逆:" not in out, f"基準が無いのに帰属ブロックを出した:\n{out}"
-    assert "not attributing irreversible changes" in out, f"帰属を省いたことを言っていない:\n{out}"
+    assert "--base" in out and "integration_ref" in out, (
+        f"the warning does not name both options:\n{out}")
+    # The attribution block's row label is "irrev.:". Keep it distinct from the warning text.
+    assert "irrev.:" not in out, (
+        f"it printed the attribution block with no reference:\n{out}")
+    assert "not attributing irreversible changes" in out, (
+        f"it does not say that the attribution was omitted:\n{out}")
 
 
 def test_show_attribution_block_fires_when_base_is_declared(tmp_path):
-    """宣言があれば帰属ブロックは従来どおり働く（rework で警告側に倒しすぎていないか）。"""
+    """With a declaration the attribution block works as before (checking the rework did not lean
+    too far toward warning)."""
     org, g = _declared_org(tmp_path, integration_ref="origin/main", develop=False)
     g("checkout", "-q", "-b", "feat/issue-9")
     (org / "migrations").mkdir()
@@ -2845,18 +2966,21 @@ def test_show_attribution_block_fires_when_base_is_declared(tmp_path):
 
 
 def test_gc_all_works_without_declared_base(tmp_path):
-    """rework #106: --all は統合済み判定をしない = base を消費しない → 宣言を要求しない。"""
+    """rework #106: --all decides no integration = it consumes no base → it demands no
+    declaration."""
     org, g = _declared_org(tmp_path, integration_ref=None, develop=True)
     wt = org / ".orgforge" / "wt" / "issue-6"
     wt.parent.mkdir(parents=True, exist_ok=True)
     g("worktree", "add", "-q", "-b", "feat/issue-6", str(wt), "main")
     code, out = run("org_cycle.py", "gc", "--all", cwd=str(org))
-    assert code == 0, f"base を消費しない --all が宣言を要求した:\n{out}"
-    assert not wt.is_dir(), f"クリーンな worktree を --all が消していない:\n{out}"
+    assert code == 0, (
+        f"--all, which consumes no base, demanded a declaration:\n{out}")
+    assert not wt.is_dir(), f"--all did not remove a clean worktree:\n{out}"
 
 
 def test_integrate_plan_targets_constitution_ref(tmp_path):
-    """(a) OBS-048: integrate --plan の統合先が constitution の宣言になる。"""
+    """(a) OBS-048: integrate --plan's integration target becomes the constitution's
+    declaration."""
     org, g = _declared_org(tmp_path, integration_ref="origin/main", develop=False)
     g("checkout", "-q", "-b", "feat/issue-42")
     (org / "w.txt").write_text("w", encoding="utf-8")
@@ -2865,17 +2989,20 @@ def test_integrate_plan_targets_constitution_ref(tmp_path):
     g("checkout", "-q", "main")
     code, out = run("org_cycle.py", "integrate", "--issue", "42", "--plan", cwd=str(org))
     assert code == 0, out
-    assert "→ origin/main" in out, f"統合先が宣言どおりでない:\n{out}"
+    assert "→ origin/main" in out, (
+        f"the integration target does not follow the declaration:\n{out}")
     assert "→ develop" not in out
 
 
 def test_integrate_plan_fails_closed_without_declared_base(tmp_path):
-    """(c)(d) integrate も推測しない — develop があっても宣言が無ければ非ゼロ。"""
+    """(c)(d) integrate does not guess either — with no declaration it is non-zero, develop or
+    not."""
     org, g = _declared_org(tmp_path, integration_ref=None, develop=True)
     g("checkout", "-q", "-b", "feat/issue-42")
     g("checkout", "-q", "main")
     code, out = run("org_cycle.py", "integrate", "--issue", "42", "--plan", cwd=str(org))
-    assert code != 0, "統合先が宣言されていないのに integrate --plan が進んだ"
+    assert code != 0, (
+        "integrate --plan proceeded although no integration target is declared")
     assert "--base" in out and "integration_ref" in out, out
 
 
