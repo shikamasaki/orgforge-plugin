@@ -1054,7 +1054,7 @@ def test_verified_without_a_trace_of_running_is_flagged(monkeypatch, capsys):
     fake = CommentGh(); monkeypatch.setattr(GS, "gh", fake)
     GS.cmd_decide(_cv(claimed="maker が client.ts を読んだと報告", verified="確認した"))
     err = capsys.readouterr().err
-    assert "痕跡" in err, err
+    assert "trace of anything actually run" in err, err
 
 
 def test_dropped_condition_in_the_summary_is_flagged(monkeypatch, capsys):
@@ -1067,7 +1067,7 @@ def test_dropped_condition_in_the_summary_is_flagged(monkeypatch, capsys):
     GS.cmd_decide(_cv(claimed="src/db/client.ts はこのブランチに存在せず feat/issue-11 側にある",
                       verified="npm test → 27 passed"))
     err = capsys.readouterr().err
-    assert "条件節" in err, err
+    assert "carries a qualifier" in err, err
 
 
 def test_carrying_the_condition_through_is_silent(monkeypatch, capsys):
@@ -1076,7 +1076,7 @@ def test_carrying_the_condition_through_is_silent(monkeypatch, capsys):
     GS.cmd_decide(_cv(claimed="client.ts はこのブランチに存在せず feat/issue-11 側にある",
                       verified="git ls-files src/db/client.ts → 出力なし（存在しないことを確認）"))
     err = capsys.readouterr().err
-    assert "条件節" not in err, err
+    assert "carries a qualifier" not in err, err
 
 
 def test_legacy_calls_without_claimed_verified_still_pass(monkeypatch, capsys, tmp_path):
@@ -1086,7 +1086,7 @@ def test_legacy_calls_without_claimed_verified_still_pass(monkeypatch, capsys, t
     fake = CommentGh(); monkeypatch.setattr(GS, "gh", fake)
     rc = GS.cmd_decide(_cv())
     assert rc == 0
-    assert "痕跡" not in capsys.readouterr().err
+    assert "trace of anything actually run" not in capsys.readouterr().err
 
 
 # ── 0.30.0: integration_admitted は gate の admit を前提とする ──────────────
@@ -1102,7 +1102,7 @@ def test_integration_admitted_requires_a_gate_admit(monkeypatch, tmp_path, capsy
     rc = GS.cmd_decide(_cv(issue=42, event="integration_admitted", verdict="pass"))
     assert rc == 4, "gate の admit なしに統合の記録が通った"
     err = capsys.readouterr().err
-    assert "gate の admit が無い" in err
+    assert "no admit from the gate" in err
     assert "verify" in err and "--role gate" in err, "打つべきコマンドが示されていない"
     assert not fake.posted, "Issue にも記録してはいけない"
 
@@ -1322,7 +1322,7 @@ def test_same_signer_on_both_lineages_is_not_independent_review(tmp_path):
     r = _h1_prov(org, subj, r2, lineage="cross-harness")
     assert r.returncode == 0, r.stdout + r.stderr
     both = r.stdout + r.stderr
-    assert "同じ signer が両方に署名している" in both
+    assert "the same signer signed both" in both
     adm = _h1_events(org, "admission_decided")
     assert len(adm) == 1
     assert adm[0]["payload"]["reviewer_independence"] == "same_signer"

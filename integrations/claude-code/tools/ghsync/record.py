@@ -1,8 +1,9 @@
-"""記録 — 作業ログと判断の記録。
+"""Recording — work logs and the record of a judgment.
 
-**Issue と台帳の両方に1コマンドで書く。** 人が2回打つ構造は片側落ちを生む
-（実地で3回起きた）。順序は台帳が先 — 統制が拒否するなら、外から見える記録を
-作る前に止める。`--why` の空・言い換え・水増しは拒否する。"""
+**Both the Issue and the ledger are written by one command.** A structure where a person types
+twice produces one side going missing (three times in the field). The ledger goes first — if
+control refuses, stop before creating a record visible from outside. An empty, restated or padded
+`--why` is refused."""
 
 import hashlib
 import json
@@ -19,19 +20,21 @@ from ._core import (
 )
 
 
-# マイルストーン: ここで「何をしたか」が残らないと、後から再構成する手段が無くなる。
-# 途中経過（progress_recorded）は軽く刻めてよいが、サイクルの節目は監査点なので実出力を要求する。
+# Milestones: without "what was done" recorded here, there is no way to reconstruct it later.
+# Interim progress (progress_recorded) may be logged lightly, but a cycle's milestone is an audit
+# point, so real output is required.
 _LOG_MILESTONES = ("cycle_started", "cycle_completed", "phase_admitted", "integration_admitted",
                    "result_deployed", "handback_opened")
 
 
 def _log_defect(a):
-    """作業ログが再構成可能かを検査する。None なら合格。
+    """Check whether a work log can be reconstructed from. None means it passes.
 
-    `decide` は --why の空・言い換え・水増しを拒否するのに、`log` は --detail を一切検査して
-    いなかった。結果は実測に出ていて、同じ Issue の中で判定は3,506〜5,894字、作業ログは
-    276〜473字。**検査のある側だけが厚くなった。** 散文の指示を守るのは人だが、必須引数を
-    守るのはツールなので、同じ強制を掛ける。
+    `decide` refuses an empty, restated or padded --why, while `log` checked --detail not at all.
+    The result showed up in measurement: within one Issue, judgments ran 3,506–5,894 characters and
+    work logs 276–473. **Only the side with a check got thicker.** Following a prose instruction is
+    a person's job; enforcing a required argument is a tool's — so the same enforcement applies
+    here.
     """
     if a.event not in _LOG_MILESTONES:
         return None
@@ -50,7 +53,9 @@ def _log_defect(a):
                 "not \"it passed\".")
     words = re.findall(r"[^\W\d_]+", res.lower(), flags=re.UNICODE)
     filler = {"ok", "okay", "done", "fine", "good", "green", "pass", "passed", "passes",
-              "success", "succeeded", "yes", "worked", "works", "完了", "成功"}
+              "success", "succeeded", "yes", "worked", "works", "完了", "成功"}   # noqa: RUF001
+                                                                # (the last two match what a
+                                                                # Japanese-writing agent types)
     if words and not [w for w in words if w not in filler]:
         return ("--result is only a paraphrase of \"it passed\". Paste the real output — test "
                 "counts, errors, the diff.")
@@ -58,21 +63,24 @@ def _log_defect(a):
 
 
 def _append_progress_receipt(a):
-    """Issue に書いた作業ログの受領証を台帳にも残す。
+    """Leave a receipt in the ledger for the work log written on the Issue.
 
-    `log` は Issue にコメントするだけで台帳に何も書いていなかった。結果、実地では Issue に
-    7回の作業記録があるのに `progress_recorded` は **0件**。これは ある Issue の反証記録 で
-    塞いだのと同型（二重記録の片側が落ちる）で、しかも影響が具体的:
+    `log` only commented on the Issue and wrote nothing to the ledger. In the field that produced
+    seven work records on an Issue against **zero** `progress_recorded`. It is the same shape as the
+    refutation record closed on another Issue — one side of a double record going missing — and its
+    consequences are concrete:
 
-      · work_in_progress ビューは progress_recorded を読むので `/org-resume` が復帰できない
-      · board も進捗を見られない
-      · 台帳だけ見ると「作業記録を一度も残していない」ことになる
+      · the work_in_progress view reads progress_recorded, so `/org-resume` cannot resume
+      · the board cannot see progress either
+      · from the ledger alone, no work was ever recorded
 
-    台帳が SSoT ではない（SSoT は code + ドメインモデル）が、**中断からの復帰と監査は台帳が
-    担う**ので、ここが空だと復帰機構が丸ごと動かない。
+    The ledger is not the SSoT (that is the code plus the domain model), but **resuming from an
+    interruption and auditing are the ledger's job**, so an empty one takes the whole resume
+    mechanism down.
 
-    失敗しても log 自体は成功させる — コメントは既に投稿済みで、受領証が付かないことを理由に
-    「ログに失敗した」と報告すると、実際には残っている記録を人が二重投稿しにいく。
+    A failure here still lets log itself succeed — the comment is already posted, and reporting
+    "the log failed" because a receipt did not attach sends a person to double-post a record that
+    is in fact already there.
     """
     payload = {"role": getattr(a, "by", None) or "org", "candidate_id": a.event_id or "",
                "phase": a.phase or "", "milestone": a.event,
@@ -88,8 +96,8 @@ def _append_progress_receipt(a):
         payload["files"] = a.files
     here = HERE
     try:
-        # **統制の書き込みは writerd 経由に統一する。** 直接呼ぶと ORG_WRITER_SOCKET 下で
-        # exit 4 になり、正規運用が止まる。
+        # **Control writes all go through writerd.** Called directly under ORG_WRITER_SOCKET it
+        # exits 4, and legitimate operation stops.
         _base = ([sys.executable, os.path.join(here, "writer_client.py"), "append", "--"]
                  if os.environ.get("ORG_WRITER_SOCKET")
                  else [sys.executable, os.path.join(here, "ledger.py"), "append"])
@@ -123,12 +131,13 @@ def cmd_log(a):
     # double-posts while the docstring promises "logs once, never twice".
     defect = _log_defect(a)
     if defect:
-        print(f"作業ログが薄い: {defect}\n\n"
-              f"docs/11 §3b のバー: **Issue だけを読んだ他人が、何が作られ・何が試され・"
-              f"何が捨てられ・何を実行して何が返り・なぜマージされたかを再構成できること**。\n"
-              f"`decide` が --why を検査するのと同じ理由でここも検査する — 人間の diff レビューは"
-              f"廃止されており、この Issue が唯一の監査面だから。\n"
-              f"途中の軽い刻みなら --event progress_recorded を使うこと（検査は掛からない）。",
+        print(f"the work log is thin: {defect}\n\n"
+              f"The bar in docs/11 §3b: **someone reading only the Issue can reconstruct what "
+              f"was built, what was tried, what was discarded, what was run and what came back, "
+              f"and why it was merged**.\n"
+              f"This is checked for the same reason `decide` checks --why — human diff review is "
+              f"retired, and this Issue is the only audit surface there is.\n"
+              f"For a light interim note use --event progress_recorded (no check applies).",
               file=sys.stderr)
         return 2
     marker_key = a.event_id or _stable_key(a.event, a.detail or "", a.phase or "")
@@ -365,48 +374,58 @@ def _reasoning_digest(*fields):
 
 
 
-# 「確かめていないことを、確かめたかのように述べる」— この org が実地で8回検出した失敗様式が、
-# **検出する側（監督）**に現れた。運用で観測した形:
-#   maker の報告 : 「src/db/client.ts は**このブランチにまだ存在せず** feat/issue-11 側にありました」
-#   監督の要約   : 「maker は推測せず src/db/client.ts の loadEnv() を読んで変数を確定させた」
-#   落ちた条件   : 「**このブランチには無い**」
-# maker は正直に条件を書いていた。**監督が要約で落とした**。その要約が gate への指示にも流れ、
-# gate は「そのファイルは存在しない」を reject 事由にした。
+# "Stating something unverified as though it had been verified" — the failure mode this org has
+# caught eight times in the field appeared **on the detecting side: the supervisor**. As observed
+# in operation:
+#   the maker's report : "src/db/client.ts **does not exist on this branch yet**; it is on
+#                        feat/issue-11"
+#   the supervisor's summary : "the maker did not guess — it read loadEnv() in src/db/client.ts and
+#                              settled the variables"
+#   the qualifier dropped : "**not on this branch**"
+# The maker had written the qualifier honestly. **The supervisor dropped it in the summary.** That
+# summary flowed into the instruction to the gate, and the gate made "that file does not exist" its
+# grounds for reject.
 #
-# 台帳は理由のハッシュしか持たないので、台帳側では書き分けを検査できない。検査は
-# **decide の入口**に置く（Issue コメントに落ちる前に見る）。
-# 条件節の**種類**ごとに同義の表現を束ねる。語尾だけ違う表現（「存在せず」と「存在しない」）を
-# 別物として扱うと、条件を正しく運んでいるのに警告が出る（実装当初そうなった）。
+# The ledger holds only a hash of the reason, so the distinction cannot be checked there. The
+# check sits **at decide's door** — seen before it lands in an Issue comment.
+# Synonyms are grouped by the **kind** of qualifier. Treat expressions differing only in inflection
+# ("存在せず" and "存在しない") as distinct and a warning fires while the qualifier is being carried
+# correctly — which is what the first implementation did.
+# The VALUES below match the prose an agent actually writes, so they stay in Japanese: they are
+# input matching, not source language.
 _HEDGE_GROUPS = {
-    "不在": ("には無い", "にはない", "存在せず", "存在しない", "存在しま", "無かった", "なかった",
+    "absence": ("には無い", "にはない", "存在せず", "存在しない", "存在しま", "無かった", "なかった",
              "not present", "does not exist", "missing"),
-    "未測定": ("未測定", "測っていない", "測定していない", "not measured", "unmeasured"),
-    "未検証": ("確認していない", "確かめていない", "未検証", "未実行", "検証していない",
+    "unmeasured": ("未測定", "測っていない", "測定していない", "not measured", "unmeasured"),
+    "unverified": ("確認していない", "確かめていない", "未検証", "未実行", "検証していない",
                "unverified", "not verified", "not run"),
-    "推測": ("のはず", "だと思われ", "推測", "かもしれ", "可能性がある", "assumed", "presumably",
+    "conjecture": ("のはず", "だと思われ", "推測", "かもしれ", "可能性がある", "assumed", "presumably",
              "probably", "likely"),
-    "条件付き": ("の場合は", "であれば", "のときは", "if ", "when "),
-    "未完了": ("予定", "できていない", "していません", "まだ", "todo", "pending"),
+    "conditional": ("の場合は", "であれば", "のときは", "if ", "when "),
+    "incomplete": ("予定", "できていない", "していません", "まだ", "todo", "pending"),
 }
-# 「実際に走らせた」痕跡。**コマンド名を書けば通る**形式化を招くのは承知の上で、
-# 何も無い状態より遥かに良い（実地で cycle_completed の薄い --result を拒否したとき、
-# 監督は実際に測り直した。拒否が形式的な壁ではなく行動を変えた実例である）。
-# 完全には塞げない — それはこの検査の限界として記録する（docs/11）。
+# Traces of "it was actually run". Knowingly, this invites the formalism of **writing a command
+# name to get through** — and it is still far better than nothing (in the field, when a thin
+# --result on a cycle_completed was refused, the supervisor went and measured again: a case of a
+# refusal changing behaviour rather than being a formal wall).
+# It cannot be closed completely, and that is recorded as this check's limit (docs/11).
 _RAN = ("npm ", "npx ", "git ", "psql", "python3", "node ", "pytest", "cargo ", "go test",
         "supabase", "curl ", "exit=", "exit code", "passed", "failed", "$ ", "→", "->")
 
 
 
 def _prior_admission(issue):
-    """その Issue に gate の `admit` があるか。(verdict, actor) を返す（無ければ (None, None)）。
+    """Is there an `admit` from the gate on this Issue? Returns (verdict, actor), or (None, None).
 
-    台帳は `phase_started` に対して既に同じ検査をしている（design が admit されていなければ
-    implement を拒否する）。**統合の側にも同じ形を置く** — `integration_admitted = pass` が
-    gate の admit なしに通ると、maker の報告の質が admit の代わりに使われる。運用では、質の
-    高い報告を受けて `git merge` し、そのあと `integration_admitted` を記録して通っていた。
+    The ledger already applies the same check to `phase_started` (refusing implement where design
+    has not been admitted). **The same shape goes on the integration side** — an
+    `integration_admitted = pass` that
+    Let it through without the gate's admit and the quality of the maker's report gets used in
+    place of an admit. In operation, a high-quality report led to a `git merge`, with
+    `integration_admitted` recorded afterwards, and it passed.
     """
     try:
-        sys.path.insert(0, HERE)          # HERE = tools/（_core に集約。0.22.1 の教訓）
+        sys.path.insert(0, HERE)          # HERE = tools/ (kept in _core — the lesson of 0.22.1)
         from discover import ledger_root
         from ledger import voided_seqs
         root = ledger_root()
@@ -435,36 +454,40 @@ def _prior_admission(issue):
 
 
 def _claim_verify_defect(a):
-    """監督の記録が「誰が確かめたか」を書き分けているかを見る。
+    """Check whether the supervisor's record distinguishes who verified what.
 
-    返り値: 警告文のリスト（**拒否はしない** — 1件を除く）。判断は監督の仕事だが、
-    条件節を落としたことに**気づける材料**は要る。
+    Returns: a list of warnings (**it does not refuse** — with one exception). The judgment is the
+    supervisor's job, but there has to be **something by which a dropped qualifier can be
+    noticed**.
     """
     warns = []
     claimed = (getattr(a, "claimed", None) or "").strip()
     verified = (getattr(a, "verified", None) or "").strip()
     if not claimed and not verified:
-        return warns          # 旧来の --why / --evidence だけの呼び出しは通す（後方互換）
+        return warns          # a legacy call with only --why / --evidence passes (compatibility)
 
-    # (a) --verified に実行の痕跡が無い ＝ 「確かめた」と書いただけ
+    # (a) no trace of execution in --verified = merely writing "verified"
     if verified and not any(k in verified for k in _RAN):
         warns.append(
-            "--verified に**実際に走らせた痕跡**（コマンド・出力・exit）が無い。"
-            "「確認した」と書くだけでは、確かめたことにならない — この org が8回検出した"
-            "失敗様式そのものである。走らせていないなら --claimed 側に書くこと。")
+            "--verified carries no **trace of anything actually run** (a command, output, an "
+            "exit code). Writing \"confirmed\" is not confirming — it is precisely the failure "
+            "mode this org has caught eight times. If you did not run it, write it on the "
+            "--claimed side.")
 
-    # (b) --claimed に条件節があるのに --verified が触れていない ＝ 要約で条件を落とした
-    # 種類ごとに見る: claimed に「不在」の条件があるなら、verified も「不在」に触れていればよい
+    # (b) --claimed carries a qualifier that --verified does not touch = the summary dropped it
+    # Compared by kind: where claimed carries an "absence" qualifier, verified touching "absence"
+    # is enough
     untouched = []
     for kind, words in _HEDGE_GROUPS.items():
         if any(w in claimed for w in words) and not any(w in verified for w in words):
             untouched.append(kind)
     if untouched:
         warns.append(
-            f"--claimed に条件節がある（{', '.join(untouched[:3])}）のに、--verified が"
-            f"触れていない。**要約で条件が落ちると、それが下流の判定に流れる** — 実地では"
-            f"「このブランチには無い」が消えて gate の reject 事由になった。"
-            f"条件をそのまま運ぶか、自分で確かめて結果を書くこと。")
+            f"--claimed carries a qualifier ({', '.join(untouched[:3])}) that --verified does not "
+            f"touch. **A qualifier dropped in the summary flows into the downstream judgment** — "
+            f"in the field, \"not on this branch\" disappeared and became the gate's grounds for "
+            f"reject. Carry the qualifier through as it stands, or verify it yourself and write "
+            f"the result.")
     return warns
 
 
@@ -501,15 +524,16 @@ def _reasoning_defect(why, verdict, event):
 
 
 def _org_lineage():
-    """constitution の `enforcement.judges.lineage` を読む。既定は `same-harness`。
+    """Read `enforcement.judges.lineage` from the constitution. The default is `same-harness`.
 
-    **設定を読めないときは止める（fail-closed）。** 0.32.0 は例外を握りつぶして
-    `same-harness` を返していた — cross-harness を宣言した org で YAML が壊れていたり
-    PyYAML が無いと、**強い安全モードが黙って通常モードに落ちる**。それは
-    「信号が壊れているので、壊れていることが分からない」形そのものである。
+    **When the configuration cannot be read, stop (fail-closed).** 0.32.0 swallowed the exception
+    and returned `same-harness` — so in an org that declared cross-harness, a broken YAML or a
+    missing PyYAML meant **a strong safety mode quietly dropping to the ordinary one**. That is
+    exactly the shape of "the signal is broken, so its being broken is invisible".
 
-    宣言されていない org（constitution に judges が無い）は既定で回る。読めなかったのか
-    宣言が無いのかを区別するため、**ファイルの存在と解析の成否を分けて扱う**。
+    An org that declares nothing (no judges in the constitution) runs on the default. To tell
+    "could not be read" from "not declared", **the file's existence and the parse's success are
+    handled separately**.
     """
     env = os.environ.get("ORG_JUDGE_LINEAGE")
     if env:
@@ -520,26 +544,27 @@ def _org_lineage():
         path = constitution()
     except Exception as e:
         raise SystemExit(f"cannot resolve the constitution's location: {e}\n"
-                         "  judges.lineage を読めない状態で判定を記録すると、cross-harness を"
-                         "宣言した org が黙って同一血統で通る。\n"
-                         "  org のルートで実行しているか確認すること。")
+                         "  Record a judgment while judges.lineage cannot be read and an org that "
+                         "declared cross-harness passes quietly on a single lineage.\n"
+                         "  Check that you are running from the org root.")
     if not path or not os.path.isfile(path):
-        return "same-harness"          # org が constitution を持たない = 宣言が無い
+        return "same-harness"          # the org has no constitution = nothing is declared
     try:
         import yaml
     except Exception:
         raise SystemExit("PyYAML is missing, so the constitution cannot be read.\n"
-                         "  judges.lineage が読めないまま判定を記録することは許さない — "
-                         "cross-harness の宣言が黙って消える。\n"
+                         "  Recording a judgment while judges.lineage cannot be read is not "
+                         "allowed — a cross-harness declaration would vanish silently.\n"
                          "    python3 -m pip install pyyaml")
     try:
         with open(path, encoding="utf-8") as f:
             c = yaml.safe_load(f) or {}
     except Exception as e:
         raise SystemExit(f"cannot parse constitution.yaml: {e}\n"
-                         f"  ファイル: {path}\n"
-                         "  **設定を読めないなら止める。** 読めない理由が judges.lineage の行に"
-                         "あるかどうかは、読めない時点では分からない。")
+                         f"  file: {path}\n"
+                         "  **If the configuration cannot be read, stop.** Whether the reason it "
+                         "cannot be read lies on the judges.lineage line is unknowable while it "
+                         "cannot be read.")
     if not isinstance(c, dict):
         raise SystemExit(f"constitution.yaml is not a map ({type(c).__name__}): {path}")
     j = ((c.get("enforcement") or {}).get("judges") or {})
@@ -569,10 +594,12 @@ def _judgment_correction_authorities():
 
 
 def _has_lineage_verdict(issue, event, lineage):
-    """その Issue の同じ event に、指定した血統の **通した** 判定が台帳にあるか。
+    """Is there a **passing** judgment from the named lineage in the ledger, for the same event on
+    this Issue?
 
-    否（reject/refuted）は数えない — 探しているのは一致なので、片方が否ならそもそも
-    admit を記録する場面ではない。訂正済み（`corrected_seqs`）は数えない。
+    A negative (reject/refuted) is not counted — what is being sought is agreement, and with either
+    side negative this is no place to record an admit at all. Corrected records
+    (`corrected_seqs`) are not counted.
     """
     ok = {"admission_decided": ("admit",), "refutation_attempted": ("survives",)}.get(event, ())
     try:
@@ -604,40 +631,43 @@ def _has_lineage_verdict(issue, event, lineage):
 
 
 def cmd_provisional(a):
-    """ある血統の judge の判定を **暫定** として記録し、2血統が一致したら admission を生成する。
+    """Record a lineage's judge as **provisional**, and derive an admission once two lineages agree.
 
-    ## なぜ二段にするのか
+    ## Why it is two-stage
 
-    0.32.0 は `admission_decided = admit` を直接記録させ、「もう一方の血統の判定が台帳に無ければ
-    拒否」とした。それでは **空の台帳からどちらの順序でも記録できず、admit が永久に作れない**
-    （実測: 両方向 exit=4、台帳は空のまま）。片側の拒否だけを確かめ、通せることを確かめなかった
-    ためである。
+    0.32.0 had `admission_decided = admit` recorded directly, refusing it "unless the other
+    lineage's judgment is already in the ledger". From an empty ledger that meant **neither order
+    could be recorded and an admit could never be created** (measured: exit=4 in both directions,
+    the ledger still empty). Only the refusal of one side had been checked; that it could be passed
+    had not.
 
-    正しい形は、**単独では権威を持たない判定**を先に置くことである:
+    The correct shape puts **a judgment that carries no authority on its own** first:
 
-      1. `verdict_provisional`  各血統の judge の判定。順序は問わない
-      2. `admission_decided`    2件が一致したときに **道具が組み立てる**
+      1. `verdict_provisional`  each lineage's judge. The order does not matter
+      2. `admission_decided`    **assembled by the tool** once the two agree
 
-    段2で verdict を作るのは配管であって判断ではない — 一致という事実の関数である。不一致なら
-    道具は admit を作れないので、監督が都合のいい方を採る余地も消える。
+    Producing the verdict at stage 2 is plumbing, not judgment — it is a function of the fact that
+    they agreed. Where they disagree the tool cannot produce an admit, which also removes any room
+    for a supervisor to take whichever suits.
 
-    ## この道具が admit を「作る」ことについて
+    ## On this tool "producing" an admit
 
-    `verify` が判定を作らないのと矛盾しない。ここで決めているのは *一致しているか* だけで、
-    verdict / why / evidence はすべて judge が書いたものをそのまま持ち越す。**道具が新しい判断を
-    足す箇所は無い。**
+    That does not contradict `verify` producing no judgment. All that is settled here is *whether
+    they agree*; the verdict, the why and the evidence are all carried over exactly as the judge
+    wrote them. **There is no point at which the tool adds a judgment of its own.**
     """
-    # **設定を読めないなら止める。** provisional は cross-harness を前提とするコマンドなので、
-    # 血統設定が読めない状態で判定を積むと、あとで一致を数える側が別の前提で動きうる。
-    # `_org_lineage()` は読めなければ SystemExit する（fail-closed）。
+    # **If the configuration cannot be read, stop.** provisional is a command premised on
+    # cross-harness, so stacking judgments while the lineage setting is unreadable lets whatever
+    # counts the agreement later run on a different premise.
+    # `_org_lineage()` raises SystemExit when it cannot read (fail-closed).
     lineage_mode = _org_lineage()
     if lineage_mode != "cross-harness":
-        print(f"provisional は judges.lineage = cross-harness の org のためのものだが、"
-              f"この org は {lineage_mode!r} である。\n"
-              f"  同一血統だけで回すなら、判定は decide でそのまま記録すればよい "
-              f"（一致を数える相手が居ない）。\n"
-              f"  2血統で回すなら constitution の enforcement.judges.lineage を "
-              f"cross-harness にすること。", file=sys.stderr)
+        print(f"provisional is for an org with judges.lineage = cross-harness, but this org is "
+              f"{lineage_mode!r}.\n"
+              f"  Running on a single lineage, record the judgment through decide directly "
+              f"(there is nobody to agree with).\n"
+              f"  Running on two, set the constitution's enforcement.judges.lineage to "
+              f"cross-harness.", file=sys.stderr)
         return 2
     # Subject equality alone cannot detect that both judges reviewed the same *old* base.  `verify`
     # persists the observable descriptor; embed it in the append-only event and re-resolve the ref
@@ -650,14 +680,17 @@ def cmd_provisional(a):
         constitution_path = None
     _declared, strict_freshness, policy_error = freshness_policy(constitution_path)
     if policy_error:
-        print(f"provisional: review freshness policy が不正 — {policy_error}", file=sys.stderr)
+        print(f"provisional: the review freshness policy is invalid — {policy_error}",
+              file=sys.stderr)
         return 2
     subject_descriptor, descriptor_path = load_descriptor(a.subject, os.getcwd())
     if strict_freshness and subject_descriptor is None:
-        print("provisional: strict review freshness に必要な subject descriptor が無い。\n"
+        print("provisional: the subject descriptor that strict review freshness needs is "
+              "absent.\n"
               f"  expected: {descriptor_path}\n"
               f"  org_cycle.py verify --issue {a.issue} --role {a.role} --print-subject\n"
-              "  古い review_subject_id だけでは統合先の移動を検査できないため、判定を記録しない。",
+              "  An old review_subject_id alone cannot check whether the integration target "
+              "moved, so the judgment is not recorded.",
               file=sys.stderr)
         return 7
     if subject_descriptor is not None:
@@ -667,36 +700,38 @@ def cmd_provisional(a):
         subject_cwd = subject_descriptor.get("subject_root") or os.getcwd()
         freshness = descriptor_status(subject_descriptor, subject_cwd)
         if strict_freshness and not freshness["ok"]:
-            print(f"provisional: stale review subject を記録しない — "
+            print(f"provisional: a stale review subject is not recorded — "
                   f"{freshness['reason']}: {freshness['detail']}\n"
-                  "  統合先を取り込み、verify と判定をやり直すこと。", file=sys.stderr)
+                  "  Take in the integration target, and run verify and the judgment again.",
+                  file=sys.stderr)
             return 7
     ok = {"gate": ("admit", "reject", "park"), "skeptic": ("survives", "refuted")}
     if a.role not in ok:
-        print(f"provisional: --role は gate | skeptic（got {a.role!r}）", file=sys.stderr)
+        print(f"provisional: --role is gate | skeptic (got {a.role!r})", file=sys.stderr)
         return 2
     if a.verdict not in ok[a.role]:
-        print(f"provisional: {a.role} の verdict は {ok[a.role]}（got {a.verdict!r}）",
+        print(f"provisional: a {a.role} verdict is {ok[a.role]} (got {a.verdict!r})",
               file=sys.stderr)
         return 2
     why = (a.why or "").strip()
     if len(why) < 40:
-        print(f"provisional: --why が薄い（{len(why)} 文字）。verdict の言い換えではなく、"
-              f"何を見て、どこで決まったかを書くこと。", file=sys.stderr)
+        print(f"provisional: --why is thin ({len(why)} characters). Not a restatement of the "
+              f"verdict — write what you looked at and where it was decided.", file=sys.stderr)
         return 2
     pass_v = {"gate": "admit", "skeptic": "survives"}[a.role]
     if a.verdict == pass_v and not (a.evidence or "").strip():
-        print(f"provisional: {pass_v} には --evidence が必要。"
-              f"何も参照していない通過は、判定ではなく判子である。", file=sys.stderr)
+        print(f"provisional: a {pass_v} requires --evidence. A pass that consulted nothing is a "
+              f"rubber stamp, not a judgment.", file=sys.stderr)
         return 2
 
     event = {"gate": "admission_decided", "skeptic": "refutation_attempted"}[a.role]
     digest = _reasoning_digest(why, a.evidence, a.alternatives, a.standard, a.risk)
 
     # ── identity（H1）─────────────────────────────────────────────────────
-    # **`decision_by` は検証済み receipt からのみ設定する。** CLI で申告できるなら、誰の判断
-    # とでも言える。receipt が無ければ `claimed` のままにし、**独立性の強制には使わない**。
-    # `recorded_by` は観測する（代理記録を許す — judge が直接書く必要は無い）。
+    # **`decision_by` is set only from a verified receipt.** If it could be asserted on the CLI, it
+    # could be claimed as anyone's judgment. With no receipt it stays `claimed` and **is not used to
+    # enforce independence**. `recorded_by` is observed (proxy recording is allowed — the judge need
+    # not write it itself).
     sys.path.insert(0, HERE)
     from identity import (verify_receipt, observed_recorder, PROTOCOL_VERSION)
     decision_by, ident = None, {"identity_assurance": "claimed"}
@@ -705,17 +740,19 @@ def cmd_provisional(a):
             rc = json.loads(open(a.receipt, encoding="utf-8").read()) \
                 if os.path.isfile(a.receipt) else json.loads(a.receipt)
         except Exception as e:
-            print(f"provisional: --receipt を読めない（{e}）。", file=sys.stderr)
+            print(f"provisional: cannot read --receipt ({e}).", file=sys.stderr)
             return 2
         expect = {"review_subject_id": a.subject, "issue": a.issue, "role": a.role,
                   "lineage": a.lineage, "verdict": a.verdict,
                   "reasoning_sha256": digest}
         decision_by, ident, rerr = verify_receipt(rc, expect)
         if rerr:
-            print(f"provisional: receipt を検証できないので判定を記録しない — {rerr}\n"
-                  f"  **判断の主体を確かめられないなら、その判断として記録しない。**\n"
-                  f"  receipt 無しで記録するなら --receipt を外すこと（その場合 decision_by は"
-                  f"`claimed` になり、独立性の強制には使えない）。", file=sys.stderr)
+            print(f"provisional: the receipt cannot be verified, so the judgment is not recorded "
+                  f"— {rerr}\n"
+                  f"  **If the deciding principal cannot be confirmed, it is not recorded as that "
+                  f"principal's judgment.**\n"
+                  f"  To record without a receipt, drop --receipt (decision_by is then `claimed` "
+                  f"and cannot be used to enforce independence).", file=sys.stderr)
             return 4
     recorded_by, rec_assurance = observed_recorder()
     payload = {"issue": a.issue, "deliverable": str(a.issue), "role": a.role,
@@ -742,8 +779,9 @@ def cmd_provisional(a):
                "workload_isolation": ident.get("workload_isolation", "none"),
                **({"signer_id": ident["signer_id"], "key_id": ident["key_id"]}
                   if ident.get("signer_id") else {}),
-               # 条件7+8: digest の照合対象を永続化する。台帳に散文は置かないが、
-               # **どこを見れば原文があるか**は残す（Issue コメントの marker）。
+               # Conditions 7+8: persist what the digest is reconciled against. No prose goes
+               # into the ledger, but **where to look for the original** does (the marker in the
+               # Issue comment).
                "reasoning_ref": f"issue:{a.issue}#provisional-{a.lineage}-{digest[:12]}"}
     if subject_descriptor is not None:
         payload["review_subject"] = subject_descriptor
@@ -752,17 +790,18 @@ def cmd_provisional(a):
     if getattr(a, "risk", None):
         payload["risk_accepted"] = True
 
-    # **同じ血統の二度目の扱い。** 0.32.1 は verdict が違うときだけ拒否したので、同じ verdict で
-    # 理由を変えた別の provisional を積めた（監査指摘）。どれと一致したのかが運用次第になる。
-    #   - 完全に同じ再実行（同 subject・同 verdict・同 digest）→ no-op
-    #   - それ以外の再判定 → 拒否。訂正は correction 経由
+    # **How a second judgment from the same lineage is handled.** 0.32.1 refused only where the
+    # verdict differed, so another provisional with the same verdict and a different reason could be
+    # stacked (raised in audit) — leaving which one it agreed with a matter of operating practice.
+    #   - an exactly identical re-run (same subject, same verdict, same digest) → no-op
+    #   - any other re-judgment → refused. A correction goes through correction
     prior = _provisional_for(a.issue, event, a.lineage)
     if prior:
         same = (prior["verdict"] == a.verdict and prior.get("subject") == a.subject
                 and prior.get("digest") == digest)
         if same:
-            print(f"provisional: #{a.issue} の {a.lineage} の判定は既に同一内容で "
-                  f"seq={prior['seq']} にある（冪等 no-op）。")
+            print(f"provisional: the {a.lineage} judgment for #{a.issue} is already present with "
+                  f"identical content at seq={prior['seq']} (idempotent no-op).")
             return 0
         what = []
         if prior["verdict"] != a.verdict:
@@ -770,9 +809,10 @@ def cmd_provisional(a):
         if prior.get("subject") != a.subject:
             what.append(f"subject {str(prior.get('subject'))[:12]}… → {a.subject[:12]}…")
         if prior.get("digest") != digest:
-            what.append("why/evidence が違う")
+            what.append("the why/evidence differs")
         authorities = _judgment_correction_authorities()
-        handback = ", ".join(authorities) if authorities else "(未宣言 — constitution を修復)"
+        handback = (", ".join(authorities) if authorities
+                    else "(undeclared — repair the constitution)")
         # **State the recovery as commands, not as a requirement.** The rule this enforces is
         # right — a lineage must not restack verdicts until they agree — but a refusal that only
         # names the rule leaves the caller stuck: the authority, the receipt and the correction
@@ -817,12 +857,14 @@ def cmd_provisional(a):
               file=sys.stderr)
         return 4
 
-    # 冪等キーは **判定の同一性**で作る。`_reasoning_digest` は散文だけを束ねる（tamper
-    # evidence の対象は散文なので正しい）ため、同じ理由で verdict を変えた判定が同一キーに
-    # なってしまう。verdict と subject を含めて、差し替えが no-op に落ちないようにする。
-    # **receipt そのものを渡す。** 環境変数の「検証済み」印は使わない — caller が立てられる
-    # ものは証拠にならない（実測: ORG_IDENTITY_VERIFIED=1 を足すだけで偽装が通った）。
-    # 書き手（ledger.py / writerd）が自分で検証し、identity fields を生成する。
+    # The idempotency key is built from **the identity of the judgment**. `_reasoning_digest`
+    # bundles only the prose (correct, since prose is what tamper evidence covers), so a judgment
+    # that kept the reason and changed the verdict would land on the same key. verdict and subject
+    # are included, so a substitution cannot fall through as a no-op.
+    # **Hand over the receipt itself.** No "verified" marker in an environment variable — anything
+    # the caller can set is not evidence (measured: merely adding ORG_IDENTITY_VERIFIED=1 let a
+    # forgery through). The writer (ledger.py / writerd) verifies it and derives the identity
+    # fields itself.
     for k in ("decision_by", "recorded_by", "identity_assurance", "recorder_assurance",
               "workload_isolation", "signer_id", "key_id"):
         payload.pop(k, None)
@@ -833,21 +875,23 @@ def cmd_provisional(a):
     if rc != 0:
         return 4
     print(f"recorded provisional {a.role}={a.verdict} ({a.lineage}) on #{a.issue}.")
-    # **条件8: digest の照合対象を永続化する。** 台帳は reasoning_sha256 しか持たないので、
-    # 散文を Issue に置かないと「後で照合する対象」が存在しない。台帳を先に通してから投影する
-    # （拒否されるなら外に見える記録を作らない — decide と同じ順序）。
+    # **Condition 8: persist what the digest is reconciled against.** The ledger holds only
+    # reasoning_sha256, so without the prose on the Issue there is nothing to reconcile against
+    # later. It goes through the ledger first and is then projected (if it is refused, no record
+    # visible from outside is created — the same order as decide).
     if not getattr(a, "repo", None):
-        print(f"  注意: GitHub repo が無いので Issue に投影していない。\n"
-              f"  **reasoning_sha256 ={digest[:12]}… の照合対象がどこにも残らない** — "
-              f"台帳は digest しか持たないので、後から散文と突き合わせられない。",
+        print(f"  note: there is no GitHub repo, so nothing was projected onto an Issue.\n"
+              f"  **Nothing anywhere holds what reasoning_sha256 ={digest[:12]}… reconciles "
+              f"against** — the ledger keeps only the digest, so it cannot be matched to the prose "
+              f"later.",
               file=sys.stderr)
     else:
         marker = f"<!-- orgforge:provisional:{a.lineage}:{digest[:12]} -->"
         parts = [
             f"### 🧪 verdict_provisional — `{a.verdict}` ({a.lineage})",
             f"**Judged by:** `{a.role}` / lineage `{a.lineage}`",
-            f"**単独では権威を持たない。** 2血統が同じ対象で一致したときにだけ "
-            f"{event} が生成される。",
+            f"**It carries no authority on its own.** {event} is generated only once two lineages "
+            f"agree on the same subject.",
             f"\n**review_subject_id:** `{a.subject}`",
             f"\n**Why (the reasoning):**\n{why}",
         ]
@@ -865,31 +909,36 @@ def cmd_provisional(a):
             parts.append(f"\n**Standard applied:** {a.standard}")
         if (a.risk or "").strip():
             parts.append(f"\n**Known risk accepted:** {a.risk}")
-        parts.append(f"\n`reasoning_sha256: {digest}` — 台帳の receipt が同じ digest を持つ。"
-                     f"再ハッシュが一致しなければ、この記録は書き換えられている。")
+        parts.append(f"\n`reasoning_sha256: {digest}` — the receipt in the ledger carries the same "
+                     f"digest. If a re-hash does not match, this record has been altered.")
         parts.append(f"\n{marker}")
         code, out = gh(["issue", "comment", str(a.issue), "--repo", a.repo,
                         "--body", "\n".join(parts)])
         if code != 0:
-            print(f"  注意: 台帳には入ったが、Issue に投影できなかった: {out[:300]}\n"
-                  f"  **reasoning_sha256 の照合対象が残っていない。** 同じ引数で再実行すれば、"
-                  f"台帳は冪等 no-op になり Issue だけが埋まる。", file=sys.stderr)
+            print(f"  note: it entered the ledger but could not be projected onto the Issue: "
+                  f"{out[:300]}\n"
+                  f"  **Nothing holds what reasoning_sha256 reconciles against.** Re-running with "
+                  f"the same arguments makes the ledger an idempotent no-op and fills in the Issue "
+                  f"alone.", file=sys.stderr)
 
-    # **通過でない判定は、そもそも一致を作る話ではない。** park / reject / refuted は片方でも
-    # 出れば否として扱われる（厳しい側に倒す）ので、もう一方を待つ必要も subject を比べる必要も
-    # ない。ここを分けないと park に対して「別の対象を見ている」という無関係な警告が出る（実測）。
+    # **A judgment that is not a pass is not about producing agreement at all.** park / reject /
+    # refuted count as negative from either side alone (fall to the stricter reading), so there is
+    # nothing to wait for and no subject to compare. Without separating this, a park draws the
+    # irrelevant warning "they are looking at different subjects" (measured).
     other = "cross-harness" if a.lineage == "same-harness" else "same-harness"
     peer = _provisional_for(a.issue, event, other)
 
-    # 否（park / reject / refuted）は単独で成立する — 相手を待たず、subject も比べない。
-    # ただし **相手が通過していたなら、それは食い違いである**。早期に返して記録を飛ばすと、
-    # 「admit の後から reject が来た」経路で judges_disagreed が残らない（実測で捕まえた）。
+    # A negative (park / reject / refuted) stands alone — it waits for nobody and compares no
+    # subject.
+    # **But where the peer passed, that is a disagreement.** Returning early and skipping the
+    # record leaves no judges_disagreed on the "a reject arrived after the admit" path (caught by
+    # measurement).
     if a.verdict != pass_v:
         if peer and peer["verdict"] == pass_v:
-            print(f"\n  ★ 2血統が食い違った — {other}={peer['verdict']}"
-                  f"（seq={peer['seq']}）に対して {a.lineage}={a.verdict}。\n"
-                  f"  **厳しい側に倒す。** admission は生成しない（既にあるなら訂正が必要）。",
-                  file=sys.stderr)
+            print(f"\n  ★ the two lineages disagree — {a.lineage}={a.verdict} against "
+                  f"{other}={peer['verdict']} (seq={peer['seq']}).\n"
+                  f"  **Fall to the stricter reading.** No admission is generated (one already "
+                  f"there needs correcting).", file=sys.stderr)
             _ledger_append(a.by or a.role, "judges_disagreed",
                            {"issue": a.issue, "role": a.role, "for_event": event,
                             a.lineage.replace("-", "_"): a.verdict,
@@ -897,60 +946,64 @@ def cmd_provisional(a):
                            f"judges_disagreed-{a.issue}-{event}-{digest[:12]}")
             ret = 5
         else:
-            print(f"\n  {a.verdict} は通過ではないので、admission は生成しない"
-                  f"（片方でも否なら否）。")
+            print(f"\n  {a.verdict} is not a pass, so no admission is generated (negative from "
+                  f"either side is negative).")
             ret = 0
-        print(f"  否として確定させるなら decide で記録すること:\n"
+        print(f"  To settle it as a negative, record it with decide:\n"
               f'    python3 "{os.path.join(HERE, "github_sync.py")}" decide --issue {a.issue} '
               f"--event {event} --verdict {a.verdict} --by {a.role} --why \"…\"",
               file=sys.stderr if ret else sys.stdout)
         return ret
     if not peer:
-        print(f"\n  もう一方の血統（{other}）の判定はまだ無い。**admission はまだ生成されない。**\n"
-              f"  順序は問わない — こちらを先に置いても構わない。\n"
+        print(f"\n  The other lineage ({other}) has not judged yet. **No admission is generated "
+              f"yet.**\n"
+              f"  Order does not matter — this one may go first.\n"
               f'    python3 "{os.path.join(HERE, "org_cycle.py")}" verify '
               f"--issue {a.issue} --role {a.role}")
         return 0
 
-    # 2件揃った。**一致だけが admission を生成する。**
-    # **subject が違う2判定は一致させない。** 別の revision を見た2つの通過は一致ではない
-    # （監査実証: revision A の admit と revision B の admit で joint が生成された）。
+    # Both are in. **Only agreement generates an admission.**
+    # **Two judgments with different subjects are not made to agree.** Two passes that looked at
+    # different revisions are not agreement (demonstrated in an audit: a joint was generated from an
+    # admit of revision A and an admit of revision B).
     if peer.get("subject") != a.subject:
-        print(f"\n  ★ 2血統が **別の対象** を見ている — admission は生成しない。\n"
+        print(f"\n  ★ the two lineages are looking at **different subjects** — no admission is "
+              f"generated.\n"
               f"    {a.lineage:14} subject = {a.subject}\n"
-              f"    {other:14} subject = {peer.get('subject') or '(なし)'}\n"
-              f"  base_sha / reviewed_tree_sha / 受け入れ基準のいずれかが違う。"
-              f"**同じものを見ていない2つの通過は、一致ではない。**\n"
-              f"  同じ木で両方を回し直すこと:\n"
+              f"    {other:14} subject = {peer.get('subject') or '(none)'}\n"
+              f"  base_sha, reviewed_tree_sha, or the acceptance criteria differ. "
+              f"**Two passes that did not look at the same thing are not agreement.**\n"
+              f"  Run both again over the same tree:\n"
               f'    python3 "{os.path.join(HERE, "org_cycle.py")}" verify '
               f"--issue {a.issue} --role {a.role}"
               + (f" --phase {a.phase}" if getattr(a, "phase", None) else "")
-              + (f"\n  （0.32.1 以前の provisional には subject が無い。"
-                 f"その判定は一致に参加できないので、回し直す）"
+              + (f"\n  (a provisional from before 0.32.1 carries no subject. That judgment cannot "
+                 f"take part in an agreement, so run it again)"
                  if not peer.get("subject") else ""),
               file=sys.stderr)
         return 6
 
     if peer["verdict"] != a.verdict:
-        print(f"\n  ★ 2血統が食い違った — {a.lineage}={a.verdict} / "
-              f"{other}={peer['verdict']}（seq={peer['seq']}）。\n"
-              f"  **admission は生成しない。** 片方でも否なら否である。\n"
-              f"  食い違いそのものを記録すること — 異常ではなく、血統を分けた目的である:",
-              file=sys.stderr)
+        print(f"\n  ★ the two lineages disagree — {a.lineage}={a.verdict} / "
+              f"{other}={peer['verdict']} (seq={peer['seq']}).\n"
+              f"  **No admission is generated.** Negative from either side is negative.\n"
+              f"  Record the disagreement itself — it is not an anomaly, it is the point of "
+              f"separating the lineages:", file=sys.stderr)
         _ledger_append(a.by or a.role, "judges_disagreed",
                        {"issue": a.issue, "role": a.role, "for_event": event,
                         a.lineage.replace("-", "_"): a.verdict,
                         other.replace("-", "_"): peer["verdict"]},
                        f"judges_disagreed-{a.issue}-{event}-{digest[:12]}")
         bad = "reject" if a.role == "gate" else "refuted"
-        print(f"  否として扱うなら、そのまま記録してよい（否は一致を要求しない）:\n"
+        print(f"  To treat it as a negative, record it as it stands (a negative demands no "
+              f"agreement):\n"
               f'    python3 "{os.path.join(HERE, "github_sync.py")}" decide --issue {a.issue} '
               f"--event {event} --verdict {bad} --by {a.role} --why \"…\"", file=sys.stderr)
         return 5
 
-    # **両方の reasoning を持ち越す。** 0.32.1 は2件目の digest しか載せず、1件目の
-    # why/evidence が joint から辿れなかった（監査指摘）。joint の reasoning_sha256 は
-    # **2つの digest から決定的に作る** — どちらか一方の digest ではない。
+    # **Carry both reasonings over.** 0.32.1 put only the second digest on the record, leaving the
+    # first one's why/evidence unreachable from the joint (raised in an audit). The joint's
+    # reasoning_sha256 is **derived deterministically from the two digests** — not from either one.
     mine = _provisional_for(a.issue, event, a.lineage)
     pair = {a.lineage: {"seq": mine["seq"], "reasoning_sha256": digest,
                         "reasoning_ref": payload["reasoning_ref"]},
@@ -959,20 +1012,21 @@ def cmd_provisional(a):
     joint_digest = hashlib.sha256(
         json.dumps({k: v["reasoning_sha256"] for k, v in sorted(pair.items())},
                    sort_keys=True).encode("utf-8")).hexdigest()
-    # **joint は writer の専用操作が生成する。** ここで payload を組み立てて generic append に
-    # 渡すと、`require_attested_identity` が「receipt が無い」として拒否し、**一致しても
-    # admission を作れないデッドロック**になる（joint に judge の receipt は存在しない —
-    # 一致は判断ではなく事実の関数だからである）。
+    # **A dedicated writer operation generates the joint.** Assembling the payload here and handing
+    # it to the generic append makes `require_attested_identity` refuse it for "no receipt", which is
+    # a **deadlock where agreement still cannot produce an admission** (no judge receipt exists for a
+    # joint — agreement is a function of fact, not a judgment).
     from identity import reviewer_independence
     mine_assurance = {"signer_id": ident.get("signer_id"), "key_id": ident.get("key_id"),
                       "workload_isolation": ident.get("workload_isolation") or "none",
                       "identity_assurance": ident.get("identity_assurance") or "claimed"}
     independence = reviewer_independence(decision_by, mine_assurance, peer.get("assurance"))
     if independence == "same_signer" and mine_assurance.get("signer_id"):
-        print(f"\n  ★ 2血統が一致したが、**同じ signer が両方に署名している**"
-              f"（{mine_assurance['signer_id']}）。\n"
-              f"  署名されていても、同じ鍵が両方の血統を作れるなら **独立レビューではない**。\n"
-              f"  **独立性の証拠として数えないこと。**", file=sys.stderr)
+        print(f"\n  ★ the two lineages agree, but **the same signer signed both** "
+              f"({mine_assurance['signer_id']}).\n"
+              f"  Signed or not, if one key can produce both lineages this is **not independent "
+              f"review**.\n"
+              f"  **Do not count it as evidence of independence.**", file=sys.stderr)
 
     args = ["--issue", str(a.issue), "--event", event]
     if os.environ.get("ORG_WRITER_SOCKET"):
@@ -983,25 +1037,26 @@ def cmd_provisional(a):
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
     except Exception as e:
-        print(f"admission を生成できなかった: {e}", file=sys.stderr)
+        print(f"could not generate the admission: {e}", file=sys.stderr)
         return 4
     if r.returncode != 0:
-        print(f"admission を生成できなかった:\n"
+        print(f"could not generate the admission:\n"
               f"  {((r.stdout or '') + (r.stderr or '')).strip()[:500]}", file=sys.stderr)
         return 4
-    print(f"\n  ✓ 2血統が {a.verdict} で一致した — {event} を生成した"
-          f"（reviewer_independence={independence}）。\n"
-          f"  この admission は **判定ではなく一致の記録** である。"
-          f"verdict / why は judge が書いたものをそのまま持ち越している。")
+    print(f"\n  ✓ the two lineages agree on {a.verdict} — generated {event} "
+          f"(reviewer_independence={independence}).\n"
+          f"  This admission is **a record of agreement, not a judgment**. verdict and why are "
+          f"carried over exactly as the judge wrote them.")
     return 0
 
 
 def _provisional_for(issue, event, lineage):
-    """その Issue・その event・その血統の **有効な** 暫定判定を返す。
+    """Return the **live** provisional judgment for that Issue, that event, that lineage.
 
-    無効化は共有の `voided_seqs` projectionに従う。v2.0.23以降はwriterが付けた
-    `effect: voids|records_backfill`が正本で、旧ledgerだけkindから互換導出する。この関数だけで
-    supersededを特別扱いすると、statusやderive-admissionと現在値が分岐する（OBS-042）。
+    Voiding follows the shared `voided_seqs` projection. From v2.0.23 the writer-applied
+    `effect: voids|records_backfill` is authoritative; only an older ledger derives it from kind for
+    compatibility. Special-casing superseded in this function alone makes status and
+    derive-admission diverge from the current value (OBS-042).
     """
     try:
         sys.path.insert(0, HERE)
@@ -1030,7 +1085,7 @@ def _provisional_for(issue, event, lineage):
             hit = {"verdict": pl.get("verdict"), "seq": e.get("seq"), "actor": e.get("actor"),
                    "subject": pl.get("review_subject_id"),
                    "digest": pl.get("reasoning_sha256"), "ref": pl.get("reasoning_ref"),
-                   # identity（H1）— 独立性の判定に使う
+                   # identity (H1) — used to judge independence
                    "decision_by": pl.get("decision_by"),
                    "assurance": {"signer_id": pl.get("signer_id"), "key_id": pl.get("key_id"),
                                  "workload_isolation": pl.get("workload_isolation") or "none",
@@ -1039,10 +1094,10 @@ def _provisional_for(issue, event, lineage):
 
 
 def _ledger_append(actor, cls, payload, natural_key, receipt=None):
-    """台帳に1件追記する。**失敗を黙って飲まない。**
+    """Append one row to the ledger. **Never swallow a failure silently.**
 
-    **writerd がいる org では RPC 経由にする。** 直接 ledger.py を呼ぶと「writerd 経由でなければ
-    書けない」に当たって exit 4 になり、判定の記録が止まる（実測で指摘された）。
+    **Where an org runs writerd, go through the RPC.** Calling ledger.py directly hits "only writerd
+    may write", exits 4, and stops the judgment from being recorded (raised by measurement).
     """
     args = ["--actor", actor, "--class", cls, "--natural-key", natural_key,
             "--payload", json.dumps(payload, ensure_ascii=False)]
@@ -1055,10 +1110,10 @@ def _ledger_append(actor, cls, payload, natural_key, receipt=None):
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
     except Exception as e:
-        print(f"台帳に追記できなかった: {e}", file=sys.stderr)
+        print(f"could not append to the ledger: {e}", file=sys.stderr)
         return 4
     if r.returncode != 0:
-        print(f"台帳が {cls} を受け付けなかった:\n"
+        print(f"the ledger did not accept {cls}:\n"
               f"  {((r.stdout or '') + (r.stderr or '')).strip()[:600]}", file=sys.stderr)
         return 4
     return 0
@@ -1085,52 +1140,58 @@ def cmd_decide(a):
               f"For a progress milestone use `log`.", file=sys.stderr)
         return 2
     why = (a.why or "").strip()
-    # integration_admitted は gate の admit を前提とする。**これは拒否する** —
-    # 統合の記録が admit なしに残ると、後から見て「通った」と読めてしまう。
+    # integration_admitted presupposes an admit from the gate. **This is refused** — an integration
+    # record left without an admit reads later as "it passed".
     if a.event == "integration_admitted" and a.verdict in ("pass", "admit"):
         verdict, actor = _prior_admission(a.issue)
         if verdict != "admit":
-            print(f"integration_admitted を記録できない: #{a.issue} に gate の admit が無い"
-                  f"（台帳の最新は {verdict or '記録なし'}）。\n"
-                  f"  先に gate を通すこと:\n"
+            print(f"cannot record integration_admitted: #{a.issue} has no admit from the gate "
+                  f"(the ledger's latest is {verdict or 'nothing recorded'}).\n"
+                  f"  Take it through the gate first:\n"
                   f'    python3 "{os.path.join(HERE, "org_cycle.py")}" verify '
                   f"--issue {a.issue} --role gate\n"
-                  f"  **maker の報告の質は admit の代わりにならない。** 台帳は phase_started に対して\n"
-                  f"  既に同じ検査をしている（design が admit されていなければ implement を拒否）。\n"
-                  f"  統合の記録が admit なしに残ると、後から見て「通った」と読めてしまう。",
+                  f"  **The quality of the maker's report is no substitute for an admit.** The\n"
+                  f"  ledger already runs this same check against phase_started (implement is\n"
+                  f"  refused unless design was admitted). An integration record left without an\n"
+                  f"  admit reads later as \"it passed\".",
                   file=sys.stderr)
             return 4
 
-    # cross-harness を宣言した org では、admit/survives は **2血統の一致で生成される** —
-    # 直接は記録できない。0.32.0 は「もう一方が台帳に無ければ拒否」としたが、それでは空の
-    # 台帳からどちらの順序でも記録できず、admit が永久に作れなかった（実測: 両方向 exit=4）。
+    # In an org that declared cross-harness, admit/survives are **generated from the agreement of
+    # two lineages** — they cannot be recorded directly. 0.32.0 refused "unless the other is in the
+    # ledger", which made either order unrecordable from an empty ledger and left admit forever
+    # unreachable (measured: exit=4 in both directions).
     #
-    # 正しい形は二段である:
-    #   1. `verdict_provisional` — ある血統の judge の判定。**単独では権威を持たない**
-    #   2. `admission_decided`   — 2血統が一致したときに **道具が組み立てる**
+    # The correct shape has two stages:
+    #   1. `verdict_provisional` — one lineage's judge's judgment. **It carries no authority alone**
+    #   2. `admission_decided`   — **assembled by the tool** once the two lineages agree
     #
-    # 段2で verdict を作るのは配管であって判断ではない（一致という事実の関数）。不一致なら
-    # 道具は admit を作れないので、監督が都合のいい方を採る余地も消える。
+    # Producing the verdict at stage 2 is plumbing, not judgment (a function of the fact of
+    # agreement). Where they disagree the tool cannot produce an admit, so there is no room left for
+    # a supervisor to take whichever side suits.
     if a.event in ("admission_decided", "refutation_attempted") \
             and a.verdict in ("admit", "survives") and _org_lineage() == "cross-harness":
         _who = "gate" if a.event == "admission_decided" else "skeptic"
-        print(f"{a.event} = {a.verdict} は直接記録できない（judges.lineage = cross-harness）。\n"
-              f"  この org では admit は **2血統の一致から生成される**もので、"
-              f"judge が単独で置けるものではない。\n"
-              f"  各血統の判定を暫定として記録すること:\n"
+        print(f"{a.event} = {a.verdict} cannot be recorded directly (judges.lineage = "
+              f"cross-harness).\n"
+              f"  In this org an admit is **generated from the agreement of two lineages**; it is "
+              f"not something one judge can place alone.\n"
+              f"  Record each lineage's judgment as provisional:\n"
               f'    python3 "{os.path.join(HERE, "github_sync.py")}" provisional '
               f"--issue {a.issue} --role {_who} \\\n"
               f"      --lineage same-harness|cross-harness --verdict {a.verdict} "
               f'--why "…" --evidence "…"\n'
-              f"  2件目を入れた時点で、一致していれば {a.event} が自動で生成される。\n"
-              f"  **否（{'reject' if _who == 'gate' else 'refuted'}）は一致を要求しない** — "
-              f"片方でも否なら否なので、そのまま decide で記録してよい。",
+              f"  The moment the second one lands, {a.event} is generated automatically if they "
+              f"agree.\n"
+              f"  **A negative ({'reject' if _who == 'gate' else 'refuted'}) demands no agreement** "
+              f"— negative from either side is negative, so record it with decide as it stands.",
               file=sys.stderr)
         return 4
 
-    # 監督の書き分けを見る（拒否ではなく警告。判断は監督の仕事）
+    # Look at how the supervisor separated the two (a warning, not a refusal — the judgment is the
+    # supervisor's job)
     for w in _claim_verify_defect(a):
-        print(f"注意: {w}", file=sys.stderr)
+        print(f"note: {w}", file=sys.stderr)
     bad = _reasoning_defect(why, a.verdict, a.event)
     if bad:
         print(f"decide: --why {bad} With human review retired, this text is the only account of why "
@@ -1159,9 +1220,11 @@ def cmd_decide(a):
         parts.append(f"**Phase:** `{a.phase}`")
     parts.append(f"\n**Why (the reasoning):**\n{why}")
     if getattr(a, "claimed", None):
-        parts.append(f"\n**Claimed (何が報告されたか — 原文に近い形で):**\n{a.claimed}")
+        parts.append(f"\n**Claimed (what was reported — close to the original wording):**\n"
+                     f"{a.claimed}")
     if getattr(a, "verified", None):
-        parts.append(f"\n**Verified (監督が自分で確かめたこと — コマンドと出力):**\n{a.verified}")
+        parts.append(f"\n**Verified (what the supervisor confirmed themselves — the command and "
+                     f"its output):**\n{a.verified}")
     if getattr(a, "evidence", None):
         parts.append(f"\n**Evidence consulted:**\n{a.evidence}")
     if getattr(a, "alternatives", None):
@@ -1184,22 +1247,26 @@ def cmd_decide(a):
                  "account of why it was allowed to._")
     body = "\n".join(parts) + f"\n\n{marker}"
 
-    # **台帳を先に通す。** 統制（自己承認拒否・順序違反）は台帳が持っているので、
-    # Issue に書いてから台帳が拒否すると「Issue には admit と書いてあるが台帳には無い」
-    # という最悪の食い違いが残る。拒否されるなら、外に見える記録を作る前に止める。
+    # **Go through the ledger first.** The controls (refusing self-approval, order violations) live
+    # in the ledger, so writing to the Issue first and then being refused leaves the worst kind of
+    # mismatch: "the Issue says admit but the ledger has nothing". If it is refused, stop before any
+    # record visible from outside exists.
     here = HERE
     payload = {"verdict": a.verdict, "deliverable": str(a.issue), "issue": a.issue,
                "reasoning_sha256": digest,
         **({"lineage": a.lineage} if getattr(a, "lineage", None) else {})}
-    # 死因の根の分類（Issue #104）。再発検出（learning.py repeats）は root の一致で数える —
-    # 記録時に分類されなければ、同根の失敗が別の言葉で書かれるだけで検出器を素通りする。
-    # 語彙は learning.DEATH_ROOTS が単一の情報源（schema の enum とはテストが突き合わせる）。
+    # Classifying the root cause of death (Issue #104). Recurrence detection (learning.py repeats)
+    # counts by matching roots — unclassified at recording time, a failure with the same root walks
+    # past the detector simply by being worded differently.
+    # learning.DEATH_ROOTS is the single source for the vocabulary (a test reconciles it against the
+    # schema's enum).
     root = (getattr(a, "root", None) or "").strip()
     if root:
         sys.path.insert(0, HERE)
         from learning import DEATH_ROOTS
         if root not in DEATH_ROOTS:
-            print(f"decide: --root {root!r} は死因の根の語彙に無い。許される値:\n"
+            print(f"decide: --root {root!r} is not in the root-cause-of-death vocabulary. "
+                  f"Permitted values:\n"
                   + "\n".join(f"  {k:<24}{v}" for k, v in DEATH_ROOTS.items()),
                   file=sys.stderr)
             return 2
@@ -1214,11 +1281,13 @@ def cmd_decide(a):
                  else [sys.executable, os.path.join(here, "ledger.py"), "append"])
         r = subprocess.run(_base + [
                             "--actor", a.by, "--class", a.event,
-                            # 冪等キーは **判定の内容ごと**に一意。`{event}-{issue}` だと2周目の
-                            # 判定が1周目と衝突して no-op になり、しかも冪等チェックは統制より
-                            # 先に評価されるので、自己承認・順序違反が「既に記録済み」として
-                            # 素通りする（実地で確認）。digest は verdict/why/evidence から
-                            # 作られるので、同じ判定の再実行だけが正しく no-op になる。
+                            # The idempotency key is unique **per judgment content**. With
+                            # `{event}-{issue}`, a second round's judgment collides with the first
+                            # and becomes a no-op — and since the idempotency check is evaluated
+                            # ahead of the controls, self-approval and order violations walk past
+                            # as "already recorded" (confirmed in the field). The digest is built
+                            # from verdict/why/evidence, so only a re-run of the same judgment is
+                            # correctly a no-op.
                             "--natural-key", f"{a.event}-{a.issue}-{digest[:12]}",
                             "--payload", json.dumps(payload, ensure_ascii=False)],
                            capture_output=True, text=True, timeout=30)
@@ -1232,21 +1301,25 @@ def cmd_decide(a):
               f"either:\n  {led_out[:500]}",
               file=sys.stderr)
         if "rejected" in led_out:
-            print("\n  これは統制が働いた結果である（自己承認・順序違反など）。"
-                  "判定そのものを見直すこと。", file=sys.stderr)
+            print("\n  This is a control doing its work (self-approval, an order violation, and "
+                  "the like). Revisit the judgment itself.", file=sys.stderr)
         return 4
 
     code, out = gh(["issue", "comment", str(a.issue), "--repo", a.repo, "--body", body])
     if code != 0:
         print(f"gh error posting decision comment: {out}", file=sys.stderr)
-        print(f"  注意: 台帳には既に記録済み（{a.event} #{a.issue}）。Issue 側だけが欠けている。\n"
-              f"  同じ引数で再実行すれば、台帳は冪等 no-op になり Issue だけが埋まる。",
+        print(f"  note: the ledger already has it ({a.event} #{a.issue}). Only the Issue side is "
+              f"missing.\n"
+              f"  Re-running with the same arguments makes the ledger an idempotent no-op and fills "
+              f"in the Issue alone.",
               file=sys.stderr)
         return 2
     print(f"recorded decision {a.event}={a.verdict} on issue #{a.issue}.")
     print(f"reasoning_sha256={digest}")
-    # 説明ではなく、そのまま打てる形を出す。実地では受領証が書かれず（refutation は台帳0件）、
-    # 相関キーの無い判定が素通りしていた。`issue` は相関キーでもあるので、これが欠けると
-    # DISTINCT_ACTOR / requires_prior が対象を特定できず、統制そのものが効かない。
-    print(f"台帳にも受領証を記録した（{a.event} #{a.issue}, digest {digest[:12]}…）。")
+    # Print something that can be typed as-is rather than an explanation. In the field the receipt
+    # went unwritten (refutation had zero ledger rows) and judgments with no correlation key walked
+    # through. `issue` is also the correlation key, so without it DISTINCT_ACTOR / requires_prior
+    # cannot identify their subject and the controls themselves stop working.
+    print(f"the receipt is recorded in the ledger too ({a.event} #{a.issue}, digest "
+          f"{digest[:12]}…).")
     return 0

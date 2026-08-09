@@ -1817,7 +1817,7 @@ def test_drift_reads_only_the_why_section(monkeypatch):
     got = drift._issue_reasons(1)
     assert len(got) == 1
     assert "未測定" in got[0]
-    # Evidence 節は事由ではない — 拾ってはいけない
+    # The Evidence section is not the reason — it must not be picked up
     assert "回帰" not in got[0]
 
 
@@ -1978,7 +1978,7 @@ def test_broken_constitution_fails_closed_no_downgrade(tmp_path):
     c, o = _prov(org, "same-harness", "admit")
     assert c != 0
     both = o
-    assert "解析できない" in both or "読めない" in both
+    assert "cannot parse constitution.yaml" in both or "cannot be read" in both
     # **降格していないこと** — 台帳に何も入っていない
     assert _events(org, "verdict_provisional") == []
     assert _events(org, "admission_decided") == []
@@ -2025,7 +2025,7 @@ def test_xh_different_subjects_do_not_agree(tmp_path):
     assert _prov(org, "same-harness", "admit", subject="rev-A")[0] == 0
     c, o = _prov(org, "cross-harness", "admit", subject="rev-B")
     assert c == 6, o
-    assert "別の対象" in o
+    assert "different subjects" in o
     assert _events(org, "admission_decided") == []
 
 
@@ -2139,8 +2139,8 @@ def test_non_pass_verdict_does_not_enter_agreement(tmp_path):
     org = _xh_org(tmp_path)
     c, o = _prov(org, "same-harness", "park")
     assert c == 0, o
-    assert "通過ではない" in o
-    assert "別の対象" not in o
+    assert "is not a pass" in o
+    assert "different subjects" not in o
     assert _events(org, "admission_decided") == []
 
 
