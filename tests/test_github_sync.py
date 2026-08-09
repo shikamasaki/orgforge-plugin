@@ -916,7 +916,7 @@ def test_needs_human_body_says_the_org_cannot_do_it(monkeypatch):
                                    parent=None, blocks="10,11"))
     body = fake.calls_matching("issue create")[0][
         fake.calls_matching("issue create")[0].index("--body") + 1]
-    assert "CEO（人間）にしか実行できない" in body
+    assert "only the CEO (a human) can carry out" in body
     assert "#10" in body and "#11" in body     # 何をブロックしているかが見える
 
 
@@ -999,7 +999,7 @@ def test_split_check_flags_multiple_failure_modes(monkeypatch):
     monkeypatch.setattr(GS, "gh", fake)
     rc, out = _quiet(GS.cmd_split_check, _ns(repo="o/r", issue=11))
     assert rc == 10, out
-    assert "壊れ方が" in out
+    assert "it can break in" in out
 
 
 def test_split_check_flags_boundary_only_authz(monkeypatch):
@@ -1018,7 +1018,7 @@ def test_split_check_flags_boundary_only_authz(monkeypatch):
     fake = FakeGh(replies={"issue view": (0, json.dumps({"body": body, "title": "t"}))})
     monkeypatch.setattr(GS, "gh", fake)
     rc, out = _quiet(GS.cmd_split_check, _ns(repo="o/r", issue=11))
-    assert "入った後に何ができるか" in out, out
+    assert "what can be done once inside" in out, out
 
 
 def test_split_check_does_not_flag_a_single_concern(monkeypatch):
@@ -1031,7 +1031,7 @@ def test_split_check_does_not_flag_a_single_concern(monkeypatch):
     fake = FakeGh(replies={"issue view": (0, json.dumps({"body": body, "title": "t"}))})
     monkeypatch.setattr(GS, "gh", fake)
     rc, out = _quiet(GS.cmd_split_check, _ns(repo="o/r", issue=7))
-    assert "壊れ方が" not in out and "入った後に" not in out, out
+    assert "it can break in" not in out and "what can be done once inside" not in out, out
 
 
 # ── 0.27.0: 監督の記録も機械で検査する（4層目にだけ検査が無かった）──────────
