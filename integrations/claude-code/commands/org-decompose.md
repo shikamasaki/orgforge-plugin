@@ -18,12 +18,14 @@ Check them up front, not one failing `create` at a time: with no repo, every Iss
 
 If that prints **STOP**, stop and tell the CEO. Do not proceed to draft specs against an unset repo.
 
-**このコマンドは実行時のカレントディレクトリの org に対して働く。** 上の行が別の org を指しているなら、
-セッションが目的のリポジトリにいない — そのまま進めると他所の org に Issue を切る。止めて場所を直すこと。
+**This command works against the org in the current directory at run time.** If the line above
+points at a different org, the session is not in the intended repository — proceeding cuts Issues
+into someone else's org. Stop and fix the location.
 
-> **出力言語:** `constitution.yaml` の `output_language`（既定 `en`）を読み、Issue 本文・spec・人間向け
-> テキストはその言語で書く（コード・ledger のイベント名・パス・`coverage_row:` トレーラの値は英語の
-> 正準形のまま — トレーラは機械照合キーなので manifest の表記と1文字も違えてはならない）。
+> **Output language:** read `output_language` from `constitution.yaml` (default `en`) and write
+> Issue bodies, specs, and human-facing text in that language (code, ledger event names, paths, and
+> the value of the `coverage_row:` trailer stay in their canonical English form — the trailer is a
+> machine matching key and must not differ from the manifest by a single character).
 
 ## 0. Preconditions — read the FIXED founding artifacts (docs/11 §0a)
 
@@ -32,7 +34,7 @@ they are. Read them now:
 
 - **`coverage-manifest.md`** — the input. One row per must-have: `{rfp_capability, owning_role,
   deliverable, acceptance}`. This is the work list; nothing outside it is RFP-derived scope.
-- **`ARCHITECTURE.md`** — the 全体設計書. The layers/components and the **seam contracts**
+- **`ARCHITECTURE.md`** — the whole-system design. The layers/components and the **seam contracts**
   `{deliverable, standard, checker, depends_on}`. This is where each task's `provides` / `depends_on` /
   `owns` / boundary come from — do not re-derive them, *read* them.
 - **`organization.yaml`** — which role owns what (the machine-checkable side of the manifest).
@@ -51,46 +53,55 @@ For each must-have row (filter to `$1`'s objective if an objective-id was given)
 Issues it becomes. The doctrine (docs/11 §4b, docs/03 §6.2):
 
 - **One task = one independently-completable unit** — one endpoint, one function, one screen, one
-  migration. Not a domain, not "the auth system". INVEST の *Small* が同じことを述べており、
-  その根拠は見積精度ではない — *"Above this size, and it seems to be too hard to know what's in
-  the story's scope"*（Wake 2003）。**スコープの境界が認識できなくなる**のが分割すべき理由で、
-  実地の #11 はまさにそれで5回スコープが変わった。
-- **層やファイルで割らない。** UI で1つ、DB で1つ、という分け方は independent でも valuable
-  でもない（Humanizing Work が名指しする反パターン）。1つの単位は *"a valuable change in system
-  behavior such that you'll probably have to touch multiple architectural layers"* である —
-  **複数層に触るのは正常**。`owns` はその上で**衝突を避ける**ための制約であって、分割の
-  判断そのものではない。
+  migration. Not a domain, not "the auth system". INVEST's *Small* says the same thing, and its
+  grounds are not estimation accuracy — *"Above this size, and it seems to be too hard to know
+  what's in the story's scope"* (Wake 2003). **The boundary of the scope stops being
+  recognisable**, and that is the reason to split; #11 in the field was exactly that, changing
+  scope five times.
+- **Do not split by layer or by file.** One for the UI and one for the DB is neither independent
+  nor valuable (the anti-pattern Humanizing Work names outright). A unit is *"a valuable change in
+  system behavior such that you'll probably have to touch multiple architectural layers"* —
+  **touching several layers is normal**. On top of that, `owns` is a constraint for **avoiding
+  collisions**, not the judgment about splitting itself.
 - **Split at every seam where sibling `owns` sets are disjoint.** Disjoint `owns` ⇒ the two units are
-  `[P]` parallel-safe ⇒ they are separate Issues. Spec Kit の `[P]`（"different files, no
-  dependencies"）と同じ判定である。
-- **`owns` が同じでも、壊れ方と検証手段が違えば別 Issue。** これは `owns` の交わりでは
-  captured されない軸で、実地で最も高くついた（下記）。問うべきは:
+  `[P]` parallel-safe ⇒ they are separate Issues. This is the same decision as Spec Kit's `[P]`
+  ("different files, no dependencies").
+- **Even with the same `owns`, a different way of breaking and a different means of verification
+  make it a different Issue.** This is an axis the intersection of `owns` does not capture, and it
+  was the most expensive one in the field (below). What to ask is:
 
-  > この deliverable が壊れたとき、**壊れ方は1種類か**。検証に必要な手段は**1種類か**。
+  > When this deliverable breaks, **is there one way it breaks**? Does verifying it need **one
+  > means**?
 
-  2種類以上なら分割候補。実地の #11（中核スキーマと RLS）は `supabase/` に閉じていたため
-  `owns` 基準では分割されなかったが、中身は「スキーマの形（型・制約で守る）」と
-  「認可（攻撃シナリオで守る）」という**壊れ方も検証手段も別の2つ**だった。結果、gate が
-  毎回「どこを見るか」の探索から始め、migration 5本が相互に干渉し（0009 が直したものを
-  0010 が壊し、0011 が別の2件を RED にした）、**12周しても終わらなかった**。同じ日に
-  #8（1つの関数）と #10（CI 設定）は1〜2周で通っている。
+  Two or more makes it a candidate for splitting. #11 in the field (the core schema and RLS) was
+  closed under `supabase/` and so was not split by the `owns` criterion, while its content held
+  **two things differing in both how they break and how they are verified**: "the shape of the
+  schema (guarded by types and constraints)" and "authorization (guarded by attack scenarios)".
+  As a result the gate began every round by searching for where to look, five migrations
+  interfered with each other (0010 broke what 0009 fixed, and 0011 turned two others RED), and
+  **twelve rounds did not finish it**. On the same day #8 (one function) and #10 (a CI setting)
+  passed in one or two rounds.
 
-  Kiro の規範が同じことを別の言い方でしている — タスクは *"Implement X function" rather than
-  "Support X feature"*。機能単位ではなく、**1つの壊れ方に対応する単位**に落とす。
+  Kiro's norm says the same thing another way — a task is *"Implement X function" rather than
+  "Support X feature"*. Bring it down not to a unit of feature but to **a unit answering one way
+  of breaking**.
 - **Do NOT split reciprocally-coupled work.** If two candidate units must constantly adjust to each
   other, they are ONE Issue — over-splitting coupled work costs far more than it saves (docs/12 §6).
 - **Order by dependency.** A unit that consumes another's seam records `depends_on: #<issue>` and the
   state it needs (`merged to develop`). Create the depended-upon Issue first so the number exists.
 
-**要求そのものが薄くないかを、切る前に見る。** 分割の失敗は、しばしば要求の欠落として現れる。
-実地の #11 は EARS 12件のうち認可を定めたものが4件で、そのどれも「入った後に何ができるか」を
-定めていなかった（内側に触れていたのは「あだ名」＝装飾的なテキスト列だけ）。**金額・支払者・
-債務の向き・グループ所有権は無防備**で、後半6周の rework は Issue のどの MUST にも対応しない
-作業になった。この deliverable が扱う資産に対し、MUST が**誰から誰を**守ると定めているか —
-片側しか定めていないなら、要求を書き足してから切ること。`github_sync split-check` が起票後に
-同じ検査をするが、**起票時に気づけるならそのほうが安い**。
+**Before cutting, look at whether the requirements themselves are thin.** A failed split often
+shows up as a missing requirement. #11 in the field had four of its twelve EARS items setting
+authorization, and not one of them set "what can be done once inside" (the only inside thing
+touched was the nickname — a decorative text column). **The amount, the payer, the direction of
+the debt, and group ownership were undefended**, and the last six rounds of rework became work
+answering no MUST on the Issue at all. Against the assets this deliverable handles, do the MUSTs
+set **whom they protect from whom** — where only one side is set, write the requirement in before
+cutting. `github_sync split-check` runs the same check after filing, but **noticing it at filing
+time is cheaper**.
 
-Lean toward **finer** splits when in doubt about independent units (a coarse task produces 大味 output),
+Lean toward **finer** splits when in doubt about independent units (a coarse task produces coarse
+output),
 and toward **keeping together** when the coupling is genuine. You MAY fan out helper subagents to draft
 several rows' task-sets concurrently — prefix each with `INDEPENDENT:` so the spawn passes the seam gate,
 and give each helper one row (never two helpers on the same row, or they mint duplicate Issues).
@@ -133,13 +144,15 @@ The sections that carry the environment-independence (do not skimp on these):
   `boundary` (the adjacent work that is NOT this task's), `tools/sources`. Take these from
   `ARCHITECTURE.md`'s seam contracts.
 - **Verification** — the exact DoD command whose green output means done (the same command the gate runs)、
-  および **完了の判定**: 「上の MUST が RED→GREEN になった時点で完了。着手後に見つかった範囲外の
-  欠陥は、この Issue で直さず別 Issue にする」。**この1行が無いと Issue が収束しない** — 実地では
-  8周 rework した Issue の4回目以降の発見が、すべて MUST に書かれていないものだった。
-  maker・gate・skeptic の3者が同じ完了条件を見るために、spec 側に書く。
+  and **the judgment of done**: "done once the MUSTs above go RED→GREEN. A defect found after
+  starting that falls outside the scope is not fixed in this Issue but becomes another one".
+  **Without that one line an Issue does not converge** — in the field, every finding from the
+  fourth round onward of an Issue that reworked eight times was absent from its MUSTs.
+  It is written on the spec side so that maker, gate, and skeptic all read the same completion
+  condition.
 - **Out of scope** — including prior deaths, so a fresh maker does not re-derive a known dead end:
 
-!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/ledger.py" view nearby_deaths 2>/dev/null || echo "（まだ死が記録されていない — 初回 founding では正常）"`
+!`python3 "${CLAUDE_PLUGIN_ROOT}/tools/ledger.py" view nearby_deaths 2>/dev/null || echo "(no death recorded yet — normal at a first founding)"`
 
 Two trailers at the bottom of every body, for machine traceability:
 
@@ -173,15 +186,20 @@ appends a `Depends on: #N` line that `github_sync ready` parses to decide whethe
 reads. Omit `--depends` and a blocked task will be handed to a maker as ready; omit the SPEC line and the
 maker gets no idea what they're waiting on.
 
-`ready` が受理する literal は **`Depends on: #N[, #M]`**（`--depends`/`--carved-from` が書く正書法）。
-読み取りは寛容で、見出しの markdown 装飾（`**Depends on:**`・リスト・引用）、`Depends-on`/`depends_on`、
-コロン前の空白、**参照の後ろの注釈**（例 `Depends on: #63 (main 未統合)`）は許容される。
-`Depends on: none` は「依存なし」の明示宣言。ただし依存は必ず `#番号` の形で書くこと —
-散文だけの依存は `ready` に見えない（Issue #103 / OBS-051）。
+The literal `ready` accepts is **`Depends on: #N[, #M]`** (the orthography `--depends` and
+`--carved-from` write).
+Reading is generous: markdown decoration on the heading (`**Depends on:**`, lists, quotes),
+`Depends-on`/`depends_on`, a space before the colon, and **an annotation after the reference**
+(e.g. `Depends on: #63 (not yet integrated into main)`) are all allowed.
+`Depends on: none` is an explicit declaration of "no dependencies". A dependency must always be
+written in the `#number` form, though — a dependency in prose alone is invisible to `ready`
+(Issue #103 / OBS-051).
 
-**rework 中に「これは #N の範囲外」を切り出して Issue にするときは `create --carved-from <元 Issue 番号>`
-を使うこと。** carve out 先は元 Issue に依存する — 例外なく（部品は元の worktree にしか無い）。
-`--carved-from` が `Depends on: #N` を自動付与し、元が閉じるまで `ready` が maker に渡さない。
+**When splitting "this is outside #N's scope" out into an Issue mid-rework, use
+`create --carved-from <the original Issue number>`.** A carve-out depends on its original —
+without exception (the parts exist only in the original worktree).
+`--carved-from` adds `Depends on: #N` automatically, and `ready` does not hand it to a maker until
+the original closes.
 
 Then shape-check each new Issue — it warns (exit 10) when a task is too coarse (`owns` spanning
 territories), depends on something still open, or has non-EARS acceptance:
@@ -190,39 +208,48 @@ territories), depends on something still open, or has non-EARS acceptance:
 
 Fix what it flags by **re-splitting the Issue**, not by loosening the spec.
 
-## 4b. 人間にしか実行できない前提条件を Issue にする（docs/11 §0c）— 省略しないこと
+## 4b. File the prerequisites only a human can carry out as Issues (docs/11 §0c) — do not skip this
 
-**org は自分が作れる作業だけを Issue にし、人間に頼むものを散文に落としてはならない。**
-起草中に「これは #N の範囲外」と気づいたものを含む。実地の founding で3件（Supabase プロジェクト作成 / Google OAuth クライアント登録 / GitHub の
-ブランチ保護設定）がセッションの文章の中にしか残らず、Issue にも台帳にも入らなかった。
-結果、`/org` は GREEN と表示するのに実際は着手できない、という乖離が起きた。
+**An org must not file only the work it can do itself and let what it needs from a human fall into
+prose.**
+This includes anything you noticed while drafting as "outside #N's scope". In a founding in the
+field, three of them (creating the Supabase project, registering the Google OAuth client,
+setting GitHub branch protection) survived only in the session's text and entered neither an Issue
+nor the ledger.
+The result was the gap where `/org` displayed GREEN while work could not actually be started.
 
-**人間への依頼こそ、忘れられると最も長く止まる。** 必ず構造化すること。
+**A request to a human is exactly what stops things longest when it is forgotten.** Always give it
+a structure.
 
-抽出源はすでに手元にある:
+The sources to extract from are already at hand:
 
-- `REQUIREMENTS.md` の **Open Questions** 節 — 「実装前に決める」と自分で書いたもの
-- 同 **Assumptions** 節 — 「CEO が用意する」「アカウントが必要」と書いたもの
-- `ARCHITECTURE.md` の技術選択のうち、**外部サービスの登録・鍵の発行**が要るもの
-- 起草中に「これは自分にはできない」と気づいたすべて
+- the **Open Questions** section of `REQUIREMENTS.md` — what you yourself wrote as "decide before
+  implementing"
+- its **Assumptions** section — what you wrote as "the CEO provides this" or "an account is
+  needed"
+- among `ARCHITECTURE.md`'s technology choices, those needing **an external service registration
+  or a key to be issued**
+- everything you noticed while drafting as "I cannot do this myself"
 
-判定は単純: **org のツールで完結するか。** アカウント作成・課金・OAuth クライアント登録・
-ドメイン取得・ストア審査・GitHub の管理設定（ブランチ保護など）は、いずれも人間にしかできない。
+The test is simple: **does it complete within the org's tools?** Creating an account, billing,
+registering an OAuth client, acquiring a domain, store review, and GitHub's administrative
+settings (branch protection and the like) can none of them be done by anyone but a human.
 
-該当するものを1件ずつ Issue にする:
+File each one that qualifies as its own Issue:
 
 ```
 python3 "${CLAUDE_PLUGIN_ROOT}/tools/github_sync.py" needs-human \
-  --title "<人間がやる作業（一行）>" \
-  --body "<どこで・何をして・何を返せばよいか。手順まで書く>" \
-  --objective "<関連する objective id>" --parent <objective Issue 番号> \
-  --blocks "<この作業が終わるまで着手できない Issue 番号>"
+  --title "<the work a human does (one line)>" \
+  --body "<where, what to do, and what to hand back. Write the steps out>" \
+  --objective "<the related objective id>" --parent <the objective Issue number> \
+  --blocks "<the Issue numbers that cannot start until this is done>"
 ```
 
-`--blocks` を書いたら、**その下流 Issue の body に `Depends on: #<この Issue 番号>` を追記する**
-こと（正書法はこの literal — 参照の後ろに注釈を足すのは許容されるが、依存は必ず `#番号` の形で。
-散文だけの依存は `ready` に見えない、Issue #103）。そうして初めて `ready` が人間待ちを依存として
-解釈し、ブロックされた task を maker に渡さなくなる。
+Once you write `--blocks`, **append `Depends on: #<this Issue's number>` to the body of each
+downstream Issue** (the orthography is that literal — an annotation after the reference is allowed,
+but a dependency always takes the `#number` form; a dependency in prose alone is invisible to
+`ready`, Issue #103). Only then does `ready` read "waiting on a human" as a dependency and stop
+handing the blocked task to a maker.
 
 ## 5. The coverage gate — prove no must-have was dropped
 
@@ -230,8 +257,8 @@ This is the check that makes decomposition trustworthy: `/org-found`'s O10 prove
 owning *contract*; this proves every must-have reached at least one *task Issue*. A must-have that never
 became an Issue is silently unbuilt, and nothing downstream would ever notice.
 
-**task Issue を作り終えた後に、あなた自身が Bash で実行すること**（`!` の自動実行では
-Issue がまだ1件も無い時点で走り、必ず全件 GAP になる）:
+**After you finish creating the task Issues, run this yourself through Bash** (the automatic `!`
+execution runs while there is not one Issue yet, and every row comes out as a GAP):
 
 ```
 python3 "${CLAUDE_PLUGIN_ROOT}/tools/github_sync.py" coverage-check --manifest coverage-manifest.md

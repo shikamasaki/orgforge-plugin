@@ -7,7 +7,7 @@ allowed-tools: Bash(*), Read, Write, Edit, Glob, Grep, Agent, Task, WebFetch, We
 Drive one **work cycle** for role **$1** against its ledger — the PM loop that turns a backlog into
 delegated, recorded work. Read-only health is `/org-tick`; this command acts.
 
-Ledger root は**発見される**（`tools/discover.py`）— 環境変数の設定は不要。
+The ledger root is **discovered** (`tools/discover.py`) — no environment variable to set.
 
 **Output language:** read `output_language` from `constitution.yaml` (default `en`) and write **all
 human-facing text** — Issue titles/bodies, work-log comments, progress notes, escalations — in that
@@ -78,199 +78,232 @@ Read the `selected[]` above. Then apply the **decomposition doctrine (docs/03)**
   from `github_sync branch --repo "$ORG_GITHUB_REPO" --issue <N>` (or `--create` to cut it). A task's
   work lands on its branch; it does NOT commit to `develop`/`main` directly.
 
-### 2b. 配管は `org_cycle` が回す — イベントを手で打たないこと
+### 2b. `org_cycle` runs the plumbing — do not type the events by hand
 
-SDLC のフェーズゲート（docs/11 §2）は、**イベントが実際に打たれて初めて**効く。しかしその
-イベント列（claim → spec_delegated → phase_started → cycle_started → Issue へ log → stage）は
-**順序と actor が決まっている配管**であり、判断ではない。手で打つと Issue 2件あたり11コマンドになり、
-18 Issue で約90回、1回の取り違えで台帳の整合が崩れる（実地で判明）。
+The SDLC phase gates (docs/11 §2) take effect **only once the events are actually typed**. That
+sequence (claim → spec_delegated → phase_started → cycle_started → log to the Issue → stage) is
+**plumbing whose order and actor are already settled**, not a judgment. Typed by hand it comes to
+eleven commands per two Issues, around ninety across eighteen, and one mistake breaks the ledger's
+consistency (found in the field).
 
-**着手する Issue ごとに1コマンド打つ:**
+**Type one command per Issue you start:**
 
 ```
 python3 "${CLAUDE_PLUGIN_ROOT}/tools/org_cycle.py" begin \
-  --role $1 --issue <task Issue番号> --agent <実際に作る役割>
+  --role $1 --issue <task Issue number> --agent <the role that actually builds>
 ```
 
-これが7ステップを正しい順序と actor で実行する。**`parent` は Issue から自動解決される** —
-以前は人が「#7 の親は #1」と目で拾って手打ちしていたが、`create` が body に `Parent: #N` を
-書いているので拾える。手打ちである限り取り違えが起き、親継承（docs/11 §2）の実装が活きない。
-`candidate_id` も Issue のトレーラから読む。
+This runs the seven steps in the right order with the right actor. **`parent` resolves from the
+Issue automatically** — a human used to pick "#7's parent is #1" out by eye and type it in, while
+`create` writes `Parent: #N` into the body and it can simply be read. As long as it is typed by
+hand one gets mistaken for another, and the implementation of parent inheritance (docs/11 §2) does
+nothing. `candidate_id` is read from the Issue's trailer too.
 
-打つ前に確認したければ `begin` を `plan` に替える — **何も実行せず**イベント列だけ印字する。
+To look before typing, replace `begin` with `plan` — it **runs nothing** and prints only the
+sequence of events.
 
-**`begin` は worktree も用意する（docs/11 §4c）。** `.orgforge/wt/issue-<N>/` に、その Issue 専用の
-作業ツリーを切る。並列 fan-out で複数の maker を同一ツリーに走らせると、**あるIssueのコミットが
-別Issueのブランチに載る** — 実際に起きた事故で、`git checkout` がツリー全体を切り替える以上、
-同一ツリーで並列に走らせる限り必ず再発する。「毎回正しく判断する」前提の設計は破れるので、
-物理的に分ける。maker には `.orgforge/wt/issue-<N>/` で作業させること。
+**`begin` prepares a worktree too (docs/11 §4c).** It cuts a working tree dedicated to that Issue
+at `.orgforge/wt/issue-<N>/`. Running several makers over one tree in a parallel fan-out puts
+**one Issue's commits on another Issue's branch** — an accident that actually happened, and since
+`git checkout` switches the whole tree, it is certain to recur for as long as parallel work shares
+one tree. A design that assumes "judge correctly every time" breaks, so they are separated
+physically. Have makers work in `.orgforge/wt/issue-<N>/`.
 
-逐次で1件だけ回すときは `--no-worktree` で省ける。**並列で回すなら使わないこと。**
+Running a single item sequentially, `--no-worktree` skips it. **Do not use it when running in
+parallel.**
 
-**`begin` / `plan` は着手前の確認も出す。** 依存が rework 中か、人間の作業待ち（needs-human）が
-残っていないか。**止めはしない** — 判断はあなたの仕事だが、材料が無ければ判断のしようがない。
-前提が崩れたまま作ったものは、後で gate が拒否する側に回る。`--no-check` で省ける。
+**`begin` and `plan` also print the pre-start checks.** Whether a dependency is in rework, and
+whether anything is still waiting on a human (needs-human). **They do not stop you** — the
+judgment is yours, but there is nothing to judge from without the material. What is built on a
+broken premise ends up on the side the gate rejects later. `--no-check` skips it.
 
-### 2c. 1つの Issue の全体像を見る — `show`
+### 2c. See the whole picture of one Issue — `show`
 
 ```
 python3 "${CLAUDE_PLUGIN_ROOT}/tools/org_cycle.py" show --issue <N>
 ```
 
-実装コミット・worktree・**判定履歴（誰が何周目に何を判定したか。訂正済み / backfill の印つき）**・
-いま何待ちか・次の一手を一望する。3周した Issue で「どの周のどの判定を見ているのか」が
-分からなくなるのを防ぐ。実地では #8 の refutation 欠落も #11 の reject 欠落も、この視点が
-あれば即座に見つかっていた。
+The implementation commits, the worktree, **the judgment history (who judged what in which round,
+marked corrected / backfilled)**, what it now waits on, and the next move, all at a glance. It
+stops an Issue three rounds in from becoming "which round's judgment am I even reading". In the
+field both the missing refutation on #8 and the missing reject on #11 would have been found
+immediately from this vantage point.
 
-### 2d. 誤って書いた記録・検証プローブは `correction` で無効にする
+### 2d. Void a mistaken record or a verification probe with `correction`
 
-台帳は追記型なので過去を消せない。**自由記述の注記では機械が読めず**、status も learning も
-除外できない（実地で検証プローブ4件が実判定として board に出た）:
+The ledger is append-only, so the past cannot be erased. **A free-text note is unreadable by
+machine**, and neither status nor learning can exclude it (in the field four verification probes
+appeared on the board as real judgments):
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/tools/ledger.py" append --actor <役割> --class correction \
+python3 "${CLAUDE_PLUGIN_ROOT}/tools/ledger.py" append --actor <role> --class correction \
   --payload '{"corrects":[<seq>,...],"kind":"probe|mistake|backfill|superseded",
-              "reason":"<なぜ無効か>","corrected_by":"<誰が>"}'
+              "reason":"<why it is void>","corrected_by":"<by whom>"}'
 ```
 
-`probe`（検証用で実判定ではない）と `mistake`（誤記）は集計から除外される。`backfill` は
-「後から書いた実判定」なので除外されず、`superseded` は最新判定の解決が扱う。
+`probe` (for verification, not a real judgment) and `mistake` (a mis-entry) are excluded from the
+counts. `backfill` is "a real judgment written afterwards" and is not excluded; `superseded` is
+handled by resolving to the latest judgment.
 
-**止まったら、そこから先は打たれていない。** 台帳が拒否したなら順序違反であり、前提を満たして
-から再実行すること。各イベントは natural-key で冪等なので、**再実行は安全**（済んだ分は no-op）。
+**Where it stopped, nothing beyond that was typed.** A refusal from the ledger means an order
+violation: satisfy the precondition and run it again. Each event is idempotent by natural key, so
+**re-running is safe** (what is done becomes a no-op).
 
-> **これは forced delegation ではない。** 自動化したのは「順序と actor が決まっている配管」だけで、
-> **何を選ぶか・誰に委ねるか・admit するかは自動化していない**（docs/03 §6.5 — forced delegation は
-> 設計エラー、forced invariant は正しい）。判断はあなたの仕事のまま。
+> **This is not forced delegation.** What was automated is only "plumbing whose order and actor
+> are already settled"; **what to choose, whom to delegate to, and whether to admit are not**
+> (docs/03 §6.5 — forced delegation is a design error, a forced invariant is right). The judgment
+> stays yours.
 
 ## 3. Record work as you go — so nothing is lost to a context wipe
 
 The backlog is the org's memory. Work that lives only in this session's context is **gone** on `/clear`
 or a crash (docs/01 R−1: the org acts only on what is written).
 
-**完了時も1コマンド:**
+**One command at completion too:**
 
 ```
 python3 "${CLAUDE_PLUGIN_ROOT}/tools/org_cycle.py" complete \
-  --role $1 --issue <N> --agent <役割> --outputs "<何を作ったか>" \
-  --command "<DoD コマンド（verbatim）>" --result "<その実出力（失敗込み）>" [--files "<変更ファイル>"] \
-  (--domain-model-updated "<確立したドメイン規則への参照>" | --domain-model-none "<確立しなかった理由>")
+  --role $1 --issue <N> --agent <role> --outputs "<what was built>" \
+  --command "<the DoD command (verbatim)>" --result "<its real output, failures included>" \
+  [--files "<the files changed>"] \
+  (--domain-model-updated "<a reference to the domain rule established>" \
+   | --domain-model-none "<the reason nothing was established>")
 ```
 
-**公開面が増えていたら申告するまで完了できない。** SECURITY DEFINER 関数・grant・RLS ポリシー・
-エンドポイント・export が新しく生えていれば列挙して止まる（危険な順に。テスト・型定義・
-スクリプトは除外し、worktree の未コミット分も見る）。`--new-surface "<面>: <誰が呼べるか /
-何ができるか>"` で申告するか、`--new-surface-none "<理由>"` で否定する。**認可ホールは
-「関数を1つ足した」ところから生まれる** — 実地の `join_group` がまさにそれで、SECURITY
-DEFINER を1つ増やしたことが誰にも機械的に見えていなかった。
+**Where public surface has grown, you cannot complete until you declare it.** If a SECURITY
+DEFINER function, a grant, an RLS policy, an endpoint, or an export has newly appeared, it lists
+them and stops (in order of danger; tests, type definitions, and scripts are excluded, and the
+worktree's uncommitted content is read too). Declare it with
+`--new-surface "<surface>: <who can call it / what it can do>"`, or deny it with
+`--new-surface-none "<reason>"`. **An authorization hole is born where "one function was
+added"** — `join_group` in the field was exactly that: nothing made it mechanically visible to
+anyone that one more SECURITY DEFINER had appeared.
 
-`--command` / `--result` は**必須**。`log` 側が「通った」の言い換えを拒否する。`decide` が
-`--why` を検査するのと同じ理由で、ここも検査する — 実地では検査のある `decide` が3,500〜5,900字、
-検査の無い `log` が276〜473字になり、**同じ Issue の中で判定だけが監査可能**という非対称が出た。
-散文の指示を守るのは人だが、必須引数を守るのはツール。
+`--command` and `--result` are **required**. The `log` side refuses a paraphrase of "it passed".
+It is checked for the same reason `decide` checks `--why` — in the field the checked `decide` ran
+3,500-5,900 characters and the unchecked `log` 276-473, producing the asymmetry where **only the
+judgments in an Issue were auditable**. A human keeps a prose instruction; a tool keeps a required
+argument.
 
-`--domain-model-none` を選ぶと、そのサイクルで増えた公開型・エクスポートを列挙して
-「これらは領域の語彙ではないか」と問い返す（判定はしない。素通りだけさせない）。
-完了時に `begin` が作った worktree も片付ける（未コミットの変更があれば残して警告する）。
+Choosing `--domain-model-none` lists the public types and exports that grew in that cycle and asks
+back "are these not the domain's vocabulary?" (it does not judge; it only stops things walking
+past).
+At completion it also cleans up the worktree `begin` created (leaving it with a warning where
+there are uncommitted changes).
 
-**次のサイクルにも効く学びは `--learned` で残す。** doctrine に propose され、gate が admit
-すれば次の Issue の担当者の brain に入る（`handoff.py` が役割ごとに配る）。admit は gate の
-仕事 — 自分の学びを自分で正典にはできない。実地では doctrine が空のまま **同じ失敗を3回**
-繰り返した（「性質のテストは壊れる場所で検証しないと無意味」）。docs/06 が「蓄積した失敗こそ
-最も価値ある context」と書いているのに、蓄積の口がサイクルに繋がっていなかった。
+**Leave a learning that holds for the next cycle with `--learned`.** It is proposed to doctrine
+and, once the gate admits it, enters the brain of whoever takes the next Issue (`handoff.py`
+distributes it per role). The admit is the gate's job — nobody canonises their own learning. In
+the field doctrine stayed empty while **the same failure repeated three times** ("a property test
+is meaningless unless it verifies at the place that breaks"). docs/06 writes that accumulated
+failure is the most valuable context there is, yet the mouth for accumulating it was not connected
+to the cycle.
 
-### 3a-2b. 本番資産に触ったら残す — `touched`
+### 3a-2b. Leave a record when you touch a production asset — `touched`
 
 ```
 python3 "${CLAUDE_PLUGIN_ROOT}/tools/org_cycle.py" touched \
-  --target "supabase:<project>" --op revoke --name "<対象>" \
-  --by <役割> --authority "<誰の権限で入れたか>" --issue <N> [--reversible --rollback "<戻し方>"]
+  --target "supabase:<project>" --op revoke --name "<the subject>" \
+  --by <role> --authority "<under whose authority>" --issue <N> \
+  [--reversible --rollback "<how to undo it>"]
 ```
 
-`exposure_budget_checked` はローカルのファイル操作を数えるが、リモート DB への DDL や本番の
-権限変更は数えていない。**実際に危険なのは後者**で、取り消しにもコストがかかる。実地では
-本番 DB にマイグレーション2本と権限の revoke が入ったのに台帳には何も残らず、「あの revoke は
-誰の権限で入ったのか」を辿れない状態になった。`--authority` はそのための欄。
+`exposure_budget_checked` counts local file operations but counts neither DDL against a remote DB
+nor a privilege change in production. **The latter is what is actually dangerous**, and it costs
+more to undo. In the field two migrations and a privilege revoke went into the production DB while
+nothing was left in the ledger, so "under whose authority did that revoke go in" could not be
+traced. `--authority` is the field for exactly that.
 
-### 3a-3. 溜まったものを片付ける — `gc`
+### 3a-3. Sweep up what has accumulated — `gc`
 
 ```
 python3 "${CLAUDE_PLUGIN_ROOT}/tools/org_cycle.py" gc
 ```
 
-統合済みの worktree だけを消す。**未統合・未コミットのものは残す**（消えて困るかは配管が
-決めてよいことではない）。`.orgforge/wt/` の外（scratchpad 等）に作られた検証用 worktree も
-git が把握している限り拾う — 配管が作った場所しか見ないと孤児が永久に残る。
+It removes only integrated worktrees. **Anything unintegrated or uncommitted is left**  (whether
+something would be missed is not the plumbing's call). Verification worktrees created outside
+`.orgforge/wt/` (in a scratchpad and the like) are picked up too, as long as git knows about them
+— reading only where the plumbing creates them leaves orphans forever.
 
-### 3b-3. 返ってきた報告が成果物の形になっているかを見る — `intake`
+### 3b-3. Check that the report you got back has the shape of a deliverable — `intake`
 
-**subagent の報告を判定として読む前に、これを通すこと。**
+**Put a subagent's report through this before reading it as a judgment.**
 
 ```
 python3 "${CLAUDE_PLUGIN_ROOT}/tools/org_cycle.py" intake --issue <N> \
-  --role gate|skeptic|maker --report "<返ってきた報告>"
+  --role gate|skeptic|maker --report "<the report you got back>"
 ```
 
-実地で **turn が作業の途中で終わる**ことが1晩に3件あった。`status` は completed で返り、
-`result` は「Now the key attack:」のような宣言1文だけ。`SendMessage` で再開させると続きを
-実行して完走したので、**agent が死んだのではなく報告が成果物の形になる前に turn が終わっている**。
+In the field **a turn ended mid-work** three times in one night. `status` returned completed and
+`result` held a single declarative sentence like "Now the key attack:". Resuming with
+`SendMessage` ran the rest to completion, so **the agent did not die — the turn ended before the
+report took the shape of a deliverable**.
 
-**気づけない形が危ない。** 「Now the key attack:」なら verdict が無いと分かるが、
-**「MUST 2 は防がれました」で切れていたら、それを verdict として読んで admit しかねない**。
-この org が繰り返し検出した「確かめていないことを確かめたかのように述べる」が、報告の切断という
-経路で起きる。
+**The dangerous shape is the one you cannot notice.** "Now the key attack:" is visibly missing a
+verdict, but **a report cut off at "MUST 2 is defended" could be read as a verdict and admitted**.
+The "stating something unverified as though it were verified" this org has detected again and
+again arrives through the path of a truncated report.
 
-見るのは役割ごとの必須要素だけ（skeptic/gate → verdict と実行の痕跡、maker → コミットと DoD の
-実測出力）。**verdict の中身も妥当性も見ない** — 判定は役割の仕事である。exit 10 なら
-`SendMessage` で続きを促し、**その報告を判定として読まないこと**。
+It reads only the elements each role must carry (skeptic/gate → a verdict and a trace of what was
+run; maker → commits and the measured output of the DoD). **It reads neither the content nor the
+soundness of the verdict** — judging is the role's work. On exit 10, prompt for the rest with
+`SendMessage` and **do not read that report as a judgment**.
 
-### 3a-3b. rework を発注したら記録する — `rework`
+### 3a-3b. Record a rework once you commission it — `rework`
 
 ```
 python3 "${CLAUDE_PLUGIN_ROOT}/tools/org_cycle.py" rework --issue <N> \
-  --after reject|refuted --by <あなたの役割> --reason "<maker に直させることを1行で>" \
-  --root <DEATH_ROOTSの根分類> --round <何周目か>
+  --after reject|refuted --by <your role> --reason "<what the maker is to fix, in one line>" \
+  --root <a DEATH_ROOTS class> --round <which round>
 ```
 
-`--root` は必須です。死因の根分類（`placebo_test` / `contract_gap` / `context_stale` /
-`tool_boundary` / `identity` / `dependency` / `resource` / `other`）を省略せず、再発学習に
-使える形で記録してください。
+`--root` is required. Do not omit the root-cause-of-death class (`placebo_test`, `contract_gap`,
+`context_stale`, `tool_boundary`, `identity`, `dependency`, `resource`, `other`) — record it in a
+form recurrence learning can use.
 
-**これを打たないと `show` の rework 警告が沈黙する** — 警告は台帳の `rework_requested` を数える
-ので、記録が無ければ閾値に届かない。実地では reject/refuted **28件**に対し記録が無く（1件は
-4回 reject で記録0件）、警告が黙っていた。**道具は数えられないものを数えない。**
+**Without typing this, `show`'s rework warning goes silent** — the warning counts
+`rework_requested` in the ledger, and with no record it never reaches the threshold. In the field
+there were no records against **twenty-eight** rejects and refutations (one Issue had four rejects
+and zero records), and the warning stayed quiet. **A tool does not count what it cannot count.**
 
-発注は「判定を受け取る → 検証 → `decide` → **発注** → 記録」の順になり、発注した subagent の
-通知が来ると記録が流れる。`verify` が reject/refuted のとき、判定の記録と**同じ場所**でこの
-コマンドを出すので、記録のコマンドが目の前にある状態で発注できる。
+Commissioning runs "receive the judgment → verify → `decide` → **commission** → record", and the
+record gets washed away when the notification from the commissioned subagent arrives. Where
+`verify` returns reject/refuted, this command is printed in **the same place** as the judgment's
+record, so you can commission with the recording command right in front of you.
 
-### 3a-4. 済んだ判定を遡って記録する — `record`
+### 3a-4. Record a judgment already made, retroactively — `record`
 
 ```
 python3 "${CLAUDE_PLUGIN_ROOT}/tools/org_cycle.py" record --issue <N> \
-  --event integration_admitted --verdict pass --by <役割> --why "<何を見て何が決め手か>"
+  --event integration_admitted --verdict pass --by <role> \
+  --why "<what was read, and what decided it>"
 ```
 
-台帳は追記型なので過去は書き換わらない。`backfilled: true` が付き、実時点の記録と区別できる。
-実地で「マージ後の10件失敗のうち8件は worktree 走査の偽陽性、#7 の欠陥はゼロ」という切り分けが
-どこにも残らなかった — **後から最も知りたいのはその切り分け**なので、遡れる口を開けてある。
+The ledger is append-only, so the past is not rewritten. It carries `backfilled: true` and stays
+distinguishable from a record made at the time.
+In the field the finding "eight of the ten failures after the merge were false positives from the
+worktree scan; #7 had zero defects" was left nowhere — **that separation is exactly what one most
+wants later**, so a way back is left open.
 
-### 3a-2. PR を出す — `handback`
+### 3a-2. Open the PR — `handback`
 
 ```
 python3 "${CLAUDE_PLUGIN_ROOT}/tools/org_cycle.py" handback --issue <N> \
-  --summary "<何を作ったか>" --result "<DoD の実出力>" [--files "<変更ファイル>"]
+  --summary "<what was built>" --result "<the DoD's real output>" \
+  [--files "<the files changed>"]
 ```
 
-feature ブランチを push し、`develop` を base に PR を作り、body に **`Closes #N`** を入れて
-Issue に紐付ける。実地では PR を作る手順がどこにも無く、結果として **PR がゼロ件**・`git merge`
-での直接統合・統合済み Issue が OPEN のまま、という状態になった。GitHub で運用する前提が
-成立していなかった。マージするかは判定しない — PR を作るところまでが配管。
+It pushes the feature branch, opens a PR based on `develop`, and links it to the Issue by putting
+**`Closes #N`** in the body. In the field no step for opening a PR existed anywhere, and the
+result was **zero PRs**, direct integration by `git merge`, and integrated Issues left OPEN. The
+premise of operating on GitHub did not hold. It does not decide whether to merge — the plumbing
+ends at opening the PR.
 
-`domain_model` は**必須**（docs/11 §4d）。台帳が拒否するので省けない — ドメインモデルに何もして
-いないなら、その理由を書く（skeptic が反証できる主張になる）。
+`domain_model` is **required** (docs/11 §4d). The ledger refuses it, so it cannot be omitted — if
+the cycle did nothing to the domain model, write why (it becomes a claim the skeptic can refute).
 
-**途中の進捗**（フェーズの終わり、ブロック、予算切れの前）は `github_sync log` で刻む:
+**Interim progress** (the end of a phase, a block, before running out of budget) is noted with
+`github_sync log`:
 
 ### 3a. The GitHub Issue is the MAIN work-log — so work isn't session- or terminal-bound
 
@@ -313,41 +346,49 @@ The bar: **a stranger reading only this Issue can reconstruct what was built, wh
 abandoned, what was run, what came back, and why it merged** — without the ledger, without the
 transcript, without asking anyone. If they cannot, the log is too thin regardless of its volume.
 
-### 3b-2. gate / skeptic を呼ぶ材料も `org_cycle verify` が組み立てる
+### 3b-2. `org_cycle verify` assembles the material for calling gate / skeptic too
 
-`complete` の次は admission だが、**検証手順を毎回書き下ろしてはいけない**。書くたびに gate の
-厳しさが変わり、18 Issue なら18通りの基準になる。基準の出所は `agents/gate.md` ただ1つであるべきで、
-それが使われずに人が手順を書いている状態は、基準が無いのと同じ。
+After `complete` comes the admission, but **do not write the verification procedure out afresh
+each time**. Each writing shifts the gate's strictness, so eighteen Issues means eighteen
+standards. The standard should have one source, `agents/gate.md`, and a state where that goes
+unused while a human writes the procedure is the same as having no standard at all.
 
 ```
 python3 "${CLAUDE_PLUGIN_ROOT}/tools/org_cycle.py" verify --issue <N> --role gate
-# gate が admit したら
+# once the gate admits
 python3 "${CLAUDE_PLUGIN_ROOT}/tools/org_cycle.py" verify --issue <N> --role skeptic
 ```
 
-出力を subagent に渡す。**本文に貼っても、ファイルに落として参照させてもよい** — seam ガードは
-本文に seam contract が無ければ、プロンプトが指すファイルを**自分で読んで**検証する（org の
-ルート配下と一時ディレクトリに限る）。以前は本文限定で、264行の契約を毎回貼る必要があり
-maker の context を圧迫していた。「参照先の中身は保証できない」のはガードが読まなければの
-話で、読めば保証できる。組み立てられるのは以下で、**すべて配管**:
+Hand the output to the subagent. **Paste it into the body, or write it to a file and reference
+that** — where the body carries no seam contract, the seam guard **reads the file the prompt
+points at itself** and verifies it (limited to under the org root and the temporary directory).
+It used to accept the body only, which meant pasting a 264-line contract every time and crowding
+the maker's context. "The content behind a reference cannot be guaranteed" holds only while the
+guard does not read it; reading it makes it guaranteeable. What is assembled is the following, and
+**all of it is plumbing**:
 
-- `handoff.py` を内部で呼んだ **seam contract**（引数6個の手打ちが消える）
-- **`agents/<role>.md` の憲章**＝検証チェックリストの注入（← ここが肝。基準が1箇所に固定される）
-- Issue の **SPEC / MUST** の埋め込み（検証対象そのもの）
-- **判定履歴**（何周目か・前回までの理由の全文）— これが無いと gate は毎回**初回判定として
-  扱う**。回数は台帳と Issue の多い方を採る（二重記録の片側が落ちても過少に言わない）
-- **「返すもの」の指定**（verdict / why / evidence / standard / risk）。**記録コマンドは載せない** —
-  subagent には `ORG_GITHUB_REPO` も台帳のパスも渡っていないので、載せると指示と権限が
-  食い違う（実地で7回、判定を出した後に「記録は監督に委ねます」と止まり、一度は判定が
-  失われかけた）。監督が打つコマンドは **stderr** に出る
-- skeptic には **gate が既に見たこと**と、**gate 自身が「今回撃っていない」と書いた領域**を
-  自動で引き渡す。渡さないと同じミューテーションを繰り返して無駄になり、撃っていない領域は
-  誰も撃たないまま残る（実地で、gate が「1件も当てていない」と書いた領域から実バグが出た）。
-  運ぶだけで、その当否も次に何を試すかも配管は決めない。
+- the **seam contract**, by calling `handoff.py` internally (six hand-typed arguments disappear)
+- **the charter in `agents/<role>.md`** = injecting the verification checklist (← this is the
+  crux: the standard is pinned to one place)
+- embedding the Issue's **SPEC / MUSTs** (the very thing being verified)
+- **the judgment history** (which round, and the full text of every prior reason) — without it the
+  gate **treats every round as the first**. The count takes the larger of the ledger and the
+  Issue (so one side of a double record going missing never understates it)
+- **stating what to return** (verdict / why / evidence / standard / risk). **No recording command
+  is included** — a subagent is given neither `ORG_GITHUB_REPO` nor the ledger path, so including
+  one puts the instructions at odds with the permissions (in the field this happened seven times:
+  a judgment was produced, then "I leave the recording to the supervisor", and once the judgment
+  came close to being lost). The command the supervisor types goes to **stderr**
+- the skeptic is automatically handed **what the gate already looked at** and **the areas the gate
+  itself wrote it had not fired at this time**. Without them the same mutations get repeated to no
+  purpose, and the unfired areas stay unfired by anyone (in the field a real bug came out of an
+  area the gate had written it "had not hit once").
+  It only carries them: the plumbing decides neither their soundness nor what to try next.
 
-> **`verify` は判定ロジックを一切持たない。** verdict・why・risk・どのミューテーションを試すかは
-> gate / skeptic が決める。**ツールが verdict を決めた瞬間に gate は形骸化する**ので、そこは越えない
-> （docs/03 §6.5 — forced invariant は正しいが、forced judgment は判定の消滅）。
+> **`verify` holds no judging logic whatsoever.** The verdict, the why, the risk, and which
+> mutation to try are decided by gate / skeptic. **The moment a tool decides the verdict the gate
+> becomes a formality**, so that line is not crossed (docs/03 §6.5 — a forced invariant is right;
+> a forced judgment is the disappearance of judgment).
 
 ### 3c. Record every JUDGMENT with its reasoning — a verdict alone is a stamp
 
@@ -356,14 +397,15 @@ With no human approving, an unrecorded judgment is indistinguishable from no jud
 can actually be inferred later). This applies to the gate's admission, the skeptic's refutation attempt,
 each `phase_admitted`, the integrate verdict, and any consequential design/scope/trade-off call:
 
-!`echo 'Per judgment: python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/github_sync.py" decide --repo "$ORG_GITHUB_REPO" --issue <N> --event admission_decided|refutation_attempted|phase_admitted|integration_admitted|design_decided|tradeoff_decided|rework_requested --verdict <admit|reject|pass|rework|survives|refuted> --why "<the REASONING: what was weighed, what decided it>" --by <role> [--phase <p>] [--root <DEATH_ROOTSの根分類>] [--evidence "<command output / CI run / repro_lint verdict>"] [--alternatives "<what was rejected and why>"] [--standard "<the bar applied>"] [--risk "<a known risk knowingly accepted>"] --event-id <ledger event id>'`
+!`echo 'Per judgment: python3 "'"${CLAUDE_PLUGIN_ROOT}"'/tools/github_sync.py" decide --repo "$ORG_GITHUB_REPO" --issue <N> --event admission_decided|refutation_attempted|phase_admitted|integration_admitted|design_decided|tradeoff_decided|rework_requested --verdict <admit|reject|pass|rework|survives|refuted> --why "<the REASONING: what was weighed, what decided it>" --by <role> [--phase <p>] [--root <a DEATH_ROOTS class>] [--evidence "<command output / CI run / repro_lint verdict>"] [--alternatives "<what was rejected and why>"] [--standard "<the bar applied>"] [--risk "<a known risk knowingly accepted>"] --event-id <ledger event id>'`
 
-`rework_requested` と `refutation_attempted` では `--root` を必須にし、未分類の死因を
-後から復元できないまま流さないでください。
+Require `--root` on `rework_requested` and `refutation_attempted`, so an unclassified cause of
+death never flows through in a form nobody can reconstruct later.
 
-`decide` は **Issue と台帳の両方に1コマンドで書く**（0.21.0）。以前は雛形を印字して人に
-`ledger append` を打たせており、実地で片側落ちが3回起きた。順序は台帳が先 — 統制が拒否する
-なら、Issue に外向きの記録を作る前に止まる（exit 4）。
+`decide` **writes to both the Issue and the ledger in one command** (0.21.0). It used to print a
+template for a human to type `ledger append` from, and in the field one side went missing three
+times. The ledger comes first — if a control refuses, it stops before any outward record is
+created on the Issue (exit 4).
 
 `decide` **rejects a `--why` that merely restates the verdict** — the degradation back into a rubber
 stamp is closed at the tool. Record the `--risk` honestly: a gate that admits despite a known hole must
@@ -376,38 +418,43 @@ as a whole** before any of them deploys (docs/11 §4c — whatever you separate,
 As the supervising manager you own this integrate phase (your A3, extended to cross-deliverable):
 
 - Each child's per-unit `test` passing (its own suite green on its feature branch) admits it to **open a
-  PR against `develop`** — not `main`. PR は `org_cycle.py handback --issue <N>` が作る（手で
-  `gh pr create` を打たない。実地で PR がゼロ件になった）。
-- マージと統合後テストと記録は `org_cycle.py integrate --issue <N>`:
+  PR against `develop`** — not `main`. The PR is created by `org_cycle.py handback --issue <N>`
+  (do not type `gh pr create` by hand — in the field that left zero PRs).
+- The merge, the post-integration test, and the record are `org_cycle.py integrate --issue <N>`:
 
 ```
 python3 "${CLAUDE_PLUGIN_ROOT}/tools/org_cycle.py" integrate --issue <N> [--test "npm test"]
 ```
 
-  `--plan` を付けると**何も実行せず**、何を統合するか（変更ファイル・コミット数）と、
-  **並行する他の worktree が同じファイルを触っていないか**を先に見せる。CI のワークフローを
-  触る統合では、**job 構成と `if:` の有無**も出す — 条件付きの job に入ったステップは、
-  YAML が妥当でテストが緑でも**一度も走らない**（マージが CI ファイルを union で解決したとき
-  に起きる）。YAML の意味は読まないので、入った先を確かめるのは監督の仕事。実地では #7 の統合後に
-  10件失敗して切り分けに時間を使った（8件が worktree 走査の偽陽性）— 衝突は統合後に分かるより
-  前に分かるほうが安い。
+  With `--plan` it **runs nothing** and shows first what would be integrated (the files changed,
+  the commit count) and **whether another worktree running in parallel touches the same files**.
+  For an integration that touches a CI workflow it also prints **the job structure and whether an
+  `if:` is present** — a step that lands in a conditional job **never runs once**, even with valid
+  YAML and green tests (it happens when a merge resolves the CI file by union). It does not read
+  the YAML's meaning, so confirming where the step landed is the supervisor's job. In the field
+  ten failures after integrating #7 cost time to separate out (eight were false positives from the
+  worktree scan) — a conflict is cheaper found before integration than after.
 
-  **gate の admit と skeptic の survives が台帳に無ければ止まる**（exit 4）。
+  **It stops unless the gate's admit and the skeptic's survives are both in the ledger**
+  (exit 4).
 
-  **`git merge` で直接 develop に入れることはできない。** 保護ブランチ（`develop`/`main`/
-  `master`）上での `merge`/`rebase`/`cherry-pick` は PreToolUse が hold する — `integrate` は
-  呼ばれなければ何も検査しないので、**呼ばなかったことを検出できるのはフックだけ**である。
-  同じ理由で `gh issue create|close|edit` も hold する（organ を通さないと `dept`/`objective`/
-  `parent`/冪等キーが付かず、`cycle_completed` の `domain_model` が飛ぶ）。
-  壊れて詰まったときは `ORG_ALLOW_MANUAL_MERGE=1` / `ORG_ALLOW_MANUAL_GH=1` で通せる。
-  GH の一度だけの迂回は、同じ Bash 呼び出しで
-  `ORG_ALLOW_MANUAL_GH=1 gh issue …` と宣言する（PreToolUse は Bash より先に走るため）。
-  1呼び出しにつき1件の Issue mutation だけを実行する — 複数件は個別に宣言して、
-  `bypass_declared` と mutation を1対1で記録する。
-  **通した事実は台帳に `bypass_declared` として残る。**Issue にコメントが
-  あっても台帳に無ければ「記録されていない」— 実地では refutation_attempted が台帳に1件も無い
-  まま統合され、`integration_admitted` も記録されなかった。二重記録の片側だけが落ちるのが
-  実際の失敗形なので、ここは台帳を見る。マージするかどうかは判定しない（前提の照合だけ）。
+  **You cannot put work into develop directly with `git merge`.** PreToolUse holds a `merge`,
+  `rebase`, or `cherry-pick` on a protected branch (`develop`/`main`/`master`) — `integrate`
+  checks nothing unless it is called, so **the hook is the only thing that can detect it not being
+  called**. For the same reason it holds `gh issue create|close|edit` (bypassing the organ leaves
+  out `dept`, `objective`, `parent`, and the idempotency key, and `cycle_completed`'s
+  `domain_model` goes missing).
+  When something breaks and you are stuck, `ORG_ALLOW_MANUAL_MERGE=1` /
+  `ORG_ALLOW_MANUAL_GH=1` let it through.
+  A one-off GH bypass is declared in the same Bash call, as
+  `ORG_ALLOW_MANUAL_GH=1 gh issue …` (PreToolUse runs before Bash does).
+  Run exactly one Issue mutation per call — declare several separately, so `bypass_declared` and
+  the mutation are recorded one to one.
+  **The fact that it was let through stays in the ledger as `bypass_declared`.** A comment on the
+  Issue with nothing in the ledger is "not recorded" — in the field work was integrated with not
+  one refutation_attempted in the ledger, and no `integration_admitted` was recorded either. One
+  side of the double record going missing is the failure that actually happens, so the ledger is
+  what is read here. It does not decide whether to merge (only reconciles the preconditions).
 - Then run the **combined** suite on `develop`: the siblings must build and pass **together**, not just
   each alone. Green CI on `develop` is the integrate gate (`integration_admitted`) — the machine form.
 - Only an integrated, green `develop` is **"done"**: nobody reads the diff (docs/11 §4f), so the
