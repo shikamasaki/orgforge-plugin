@@ -1,6 +1,6 @@
-"""ブランチと worktree — feature ブランチの決定的な導出と、Issue ごとの作業ツリー。
+"""Branches and worktrees — deriving a feature branch deterministically, and a work tree per Issue.
 
-同一ツリーで並列 maker を走らせると、あるIssueのコミットが別Issueのブランチに載る。"""
+Run makers in parallel in one tree and a commit for one Issue lands on another Issue's branch."""
 
 import hashlib
 import json
@@ -17,61 +17,64 @@ from ._core import (
 
 
 def derived_branch_name(issue, title):
-    """(issue, title) の純関数としての導出名 — 作成時の規約。恒久 identity ではない（#107）:
-    タイトルが後から変われば実在の branch とずれるので、**実在の branch を答える文脈**では
-    そのまま使わず resolve_issue_branch で突合すること。"""
+    """The name derived as a pure function of (issue, title) — a convention for creation time, not
+    a permanent identity (#107). If the title later changes it drifts from the branch that actually
+    exists, so **wherever the answer must be a real branch**, do not use this directly; reconcile
+    with resolve_issue_branch."""
     if not title:
-        # タイトル不明（gh に届かない等）の導出は**本当に** slug 無し。空文字にも _slug は
-        # hash（te3b0c442…）を返すので、ここで落とさないと「slug を省く」と告知しながら
-        # 幻の hash 付き名を導出する — 告知と実際の名前が食い違う（#107 rework）。
+        # With the title unknown (gh unreachable and so on) the derivation is **genuinely**
+        # slug-less. _slug returns a hash (te3b0c442…) even for an empty string, so without
+        # dropping it here we would announce "omitting the slug" while deriving a phantom
+        # hash-bearing name — the announcement and the actual name disagreeing (#107 rework).
         return f"feat/issue-{issue}"
     slug = _slug(title)
     return f"feat/issue-{issue}-{slug}" if slug else f"feat/issue-{issue}"
 
 
 def _make_worktree(name, base, issue):
-    """ブランチ専用の git worktree を作る — 並列 fan-out の唯一の安全な形。
+    """Create a git worktree dedicated to a branch — the only safe shape for a parallel fan-out.
 
-    **なぜ checkout では駄目なのか。** `git checkout` は*ツリーを切り替える*ので、同一ディレクトリで
-    2体の maker を並列に走らせると、片方のコミットがもう片方のブランチに載る。実地でそれが起きた
-    （のコミットが `feat/issue-8-settle` に載った）。内容が分離されていたので復旧できたが、
-    **同一ツリーで並列に走らせる限り再発する**。
+    **Why a checkout will not do.** `git checkout` *switches the tree*, so running two makers in
+    parallel in one directory puts one's commits on the other's branch. That happened in the field
+    (a commit landed on `feat/issue-8-settle`). The contents were separable so it was recoverable,
+    but **it recurs for as long as they run in parallel in one tree**.
 
-    「毎回正しいブランチにいることを確認する」という運用でこれを防ぐのは、判断に依存する設計であり、
-    18 Issue を並列で回せば必ず破れる。worktree なら**物理的に別ディレクトリ**なので、混ざりようがない。
+    Preventing it by an operating habit — "check you are on the right branch every time" — is a
+    design that depends on judgment, and it will certainly break across 18 Issues in parallel. A
+    worktree is **physically a separate directory**, so there is nothing to mix.
 
-    R0: git の worktree をそのまま借りる。ref ストアも並行制御も作らない。"""
+    R0: borrow git's worktree as it is. No ref store and no concurrency control of our own."""
     import os
     import subprocess
     roots = subprocess.run(["git", "worktree", "list", "--porcelain"],
                            capture_output=True, text=True, timeout=30)
     if roots.returncode != 0:
-        print("git リポジトリの外にいる。", file=sys.stderr)
+        print("we are outside a git repository.", file=sys.stderr)
         return 2
     primary = next((line[len("worktree "):].strip()
                     for line in roots.stdout.splitlines()
                     if line.startswith("worktree ")), None)
     if not primary:
-        print("primary worktree を解決できない。", file=sys.stderr)
+        print("cannot resolve the primary worktree.", file=sys.stderr)
         return 2
     wt = os.path.join(primary, ".orgforge", "wt", f"issue-{issue}")
     if os.path.isdir(wt):
-        print(f"worktree は既にある（冪等）: {wt}")
-        print(f"\ncd {wt}    # ここで作業すること。元のツリーには触らない")
+        print(f"the worktree already exists (idempotent): {wt}")
+        print(f"\ncd {wt}    # work here. Do not touch the original tree")
         return 0
     os.makedirs(os.path.dirname(wt), exist_ok=True)
-    # ブランチが既にあれば繋ぐ、無ければ base から作る
+    # Attach to the branch if it exists; otherwise create it from base
     p = subprocess.run(["git", "worktree", "add", "-b", name, wt, base],
                        capture_output=True, text=True, timeout=60)
     if p.returncode != 0:
         p = subprocess.run(["git", "worktree", "add", wt, name],
                            capture_output=True, text=True, timeout=60)
     if p.returncode != 0:
-        print(f"worktree を作れない: {(p.stderr or '').strip()[:200]}", file=sys.stderr)
+        print(f"cannot create the worktree: {(p.stderr or '').strip()[:200]}", file=sys.stderr)
         return 2
     print(f"worktree: {wt}  (branch {name} off {base})")
-    print(f"\ncd {wt}    # ここで作業すること。元のツリーには触らない")
-    print("完了したら PR を出し、`git worktree remove` で片付ける。")
+    print(f"\ncd {wt}    # work here. Do not touch the original tree")
+    print("When it is done, open a PR and clear it away with `git worktree remove`.")
     return 0
 
 
@@ -89,12 +92,14 @@ def cmd_branch(a):
     labels, err = issue_labels(a.repo, a.issue)  # also validates the Issue exists
     code, out = gh(["issue", "view", str(a.issue), "--repo", a.repo, "--json", "title"])
     if code != 0:
-        # slug は名前を読みやすくするだけで、識別子は Issue 番号。GitHub に届かない
-        # （オフライン / 認証切れ / repo 未作成）ことを、作業場を用意できない理由にはしない —
-        # ここで止めると並列 maker が分離ツリーを持てず、同一ツリーに落ちて混線する。
-        # query mode も止めない（#107）: 答えは git（worktree の HEAD / 実在 branch）に
-        # あるので、slug 無しで導出して下の実在解決に委ねる。
-        print(f"警告: Issue のタイトルを取れなかったので slug を省く（{out.strip()[:80]}）",
+        # The slug only makes the name readable; the identifier is the Issue number. Not reaching
+        # GitHub (offline, expired auth, repo not created) is never a reason to be unable to
+        # prepare a workspace — stop here and parallel makers get no separate trees, fall back into
+        # one, and cross.
+        # Query mode is not stopped either (#107): the answer lives in git (the worktree's HEAD, or
+        # a branch that exists), so derive without a slug and leave it to the resolution below.
+        print(f"warning: could not fetch the Issue title, so the slug is omitted "
+              f"({out.strip()[:80]})",
               file=sys.stderr)
         title = ""
     else:
@@ -104,18 +109,20 @@ def cmd_branch(a):
             title = ""
     name = derived_branch_name(a.issue, title)
     if not (getattr(a, "worktree", False) or getattr(a, "create", False)):
-        # query mode（#107）: 「この Issue の branch はどれか」への答えは**実在する branch**で
-        # なければならない。導出名は作成規約であって恒久 identity ではない — タイトル変更や
-        # 手動命名で実在名とずれる（Tatekae OBS-012: 導出 `feat/issue-15-google`、実在
-        # `feat/issue-15-login-redirect` → gc が統合済み worktree を「未統合」と誤読）。
-        # worktree の HEAD > 実在する導出名 > fail-closed。実在しない名前は黙って印字しない。
+        # Query mode (#107): the answer to "which branch belongs to this Issue" has to be **a
+        # branch that exists**. A derived name is a creation convention, not a permanent identity —
+        # a retitle or a hand-picked name drifts from what exists (Tatekae OBS-012: derived
+        # `feat/issue-15-google` against the real `feat/issue-15-login-redirect`, so gc misread an
+        # already-integrated worktree as unintegrated).
+        # The worktree's HEAD > a derived name that exists > fail-closed. A name that does not
+        # exist is never printed silently.
         from orgcycle._core import resolve_issue_branch
         resolved, warn, err = resolve_issue_branch(a.issue, derived=name)
         if err:
             print(err, file=sys.stderr)
             return 2
         if warn:
-            print(f"警告: {warn}", file=sys.stderr)
+            print(f"warning: {warn}", file=sys.stderr)
         print(resolved)
         return 0
     print(name)
@@ -126,24 +133,28 @@ def cmd_branch(a):
         if not base:
             print(error, file=sys.stderr)
             return 2
-    # --worktree は --create を含意する（worktree を作れば分離した作業場ができる）。
-    # 並列 fan-out ではこちらが正解 — checkout はツリーを切り替えるので必ず混ざる。
+    # --worktree implies --create (creating a worktree yields the separate workspace).
+    # For a parallel fan-out this is the right answer — checkout switches the tree, so it always
+    # ends up mixed.
     if getattr(a, "worktree", False):
         return _make_worktree(name, base, a.issue)
     if getattr(a, "create", False):
         import subprocess
-        # **worktree で並列運用している org では、メインリポジトリのブランチを切り替えない。**
-        # 実地で `--create` がメインを develop から離し、気づかなければ develop での統合テストが
-        # 別 Issue のブランチ上で走っていた。`.orgforge/wt/` が既にあるなら worktree 運用と
-        # みなし、worktree を作る（`--worktree` と同じ経路）。
+        # **In an org operating in parallel through worktrees, never switch the main repository's
+        # branch.** In the field `--create` moved main off develop, and unnoticed, the integration
+        # tests meant for develop were running on another Issue's branch. If `.orgforge/wt/`
+        # already exists, treat it as worktree operation and create a worktree (the same path as
+        # `--worktree`).
         wt_dir = os.path.join(os.getcwd(), ".orgforge", "wt")
         if (not getattr(a, "no_worktree", False)) and os.path.isdir(wt_dir) and any(
                 n.startswith("issue-") for n in os.listdir(wt_dir)):
-            print(f"注意: この org は worktree で並列運用している（{wt_dir} に "
-                  f"{len([n for n in os.listdir(wt_dir) if n.startswith('issue-')])} 個）。\n"
-                  f"  メインリポジトリのブランチは切り替えず、worktree を作る — メインが "
-                  f"develop から離れると、develop での統合テストが別 Issue のブランチ上で走る。\n"
-                  f"  メインで切り替えたいなら --no-worktree を付けること。", file=sys.stderr)
+            print(f"note: this org operates in parallel through worktrees "
+                  f"({len([n for n in os.listdir(wt_dir) if n.startswith('issue-')])} under "
+                  f"{wt_dir}).\n"
+                  f"  The main repository's branch is not switched; a worktree is created "
+                  f"instead — once main moves off develop, the integration tests meant for develop "
+                  f"run on another Issue's branch.\n"
+                  f"  To switch on main anyway, add --no-worktree.", file=sys.stderr)
             return _make_worktree(name, base, a.issue)
         try:
             p = subprocess.run(["git", "checkout", "-b", name, base],
@@ -158,9 +169,9 @@ def cmd_branch(a):
                 print(f"branch {name} already existed — switched to it (idempotent).", file=sys.stderr)
             else:
                 print(f"created and switched to {name} off {base}.\n"
-                      f"  ⚠ **メインリポジトリのブランチを切り替えた。** develop での統合テストを"
-                      f"走らせる前に `git checkout {base}` で戻すこと"
-                      f"（並列運用するなら --worktree を使う）。", file=sys.stderr)
+                      f"  ⚠ **The main repository's branch was switched.** Before running the "
+                      f"integration tests meant for develop, return with `git checkout {base}` "
+                      f"(for parallel operation, use --worktree).", file=sys.stderr)
         except Exception as e:
             print(f"git not available: {e}", file=sys.stderr)
             return 2
