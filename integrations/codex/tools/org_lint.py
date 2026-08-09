@@ -221,12 +221,13 @@ def check_layers_and_span(org, roles, lint):
         active = [x for x in reports if x in roles and is_active(roles[x])]
         if len(active) > span:
             lint.fail("O2", f"supervisor '{r['id']}' has {len(active)} active reports "
-                            f"> effective span {span}. 選択肢は2つ: (a) この数を実際に見られる"
-                            f"理由があるなら structure.span.default_effective_span を "
-                            f"{len(active)} に宣言し、なぜ見られるのかをコメントで残す; "
-                            f"(b) 階層が本当に要るなら charter-tier の add_layer を出す。"
-                            f"(a) を先に検討すること — 契約を持たない中間管理ロールを足すのは "
-                            f"docs/03 §6.5（coordinator は deliverable を持たない）と緊張する "
+                            f"> effective span {span}. Two options: (a) if there is a reason this "
+                            f"number can genuinely be attended to, declare "
+                            f"structure.span.default_effective_span as {len(active)} and leave a "
+                            f"comment saying why it can be; (b) if the hierarchy is genuinely "
+                            f"needed, raise a charter-tier add_layer. Consider (a) first — adding "
+                            f"a middle-management role that holds no contract is in tension with "
+                            f"docs/03 §6.5 (a coordinator holds no deliverable) "
                             f"(docs/02 §3)")
 
 
