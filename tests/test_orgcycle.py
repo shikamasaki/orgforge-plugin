@@ -1,6 +1,6 @@
-"""サイクルの配管 — begin / complete / verify / integrate / worktree / 公開面。
+"""The cycle's plumbing — begin / complete / verify / integrate / worktree / public surface.
 
-配管は自動化するが判断はしない、という線引きを固定する。"""
+It fixes the line: the plumbing is automated, the judgment is not."""
 import argparse
 import hashlib
 import json
@@ -72,11 +72,12 @@ def test_reconcile_mandate_integrate(tmp_path):
     assert code == 0 and "integrate" in out
 
 
-# ── org_cycle: 配管の自動化（docs/11 §0d）─────────────────────────────────────
-# 実地で Issue 2件あたり11コマンドを手打ちしており、18 Issue で約90回になっていた。
-# とりわけ parent を目で拾って手打ちしていたため、親継承（§2）の実装が活きていなかった。
+# ── org_cycle: automating the plumbing (docs/11 §0d) ────────────────────────
+# In the field, two Issues took eleven hand-typed commands, which came to about ninety across 18.
+# In particular, the parent was read off by eye and typed in, so the parent-inheritance
+# implementation (§2) was never actually in play.
 def test_org_cycle_plan_executes_nothing(tmp_path):
-    """plan は印字だけ — 台帳にもGitHubにも触らない。"""
+    """plan only prints — it touches neither the ledger nor GitHub."""
     code, out = run("org_cycle.py", "plan", "--role", "r", "--issue", "7")
     assert code == 0, out
     assert "phase_started" in out and "cycle_started" in out
@@ -84,7 +85,8 @@ def test_org_cycle_plan_executes_nothing(tmp_path):
 
 
 def test_org_cycle_complete_requires_domain_model(tmp_path):
-    """docs/11 §4d: ドメインモデルに何をしたかを述べない cycle_completed は認めない。"""
+    """docs/11 §4d: a cycle_completed that does not state what it did to the domain model is not
+    accepted."""
     code, out = run("org_cycle.py", "complete", "--role", "r", "--issue", "7",
                     "--outputs", "something")
     assert code == 2
@@ -92,7 +94,7 @@ def test_org_cycle_complete_requires_domain_model(tmp_path):
 
 
 def test_org_cycle_resolves_parent_from_issue_body():
-    """parent は Issue の `Parent: #N` から読む — 人が運ばない。"""
+    """The parent is read from the Issue's `Parent: #N` — a person does not carry it."""
     import importlib.util
     spec = importlib.util.spec_from_file_location("org_cycle", TOOLS / "org_cycle.py")
     m = importlib.util.module_from_spec(spec)
@@ -102,18 +104,19 @@ def test_org_cycle_resolves_parent_from_issue_body():
     assert re.search(r"^\s*Parent:\s*#?(\d+)", body, flags=re.M | re.I).group(1) == "1"
 
 
-# ── 案5: worktree 分離の強制（docs/11 §4c）──────────────────────────────────
-# 並列 fan-out で #7 のコミットが feat/issue-8-settle に載る事故が実際に起きた。
-# git checkout はツリー全体を切り替えるので、同一ツリーで並列 maker を走らせる限り再発する。
-# 「毎回正しく判断する」前提の設計は破れる、というのが実地で得られた教訓。
+# ── proposal 5: enforcing worktree separation (docs/11 §4c) ─────────────────
+# In a parallel fan-out, #7's commit actually landed on feat/issue-8-settle.
+# git checkout switches the whole tree, so it recurs for as long as makers run in parallel in one
+# tree. The lesson from the field: a design premised on "judging correctly every time" breaks.
 
 
-# ── 案5: worktree 分離の強制（docs/11 §4c）──────────────────────────────────
-# 並列 fan-out で #7 のコミットが feat/issue-8-settle に載る事故が実際に起きた。
-# git checkout はツリー全体を切り替えるので、同一ツリーで並列 maker を走らせる限り再発する。
-# 「毎回正しく判断する」前提の設計は破れる、というのが実地で得られた教訓。
+# ── proposal 5: enforcing worktree separation (docs/11 §4c) ─────────────────
+# In a parallel fan-out, #7's commit actually landed on feat/issue-8-settle.
+# git checkout switches the whole tree, so it recurs for as long as makers run in parallel in one
+# tree. The lesson from the field: a design premised on "judging correctly every time" breaks.
 def test_worktree_isolates_parallel_makers(tmp_path):
-    """2つの Issue の worktree が別ディレクトリ・別ブランチになり、互いのコミットが混ざらない。"""
+    """Two Issues get worktrees in separate directories on separate branches, and their commits do
+    not mix."""
     import subprocess
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -132,8 +135,8 @@ def test_worktree_isolates_parallel_makers(tmp_path):
         assert code == 0, out
         made.append(repo / ".orgforge" / "wt" / f"issue-{issue}")
 
-    assert all(d.is_dir() for d in made), "worktree が作られていない"
-    # 各 worktree で別々にコミットしても、相手のツリーには現れない
+    assert all(d.is_dir() for d in made), "the worktrees were not created"
+    # Committing separately in each worktree, neither appears in the other's tree
     for issue, d in zip((7, 8), made):
         (d / f"F{issue}.txt").write_text("x")
         g("add", "-A", cwd=d); g("commit", "-qm", f"i{issue}", cwd=d)
@@ -141,47 +144,55 @@ def test_worktree_isolates_parallel_makers(tmp_path):
         other = 8 if issue == 7 else 7
         assert (d / f"F{issue}.txt").exists()
         assert not (d / f"F{other}.txt").exists(), \
-            f"#{other} の成果物が #{issue} のツリーに混入した — 分離が効いていない"
-    # ブランチも別
+            f"#{other}'s deliverable bled into #{issue}'s tree — the separation is not working"
+    # The branches differ too
     b = [g("branch", "--show-current", cwd=d).stdout.strip() for d in made]
     assert b[0] != b[1] and all(b), b
 
 
-# ── 案2: verify は配管だけ。判定は持たない ─────────────────────────────────
-# 検証手順を人が毎回書き下ろすと、書くたびに gate の厳しさが変わる（18 Issue で18通り）。
-# 基準の出所は agents/gate.md 1つにする。ただし verdict を埋めた瞬間に gate が形骸化するので、
-# そこは越えない — この境界をテストで固定する。
+# ── proposal 2: verify is plumbing only, and holds no judgment ──────────────
+# If a person writes out the verification steps each time, the gate's strictness changes with each
+# writing (18 Issues, 18 versions). The standard comes from one place: agents/gate.md. But the
+# moment a verdict is filled in, the gate becomes a formality, so
+# that line is not crossed — and the boundary is fixed here by test.
 
 
-# ── 案2: verify は配管だけ。判定は持たない ─────────────────────────────────
-# 検証手順を人が毎回書き下ろすと、書くたびに gate の厳しさが変わる（18 Issue で18通り）。
-# 基準の出所は agents/gate.md 1つにする。ただし verdict を埋めた瞬間に gate が形骸化するので、
-# そこは越えない — この境界をテストで固定する。
+# ── proposal 2: verify is plumbing only, and holds no judgment ──────────────
+# If a person writes out the verification steps each time, the gate's strictness changes with each
+# writing (18 Issues, 18 versions). The standard comes from one place: agents/gate.md. But the
+# moment a verdict is filled in, the gate becomes a formality, so
+# that line is not crossed — and the boundary is fixed here by test.
 def test_verify_injects_focused_contract_and_leaves_verdict_unfilled():
-    """Issue-scoped contract と decide 雛形は出すが、verdict は先取りしない。"""
+    """It emits the Issue-scoped contract and the decide template, but never pre-empts the
+    verdict."""
     import subprocess, os
     env = dict(os.environ, ORG_GITHUB_REPO="")
-    # #101 以降、subject は Issue の worktree から mint する。この開発リポジトリに
-    # issue-1 の worktree は無いので、逃げ道を明示する（テストの主題は憲章の注入）。
+    # Since #101 the subject is minted from the Issue's worktree. This development repository has
+    # no worktree for issue-1, so the escape hatch is stated explicitly (what this test is about is
+    # the charter injection).
     p = subprocess.run([sys.executable, str(TOOLS / "org_cycle.py"), "verify",
                         "--issue", "1", "--role", "gate", "--subject-root", "."],
                        capture_output=True, text=True, env=env, timeout=60)
     out = p.stdout + p.stderr
-    # gh が無い/認証が無い環境では Issue を読めず 3 で落ちるのが正しい挙動
+    # Where gh is missing or unauthenticated, failing with 3 because the Issue cannot be read is
+    # the correct behaviour
     if p.returncode == 0:
-        assert "Fixed review contract" in out, "Issue-scoped review contract が注入されていない"
+        assert "Fixed review contract" in out, \
+            "the Issue-scoped review contract was not injected"
         assert "Do not add unrelated review criteria" in out
-        # 0.25.2: subagent 向けは「返すもの」の指定、監督向けは値を入れる欄。
-        # どちらも **verdict を決めない** — ツールが verdict を決めた瞬間に gate は形骸化する。
-        assert "admit|reject|park" in out, "verdict の選択肢が示されていない"
+        # 0.25.2: for the subagent it specifies what to return; for the supervisor it is a field
+        # to fill in. **Neither decides the verdict** — the moment a tool decides it, the gate
+        # becomes a formality.
+        assert "admit|reject|park" in out, "the verdict options are not shown"
         for filled in ('--verdict admit', '--verdict "admit"', '--verdict reject'):
-            assert filled not in out, f"配管が verdict を決めている: {filled}"
+            assert filled not in out, f"the plumbing is deciding the verdict: {filled}"
     else:
         assert p.returncode in (2, 3), out
 
 
 def test_verify_rejects_unknown_role():
-    """憲章の無い役割では verify は成り立たない（基準の出所が無いまま起動しない）。"""
+    """For a role with no charter, verify does not hold — it never launches with no source for the
+    standard."""
     import subprocess
     p = subprocess.run([sys.executable, str(TOOLS / "org_cycle.py"), "verify",
                         "--issue", "1", "--role", "maker"],
@@ -190,38 +201,42 @@ def test_verify_rejects_unknown_role():
 
 
 def test_verify_finds_charter_in_every_layout():
-    """憲章を **CLAUDE_PLUGIN_ROOT の有無にかかわらず**見つけること。
+    """Find the charter **whether or not CLAUDE_PLUGIN_ROOT is set**.
 
-    以前のテストは env を設定してから呼んでいたため、**env が無い経路＝実際の使われ方**を
-    検査していなかった。その結果 0.22.0 の分割で `_agents_dir` の探索先が1階層ずれ、
-    verify が gate/skeptic とも「agents/*.md が見つからない（探した先: None）」で死んだのに、
-    テストは緑のままだった。壊れる場所で検証していないテストは無いのと同じ — #7 の
-    split() で捕まえたのと同じ形を、テスト側でやっていた。
+    The earlier test set env before calling, so it never checked **the path with no env — the way
+    it is actually used**. As a result, the 0.22.0 split moved `_agents_dir`'s search one level and
+    verify died for both gate and skeptic with "agents/*.md not found (looked in: None)" — while
+    the test stayed green. **A test that does not verify where the thing breaks is no test at
+    all** — the same shape caught by split() in #7, committed on the test side.
     """
     m = _cycle_mod("judge")
     bundled = TOOLS.parent / "integrations" / "claude-code"
     codex_bundled = TOOLS.parent / "integrations" / "codex"
     saved = os.environ.pop("CLAUDE_PLUGIN_ROOT", None)
     try:
-        # (1) env なし — repo を直接使う形。実地で壊れたのはこちら
+        # (1) no env — using the repo directly. This is the one that broke in the field
         for role in ("gate", "skeptic"):
             charter, path = m._role_charter(role)
-            assert charter, f"env 無しで {role} の憲章を見失った（探した先: {path}）"
-        # (2) env あり — Claude plugin として入った形
-        assert (bundled / "agents").is_dir(), "Claude projection に review charter が無い"
+            assert charter, f"lost sight of {role}'s charter with no env (looked in: {path})"
+        # (2) with env — installed as a Claude plugin
+        assert (bundled / "agents").is_dir(), \
+            "the Claude projection holds no review charter"
         os.environ["CLAUDE_PLUGIN_ROOT"] = str(bundled)
         for role in ("gate", "skeptic"):
             charter, path = m._role_charter(role)
-            assert charter, f"Claude bundle で {role} の憲章を見失った（探した先: {path}）"
+            assert charter, \
+                f"lost sight of {role}'s charter in the Claude bundle (looked in: {path})"
 
-        # (3) env あり — Codex plugin として入った形。Codex が注入する
-        # PLUGIN_ROOT そのものを使う。互換変数だけを試すと実際の host 契約から外れる。
-        assert (codex_bundled / "agents").is_dir(), "Codex projection に review charter が無い"
+        # (3) with env — installed as a Codex plugin. It uses the PLUGIN_ROOT Codex itself
+        # injects; trying only the compatibility variable departs from the real host contract.
+        assert (codex_bundled / "agents").is_dir(), \
+            "the Codex projection holds no review charter"
         os.environ.pop("CLAUDE_PLUGIN_ROOT", None)
         os.environ["PLUGIN_ROOT"] = str(codex_bundled)
         for role in ("gate", "skeptic"):
             charter, path = m._role_charter(role)
-            assert charter, f"Codex bundle で {role} の憲章を見失った（探した先: {path}）"
+            assert charter, \
+                f"lost sight of {role}'s charter in the Codex bundle (looked in: {path})"
     finally:
         os.environ.pop("CLAUDE_PLUGIN_ROOT", None)
         os.environ.pop("PLUGIN_ROOT", None)
@@ -230,42 +245,44 @@ def test_verify_finds_charter_in_every_layout():
 
 
 def test_verify_actually_injects_the_charter(tmp_path):
-    """`_role_charter` 単体ではなく、**verify の出力に憲章が入る**ことを見る。
+    """Check that **the charter reaches verify's output**, not that `_role_charter` works alone.
 
-    ヘルパが動いても、組み立て側で落としていれば意味がない。実地の症状は
-    「verify が使えない」であって「_role_charter が None を返す」ではなかった。
+    A working helper means nothing if the assembling side drops it. The symptom in the field was
+    "verify is unusable", not "_role_charter returns None".
     """
     p = subprocess.run([sys.executable, str(TOOLS / "org_cycle.py"), "verify",
                         "--issue", "1", "--role", "gate"],
                        capture_output=True, text=True, cwd=str(tmp_path), timeout=60)
     out = p.stdout + p.stderr
-    # gh が無い / Issue が読めない環境では exit 3 で落ちるのが正しい。
-    # ただし **憲章が見つからない（exit 2）で落ちてはいけない** — それは配線の欠陥。
-    assert "agents/gate.md が見つからない" not in out, \
-        f"憲章の探索が壊れている: {out[:300]}"
+    # Where gh is missing or the Issue cannot be read, failing with exit 3 is correct.
+    # But it **must not fail with "charter not found" (exit 2)** — that is a wiring defect.
+    assert "agents/gate.md not found" not in out, \
+        f"the charter search is broken: {out[:300]}"
     assert p.returncode != 2, out
 
 
 def test_verify_allows_passing_by_file_reference():
-    """本文でもファイル参照でも渡せることを案内する（0.19.0 でガードが読むようになった）。
+    """State that it can be passed in the body or by file reference (since 0.19.0 the guard reads
+    the file).
 
-    以前は本文限定だったので「本文に貼れ」と案内していた。264行を毎回貼ると maker の
-    context を圧迫するので、ガード側がファイルを読んで検証するように変えた。
+    It used to be body-only, so the guidance said "paste it into the body". Pasting 264 lines every
+    time crowds the maker's context, so the guard was changed to read the file and verify it.
     """
     src = _cycle_src()
     seg = src[src.index("def cmd_verify"):]
     assert "write it to a " in seg and "file and reference that" in seg
-    assert "HELD" not in seg, "ファイル渡しが弾かれる前提の案内が残っている"
+    assert "HELD" not in seg, \
+        "guidance premised on a file reference being rejected is still there"
 
 
-# ── 実地フィードバック: 統合直前が最も抜けやすい ─────────────────────────
+# ── field report: the moment just before integration is the easiest to skip ──
 
 
 def test_integrate_blocks_without_skeptic(tmp_path):
-    """gate が admit していても、skeptic の survives が無ければ統合させない。
+    """Even with the gate's admit, no integration without the skeptic's survives.
 
-    実地で #8 が「refutation_attempted が台帳に1件も無いまま develop へ統合」された。
-    Issue にはコメントがあったので、二重記録の片側だけが落ちていた。
+    In the field, #8 was integrated into develop with not one refutation_attempted in the ledger.
+    The Issue carried a comment, so one side of the double record had gone missing.
     """
     led = _ledger_with(tmp_path, [
         {"seq": 1, "class": "admission_decided",
@@ -277,11 +294,13 @@ def test_integrate_blocks_without_skeptic(tmp_path):
     assert p.returncode == 4, p.stdout + p.stderr
     err = p.stdout + p.stderr
     assert "skeptic" in err and "survives" in err
-    assert "git merge" not in err, "前提が揃わないのにマージ手順に入っている"
+    assert "git merge" not in err, \
+        "it enters the merge procedure without the preconditions being met"
 
 
 def test_integrate_allows_when_both_recorded(tmp_path):
-    """admit + survives が揃えば、前提照合では止まらない（実行は git の世界に入る）。"""
+    """With admit + survives both present, the precondition check does not stop it (execution then
+    enters git's world)."""
     led = _ledger_with(tmp_path, [
         {"seq": 1, "class": "admission_decided",
          "payload": {"deliverable": "8", "issue": 8, "verdict": "admit"}},
@@ -299,14 +318,17 @@ def test_integrate_allows_when_both_recorded(tmp_path):
 
 
 def test_verify_gate_uses_the_stable_organ_for_repro_lint():
-    """installed promptはcache pathでなくbinding launcher、source開発時だけHEREを使う。"""
+    """An installed prompt uses the binding launcher, not a cache path; HERE is used only when
+    developing from source."""
     src = _cycle_src()
     assert '_organ_command(stable_organ, "repro-lint")' in src
-    assert 'os.path.join(HERE, filename)' in src, "source checkout 用 fallback が無い"
+    assert 'os.path.join(HERE, filename)' in src, \
+        "there is no fallback for a source checkout"
 
 
 def test_worktree_cleanup_keeps_dirty_tree(tmp_path):
-    """未コミットの変更がある worktree は消さない（消えて困るかは配管が決めることではない）。"""
+    """A worktree with uncommitted changes is not removed — whether losing it would matter is not
+    the plumbing's decision."""
     import importlib.util
     repo = tmp_path / "r"; repo.mkdir()
     def g(*a, cwd=repo):
@@ -322,21 +344,21 @@ def test_worktree_cleanup_keeps_dirty_tree(tmp_path):
     cwd = os.getcwd(); os.chdir(repo)
     try:
         msg = m._cleanup_worktree(5)
-        assert wt.is_dir(), "未コミットの変更ごと worktree を消した"
-        assert "残した" in msg, msg
-        # クリーンにすれば消える
+        assert wt.is_dir(), "it removed the worktree along with uncommitted changes"
+        assert "was kept" in msg, msg
+        # Once clean, it is removed
         (wt / "dirty.txt").unlink()
         msg2 = m._cleanup_worktree(5)
-        assert not wt.is_dir(), f"クリーンな worktree が片付いていない: {msg2}"
+        assert not wt.is_dir(), f"a clean worktree was not cleared away: {msg2}"
     finally:
         os.chdir(cwd)
 
 
 def test_complete_requires_command_and_result():
-    """DoD の実出力を人の自由記述任せにしない（B）。"""
+    """The DoD's real output is not left to a person's free prose (B)."""
     p = subprocess.run([sys.executable, str(TOOLS / "org_cycle.py"), "complete",
                         "--role", "r", "--issue", "1", "--outputs", "x",
-                        "--domain-model-none", "理由"],
+                        "--domain-model-none", "a reason"],
                        capture_output=True, text=True, timeout=60)
     assert p.returncode != 0
     assert "--command" in p.stderr and "--result" in p.stderr

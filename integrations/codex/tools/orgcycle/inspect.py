@@ -282,10 +282,11 @@ def cmd_gc(a):
     for n, why in removed:
         print(f"  ✓ {n} — {why}")
     for n, why in kept:
-        print(f"  · {n} — 残した（{why}）")
-    print(f"\n{len(removed)} 個を片付け、{len(kept)} 個を残した。")
+        print(f"  · {n} — kept ({why})")
+    print(f"\ncleared {len(removed)}, kept {len(kept)}.")
     if kept:
-        print("残したものは中身を確認すること — 消えて困るかは、こちらが決めてよいことではない。")
+        print("Inspect the contents of what was kept — whether losing it would matter is not "
+              "ours to decide.")
     return 0
 
 

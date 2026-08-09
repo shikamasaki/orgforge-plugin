@@ -1,6 +1,6 @@
-"""テスト全体で共有するヘルパ。
+"""Helpers shared across the tests.
 
-pytest が自動で読み込むが、フィクスチャ以外は明示 import が要る:
+pytest loads this automatically, but anything other than a fixture needs an explicit import:
     from conftest import run, seed, TOOLS
 """
 import importlib
@@ -15,34 +15,35 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 TOOLS = REPO / "tools"
 
 
-# ── organ binding: このチェックアウトからテストを回せるようにする ─────────────
-# organ-binding ガードは「SessionStart が束縛した installed plugin 以外の organ が台帳へ
-# 書くこと」を拒否する。正しい振る舞いだが、そのホスト session の中で開発チェックアウトの
-# テストを回すと、ledger へ書くテストが軒並み exit 12 で落ちる（実測: 184 failed）。CI が
-# 緑なのは binding が存在しないからで、ガードが壊れているわけではない。
+# ── organ binding: let the tests run from this checkout ─────────────────────
+# The organ-binding guard refuses a write to the ledger by any organ other than the installed
+# plugin SessionStart bound. That is correct behaviour, but running a development checkout's tests
+# inside such a host session fails every test that writes to the ledger with exit 12 (measured: 184
+# failed). CI is green because no binding exists there, not because the guard is broken.
 #
-# ここで **プロセス全体に** 明示する: このテスト実行は意図的な開発チェックアウトである、と。
-# os.environ に置くので、`dict(os.environ, ...)` で env を組み立てるヘルパも、env を渡さず
-# 継承する `run()` も、等しく効く。
+# So it is stated here **for the whole process**: this test run is a deliberate development
+# checkout. Placing it in os.environ means it applies equally to helpers that build an env with
+# `dict(os.environ, ...)` and to `run()`, which inherits the env without being passed one.
 #
-# binding ガード自身を検証するテストは、この既定を自分で上書きして「明示が無い」状態を
-# 作ること（ORG_ALLOW_FOREIGN_ORGAN を消した env を組んで組織へ書かせる）。
+# A test verifying the binding guard itself must override this default and construct the state
+# where nothing is stated (build an env with ORG_ALLOW_FOREIGN_ORGAN removed and have it write to
+# the organization).
 os.environ.setdefault("ORG_ALLOW_FOREIGN_ORGAN", "1")
 
 
-# ── org_cycle は tools/orgcycle/ に分割された（0.22.0）─────────────────────
-# ソースを文字列で検査するテストは分割に弱い。**どのモジュールに居るかではなく、
-# 何が書かれているか**を見たいので、全モジュールを連結したものを対象にする。
-# 「振る舞いで検証できるもの」は振る舞いで見る（そちらが本筋）。
+# ── org_cycle was split into tools/orgcycle/ (0.22.0) ───────────────────────
+# A test that inspects source as text is fragile against a split. What we want to see is **what is
+# written, not which module it lives in**, so the target is every module concatenated.
+# Anything verifiable by behaviour is checked by behaviour (that is the main line).
 
 TEMPLATE = REPO / "template"
 
-# ── org_cycle は tools/orgcycle/ に分割された（0.22.0）─────────────────────
-# ソースを文字列で検査するテストは分割に弱い。**どのモジュールに居るかではなく、
-# 何が書かれているか**を見たいので、全モジュールを連結したものを対象にする。
-# 「振る舞いで検証できるもの」は振る舞いで見る（そちらが本筋）。
+# ── org_cycle was split into tools/orgcycle/ (0.22.0) ───────────────────────
+# A test that inspects source as text is fragile against a split. What we want to see is **what is
+# written, not which module it lives in**, so the target is every module concatenated.
+# Anything verifiable by behaviour is checked by behaviour (that is the main line).
 def _cycle_src(*mods):
-    """orgcycle の（指定した / 全）モジュールのソースを連結して返す。"""
+    """Return the source of orgcycle's modules (the named ones, or all) concatenated."""
     base = TOOLS / "orgcycle"
     names = mods or ("_core", "cycle", "judge", "ship", "inspect")
     out = []
@@ -53,10 +54,10 @@ def _cycle_src(*mods):
     return "\n".join(out)
 
 def _gh_src(*mods):
-    """ghsync の（指定した / 全）モジュールのソースを連結して返す。
+    """Return the source of ghsync's modules (the named ones, or all) concatenated.
 
-    github_sync も tools/ghsync/ に分割された（0.22.0）。ソースを文字列で探すテストは
-    分割に弱いので、モジュール構成に依存しない形にする。
+    github_sync was split into tools/ghsync/ as well (0.22.0). A test that searches source as text
+    is fragile against a split, so this form does not depend on the module layout.
     """
     base = TOOLS / "ghsync"
     names = mods or ("_core", "backlog", "record", "branch", "coverage")
@@ -64,10 +65,10 @@ def _gh_src(*mods):
                       for m in names if (base / f"{m}.py").is_file())
 
 def _cycle_mod(name):
-    """orgcycle の1モジュールを import して返す（関数を直接呼ぶテスト用）。
+    """Import and return one orgcycle module (for tests that call a function directly).
 
-    パッケージとして import する — 単体ファイルとして読むと `from ._core import ...` の
-    相対 import が解決できない。
+    It is imported as a package — read as a standalone file, the relative import in
+    `from ._core import ...` cannot resolve.
     """
     import importlib, sys as _s
     if str(TOOLS) not in _s.path:
@@ -120,14 +121,15 @@ def _admitted_claim(tmp_path, role, claim, affects):
 def _sched():
     return str(TEMPLATE / "schedule.yaml")
 
-# ── 実地フィードバック: 統合直前が最も抜けやすい ─────────────────────────
+# ── field report: the moment just before integration is the easiest to skip ──
 def _ledger_with(tmp_path, rows):
     led = tmp_path / "ledger"; led.mkdir(exist_ok=True)
     (led / "ledger.jsonl").write_text(
         "\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
     return led
 
-# ── 実地: 相関キーが無いと統制が無言で無効になっていた（seq 204 / 205）───────
+# ── field report: with no correlation key the control had silently stopped working
+# ──               (seq 204 / 205) ───────────────────────────────────────────
 def _led(tmp_path):
     d = tmp_path / "l"; d.mkdir(exist_ok=True)
     return dict(os.environ, ORG_LEDGER_ROOT=str(d))
@@ -138,7 +140,7 @@ def _append(env, actor, cls, payload):
          "--class", cls, "--payload", json.dumps(payload)],
         capture_output=True, text=True, env=env, timeout=60)
 
-# ── 0.18.0: 判定は最新が有効（追記型の台帳で reject が後から来る）─────────
+# ── 0.18.0: the latest judgment holds (in an append-only ledger a reject arrives later) ──
 def _status(led):
     return subprocess.run([sys.executable, str(TOOLS / "status.py"), "status", str(led)],
                           capture_output=True, text=True, timeout=60)

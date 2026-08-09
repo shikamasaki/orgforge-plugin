@@ -97,7 +97,7 @@ def cmd_propose(a):
     # empty in the field, so it is said here, before the jam — stay silent until admit and whoever
     # offered the learning never learns why.
     if not a.retrieved_at or not a.review_by:
-        missing = " と ".join(x for x, v in
+        missing = " and ".join(x for x, v in
                               (("--retrieved-at", a.retrieved_at), ("--review-by", a.review_by))
                               if not v)
         print(f"note: {missing} is absent, so the gate cannot admit this as it stands (doctrine "

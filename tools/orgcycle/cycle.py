@@ -299,7 +299,7 @@ def _cleanup_worktree(issue):
         return None
     code, out = _raw(["git", "-C", wt, "status", "--porcelain"])
     if code == 0 and out.strip():
-        return (f"worktree を残した: {wt}\n"
+        return (f"the worktree was kept: {wt}\n"
                 f"  未コミットの変更がある（{len(out.strip().split(chr(10)))} 件）。"
                 f"確認してから `git worktree remove` すること。")
     code, out = _raw(["git", "worktree", "remove", wt])

@@ -1,6 +1,7 @@
-"""board — 何が RED / AMBER として見えるか。
+"""The board — what shows up as RED / AMBER.
 
-追記型の台帳では「一度でも admit があった」と「いま admit されている」は別物。"""
+In an append-only ledger, "there was an admit at some point" and "it is admitted now" are different
+things."""
 import argparse
 import json
 import os
@@ -50,7 +51,7 @@ def test_status_redline_emits_on_red(tmp_path):
 
 
 def test_status_counts_risk_accepted_admits(tmp_path):
-    """リスク付き admit が board に出る（書き得にしない）。"""
+    """An admit carrying a risk shows on the board (so writing one is not a free pass)."""
     led = _ledger_with(tmp_path, [
         {"seq": 1, "class": "admission_decided",
          "payload": {"issue": 8, "verdict": "admit", "risk_accepted": True}},
@@ -63,7 +64,8 @@ def test_status_counts_risk_accepted_admits(tmp_path):
 
 
 def test_reject_after_admit_clears_the_admit(tmp_path):
-    """admit → reject の順なら reject が有効。「一度でも admit があった」で数えない。"""
+    """With admit then reject, the reject holds. Never counted as "there was an admit at some
+    point"."""
     led = _write_ledger(tmp_path, "s1", [
         {"seq": 216, "class": "admission_decided",
          "payload": {"issue": 11, "verdict": "admit"}},
@@ -71,29 +73,30 @@ def test_reject_after_admit_clears_the_admit(tmp_path):
          "payload": {"issue": 11, "verdict": "reject"}},
     ])
     out = _status(led).stdout
-    assert "no skeptic record" not in out, f"reject 後も admit 扱いのまま: {out}"
-    assert "awaiting rework" in out, f"reject されたまま放置されていることが見えない: {out}"
+    assert "no skeptic record" not in out, f"still treated as admitted after the reject: {out}"
+    assert "awaiting rework" in out, f"being left sitting in reject is not visible: {out}"
 
 
 def test_admit_after_reject_counts_as_admit(tmp_path):
-    """逆順（reject → admit）なら admit が有効。rework が通った正常系。"""
+    """In the other order (reject then admit), the admit holds — the happy path where rework
+    passed."""
     led = _write_ledger(tmp_path, "s2", [
         {"seq": 1, "class": "admission_decided", "payload": {"issue": 11, "verdict": "reject"}},
         {"seq": 2, "class": "admission_decided", "payload": {"issue": 11, "verdict": "admit"}},
     ])
     out = _status(led).stdout
-    assert "no skeptic record" in out, f"再 admit が admit として数えられていない: {out}"
+    assert "no skeptic record" in out, f"the re-admit is not being counted as an admit: {out}"
 
 
 def test_risk_accepted_admit_not_counted_after_reject(tmp_path):
-    """後で reject された risk 付き admit を「残っている穴」に数えない。"""
+    """An admit carrying a risk that was later rejected is not counted as a hole still open."""
     led = _write_ledger(tmp_path, "s3", [
         {"seq": 1, "class": "admission_decided",
          "payload": {"issue": 5, "verdict": "admit", "risk_accepted": True}},
         {"seq": 2, "class": "admission_decided", "payload": {"issue": 5, "verdict": "reject"}},
     ])
     out = _status(led).stdout
-    assert "リスク付き admit" not in out, out
+    assert "admits carrying a risk" not in out, out
 
 
 def test_voiding_superseded_correction_removes_admit_from_redline(tmp_path):
