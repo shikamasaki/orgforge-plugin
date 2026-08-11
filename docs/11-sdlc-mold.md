@@ -80,15 +80,15 @@ So founding writes **exactly these four files, at the org root, under these exac
 | File | SDD/lifecycle role | What it holds |
 |---|---|---|
 | `REQUIREMENTS.md` | the received brief | the RFP verbatim (or the brief restated), + the one-sentence purpose. The immutable input the rest traces to. |
-| `FEATURE-INVENTORY.md` | the 洗い出し | every capability the RFP requires, grouped must / should / nice, + the explicit EXCLUDE list |
-| `ARCHITECTURE.md` | **the 全体設計書** — the whole-system design, distinct from any per-task spec | layers/components + the **seam contracts** between them, each in the normalized shape `{deliverable, standard, checker, depends_on}` |
+| `FEATURE-INVENTORY.md` | the full sweep | every capability the RFP requires, grouped must / should / nice, + the explicit EXCLUDE list |
+| `ARCHITECTURE.md` | **the whole-system design**, distinct from any per-task spec | layers/components + the **seam contracts** between them, each in the normalized shape `{deliverable, standard, checker, depends_on}` |
 | `coverage-manifest.md` | the RFP→contract coverage map | one row per must-have: `{rfp_capability, owning_role, deliverable, acceptance}` |
 
 Plus `organization.yaml` (the machine-checkable side of the manifest), which already had a fixed name.
 
 Three consequences that make this load-bearing rather than cosmetic:
 
-- **`ARCHITECTURE.md` is the 全体設計書, and it is NOT an SDD artifact.** SDD's three layers (§4b) —
+- **`ARCHITECTURE.md` is the whole-system design, and it is NOT an SDD artifact.** SDD's three layers (§4b) —
   spec / plan / tasks — live in the *Issue hierarchy* and are per-objective and per-task. `ARCHITECTURE.md`
   sits *above* all of them: it is the whole-system design the objectives are carved out of, authored once
   at founding and amended at reorg. Keeping it a file (not an Issue) is deliberate — it is not disposable
@@ -106,187 +106,216 @@ product the org builds*, written into the product/org root — not a copy of thi
 
 ---
 
-## 0b. 要求記述の書式は規格に準拠する — 名前だけでなく中身も固定する
+## 0b. The format of the requirements conforms to a standard — fix the content, not just the name
 
-§0a は founding 成果物の**ファイル名**を固定した。しかし**中身の書式**を規定しなかったため、
-founding のたびにエージェントが構成をその場で発明していた。同じ要求から別の構造の文書が出るなら、
-「同じ spec ⇒ 同じプロセス・同じ契約」という §0 の主張は、**要求記述の層で最初から破れている**。
-名前を固定して中身を放置するのは、器を揃えて中身を問わないのと同じ。
+§0a fixed the **file names** of the founding artifacts. It prescribed nothing about **the format of
+their content**, so an agent invented the structure afresh at every founding. If the same
+requirements produce documents of different structure, §0's claim — "same spec ⇒ same process, same
+contract" — is **already broken at the layer where requirements are written**. Fixing the names and
+leaving the content is the same as standardising the vessels and asking nothing of what goes in.
 
-### 準拠のレベル: ISO/IEC/IEEE 29148:2018 の tailored conformance
+### Level of conformance: tailored conformance to ISO/IEC/IEEE 29148:2018
 
-同規格 §4.5.2 が正式に認める適合形態を宣言する。**SRS の全20条項（§9.6）は採らない** —
-`Memory constraints`・`Site adaptation requirements`・`Logical database requirements` は組込み・
-防衛・規制産業向けの条項で、小規模プロダクトでは空欄かボイラープレートにしかならない。
-**空欄の節が並ぶ文書は読まれなくなり、やがて更新されなくなる**。採るのは次の4条項:
+We declare the form of conformance that standard's §4.5.2 formally recognises. **Not all twenty SRS
+clauses (§9.6) are adopted** — `Memory constraints`, `Site adaptation requirements`, and
+`Logical database requirements` are clauses for embedded, defence, and regulated industries, and in
+a small product they become empty fields or boilerplate. **A document lined with empty sections
+stops being read and eventually stops being updated.** The four adopted are:
 
-| 条項 | 内容 | 検査 |
+| clause | content | check |
 |---|---|---|
-| §5.2.4 | 構文規約（主語＋`shall`。`must` は要求と誤解されるので使わない） | 警告 |
-| §5.2.5 | 個々の要求の特性9つ（Verifiable / Singular / Unambiguous …） | 一部を機械化 |
-| §5.2.6 | 集合の特性5つ（TBD/TBS/TBR を残さない、矛盾・重複がない） | TBD を落とす |
-| §5.2.7 | **避けるべき語**（主観語・最上級・抜け穴・全称語・曖昧な接続） | **落とす** |
+| §5.2.4 | syntactic rules (subject + `shall`; `must` is not used, as it is mistaken for a requirement) | warning |
+| §5.2.5 | the nine characteristics of each requirement (Verifiable / Singular / Unambiguous …) | partly mechanised |
+| §5.2.6 | the five characteristics of the set (no TBD/TBS/TBR left, no contradiction or duplication) | fails on TBD |
+| §5.2.7 | **the words to avoid** (subjective, superlative, loophole, universal, vague conjunction) | **fails** |
 
-§5.2.7 が本体である。「使いやすい」「可能であれば」「すべての場合」は、**人によって判定が変わる**
-か、**実装しない口実になる**か、**例外の有無が検証されていない**。AIエージェントに渡す文としては
-特に危険で、曖昧語は推測の余地としてそのまま実装に流れ込む。
+§5.2.7 is the substance. "Easy to use", "if possible", and "in all cases" either **change their
+verdict from person to person**, **become an excuse not to implement**, or **leave the existence of
+exceptions unverified**. They are especially dangerous in a sentence handed to an AI agent: a vague
+word flows straight into the implementation as room for a guess.
 
-### 併せて採るもの
+### What is adopted alongside it
 
-- **EARS**（Alistair Mavin / Rolls-Royce。Airbus・NASA・Bosch・Intel・Siemens が採用）—
-  6パターンと ruleset「**トリガーは最大1つ**」。この制約が**要求の粒度を構文レベルで強制する**。
-  学習コストが実質ゼロで、効果が最も大きい。§5.2.5 の *Conforming* も同時に満たす
-- **Given-When-Then**（Cucumber 公式仕様の Gherkin から記法だけ借用）— 受入基準。
-  要求は EARS、その検証シナリオは GWT という役割分担
-- **`[NEEDS CLARIFICATION]` マーカー**（GitHub Spec Kit 由来）— **最重要**。
-  曖昧なまま推測で実装されるのを止める。未解決で残っていれば lint が落とす
-- **Non-Goals / Alternatives Considered**（Google Design Doc 由来）— スコープクリープを止める
-  最も安価な装置
+- **EARS** (Alistair Mavin / Rolls-Royce; adopted by Airbus, NASA, Bosch, Intel, and Siemens) —
+  its six patterns and the ruleset "**at most one trigger**". That constraint **enforces the
+  granularity of a requirement at the syntactic level**. It costs effectively nothing to learn and
+  gives the largest effect. It satisfies §5.2.5's *Conforming* at the same time
+- **Given-When-Then** (only the notation, borrowed from Gherkin in Cucumber's official
+  specification) — the acceptance criteria. Requirements in EARS, their verification scenarios in
+  GWT
+- **the `[NEEDS CLARIFICATION]` marker** (from GitHub Spec Kit) — **the most important one**. It
+  stops something ambiguous from being implemented on a guess. Left unresolved, the lint fails
+- **Non-Goals / Alternatives Considered** (from Google's Design Doc) — the cheapest device there is
+  for stopping scope creep
 
-規定は `template/REQUIREMENTS.md`、検査は `tools/req_lint.py`。`/org-found` が両方を呼ぶ。
+The prescription is `template/REQUIREMENTS.md` and the check is `tools/req_lint.py`. `/org-found`
+calls both.
 
-### なぜ「RFP」をやめたか
+### Why "RFP" was dropped
 
-RFP (Request for Proposal) は**調達文書**である。発注者が**外部の競合ベンダー**に提案を求め、
-**比較評価して契約相手を選ぶ**ために発行する。中核は評価基準・配点・提案書式の指定・契約条項で、
-自社開発（実装主体が単一で、内部が可視で、常時交渉可能）ではこれらが**すべて無意味**になる。
+An RFP (Request for Proposal) is **a procurement document**. A commissioning party issues it to
+solicit proposals from **competing external vendors** and **evaluate them comparatively to select a
+party to contract with**. Its core is the evaluation criteria, the scoring, the required proposal
+format, and the contract terms — and in in-house development (a single implementing party, an
+interior that is visible, negotiation available at any time) **all of them become meaningless**.
 
-ここで書いているものの正確な対応物は 29148 の **StRS (Stakeholder Requirements Specification)**
-— 発注側の視点でニーズを記述し、まだ解に踏み込んでいない文書。ファイル名は `REQUIREMENTS.md`
-とする（規格の略語を背負わずに済み、誤解がない）。
+The exact counterpart of what is written here is 29148's **StRS (Stakeholder Requirements
+Specification)** — a document describing needs from the commissioning side, before stepping into a
+solution. The file is named `REQUIREMENTS.md` (it carries no standard's acronym, and misleads
+nobody).
 
-RFP から借りる価値があるのは**「評価基準を事前に文書化する」規律**だけで、それは自社開発では
-「**受入基準を実装前に確定する**」に翻訳される。本テンプレートでは §4（Acceptance）と
-§5（Success Criteria）がそれを担い、`coverage-manifest.md` がその契約への写像を担う。
+The one thing worth borrowing from an RFP is **the discipline of documenting the evaluation criteria
+in advance**, which in in-house development translates to "**settle the acceptance criteria before
+implementing**". In this template §4 (Acceptance) and §5 (Success Criteria) carry that, and
+`coverage-manifest.md` carries its mapping onto the contract.
 
 ---
 
-## 0c. 人間にしか実行できない作業も Issue にする — 散文に落とさない
+## 0c. Work only a human can carry out becomes an Issue too — it does not fall into prose
 
-§0a は founding 成果物の名前を、§0b は要求記述の書式を固定した。どちらも「org が作るもの」の話で
-ある。しかし実際の founding には、**org には構造的に実行できない作業**が必ず混ざる:
+§0a fixed the names of the founding artifacts and §0b the format of the requirements. Both concern
+"what the org produces". A real founding, however, always contains **work the org is structurally
+incapable of carrying out**:
 
-- 外部サービスのアカウント作成と課金（Supabase、決済事業者）
-- OAuth クライアントの登録、API キーの発行
-- ドメイン取得、ストアの開発者登録と審査提出
-- GitHub の管理設定（ブランチ保護、シークレット登録）
+- creating and billing accounts on external services (Supabase, a payment provider)
+- registering an OAuth client, issuing an API key
+- acquiring a domain, registering as a store developer and submitting for review
+- GitHub's administrative settings (branch protection, registering secrets)
 
-これらは org のツールでは完結しない。だから **CEO に依頼する**しかないのだが、その依頼が
-コマンドの出力する散文にしか現れていなかった。実地の founding で3件が「申し送り」として文章に
-書かれ、**Issue にも台帳にも残らなかった**。
+None of these complete within the org's tools, so **asking the CEO** is the only option — and that
+request appeared only in the prose a command printed. In a founding in the field, three of them were
+written into the text as "handover notes" and **left neither on an Issue nor in the ledger**.
 
-### なぜ散文では駄目なのか
+### Why prose does not work
 
-| 失われるもの | 具体的に何が起きるか |
+| what is lost | what actually happens |
 |---|---|
-| **永続性** | セッションが切れれば消える。`/org-resume` は ledger を読むので復元されない |
-| **board の正しさ** | `/org` が「全 Issue ready・GREEN」と出すのに、実際は着手できない |
-| **ready の正しさ** | 人間待ちを依存として表現できないので、ブロック済みの task が maker に渡る |
-| **coverage の正しさ** | `coverage-check` は「Issue になったか」しか見ない。前提が欠けても 66/66 と出る |
+| **persistence** | it vanishes when the session ends. `/org-resume` reads the ledger, so it is not restored |
+| **a correct board** | `/org` reports "every Issue ready, GREEN" while nothing can actually be started |
+| **a correct ready** | waiting on a human cannot be expressed as a dependency, so a blocked task reaches a maker |
+| **correct coverage** | `coverage-check` only asks "did it become an Issue". It reports 66/66 with a prerequisite missing |
 
-とりわけ最後の例が象徴的で、**ブランチ保護の設定は §4e の機械的拒否層の一部**でありながら
-GitHub の管理設定なのでコードでは実現できない。それが散文に消えると、「機械が守るはず」の層に
-穴が開いたまま誰も気づかない。
+The last is the most telling: **setting branch protection is part of §4e's layer of mechanical
+refusal**, and yet it is a GitHub administrative setting that code cannot achieve. Vanishing into
+prose, it leaves a hole in the layer that "the machine is supposed to guard", with nobody noticing.
 
-### 規定
+### The rule
 
-**`/org-found` と `/org-decompose` は、人間にしか実行できない前提条件を Issue にすること。**
-`github_sync needs-human` がその専用の口で、`orgforge:needs-human` ラベルを立てる。
+**`/org-found` and `/org-decompose` file the prerequisites only a human can carry out as Issues.**
+`github_sync needs-human` is the dedicated entry point for that, and it raises the
+`orgforge:needs-human` label.
 
-判定は単純: **org のツールで完結するか。** 完結しないなら人間タスクである。
+The test is simple: **does it complete within the org's tools?** If not, it is a human task.
 
-抽出源は既に手元にある — `REQUIREMENTS.md` の **Open Questions**（「実装前に決める」と自分で
-書いたもの）と **Assumptions**（「CEO が用意する」と書いたもの）は 29148 の標準節であり、
-機械的に読める場所にある。§0b でその節を必須にしたのは、ここに効かせるためでもある。
+The sources to extract from are already at hand — `REQUIREMENTS.md`'s **Open Questions** (what you
+yourself wrote as "decide before implementing") and **Assumptions** (what you wrote as "the CEO
+provides this") are standard 29148 sections and sit somewhere a machine can read. Making those
+sections required in §0b was partly to make this work.
 
-立てた Issue は通常の task と同じ形なので、下流を `--blocks` と `Depends on: #N` で縛れる。
-人間の作業が close されるまで、依存する task は `ready` に出てこない。
+The Issue it files has the same shape as an ordinary task, so a downstream one can be bound with
+`--blocks` and `Depends on: #N`. Until the human's work is closed, whatever depends on it does not
+appear in `ready`.
 
-**`/org` の board では RED として最上位に出す。** 「あなたを待っている」ものこそ board の意味で
-あり、それが見えないなら board は嘘をついている。
+**On `/org`'s board it appears at the top, as RED.** What "is waiting on you" is precisely what a
+board is for, and a board that does not show it is lying.
 
-> **人間への依頼は、忘れられると最も長く止まる種類の作業である。** org が自分の作業だけを
-> 構造化して人間への依頼を散文に落とすのは、いちばん止まりやすいものをいちばん失われやすい
-> 場所に置くということ。逆にすべきである。
+> **A request to a human is the kind of work that stops things longest when it is forgotten.** For
+> an org to structure only its own work and let its requests to a human fall into prose is to put
+> the thing most likely to stall in the place most likely to lose it. It should be the other way
+> around.
 
 ---
 
-## 0d. 配管は自動化する、判断は自動化しない
+## 0d. Automate the plumbing; do not automate the judgment
 
-§0a〜§0c は「何を書くか」を固定した。ここは「**誰が打つか**」の話である。
+§0a through §0c fixed "what is written". This section is about "**who types it**".
 
-`/org-work` は long らく「こういうイベントを打て」という散文の指示だった。実行するのは
-エージェントであり、実地では **Issue 2件あたり11コマンド**を手で叩いていた。18 Issue なら
-約90回で、そのうち1回の取り違えで台帳の整合が崩れる。
+`/org-work` was for a long time a prose instruction to "type these events". An agent was what
+executed it, and in the field **eleven commands were typed by hand per two Issues**. Eighteen Issues
+comes to around ninety, and one mistake among them breaks the ledger's consistency.
 
-さらに悪いのは `parent` の扱いだった。フェーズ連鎖は親 objective の admit を継承する（§2）のに、
-その値を**人が Issue から目で拾って手打ち**していた。**継承を実装しても、値が手打ちである限り
-取り違えが起きる** — 拾えるものを拾わせないのは設計の怠慢である。
+Worse was how `parent` was handled. A phase chain inherits the parent objective's admit (§2), and yet
+**a human picked that value out of the Issue by eye and typed it in**. **Implementing the inheritance
+changes nothing while the value is typed by hand** — not picking up what can be picked up is
+negligence in the design.
 
-### 線引き: 配管か、判断か
+### The line: plumbing, or judgment?
 
-| | 例 | 誰が |
+| | examples | who |
 |---|---|---|
-| **配管**（順序と actor が決まっている） | claim → spec_delegated → phase_started → cycle_started → log → stage / Issue ごとの worktree を切る / seam contract の生成 / 憲章とSPECの注入 / gate の所見を skeptic へ運ぶ / `decide` の雛形 | **ツール**（`org_cycle.py`） |
-| **判断**（役割の仕事） | 何を選ぶか / 誰に委ねるか / 分割するか / admit するか / verdict・why・risk / どのミューテーションを試すか | **役割**（自動化しない） |
+| **plumbing** (the order and actor are settled) | claim → spec_delegated → phase_started → cycle_started → log → stage / cutting a worktree per Issue / generating the seam contract / injecting the charter and the SPEC / carrying the gate's findings to the skeptic / the `decide` template | **the tool** (`org_cycle.py`) |
+| **judgment** (the role's work) | what to choose / whom to delegate to / whether to split / whether to admit / the verdict, why, and risk / which mutation to try | **the role** (not automated) |
 
-**`verify` が verdict を埋めないのは、線引きの中でもとりわけ譲れない一点である。** ツールが
-verdict を決めた瞬間に gate は形骸化し、admission は「ツールが出した文字列を役割が転記する
-儀式」に落ちる。埋めてよいのは**材料**（憲章・SPEC・seam・gate の所見）までで、**結論**は
-役割が出す。逆に、材料を毎回人が書き下ろす状態も同じくらい悪い: 検証手順を人が書けば、
-書くたびに厳しさが変わり、18 Issue なら18通りの基準になる。基準の出所は `agents/<role>.md`
-ただ1つにし、変更はそこ1箇所で効くようにする。
+**That `verify` does not fill in the verdict is the least negotiable point on this line.** The
+moment a tool decides the verdict, the gate becomes a formality and an admission falls to "a ritual
+in which a role transcribes a string the tool produced". What may be filled in is **the material**
+(the charter, the SPEC, the seam, the gate's findings); **the conclusion** comes from the role.
+The opposite state — a human writing the material out afresh each time — is equally bad: a human
+writing the verification procedure shifts the strictness with each writing, and eighteen Issues
+produce eighteen standards. The standard has one source, `agents/<role>.md`, and a change there
+takes effect everywhere.
 
-**二重管理はしない — 書くのは1コマンド。** 判断は Issue と台帳の両方に残る（Issue に理由、
-台帳に受領証と digest）が、**打つのは1回**である。以前は `decide` が Issue に書き、人が
-`ledger append` を別に打つ設計で、運用では片側落ちが繰り返し起きた（反証の記録が台帳に無い、`progress_recorded` が0件）。actor は `--by` で既に
-渡っているので、分ける理由が無かった。
+**No double bookkeeping — one command writes.** A judgment stays in both the Issue and the ledger
+(the reason on the Issue; the receipt and digest in the ledger), but **it is typed once**. The
+earlier design had `decide` write to the Issue and a human type `ledger append` separately, and in
+operation one side went missing again and again (no refutation record in the ledger; zero
+`progress_recorded`). The actor was already passed through `--by`, so there was no reason to
+separate them.
 
-順序は **台帳が先、Issue が後**。統制（自己承認拒否・順序違反）は台帳が持っているので、
-Issue に書いてから台帳が拒否すると「Issue には admit と書いてあるが台帳には無い」という
-最悪の食い違いが外に残る。拒否されるなら、外から見える記録を作る前に止める。
+The order is **the ledger first, the Issue second**. The controls (refusing self-approval, order
+violations) live in the ledger, so writing to the Issue first and then being refused leaves the
+worst kind of mismatch visible from outside: "the Issue says admit but the ledger has nothing". If
+it is refused, stop before any record visible from outside exists.
 
-**冪等キーは統制の裏口になってはいけない。** 冪等 no-op は「同じ actor による同じ論理
-イベントの再実行」に限る。`(class, natural_key)` だけを見ていたときは、キーさえ一致すれば
-actor が違っても no-op になり、DISTINCT_ACTOR も REQUIRES_PRIOR も**評価すらされなかった** —
-gate の判定と同じキーを maker が使えば、自己承認が exit 0 で通った。冪等性は再実行を守る
-仕組みであって、統制を迂回する経路ではない。
+**An idempotency key must not become a back door around the controls.** An idempotent no-op is
+limited to "a re-run of the same logical event by the same actor". While only
+`(class, natural_key)` was read, a matching key made it a no-op even with a different actor, and
+neither DISTINCT_ACTOR nor REQUIRES_PRIOR was **even evaluated** — a maker using the same key as
+the gate's judgment got a self-approval through at exit 0. Idempotency is a mechanism for
+protecting a re-run, not a path around the controls.
 
-**訂正は第一級のイベントである。** 台帳は追記型なので過去を消せない。誤って書いた記録も、
-仕様検証のために書いたプローブも、そこに残り続ける。これを自由記述の注記で済ませると
-**機械が読めない** — 検証用のプローブが実判定として集計され、board が「admit 済みだが
-skeptic の記録が無い」と現実と食い違う表示を出し続けた。`correction{corrects, kind}` で
-無効を宣言し、`kind: probe|mistake` は集計から除外する。`backfill`（後から書いた実判定）と
-`superseded`（後続判定で置き換わった）は除外しない — 前者は有効な判定であり、後者は
-「同一 deliverable は最新判定が有効」という時系列の解決が扱う領域だからである。
+**A correction is a first-class event.** An append-only ledger cannot erase the past. A record
+written in error, and a probe written to verify the specification, both stay there. Settling for a
+free-text note leaves it **unreadable by machine** — verification probes were counted as real
+judgments and the board kept displaying "admitted, but no record from the skeptic", at odds with
+reality. `correction{corrects, kind}` declares the void, and `kind: probe|mistake` is excluded from
+the counts. `backfill` (a real judgment written afterwards) and `superseded` (replaced by a later
+judgment) are not excluded — the first is a valid judgment, and the second belongs to the
+chronological resolution that "the latest judgment on a deliverable is the live one".
 
-**識別子の揺れで統制が消えてはいけない。** 人間側は Issue 番号（`deliverable` / `issue`）で
-書き、強制ロジックは `candidate_id` / `claim_id` を見ていた。同じ仕事を指しているのに片方しか
-見ないため、実地では自己承認も、反証を経ない deploy も素通りした。書き手がどのキーを使ったかで
-統制の有効性が変わるなら、それは統制ではない。台帳にある対応関係（`pack_manifest_id: "issue-7"`
-など）を辿って同一性を解決し、**相関の取れない判定は拒否する**。素通りが最悪なのは、統制が
-効いていないことが誰にも見えないまま、ハッシュ連鎖が偽造にお墨付きを与えるからである。
+**A control must not vanish through variation in identifiers.** The human side wrote Issue numbers
+(`deliverable` / `issue`) while the enforcement logic read `candidate_id` / `claim_id`. Both point
+at the same work, and reading only one let both a self-approval and a deploy without refutation
+walk straight through in the field. If a control's effectiveness depends on which key the writer
+used, it is not a control. The correspondences present in the ledger (`pack_manifest_id:
+"issue-7"` and the like) are followed to resolve identity, and **a judgment that cannot be
+correlated is refused**. Walking through is the worst outcome because the hash chain then lends its
+endorsement to a forgery, with nobody able to see that the control is not in effect.
 
-**worktree は「判断で守れない不変条件」の実例である。** 並列 fan-out で、ある Issue のコミットが
-`feat/issue-8-settle` に載る事故が実際に起きた。`git checkout` はツリー全体を切り替えるので、
-同一ツリーで並列 maker を走らせる限り、注意深さの問題ではなく構造の問題として再発する。
-**「毎回正しく判断する」前提の設計は破れる** — だから `begin` が `.orgforge/wt/issue-<N>/` を
-物理的に分ける。これは forced invariant であって forced delegation ではない。
+**A worktree is a worked example of an invariant judgment cannot protect.** In a parallel fan-out,
+the accident of one Issue's commits landing on `feat/issue-8-settle` actually happened. `git
+checkout` switches the whole tree, so for as long as parallel makers share one tree it recurs as a
+structural problem rather than a problem of care.
+**A design that assumes "judge correctly every time" breaks** — which is why `begin` separates
+`.orgforge/wt/issue-<N>/` physically. This is a forced invariant, not forced delegation.
 
-これは docs/03 §6.5 の線引きをそのまま踏襲している — **forced delegation は設計エラー、
-forced invariant は正しい**。`org_cycle` が自動化したのは後者だけで、fan-out するかどうかも、
-admit するかどうかも、依然として役割の判断である。
+This follows exactly the line docs/03 §6.5 draws — **forced delegation is a design error; a forced
+invariant is right**. What `org_cycle` automated is only the latter: whether to fan out and whether
+to admit both remain the role's judgment.
 
-### 三つの性質
+### Three properties
 
-1. **自動解決** — `parent` は Issue の `Parent: #N`（`create` が書く）とネイティブ sub-issue API
-   から解決する。`candidate_id` は Issue のトレーラから読む。**人が値を運ばない**
-2. **止まったら止まったまま** — 途中で失敗したら、そこから先は打たない。部分適用のまま
-   「成功」と報告するのが最悪（台帳の整合が崩れた状態を正常と見せる）
-3. **再実行が安全** — 各イベントは natural-key で冪等なので、済んだ分は no-op になる。
-   だから「止まったら直して再実行」が成立する
+1. **Automatic resolution** — `parent` resolves from the Issue's `Parent: #N` (written by `create`)
+   and from the native sub-issue API. `candidate_id` is read from the Issue's trailer. **No human
+   carries a value**
+2. **Stopped means stopped** — on a failure partway, nothing beyond it is typed. Reporting
+   "success" while half-applied is the worst outcome (it presents a ledger left inconsistent as
+   normal)
+3. **Re-running is safe** — each event is idempotent by natural key, so what is done becomes a
+   no-op. That is what makes "fix it and run it again" work
 
-`plan` サブコマンドは**何も実行せず**イベント列だけを印字する。打つ前に確認したいとき用。
+The `plan` subcommand **runs nothing** and prints only the sequence of events. For when you want to
+look before typing.
 
 ---
 
@@ -405,7 +434,7 @@ A candidate deliverable is **not admissible** past the phase named unless its re
 
 | Artifact | Phase gate | Why it is a reproducibility requirement |
 |---|---|---|
-| **A committed lockfile + a populated, version-pinned manifest** | implement → test | `clone → install` must resolve to *one* dependency tree on every machine and every day; a manifest with version ranges and no lockfile resolves differently over time (the タテカエ failure: manifest with no deps, no lock). |
+| **A committed lockfile + a populated, version-pinned manifest** | implement → test | `clone → install` must resolve to *one* dependency tree on every machine and every day; a manifest with version ranges and no lockfile resolves differently over time (the Tatekae failure: manifest with no deps, no lock). |
 | **A pinned toolchain** (`.nvmrc` / `.tool-versions` / `engines`, per-language) | implement → test | the same source transpiles/builds/tests identically only on a pinned runtime; an unpinned node/deno/python floats the result. |
 | **A one-command setup and a one-command test, documented in a README** | test → integrate → deploy | "verified end-to-end" must be reproducible *by a stranger from a clean clone*, not asserted by the maker; the **gate re-runs both from a fresh checkout** rather than trusting the claim. |
 | **Idempotent, re-runnable migrations + a one-command DB bring-up** | test → integrate → deploy | a second developer must be able to bring up state deterministically; bare `create table` (no `if not exists`, no seed, no apply command) is not re-runnable. |
@@ -660,74 +689,87 @@ re-split candidate (a *shape* check, not a quality judgment).
 
 ---
 
-### 分割の判断軸 — SDD の既存ツールが持つもの、持たないもの
+### The axes for deciding a split — what the existing SDD tools have, and what they do not
 
-タスクへの分割基準を Spec Kit と Kiro の実テンプレートで確認した（原文は docs/sources）。
+The criteria for splitting into tasks were checked against the real templates of Spec Kit and Kiro
+(the sources are in docs/sources).
 
 | | Spec Kit | Kiro | orgforge |
 |---|---|---|---|
-| 分割の第一軸 | ユーザーストーリー（P1/P2/P3） | design のコンポーネント + 逐次の依存連鎖 | coverage-manifest の must-have 行 |
-| 並列の判定 | `[P]` = *"different files, no dependencies"* | 概念なし（逐次前提） | `owns` の交わり（= Spec Kit と同じ判定） |
-| 粒度の明文規範 | 実質なし（"exact file path" 必須 + *"not vague"*） | *"Implement X function" rather than "Support X feature"* | 「壊れ方が1種類か」（下記） |
-| **過大タスクの検出** | **なし** | **なし**（人間の承認ゲートのみ） | `split-check`（警告） |
-| テスト | OPTIONAL（明示要求時のみ） | TDD 既定 | 必須（機械バー docs/11 §4e） |
+| the primary axis | user stories (P1/P2/P3) | design components + a sequential dependency chain | the must-have rows of coverage-manifest |
+| deciding parallelism | `[P]` = *"different files, no dependencies"* | no such concept (sequential by assumption) | the intersection of `owns` (= the same decision as Spec Kit) |
+| a written norm for granularity | effectively none ("exact file path" required + *"not vague"*) | *"Implement X function" rather than "Support X feature"* | "is there one way it breaks" (below) |
+| **detecting an oversized task** | **none** | **none** (a human approval gate only) | `split-check` (a warning) |
+| tests | OPTIONAL (only on explicit request) | TDD by default | required (the machine bar, docs/11 §4e) |
 
-**`owns` の交わりだけでは足りない、というのが実地で最も高くついた発見である。** これは
-Spec Kit の `[P]` と同じ判定であり、**同じ限界を継承していた**: `owns` が `supabase/` に
-1つのディレクトリに閉じていた Issue は分割されなかったが、中身は「スキーマの形（型・制約で守る）」と
-「認可（攻撃シナリオで守る）」という壊れ方も検証手段も別の2つだった。結果、gate が14回の
-判定のうち一度も同じ観点で連続できず、複数のマイグレーションが相互に干渉し、10周を超えても終わらなかった。
-同じ日に #8（1つの関数）と #10（CI 設定）は1〜2周で通っている。
+**That the intersection of `owns` is not enough was the most expensive discovery in the field.**
+It is the same decision as Spec Kit's `[P]`, and it **inherited the same limit**: an Issue whose
+`owns` was closed inside the single directory `supabase/` was not split, while its content held two
+things differing in both how they break and how they are verified — "the shape of the schema
+(guarded by types and constraints)" and "authorization (guarded by attack scenarios)". As a
+result the gate could not once sustain the same viewpoint across fourteen judgments, several
+migrations interfered with each other, and it did not finish in over ten rounds.
+On the same day #8 (one function) and #10 (a CI setting) passed in one or two.
 
-そこで軸を1本足す:
+So one more axis is added:
 
-> この deliverable が壊れたとき、**壊れ方は1種類か**。検証に必要な手段は**1種類か**。
+> When this deliverable breaks, **is there one way it breaks**? Does verifying it need **one
+> means**?
 
-Kiro の *"Implement X function" rather than "Support X feature"* は、同じことを別の言い方で
-述べている — 機能単位ではなく、**1つの壊れ方に対応する単位**に落とせ、ということである。
+Kiro's *"Implement X function" rather than "Support X feature"* says the same thing another way —
+bring it down not to a unit of feature but to **a unit answering one way of breaking**.
 
-**過大タスクの検出は、調べた範囲のどのツール・手法も持っていない**（docs/sources）。
-Spec Kit の `analyze` に粒度の検査は無く、Kiro は人間の承認ゲートのみ。BMAD は同じ機能要求
-（Issue #1471「タスク数が閾値を超えたら分解エージェントを起動」）が**未解決のまま放置**され、
-学術側の AQUSA も Estimatable（サイズ過大）の自動化を「意味理解を要する」として明示的に
-諦めている。定量的な閾値を持つのは Devin の *"if a task would take you three hours or less"*
-だけで、それも事前 lint ではない。人間の diff レビューを廃止した org（§4f）では承認ゲートが
-無いので、`github_sync split-check` が起票後に警告を出す — 壊れ方が複数か、認可の要求が
-境界だけを定めていないか。**止めない、警告する**: 何を守るべきかは人が決める。
+**Detecting an oversized task is something no tool or method surveyed has** (docs/sources).
+Spec Kit's `analyze` carries no granularity check, and Kiro has only a human approval gate. BMAD
+has the same feature request (Issue #1471, "start a decomposition agent once the task count
+exceeds a threshold") **left open and unresolved**, and on the academic side AQUSA explicitly
+gives up on automating Estimatable (oversized), calling it a matter requiring semantic
+understanding. The only quantitative threshold is Devin's *"if a task would take you three hours
+or less"*, and even that is not a pre-filing lint. An org that has retired human diff review (§4f)
+has no approval gate, so `github_sync split-check` warns after filing — are there several ways of
+breaking, and does the authorization requirement set only the boundary? **It does not stop; it
+warns**: what should be protected is a human's call.
 
-**「同じファイルを触るか」を分割基準にすることは、既存の規範体系ではむしろ反パターンである。**
-Humanizing Work の垂直スライスの定義は *"a work item that delivers a valuable change in system
-behavior such that you'll probably have to touch multiple architectural layers"* — **複数層に
-触ることを肯定的に含む**。層ごとに割る（UI で1つ、DB で1つ）のは independent と valuable に
-反する失敗パターンとして名指しされている。Tessl の spec:code 1:1 写像は逆の極で、Fowler の
-分析はそれを「コンポーネント横断の合成を制限する」限界として指摘している。
+**Making "does it touch the same file" the criterion for splitting is, in the existing normative
+bodies, an anti-pattern.** Humanizing Work defines a vertical slice as *"a work item that delivers
+a valuable change in system behavior such that you'll probably have to touch multiple architectural
+layers"* — it **positively includes touching several layers**. Splitting by layer (one for the UI,
+one for the DB) is named outright as a failure pattern, against both independent and valuable.
+Tessl's 1:1 spec-to-code mapping is the opposite pole, and Fowler's analysis names it as a limit
+that "restricts composition across components".
 
-orgforge の `owns` 基準は**衝突の回避**（並列 maker が同じファイルを書かない）には正しいが、
-**分割の判断**としてはこれ1本では足りない。だから「壊れ方」の軸を足す。
+orgforge's `owns` criterion is right for **avoiding collisions** (parallel makers not writing the
+same file), but as **the judgment about splitting** it is not sufficient on its own. Hence the
+"way of breaking" axis.
 
-### 検査を呼ぶかどうかを、検査される側が決めてはいけない
+### Whoever is checked must not decide whether the check runs
 
-`integrate` は gate の admit と skeptic の survives が台帳にあるかを確認して止める。しかし
-**呼ばれなければ何も起きない。** 運用では、質の高い maker 報告を受けた監督が `git merge` で
-`develop` に入れ、gate も skeptic も通らないまま複数の deliverable が統合された。台帳は後から
-正しく拒否したが、拒否が来たのは**コードが入った後**である。
+`integrate` confirms that the gate's admit and the skeptic's survives are in the ledger, and stops
+otherwise. But **nothing happens unless it is called.** In operation a supervisor who had received
+a high-quality maker report merged into `develop` with `git merge`, and several deliverables were
+integrated having passed neither the gate nor the skeptic. The ledger correctly refused them
+afterwards — but the refusal came **after the code was in**.
 
-これは「検査対象そのものの有無で判定するな」と同じ構造で、一段上にある: **道具の中に検査を
-足しても、その道具を呼ぶかどうかが呼ぶ側の裁量なら、検査は選択制になる。** 呼ばなかったことを
-検出できるのは、呼び出しの外側にある層（PreToolUse フック）だけである。
+This has the same structure as "do not decide by the presence of the subject itself", one level
+up: **adding a check inside a tool makes the check optional as long as calling that tool is at the
+caller's discretion.** The only thing that can detect it not being called is a layer outside the
+call — the PreToolUse hook.
 
-同じ形の穴が Issue の操作にもあった。`gh issue create` は `dept` / `objective` / `parent` /
-冪等キーを付けず、`gh issue close` は `cycle_completed`（`domain_model` を必須とする）を残さない。
-organ を通さない書き換えは、記録の必須項目を丸ごと飛ばす。
+A hole of the same shape existed in Issue operations. `gh issue create` attaches no `dept`,
+`objective`, `parent`, or idempotency key, and `gh issue close` leaves no `cycle_completed` (which
+requires `domain_model`). A rewrite that does not go through an organ skips the record's required
+fields wholesale.
 
-**hold には打つべきコマンドを必ず添える。** 迂回は速さのためではなく「道具の名前を思い出す
-コスト」を払わなかったために起きる。コマンドが目の前にあれば迂回する理由が消える。逆に hold
-だけして代替を示さないと、**逃げ道の宣言が覚えられて常用され、迂回が記録に残らないまま
-高速化する** — それは hold が無い状態より悪い。
+**Always attach the command to type to a hold.** A bypass happens not for speed but because "the
+cost of remembering the tool's name" went unpaid. With the command in front of you, the reason to
+bypass disappears. Conversely, holding without offering an alternative means **the escape-hatch
+declaration gets memorised, becomes routine, and bypassing accelerates while leaving no record** —
+which is worse than having no hold at all.
 
-**逃げ道は用意し、通ったことを記録する。** 完全に塞ぐと壊れたときに詰まるので、明示の宣言
-（`ORG_ALLOW_MANUAL_MERGE` / `ORG_ALLOW_MANUAL_GH`）で通せるようにし、**その宣言自体を
-`bypass_declared` として台帳に残す**。塞げないことを記録する形である。
+**Provide the escape hatch, and record that it was used.** Blocking it completely traps you when
+something breaks, so an explicit declaration (`ORG_ALLOW_MANUAL_MERGE` / `ORG_ALLOW_MANUAL_GH`)
+lets it through, and **the declaration itself is left in the ledger as `bypass_declared`**. It is
+the shape of recording what cannot be blocked.
 
 ### 検査は、自分が要求している文面と同じ厳しさで書く
 
