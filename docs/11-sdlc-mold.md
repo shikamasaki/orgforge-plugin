@@ -771,42 +771,49 @@ something breaks, so an explicit declaration (`ORG_ALLOW_MANUAL_MERGE` / `ORG_AL
 lets it through, and **the declaration itself is left in the ledger as `bypass_declared`**. It is
 the shape of recording what cannot be blocked.
 
-### 検査は、自分が要求している文面と同じ厳しさで書く
+### Write a check as strictly as the wording it demands
 
-ガードのメッセージが「子プロンプトの**冒頭に1行**書く」と言っているのに、検査は**全文の部分
-一致**だった。結果、**否定文が宣言として通った** — 「contract も `INDEPENDENT:` も付けて
-いません」がそのまま独立宣言として一致した（実地のプローブ）。
+The guard's message said to write **one line at the top** of the child prompt, while the check was
+**a substring match over the whole text**. As a result **a negation passed as a declaration** — the
+Japanese for "I attached neither a contract nor `INDEPENDENT:`" matched verbatim as a declaration
+of independence (a probe in the field).
 
-実害のある形は「この作業は independent ではないので contract を付ける」と書いた spawn が
-独立宣言と誤判定されることで、**独立宣言は `owns` の宣言を免除する**ので、偶然の一致で免除が
-取れる。**検査が文面より緩いと、正しく書いた人だけが厳しい制約を負う。**
+The harmful shape is a spawn written as "this work is not independent, so I attach a contract"
+being misjudged as a declaration of independence: **such a declaration exempts the `owns`
+declaration**, so a chance match takes the exemption. **When a check is looser than the wording,
+only whoever wrote it correctly bears the strict constraint.**
 
-同じ穴が seam 側にもあった: `"seam contract"` という**語**を見ていたため、「no seam contract is
-attached」が宣言として通った。語ではなく**構造**（`## Your slice` / `Inputs you receive:` /
-`Outputs you MUST produce:`）を見る — 構造は否定文に現れない。「`Inputs you receive:` が無い」と
-書くことはあっても、コロン付きの見出しを否定文の中に置くことはまずない。
+The same hole existed on the seam side: it read the **word** `"seam contract"`, so "no seam
+contract is attached" passed as a declaration. Read **structure** rather than words (`## Your
+slice`, `Inputs you receive:`, `Outputs you MUST produce:`) — structure does not appear in a
+negation. One may write "there is no `Inputs you receive:`", but one hardly ever places a
+colon-terminated heading inside a negation.
 
-**一般形**: 宣言や約束を検査するなら、**それが現れる位置と形**を見る。散文に混ざりうる語だけを
-見ると、その語について語っただけで検査を通過する。この org が繰り返し塞いできた「確かめて
-いないことを確かめたかのように述べる」の、**道具側の変種**である。
+**The general form**: when checking a declaration or a promise, read **the position and shape in
+which it appears**. Reading only a word that can occur in prose lets merely talking about that word
+pass the check. It is **the tool-side variant** of the failure this org has closed again and again:
+stating something unverified as though it were verified.
 
-### 観測経路が値を隠すことがある
+### The observation path can hide a value
 
-`intake` が「本命ケースだけ exit=0」と報告されたが、実装は3経路すべてで 10 を返していた。
-原因は**パイプ**で、`| tail` を通すとシェルの終了コードは最後のコマンドのものになる。
+`intake` was reported as "exit=0 on the main case only", while the implementation returned 10 on
+all three paths. The cause was **a pipe**: through `| tail` the shell's exit code becomes the last
+command's.
 
-**実装が正しくても、観測が違えば同じように誤判断が起きる。** 終了コードで判定させる設計は、
-パイプを挟まれた瞬間に無効になる — 機械が拾う判定は**出力の中**にも置く（`INCOMPLETE` の1行）。
+**A correct implementation still produces the same misjudgment when the observation differs.** A
+design that decides by exit code is void the moment a pipe is inserted — a decision a machine picks
+up also goes **into the output** (one `INCOMPLETE` line).
 
-### 報告の切断 — 判定として読む前に、形を見る
+### A truncated report — read the shape before reading it as a judgment
 
-subagent の turn が**作業の途中で終わる**ことがある: `status` は
-completed で返り、`result` は「Now the key attack:」のような宣言1文だけ。`SendMessage` で
-再開させると続きを実行して完走したので、**agent が死んだのではなく、報告が成果物の形になる
-前に turn が終わっている**。
+A subagent's turn sometimes **ends mid-work**: `status` returns completed and `result` holds a
+single declarative sentence like "Now the key attack:". Resuming with `SendMessage` ran the rest to
+completion, so **the agent did not die — the turn ended before the report took the shape of a
+deliverable**.
 
-**危ないのは、それらしく切れた形である。** 「Now the key attack:」なら verdict が無いと分かる
-が、「MUST 2 は防がれました」で切れていたら、それを verdict として読んで admit しかねない。
+**The dangerous shape is the one that cuts off plausibly.** "Now the key attack:" is visibly
+missing a verdict, but a report cut off at "MUST 2 is defended" could be read as a verdict and
+admitted.
 The failure mode this org has detected again and again — stating something unverified as though it
 were verified — holds through the path of **a truncated report**: nobody has lied, and the record
 still carries a judgment presented as verified.
@@ -829,7 +836,7 @@ completion notifications):
 
 ```
 maker 486.7s (54%) · gate 260.2s (29%) · skeptic 169.3s (17%)
-1周 ≈ 15.3分 ／ 反証による周回 = 214分 / 269分 = 79%
+one round ≈ 15.3 min / rounds driven by refutation = 214 min / 269 min = 79%
 ```
 
 **"One wait" is only 21%; 79% is the number of rounds.** Lowering the gate's or skeptic's model on
@@ -1113,10 +1120,11 @@ being recorded on the path where "a reject arrived after the admit".
 
 When adding a branch that depends on order, **test both orders.** Confirming one lets it through.
 
-### 記録の手順が、判定の実行を要求してはいけない
+### A recording procedure must not require a judgment to be run
 
-判定を記録するために必要な値を得る手段が「判定をもう一度回すこと」なら、監督はその手順を
-飛ばす。実例: 判定対象の id を知るために材料を組むコマンドを打ち、別ハーネスの judge が
+If the only way to obtain a value needed to record a judgment is "run the judgment again", the
+supervisor skips that step. A worked example: the command that assembles the material was typed to
+learn the id of what was judged, and a judge in another harness
 it actually started one and waited minutes (before being cut off).
 
 **For a question that a read alone answers, provide a path that answers it with a read alone.**
@@ -1380,384 +1388,439 @@ Guarding the writes still leaves the state forgeable **if the read follows a pat
 at**. Measured: repointing the reference at an empty location made a halted org look "not
 halted".
 
-判定に使う読み取りは、書き手が起動時に固定した実体を見る。**参照を張り替えられても、
-見る先は動かない。**
+A read used in a judgment looks at the real content the writer fixed at startup. **Repointing the
+reference does not move what is read.**
 
-### 検査の入力を、検査される側が書けてはいけない
+### Whoever is checked must not be able to write the check's input
 
-統制の判定に使う値が **記録の本文に書けるもの**なら、それは検査ではない。実測で、2つの文字列を
-本文に書くだけで職務分離の強制を回避できた。
+If the value a control judges by is **something writable in the record's body**, it is not a check.
+Measured: writing two strings into the body was enough to bypass the enforcement of the separation
+of duties.
 
-**そして自分のテストがその偽装を「正しい経路」として固定していた。** 検査を足したとき、
-その検査が読む値を **誰が書けるか**を必ず確かめる。書ける側が書いた値を根拠にすると、
-検査は形だけになり、テストがそれを正常系として保存する。
+**And my own tests had pinned that forgery as "the correct path".** When adding a check, always
+confirm **who can write** the value it reads. Grounding a check in a value written by the side
+being checked makes it a formality, and the tests then preserve that as the happy path.
 
-判定に使う値は、**検証した経路だけが生成する**形にする。本文に書かれた同名の値は拒否する。
+A value used in a judgment takes a shape where **only the verified path generates it**. A
+same-named value written in the body is refused.
 
-### 設定は三値で読む
+### Read configuration as three values
 
-有効・無効の二値で読むと、**読めないときに無効へ倒れる**。有効にしていた org が、設定ファイルが
-壊れた瞬間に無防備になる（実測: 破損前 exit 3 → 破損後 exit 0）。
+Reading it as the two values enabled/disabled **falls to disabled when it cannot be read**. An org
+that had it enabled becomes defenceless the moment the configuration file breaks (measured: exit 3
+before corruption, exit 0 after).
 
-読み取りは **有効・無効・判定できない** の三値にし、判定できないなら止める。構文の破損だけでなく、
-**型が違う**場合（map であるべき所が文字列、真偽値であるべき所が別の値）も「判定できない」に
-含める — 曖昧な値を「無効」と読まない。
+The read gives three values — **enabled, disabled, undecidable** — and stops where it is
+undecidable. Beyond broken syntax, **a wrong type** (a string where a map belongs, something else
+where a boolean belongs) counts as undecidable too — an ambiguous value is never read as
+"disabled".
 
-### 評価に使う値は、署名が覆う
+### The signature covers the values used in an assessment
 
-署名された記録に、**署名の外側の欄**を混ぜてはいけない。実測で、独立性の評価に使う値が署名の外に
-あり、署名後にその値を強い方へ書き換えても検証が通った。
+A signed record must not mix in **a field outside the signature**. Measured: the value used to
+assess independence sat outside the signature, and rewriting it to the stronger value after signing
+still verified.
 
-評価に使うなら署名対象に入れる。そして **形式が変わったら版を上げる** — 古い版の記録を新しい
-規則で読むと、覆っていない値を覆っていると誤解する。
+If it is used in an assessment, it goes into what is signed. And **raise the version when the format
+changes** — reading an old-version record under the new rules mistakes an uncovered value for a
+covered one.
 
-### 中身の権限を絞っても、入れ物を差し替えられるなら意味が無い
+### Tightening the permissions on the contents means nothing if the container can be replaced
 
-権威データの権限を絞っても、**その親ディレクトリが呼び出し側の所有**なら、ディレクトリごと
-置き換えられる。実体を呼び出し側の管理下から出し、参照だけを残す。そして **実際に書く側には
-実体のパスを渡す** — 参照を張り替えられても、書き込み先は動かない。
+Tightening the permissions on the authoritative data still allows replacing the directory wholesale
+**where its parent is caller-owned**. Move the real content out from under the caller's control and
+leave only a reference. And **give the side that actually writes the real path** — repointing the
+reference does not move the write target.
 
-### 名乗りを変えられるなら、名乗りの比較に意味は無い
+### If the name can be changed, comparing names means nothing
 
-職務分離を「誰が書いたか」の比較で行うとき、**その「誰か」を自由に名乗れるなら統制は無い**。
-実測で、本人としての自己承認は拒否されるのに、同じプロセスが別名を名乗ると通った。
+Where the separation of duties is done by comparing "who wrote it", **there is no control if that
+"who" can be claimed freely**. Measured: self-approval under one's own name is refused, while the
+same process passed by claiming another.
 
-塞ぐには、統制の中核となる記録に **検証済みの署名由来の主体** を要求する。ただし要求を有効に
-すると、署名の仕組みを持たない既存の運用が全部止まる — **既定は無効にし、鍵を配ってから
-有効にする**。無効が安全という意味ではなく、移行を可能にするための既定である。
+Closing it requires **a principal derived from a verified signature** on the records at the core of
+the controls. Enabling that requirement stops every existing deployment without a signing mechanism,
+though — **the default is off, and it is turned on after the keys are distributed**. Off does not
+mean safe; it is a default that makes migration possible.
 
-### 権限は「作れること」と「守れること」の両方を満たす
+### Permissions satisfy both "it can be created" and "it can be guarded"
 
-経路を守るために親ディレクトリの権限を絞るとき、**その経路を作る側が作れるか**を確かめる。
-実測で、root 所有の読み取り専用ディレクトリには、別の主体として動く常駐プロセスが socket を
-**作れなかった** — 守りすぎて動かない。
+When tightening a parent directory's permissions to guard a path, confirm **whether the side that
+creates that path still can**. Measured: under a root-owned read-only directory, a resident process
+running as a different principal **could not create** the socket — guarded so far that it does not
+run.
 
-解決は階層を分けることである。**anchor**（呼び出し側が書けない）と **leaf**（作る側が書ける）
-に分け、保証は「anchor に書けないので leaf ごと差し替えられない」とする。
+The answer is to split the hierarchy: an **anchor** (unwritable by the caller) and a **leaf**
+(writable by the creating side), with the guarantee being "the anchor cannot be written to, so the
+leaf cannot be replaced wholesale".
 
-### 別の主体が守っていることと、判断が独立していることは別
+### A separate principal guarding it, and the judgments being independent, are different things
 
-書き込みを担う主体を隔離しても、**判断する主体同士が独立しているかは別の問い**である。実測で、
-書き手の隔離値が判断者の隔離として記録され、鍵が違うだけで「別ワークロード」に昇格していた。
+Isolating the principal that writes leaves **whether the judging principals are independent as a
+separate question**. Measured: the writer's isolation value was recorded as the judge's isolation,
+and a merely different key promoted it to "a separate workload".
 
-欄を分けること。書き手の隔離は書き手の性質であり、判断者の独立性は判断者が申告するか、
-分からなければ「不明」である。**借りてきた値で昇格させない。**
+Keep the fields apart. The writer's isolation is a property of the writer; a judge's independence is
+declared by the judge, or is "unknown" where it is unknown. **Do not promote on a borrowed value.**
 
-### 導入する側と、受け入れる側の条件を突き合わせる
+### Reconcile the conditions of the installing side and the accepting side
 
-設定を書く道具と、その設定で動く道具が別なら、**両者の条件が食い違っていないかを確かめる**。
-実例: 導入スクリプトが親ディレクトリを group から書ける形にし、**受け入れる側がまさにその形を
-拒否した** — 導入は成功し、daemon は起動しない。
+Where the tool that writes the configuration differs from the tool that runs under it, **confirm
+that their conditions do not diverge**. A worked example: the installer made the parent directory
+group-writable, and **the accepting side refused exactly that shape** — the install succeeded and
+the daemon would not start.
 
-そして **前提を検査する主体を間違えない**。利用者の環境に必要なものが揃っていても、実際に動く
-主体（別の利用者として起動される常駐プロセス）から見えなければ意味が無い。検査は**動く側の
-環境で**行う。
+And **do not mistake which principal checks the prerequisites**. Whatever is present in the user's
+environment means nothing if it is invisible to the principal that actually runs (a resident
+process started as a different user). The check happens **in the environment of the side that
+runs**.
 
-### 「書けない」と「見えない」を混同しない
+### Do not confuse "cannot be written" with "cannot be seen"
 
-統制が要求するのは書けないことであって、見えないことではない。**読めない記録は、監査のための
-記録ではない。** 権限を絞るときは、検査・集計・投影が動き続けることを同時に確かめる。
+What a control demands is that it cannot be written, not that it cannot be seen. **A record that
+cannot be read is not a record for auditing.** When tightening permissions, confirm at the same
+time that the checks, the aggregation, and the projections keep working.
 
-### 検証が検証対象を壊してはいけない
+### A verification must not break what it verifies
 
-境界を確かめるために「書いてみる」と、成功したときに本物が壊れる。**開けるかどうかだけを見て、
-1バイトも書かない。** 権限を変えられるかは、実際に変えるのではなく**所有者を見る**。停止できるか
-を確かめるために止めてはいけない — 止まったら、以降の検証も、実運用の統制も落ちる。
+"Trying a write" to confirm a boundary breaks the real thing when it succeeds. **Read only whether
+it opens, and write not one byte.** Whether the permissions can be changed is answered by **reading
+the owner**, not by changing them. Do not stop something to confirm it can be stopped — once it
+stops, every later check and the controls in real operation fall with it.
 
-副作用がゼロで回せる経路を用意する。そして **その経路では「通せること」を確かめていない**と
-明記する — 止まるだけの仕組みは運用できない。
+Provide a path that runs with zero side effects. And state explicitly that **that path has not
+confirmed anything can get through** — a mechanism that only stops cannot be operated.
 
-### 隔離を主張する前に、実測で確かめる
+### Measure before claiming isolation
 
-設定を書いたことは、境界があることではない。**通常の呼び出し側から実際に書けないこと**を測る。
-書き込み・権限変更・経路の差し替え・停止を、それぞれ試して失敗することを確かめる。
+Having written the configuration is not having a boundary. Measure **that a normal caller genuinely
+cannot write**. Try a write, a permission change, replacing the path, and a stop, and confirm each
+one fails.
 
-その検証は **特権で走らせてはいけない** — 特権なら全部できてしまい、何も確かめたことにならない。
+That verification **must not be run with privilege** — with privilege everything succeeds, and
+nothing has been confirmed.
 
-### 鍵が違うことは、主体が違うことではない
+### A different key is not a different principal
 
-共有鍵では、**検証できる側が署名も作れる**。したがって別の共有鍵を使っても示せるのは「鍵が
-違う」ことだけで、別の主体・別のプロセス・独立した承認は何も示さない。**それを独立性の根拠に
-すると、名前と保証がまた食い違う。**
+With a shared key, **whoever can verify can also produce the signature**. So using a different
+shared key shows only that "the key differs" — it shows nothing about a different principal, a
+different process, or an independent approval. **Making it the grounds for independence puts the
+name and the guarantee at odds again.**
 
-非対称にすると、判断する側が秘密鍵を持ち、**検証する側は公開鍵だけを持つ** — 検証する側は
-判断を作れない。これは「申告より強い」attestationの条件である。
+Going asymmetric gives the judging side the private key and **the verifying side only the public
+key** — the verifying side cannot produce a judgment. That is the condition for an attestation
+"stronger than a declaration".
 
-ただし鍵を非対称にしただけでは、**ワークロードは隔離されていない**。同じ利用者が書き手も鍵も
-差し替えられるなら、そこはまだidentity authenticationの境界ではない。隔離は別の軸として残す。
-orgforgeは異なるモデル系統によるレビュー品質の非相関化を狙う。別host/KMS/HSMをコアの
-前提にしてR0を破ってはいけない。
+Making the key asymmetric alone, however, leaves **the workload unisolated**. While the same user
+can replace both the writer and the keys, that is not yet a boundary of identity authentication.
+Isolation stays a separate axis.
+What orgforge aims at is decorrelating review quality through different model families. Do not
+break R0 by making a separate host, a KMS, or an HSM a premise of the core.
 
-### 署名が正しいことと、その判定を出してよいことは別
+### A valid signature and permission to issue that judgment are different things
 
-検証が通っても、**その主体がその役・その血統の判定を出す権限を持つか**は別の問いである。
-権限は宣言し、宣言の無いものは「許可されていない」と読む（認可の既定は拒否）。
+A verification passing leaves **whether that principal is permitted to issue a judgment for that
+role and that lineage** as a separate question. Permissions are declared, and what is undeclared
+reads as "not permitted" (authorization defaults to refusal).
 
-とくに **止めた状態を解除する権限は、止める権限と分ける**。同じ主体が両方を持つなら、独立した
-承認という考え方が成り立たない。
+In particular, **the permission to release a stopped state is separated from the permission to
+stop**. If one principal holds both, the idea of an independent approval does not hold.
 
-### 解除は、記録してから状態を変える
+### A release records first, then changes the state
 
-止まった状態を解く手順の順序が、そのまま安全性である。
+The order of the steps that lift a stopped state is the safety itself.
 
-    確認 → 独立した承認の検証 → 復旧の証拠の検証 → 記録の追記と永続化 → **その後で** 状態を解く
+    confirm → verify the independent approval → verify the recovery evidence → append and persist
+    the record → **and only then** lift the state
 
-逆順にすると、状態を解いたあとに記録が失敗して、**止まっていた証拠も、止まっている状態も無い**
-という最悪の形になる。記録できなかったら、**止まったままにする**。そして同じ承認での再実行が
-安全に後片付けを完了できるようにする。
+The reverse order produces the worst shape: the record fails after the state is lifted, and
+**neither the evidence that it was stopped nor the stopped state exists**. Where it cannot be
+recorded, **it stays stopped**. And a re-run under the same approval completes the cleanup safely.
 
-### 保証を1つの強弱値に潰さない
+### Do not collapse assurance into a single strong/weak value
 
-「署名されている」は「独立している」ではない。**同じ主体、あるいは同じ鍵が両方の血統を作れる
-なら、それは独立レビューではない。** 潰すと、この誤読がそのまま通る。
+"It is signed" is not "it is independent". **If one principal, or one key, can produce both
+lineages, it is not independent review.** Collapsing them lets that misreading through unchallenged.
 
-少なくとも次を別の軸にする:
+At minimum these are kept as separate axes:
 
-    identity assurance      判断者の identity をどこまで確かめたか
-    recorder assurance      記録者を観測したのか、申告なのか
-    workload isolation      同じプロセス／同じ利用者／別ホストか
-    reviewer independence   別の署名者か、別のワークロードか
+    identity assurance      how far the judge's identity was confirmed
+    recorder assurance      was the recorder observed, or declared?
+    workload isolation      same process / same user / separate host?
+    reviewer independence   a different signer, or a different workload?
 
-そして **確かめられていない段階を「確かめた」と呼ばない**。共有鍵で得られるのは、申告より強い
-という程度である。**認証と呼べるのは、隔離された書き手・限定された経路・鍵の保護・主体ごとの
-認可が揃ったときだけ**である。別プロセスに問い合わせることは、信頼境界ではない。
+And **a level that was not confirmed is never called confirmed**. What a shared key yields is
+roughly "stronger than a declaration". **Only an isolated writer, a limited path, protected keys,
+and per-principal authorization together earn the name authentication.** Asking a separate process
+is not a trust boundary.
 
-段階を分けたなら、**弱い段階の結果を「強制」に使わない**。証拠にはなるが、独立性を要求する
-根拠にはならない。
+Having separated the levels, **do not use a weaker level's result for enforcement**. It serves as
+evidence; it does not serve as grounds for demanding independence.
 
-### 検査に使う記録は、検査する側だけが書ける
+### A record used in a check is writable only by whoever checks
 
-上限や履歴を検査する仕組みは、その検査が読む記録を**自由に書けてはいけない**。実測で、負の曝露を
-1件通常の追記で入れるだけで、上限が完全に無効になった（しかも鎖は健全と報告された）。
+A mechanism checking a cap or a history **must not allow the records it reads to be written
+freely**. Measured: one negative exposure entered through an ordinary append voided the cap
+completely (and the chain was reported sound).
 
-**記録の種類ごとに「どの操作が書けるか」を宣言する。** これは identity の認証ではない（同じ権限
-なら writer を騙れる）が、「通常の経路で偶然にも意図的にも書けてしまう」ことは塞げる。
+**Declare per record class which operation may write it.** This is not identity authentication
+(under the same privileges one can impersonate the writer), but it does close "it can be written
+through the ordinary path, by accident or design".
 
-ただし**既に書かれたものを検証するときは、この規則を適用しない** — 経路は記録に残らないので、
-書いた時点でしか確かめられない。適用すると、正しく書かれた記録が「書けないはずのもの」として
-拒否され、健全な台帳が壊れていると報告される。
+**The rule is not applied when verifying what is already written**, though — the path leaves no
+trace in the record, so it can only be confirmed at the moment of writing. Applying it makes a
+correctly written record be refused as "something that should not have been writable", and reports
+a sound ledger as broken.
 
-### 再実行と、同じキーの別の要求は違う
+### A re-run and a different request under the same key are different
 
-冪等キーが一致しても、**要求の内容が違えば再実行ではない**。実測で、少ない量の許可を根拠に
-大きな量が通った。キーとは別に**要求内容の digest** を持ち、違えば衝突として拒否する。
+A matching idempotency key still **is not a re-run where the request's content differs**. Measured:
+a large amount got through on the grounds of a permit for a small one. Alongside the key there is
+**a digest of the request's content**, and a difference is refused as a conflict.
 
-そしてキーは**区切り文字での連結ではなく、正規化した組の hash** にする。値に区切り文字が入ると、
-別の組が同じキーになる。
+And the key is **a hash of a canonical tuple, not a concatenation with a separator**. A value
+containing the separator makes a different tuple produce the same key.
 
-### 終了コードだけを信じない
+### Do not trust the exit code alone
 
-構造化された結果を返す道具を呼ぶなら、**結果を読む**。終了コードだけを見ると、「拒否と言いながら
-0 で終わる」実装を通してしまう（実測でそうなった）。
+When calling a tool that returns a structured result, **read the result**. Reading the exit code
+alone lets through an implementation that "says refused and exits 0" (which is what happened).
 
-`終了コードが 0` かつ `結果が許可` の**組でしか通さない**。結果が無い・読めない・矛盾している —
-すべて拒否側に倒す。ただし「結果が読めない」と「読めた結果が拒否」は別の事象である。前者は環境の
-問題なので開発用の逃げ道が効いてよいが、**後者に逃げ道を効かせてはいけない**。
+It passes **only on the pair** of `exit code 0` and `the result is a permit`. No result, an
+unreadable result, a contradiction — all fall to refusal. "The result cannot be read" and "the
+result read as a refusal" are different events, though. The first is an environment problem, so a
+development escape hatch may apply; **the second must not have one**.
 
-### 無料と宣言したものを、検査で止めない
+### Do not stop, with a check, what was declared free
 
-「これは計量しない」と決めた操作（再生成できる対象の削除など）に、**量を要求する検査をかけると
-止まる**。実測で、`node_modules` の削除が「重み 0 なので予約できない」として拒否された — 無料だと
-決めたものを止めるのは、設計と真逆の結果である。**計量しないものは、計量の経路に入れない。**
+Applying **a check that demands a quantity** to an operation decided as "not metered" (deleting
+something regenerable, say) **stops it**. Measured: deleting `node_modules` was refused as "weight
+0, so it cannot be reserved" — stopping what was decided to be free is the exact opposite of the
+design. **What is not metered does not enter the metering path.**
 
-### 止まったことの呼び名を変えない
+### Do not rename what a stop is called
 
-判断の出所を組み替えたとき、**メッセージの語彙を維持する**。監督も検査も特定の語を探しているので、
-中身が同じでも呼び名が変わると「止まったことが見えなくなる」。
+When the source of a judgment is rearranged, **keep the message's vocabulary**. Supervisors and
+checks alike look for particular words, so renaming it while the substance is unchanged makes "the
+fact that it stopped" invisible.
 
-### 冪等キーは、識別子1つでは足りない
+### One identifier is not enough for an idempotency key
 
-同じ操作の再実行を二重に数えないためのキーは、**(セッション, 呼び出し, 規則, 記録の種類)** を
-束ねる。呼び出しの識別子だけでは、別のセッションや別の規則の間で衝突する。
+The key that stops a re-run of the same operation being double-counted bundles **(session, call,
+rule, record class)**. The call's identifier alone collides across sessions and across rules.
 
-そして **キーが欠けていれば、計量される操作を拒否する**。同一性を確かめられないなら、二重計上
-しないという保証そのものが成り立たない。
+And **a missing key refuses a metered operation**. Without being able to confirm identity, the
+guarantee of not double-counting does not hold at all.
 
-「同じ呼び出しで検査が二度走るか」が文書に書かれていないなら、**書かれていないことを「走らない」
-と読まない**。キーを付けておけば、走っても数えられる。
+Where the documentation does not say whether "the check runs twice within one call", **do not read
+the silence as "it does not"**. With a key attached, running twice is still counted once.
 
-### 逃げ道は、記録と引き換えである
+### An escape hatch is traded for a record
 
-塞ぎきれない経路に明示の逃げ道を置くのは正しい。ただし **宣言が記録されるから許される**のであって、
-宣言したと言えば許されるのではない。**記録に失敗した迂回は通さない。**
+Placing an explicit escape hatch on a path that cannot be fully blocked is right. It is permitted
+**because the declaration is recorded**, though — not because someone said they declared it. **A
+bypass whose recording failed does not pass.**
 
-### fail-closed は、故障注入できなければ主張できない
+### fail-closed cannot be claimed without fault injection
 
-「失敗したら止まる」という性質は、**失敗させてみなければ確かめられない**。正常系だけを試して
-「fail-closed にした」と書くのは、検査していないことを検査したと述べることである。
+The property "it stops on failure" **cannot be confirmed without making it fail**. Trying only the
+happy path and writing "it is fail-closed" is stating that something unchecked was checked.
 
-実例: ロックの失敗時に止まる、と書いた。しかし置換が一致せず適用されておらず、判定用の変数は
-初期化されるだけで設定されず、逃げ道の環境変数はコードのどこにも無かった。**正常系は通るので、
-何も気づかなかった。**
+A worked example: it was written that it stops when the lock fails. But the replacement did not
+match and was never applied, the deciding variable was initialised and never set, and the
+escape-hatch environment variable existed nowhere in the code. **The happy path passed, so nothing
+was noticed.**
 
-だから故障注入の口を道具に持たせる（`ORG_LEDGER_FORCE_LOCK_FAIL=1` のような）。異常系を
-再現できない検査は、書いた本人にも確かめられない。
+So the tools carry an entry point for fault injection (`ORG_LEDGER_FORCE_LOCK_FAIL=1` and the
+like). A check whose failure path cannot be reproduced cannot be confirmed even by whoever wrote
+it.
 
-### 時刻の形式検査は、実在性の検査ではない
+### Checking a timestamp's format is not checking that it exists
 
-`YYYY-MM-DDTHH:MM:SSZ` に合っていても、`2026-99-99T99:99:99Z` は実在しない。**実日時として
-parse する。** そして順序を偽れないよう、未来と遠すぎる過去を拒否する — どちらも「いま起きた
-こと」を窓の外に置き、窓で集計する上限を迂回できる。
+`2026-99-99T99:99:99Z` matches `YYYY-MM-DDTHH:MM:SSZ` and does not exist. **Parse it as a real
+datetime.** And refuse the future and the too-distant past, so the order cannot be faked — either
+one puts "what happened just now" outside the window and bypasses a cap that aggregates over it.
 
-時刻を指定できる経路は、**通常の書き込みから分ける**。名前に意図を出す（`--backfill-ts`）。
-同じ引数で「いまを記録する」と「過去を補う」の両方ができると、後者の検査が前者を邪魔する。
+The path that can specify a timestamp is **separated from ordinary writes**, with the intent in the
+name (`--backfill-ts`). One argument doing both "record now" and "fill in the past" makes the
+latter's checks get in the former's way.
 
-そして **時刻を検査するテストに固定日付を書かない。** その時刻が未来から過去に変わった瞬間に
-壊れる（実際に、この検査を入れた版で自分のテストがそう壊れた）。いまからの相対で組む。
+And **do not write a fixed date into a test that checks timestamps.** It breaks the moment that
+time turns from future into past (which is exactly how my own test broke in the version that added
+this check). Build it relative to now.
 
-### 検証規則の欠落は、宣言の欠落と同じくらい静かに効く
+### A missing validation rule works as quietly as a missing declaration
 
-設定の差分を「ブロックがあるか」で見てはいけない。**中身の欠落**を見る。検証規則が1つ消えて
-いれば、拒否されるべき記録が通り、通ったことは記録に残らない。
+Do not read a configuration diff as "is the block there". Read **what is missing inside it**. With
+one validation rule gone, a record that should be refused passes, and nothing records that it did.
 
-そして規則を埋めるときも、**足すだけにする**。ブロックごと差し替えると、org が自分で足した
-**厳格な**規則が消える — 実測で、org が加えた `required.progress_recorded: [milestone]` が
-修復で失われた。**修復が org 所有の安全設定を弱めるのは、修復ではなく退行である。**
+And when filling rules in, **only add**. Replacing the whole block deletes the **stricter** rules
+the org added itself — measured: an org's own `required.progress_recorded: [milestone]` was lost to
+a repair. **A repair that weakens an org's own safety settings is not a repair but a regression.**
 
-同じ位置に違う値があるときは、自動で上書きしない。org が意図して変えたのか、テンプレートが
-変わったのかは道具では判別できないので、**衝突として報告して人に決めさせる**。そして欠落と衝突は
-**1つの計算から出す** — 別々に判定すると、片方だけ検出して片方を見落とす（実測でそうなった）。
+Where a different value sits in the same position, do not overwrite automatically. A tool cannot
+tell whether the org changed it deliberately or the template changed, so **report it as a conflict
+and let a human decide**. And omissions and conflicts **come out of one computation** — deciding
+them separately detects one and misses the other (which is what happened).
 
-**設定ブロックの範囲を正規表現で切らない。** `\nkey:\n(?:(?: |\n).*\n)*` は、次のトップレベル
-キーの前にあるコメント行やその子行まで飲み込む。実際に、ある置換が別のブロックを丸ごと消し、
-**結果は YAML として読めた**ので気づきにくかった。範囲は「インデントの無い次の行」で決める。
+**Do not carve a configuration block's extent with a regex.** `\nkey:\n(?:(?: |\n).*\n)*` swallows
+the comment lines before the next top-level key, and their children. In practice one replacement
+deleted another block wholesale, and **the result parsed as YAML**, which made it hard to notice.
+The extent is decided by "the next line with no indentation".
 
-### 修復する道具は、途中で止まっても壊さない
+### A repairing tool does not break things when it stops partway
 
-設定ファイルを直接上書きする修復は、途中で止まると**その org が何も書けない状態**を作る。
-temp → fsync → rename → fsync(dir) で置き換える。修復が壊すのは最悪の形である。
+A repair that overwrites the configuration file in place creates **a state where that org can write
+nothing** if it stops partway. Replace via temp → fsync → rename → fsync(dir). A repair that breaks
+things is the worst shape there is.
 
-### 厳格化は、可用性事故になりうる
+### Tightening can become an availability incident
 
-「宣言の無いものを拒否する」を全体に一度にかけると、**宣言と実態の乖離が「組織全体の記録停止」に
-変わる**。それは fail-closed ではなく、**既知の移行不備による可用性事故**である。区別すること。
+Applying "refuse what is undeclared" to everything at once **turns a divergence between the
+declaration and reality into "the whole org stops recording"**. That is not fail-closed but **an
+availability incident caused by a known migration gap**. Keep them apart.
 
-検証は軸を分けて入れる:
+Validation goes in along separate axes:
 
-    required        宣言したクラスだけ、必須の欠落を拒否
-    require_any     相関キーは複数のうち1つでよい（経路によって違う）
-    enum / 型       宣言済みの項目は **存在する場合に** 検証
-    closed world    厳格化したい少数のクラスだけ、未宣言を拒否
+    required        refuse a missing required field, for declared classes only
+    require_any     any one of several correlation keys is enough (it differs by path)
+    enum / type     validate a declared field **where it is present**
+    closed world    refuse the undeclared, for the few classes to be tightened
 
-未宣言のものは既定で許し、**乖離として記録する**（見えるようにするが止めない）。統制の中核だけ
-最初から厳格にし、乖離しているクラスは**実態を宣言に反映してから**別の移行として厳格化する。
+The undeclared is allowed by default and **recorded as a divergence** (made visible without
+stopping anything). Only the core of the controls is strict from the start, and a diverging class
+is tightened as a separate migration **after reality is reflected into the declaration**.
 
-相関キーを1つに固定してはいけない。同じ対象を指すキーが経路によって違うなら、**どれか1つで
-足りる**形にする。固定すると正当な書き込みを弾く。
+Do not fix on one correlation key. Where the keys pointing at the same subject differ by path, the
+shape is **any one of them is enough**. Fixing on one rejects legitimate writes.
 
-### 所有物のコピーは、配らないと古くなる
+### A copy of what someone owns goes stale unless it is distributed
 
-org が自分の設定ファイルを所有する設計は正しい（org が自分の形式を決める）。しかし**プラグイン
-側が宣言を増やしても、org のコピーは古いまま**である。そこに「宣言の無いものは書けない」検査を
-入れると、更新直後に記録が止まる。
+A design where the org owns its own configuration file is right (the org decides its own format).
+But **when the plugin side adds a declaration, the org's copy stays old**. Adding a check that
+"the undeclared cannot be written" on top of that stops recording immediately after an update.
 
-だから検査より先に、**差分を診断する道具**と**明示的に埋める道具**を持つ。診断は「使われている
-かどうか」を言うこと — 実データで使われているクラスが欠けているなら、緊急度が違う。
+So before the check there is **a tool that diagnoses the difference** and **a tool that fills it in
+explicitly**. The diagnosis says whether it is in use — a missing class that real data uses carries
+a different urgency.
 
-そして **埋める側は既存の宣言を書き換えない。** org が実態に合わせて変えた宣言を上書きすると、
-検査が実態と食い違う。足すだけにする。
+And **the filling side does not rewrite an existing declaration.** Overwriting a declaration the
+org changed to match reality puts the check at odds with reality. It only adds.
 
-**修復の書き込み前に、結果を検証すること。** この修復の初版は、テンプレートのブロックを丸ごと
-挿入して `event_classes` を2つにし、YAML の後勝ちで65クラスの宣言を消した。**修復が壊す**のは
-最悪の形なので、書く前に「読めるか」「減っていないか」を確かめる。
+**Verify the result before a repair writes.** The first version of this repair inserted the
+template's block wholesale, produced two `event_classes`, and — YAML taking the later one — deleted
+the declarations of sixty-five classes. **A repair that breaks things** is the worst shape there
+is, so before writing it confirms "does it parse" and "has nothing been lost".
 
-### 宣言の無いクラスは、書けても読まれない
+### An undeclared class can be written and is never read
 
-台帳に書けるクラスと、schema が宣言しているクラスは、放っておくとずれる。**宣言の無いクラスは
-projection にも sensor にも乗らないので、書いても読まれない。** 実際に、道具が書いていた5つの
-クラスが宣言されておらず、そのうち2つは実データに5件・23件あった。`show` の警告が沈黙した一因
-でもある。
+The classes writable to the ledger and the classes the schema declares drift apart if left alone.
+**An undeclared class rides on neither a projection nor a sensor, so writing it leaves it unread.**
+In practice five classes the tools were writing went undeclared, and two of them had five and
+twenty-three rows in real data. It was part of why `show`'s warning went silent.
 
-検査を入れるときは、**宣言を実態に合わせる**こと。実データの payload を数えてから書く。
-宣言が実態と違えば、検査は嘘になる。
+When a check goes in, **bring the declaration in line with reality**. Count the payloads in real
+data before writing it. A declaration at odds with reality makes the check a lie.
 
-### HEAD は権威ではなく cache である
+### HEAD is a cache, not the authority
 
-追記型の記録で、末尾を指すファイルを別に持つなら、**それは log から再構築できる cache として
-扱う。** 権威にすると、cache が壊れたときに記録全体が読めなくなる。
+Where an append-only record keeps a separate file pointing at the tail, **treat it as a cache
+rebuildable from the log.** Making it authoritative means the whole record becomes unreadable when
+the cache breaks.
 
-ただし **途中の破損を自動修復してはいけない。** torn line、seq の飛び、hash 不一致の上に整合した
-HEAD を載せると、壊れていることが分からなくなる。破損は fail-closed で報告する。
+**Do not auto-repair corruption partway, though.** Laying a consistent HEAD over a torn line, a
+gap in seq, or a hash mismatch makes the corruption invisible. Corruption is reported fail-closed.
 
-### 偽の記録で試験すると、検査を入れたときに露見する
+### Testing with fake records comes to light when the check goes in
 
-手で組んだイベント（hash の無いもの）で台帳を seed していると、鎖の健全性を検査し始めた瞬間に
-落ちる。**それは検査が正しい** — 鎖の無い台帳に追記できてはいけない。試験も実際の追記経路を
-通すこと。
+Seeding the ledger with hand-assembled events (carrying no hash) fails the moment the chain's
+soundness starts being checked. **The check is right** — appending to a ledger with no chain must
+not be possible. Tests go through the real append path too.
 
-### 統制を配るなら、配ったものだけで動くこと
+### If controls are distributed, they run on what was distributed alone
 
-統制の仕組みを配布物にするなら、**その配布物の中だけで完結させる**。元の作業ツリーを参照する形は、
-そのツリーが動いた瞬間に統制が消える。しかも消えたことは静かで、通常の操作は成功し続ける。
+When a control mechanism becomes a distributed artifact, **make it complete within that artifact**.
+A shape that references the original working tree loses the controls the moment that tree moves.
+And their disappearance is silent: ordinary operations keep succeeding.
 
-自己完結を確かめる方法は1つしかない — **元のツリーを一時的に無くして動かす**。参照が残っていれば
-そこで落ちる。
+There is only one way to confirm self-containment — **remove the original tree temporarily and run
+it**. A remaining reference fails there.
 
-### 導入と有効化を、同じことだと思わない
+### Do not think installing and enabling are the same thing
 
-「入れた」と「効いている」は別である。実測した環境では、**配布物を入れて有効にしても、検査の
-仕組みは信頼されるまで黙って読み飛ばされた** — 警告も、記録も、何も出ない。「入れたのに効いて
-いない」は、この形でいちばん見えにくい。
+"It is installed" and "it is in effect" are different. In the environment measured, **installing
+and enabling the artifact still had the checking mechanism silently skipped until it was trusted** —
+no warning, no record, nothing. "Installed and not in effect" is at its least visible in this
+shape.
 
-したがって配布物の説明には、**有効化に何が必要か**と、**有効化されていない状態がどう見えるか**を
-書く。「入れれば効く」と読める書き方をしてはいけない。
+So the artifact's documentation states **what enabling requires** and **what the not-yet-enabled
+state looks like**. Do not write it in a way that reads as "install it and it works".
 
-そして**内容に束縛された署名で信頼を管理する仕組み**では、配布物を更新すると信頼が外れうる。
-更新が統制を無効化する経路として、これも書いておく。
+And in **a mechanism managing trust through a signature bound to the content**, updating the
+artifact can drop that trust. Write this down too, as a path by which an update voids the
+controls.
 
-### 他所の形式をそのまま持ち込まない
+### Do not carry another environment's format over as-is
 
-似た形式を採る2つの環境でも、**受け付けるものは違う**。実例として、設定ファイルにコメント用の
-キーを1つ入れたところ、片方の環境では通り、もう片方では**ファイル全体を読み飛ばされた**。
-統制の設定が丸ごと無効になり、しかも通常の操作は成功し続けた。
+Two environments adopting a similar format still **accept different things**. A worked example:
+adding one comment key to a configuration file passed in one environment and had **the whole file
+skipped** in the other. The controls' configuration was voided wholesale, and ordinary operations
+kept succeeding.
 
-移植するときは、**その環境で実際に読ませて確かめる**。形式が似ていることは、同じであることの
-証拠にならない。
+When porting, **have that environment actually read it and confirm**. Similar formats are no
+evidence of identical ones.
 
-### 拒否の検証は「1回だけ試して止まる」ことと対で行う
+### Verify a refusal paired with "try once and stop"
 
-拒否が効いたかを、行為者の最終結果で判定してはいけない。**正しく拒否された後に別の手段で目的を
-達成すると、「拒否が効かなかった」と読める**。
+Do not decide whether a refusal worked from the actor's final result. **Achieving the goal by
+another means after being correctly refused reads as "the refusal did not work".**
 
-検証のときは行為者に「**1回だけ試し、拒否されたら代替手段を使わず終了する**」と指示する。そして
-拒否の証拠は、行為者の報告ではなく**対象物が変わっていないこと**と**拒否が記録されていること**で
-確かめる。
+During verification the actor is instructed to "**try once and, if refused, stop without using an
+alternative**". And the evidence of the refusal is confirmed not from the actor's report but from
+**the subject being unchanged** and **the refusal being recorded**.
 
-### 誰に対して強制的なのかを書く
+### Write down whom it is mandatory for
 
-PreToolUse hook として動く道具は、**hook を有効にしたホスト上の agent**に対しては強制的だが、
-hook を無効化できるホスト所有者に対しては強制力を持たない。これは欠陥ではなく境界である。
+A tool running as a PreToolUse hook is mandatory for **an agent on a host where the hook is
+enabled**, and holds no force over a host owner who can disable it. That is a boundary, not a
+defect.
 
-問題になるのは限界そのものではなく、**境界を書かずに「回避不能」と述べること**である。
-信頼境界（TCB）と脅威モデルを明示すれば、同じ実装が正しく評価される。
+What becomes a problem is not the limit itself but **stating "unavoidable" without writing the
+boundary down**. State the trusted computing base and the threat model, and the same implementation
+is assessed correctly.
 
-そして境界の内側にも、**認証されていない属性**がある。台帳の `actor` は引数から採られるので、
-1つのプロセスが maker と gate を名乗り分けられる。したがって職務分離は「**レビューが行われた
-証拠**」であって「誰が行ったかの証明」ではない。血統の分離も同じ性質を持つ — 独立したレビュー
-であって、認証された独立性ではない。**ラベルを信頼境界と呼ばないこと。**
+And inside the boundary there are **attributes that are not authenticated**. The ledger's `actor`
+is taken from an argument, so one process can claim to be the maker and the gate in turn. The
+separation of duties is therefore **evidence that a review happened**, not proof of who performed
+it. Lineage separation has the same property — independent review, not authenticated independence.
+**Do not call a label a trust boundary.**
 
-### 摘発と、適応の理解を混同しない
+### Do not confuse catching a deviation with understanding an adaptation
 
-監督が正しい道具を使わずに同じ状態変更を行うのは、多くの場合**遅いからではなく、道具の名前を
-思い出すコストを払わなかったから**である。それは規律の欠如ではなく**適応**である。
+A supervisor making the same state change without the right tool is usually **not about speed but
+about not paying the cost of remembering the tool's name**. That is not a lack of discipline but
+**an adaptation**.
 
-したがって検査を足すときは、**逸脱の摘発**と**適応の構造を残すこと**を分けて設計する。摘発だけを
-足すと、次はその検査を形式的に満たすだけの逃げ方が生まれる（`--verified` を必須にすれば「確かめ
-た」と書くだけで通るのと同じ）。逃げ道は塞ぎきらず、**逃げたことが記録に残る**形にする
+So when adding a check, design **catching the deviation** and **preserving the structure of the
+adaptation** separately. Adding only the catching produces, next, a way out that merely satisfies
+the check formally (requiring `--verified` and having "I confirmed it" pass is the same thing).
+The escape hatch is not fully blocked; it takes a shape where **taking it leaves a record**
 （`bypass_declared`・`judges_disagreed`・`correction`）。
 
-**都合の悪い記録が消せないこと**が、この org の台帳が append-only である理由である。訂正は
-削除ではなく `correction` の追記で行う — 消せる記録は、消したい人がいるときに消える。
+**That an inconvenient record cannot be deleted** is why this org's ledger is append-only. A
+correction is an appended `correction` rather than a deletion — a deletable record gets deleted
+whenever someone wants it gone.
 
-### 分割の失敗は、しばしば要求の欠落として現れる
+### A failed split often shows up as a missing requirement
 
-10周を超えた Issue の後半は、その Issue の EARS のどれにも対応していない作業だった（メンバー間の
-UPDATE / INSERT 権限・同意の表現・前提の凍結 — MUST に1件も無い）。skeptic の言葉では
-**「装飾的なテキスト列を守り、金額・支払者・債務の向き・グループ所有権を無防備にしていた」**。
+The latter half of the Issue that went past ten rounds was work answering none of that Issue's EARS
+items (UPDATE/INSERT permissions between members, expressing consent, freezing the premises — not
+one of them in the MUSTs). In the skeptic's words, it **"protected a decorative text column while
+leaving the amount, the payer, the direction of the debt, and group ownership undefended"**.
 
-認可を扱う deliverable なのに、MUST が「誰が入れるか」しか定めておらず「入った後に何が
-できるか」を定めていない、という偏りは**起票時に検出できる**。切り方の問題として現れる前に、
-要求の問題として捕まえるほうが安い。
+In a deliverable that handles authorization, the lopsidedness of MUSTs setting only "who may enter"
+and never "what can be done once inside" **can be detected at filing time**. Catching it as a
+problem of the requirements is cheaper than waiting for it to surface as a problem of the split.
 
 ## 4c. The integration seam — feature → develop → main, and where fan-out fans back in
 
