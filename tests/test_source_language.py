@@ -37,9 +37,15 @@ against, where Japanese is the thing being recognised.
   - the test files — fixtures feeding those matchers. An English fixture there tests nothing.
   - `template/SPEC.md` — the fill-in examples, which exist to show content written in an org's own
     `output_language`.
+  - `docs/` and the root documents — term glosses that name the practice being cited (稟議, 決裁権限,
+    べき論, 属人化), the titles and verbatim quotations of Japanese primary sources in
+    `docs/sources.md`, and the links to the Japanese documentation.
 
 An empty dict is therefore NOT the end state. Translating any of these would delete a capability.
 If one of these counts drops, check that a matcher was not removed with it.
+
+`docs/ja/` is excluded from the scan entirely: it is the official Japanese documentation, complete
+in itself, and translating it would delete the thing it is.
 """
 import pathlib
 import re
@@ -57,13 +63,28 @@ JAPANESE = re.compile(r"[ぁ-んァ-ヶ一-龠]")
 # command is this repository's own instruction to an agent, and a template's comments explain to a
 # founder why a field exists. Neither is what an org writes for its humans, which is the surface
 # output_language governs. The commands are authored under integrations/claude-code/, not generated.
+#
+# `docs/` is in scope because whole sections of the English documentation were written in Japanese —
+# the same mixing as in source, one layer up. `docs/ja/` is exempt: it is the official Japanese
+# documentation, not a lapse.
 ROOTS = ("tools", "tests", "integrations/common", "template",
-         "integrations/claude-code/commands")
+         "integrations/claude-code/commands", "docs")
+EXEMPT_PREFIXES = ("docs/ja/",)
 
 # The remaining floor, measured 2026-08-09. Every entry is a matcher or a fixture (see the module
 # docstring), not untranslated prose. Never raise one; lowering one means a pattern was removed, so
 # check that on purpose. A file that is not listed here must contain no Japanese at all.
 BUDGET = {
+    "AGENTS.md": 1,
+    "QUICKSTART.md": 1,
+    "README.md": 1,
+    "docs/02-growth-stages.md": 1,
+    "docs/05-lifecycle-operations.md": 5,
+    "docs/06-doctrine-and-knowledge.md": 1,
+    "docs/07-context-economy.md": 1,
+    "docs/11-sdlc-mold.md": 1,
+    "docs/README.md": 2,
+    "docs/sources.md": 6,
     "integrations/common/org_hook.py": 1,
     "template/REQUIREMENTS.md": 9,
     "template/SPEC.md": 15,
@@ -76,7 +97,7 @@ BUDGET = {
     "tests/test_orgcycle.py": 48,
     "tests/test_rederivability.py": 1,
     "tests/test_req_lint.py": 30,
-    "tests/test_source_language.py": 3,
+    "tests/test_source_language.py": 5,
     "tests/test_supersede_recovery.py": 1,
     "tools/drift.py": 11,
     "tools/ghsync/backlog.py": 20,
@@ -107,7 +128,15 @@ def _sources():
         # The same held for the shipped templates and slash commands (*.md, *.yaml, *.json).
         for pattern in ("*.py", "*.sh", "*.md", "*.yaml", "*.json"):
             for path in sorted(base.rglob(pattern)):
-                yield path.relative_to(REPO).as_posix(), path
+                rel = path.relative_to(REPO).as_posix()
+                if rel.startswith(EXEMPT_PREFIXES):
+                    continue
+                yield rel, path
+    # The root documents ship as the entry point and follow the same rule.
+    for name in ("QUICKSTART.md", "README.md", "AGENTS.md", "CLAUDE.md"):
+        path = REPO / name
+        if path.is_file():
+            yield name, path
 
 
 def test_no_new_japanese_in_source():

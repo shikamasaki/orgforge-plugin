@@ -80,15 +80,15 @@ So founding writes **exactly these four files, at the org root, under these exac
 | File | SDD/lifecycle role | What it holds |
 |---|---|---|
 | `REQUIREMENTS.md` | the received brief | the RFP verbatim (or the brief restated), + the one-sentence purpose. The immutable input the rest traces to. |
-| `FEATURE-INVENTORY.md` | the 洗い出し | every capability the RFP requires, grouped must / should / nice, + the explicit EXCLUDE list |
-| `ARCHITECTURE.md` | **the 全体設計書** — the whole-system design, distinct from any per-task spec | layers/components + the **seam contracts** between them, each in the normalized shape `{deliverable, standard, checker, depends_on}` |
+| `FEATURE-INVENTORY.md` | the full sweep | every capability the RFP requires, grouped must / should / nice, + the explicit EXCLUDE list |
+| `ARCHITECTURE.md` | **the whole-system design**, distinct from any per-task spec | layers/components + the **seam contracts** between them, each in the normalized shape `{deliverable, standard, checker, depends_on}` |
 | `coverage-manifest.md` | the RFP→contract coverage map | one row per must-have: `{rfp_capability, owning_role, deliverable, acceptance}` |
 
 Plus `organization.yaml` (the machine-checkable side of the manifest), which already had a fixed name.
 
 Three consequences that make this load-bearing rather than cosmetic:
 
-- **`ARCHITECTURE.md` is the 全体設計書, and it is NOT an SDD artifact.** SDD's three layers (§4b) —
+- **`ARCHITECTURE.md` is the whole-system design, and it is NOT an SDD artifact.** SDD's three layers (§4b) —
   spec / plan / tasks — live in the *Issue hierarchy* and are per-objective and per-task. `ARCHITECTURE.md`
   sits *above* all of them: it is the whole-system design the objectives are carved out of, authored once
   at founding and amended at reorg. Keeping it a file (not an Issue) is deliberate — it is not disposable
@@ -106,187 +106,216 @@ product the org builds*, written into the product/org root — not a copy of thi
 
 ---
 
-## 0b. 要求記述の書式は規格に準拠する — 名前だけでなく中身も固定する
+## 0b. The format of the requirements conforms to a standard — fix the content, not just the name
 
-§0a は founding 成果物の**ファイル名**を固定した。しかし**中身の書式**を規定しなかったため、
-founding のたびにエージェントが構成をその場で発明していた。同じ要求から別の構造の文書が出るなら、
-「同じ spec ⇒ 同じプロセス・同じ契約」という §0 の主張は、**要求記述の層で最初から破れている**。
-名前を固定して中身を放置するのは、器を揃えて中身を問わないのと同じ。
+§0a fixed the **file names** of the founding artifacts. It prescribed nothing about **the format of
+their content**, so an agent invented the structure afresh at every founding. If the same
+requirements produce documents of different structure, §0's claim — "same spec ⇒ same process, same
+contract" — is **already broken at the layer where requirements are written**. Fixing the names and
+leaving the content is the same as standardising the vessels and asking nothing of what goes in.
 
-### 準拠のレベル: ISO/IEC/IEEE 29148:2018 の tailored conformance
+### Level of conformance: tailored conformance to ISO/IEC/IEEE 29148:2018
 
-同規格 §4.5.2 が正式に認める適合形態を宣言する。**SRS の全20条項（§9.6）は採らない** —
-`Memory constraints`・`Site adaptation requirements`・`Logical database requirements` は組込み・
-防衛・規制産業向けの条項で、小規模プロダクトでは空欄かボイラープレートにしかならない。
-**空欄の節が並ぶ文書は読まれなくなり、やがて更新されなくなる**。採るのは次の4条項:
+We declare the form of conformance that standard's §4.5.2 formally recognises. **Not all twenty SRS
+clauses (§9.6) are adopted** — `Memory constraints`, `Site adaptation requirements`, and
+`Logical database requirements` are clauses for embedded, defence, and regulated industries, and in
+a small product they become empty fields or boilerplate. **A document lined with empty sections
+stops being read and eventually stops being updated.** The four adopted are:
 
-| 条項 | 内容 | 検査 |
+| clause | content | check |
 |---|---|---|
-| §5.2.4 | 構文規約（主語＋`shall`。`must` は要求と誤解されるので使わない） | 警告 |
-| §5.2.5 | 個々の要求の特性9つ（Verifiable / Singular / Unambiguous …） | 一部を機械化 |
-| §5.2.6 | 集合の特性5つ（TBD/TBS/TBR を残さない、矛盾・重複がない） | TBD を落とす |
-| §5.2.7 | **避けるべき語**（主観語・最上級・抜け穴・全称語・曖昧な接続） | **落とす** |
+| §5.2.4 | syntactic rules (subject + `shall`; `must` is not used, as it is mistaken for a requirement) | warning |
+| §5.2.5 | the nine characteristics of each requirement (Verifiable / Singular / Unambiguous …) | partly mechanised |
+| §5.2.6 | the five characteristics of the set (no TBD/TBS/TBR left, no contradiction or duplication) | fails on TBD |
+| §5.2.7 | **the words to avoid** (subjective, superlative, loophole, universal, vague conjunction) | **fails** |
 
-§5.2.7 が本体である。「使いやすい」「可能であれば」「すべての場合」は、**人によって判定が変わる**
-か、**実装しない口実になる**か、**例外の有無が検証されていない**。AIエージェントに渡す文としては
-特に危険で、曖昧語は推測の余地としてそのまま実装に流れ込む。
+§5.2.7 is the substance. "Easy to use", "if possible", and "in all cases" either **change their
+verdict from person to person**, **become an excuse not to implement**, or **leave the existence of
+exceptions unverified**. They are especially dangerous in a sentence handed to an AI agent: a vague
+word flows straight into the implementation as room for a guess.
 
-### 併せて採るもの
+### What is adopted alongside it
 
-- **EARS**（Alistair Mavin / Rolls-Royce。Airbus・NASA・Bosch・Intel・Siemens が採用）—
-  6パターンと ruleset「**トリガーは最大1つ**」。この制約が**要求の粒度を構文レベルで強制する**。
-  学習コストが実質ゼロで、効果が最も大きい。§5.2.5 の *Conforming* も同時に満たす
-- **Given-When-Then**（Cucumber 公式仕様の Gherkin から記法だけ借用）— 受入基準。
-  要求は EARS、その検証シナリオは GWT という役割分担
-- **`[NEEDS CLARIFICATION]` マーカー**（GitHub Spec Kit 由来）— **最重要**。
-  曖昧なまま推測で実装されるのを止める。未解決で残っていれば lint が落とす
-- **Non-Goals / Alternatives Considered**（Google Design Doc 由来）— スコープクリープを止める
-  最も安価な装置
+- **EARS** (Alistair Mavin / Rolls-Royce; adopted by Airbus, NASA, Bosch, Intel, and Siemens) —
+  its six patterns and the ruleset "**at most one trigger**". That constraint **enforces the
+  granularity of a requirement at the syntactic level**. It costs effectively nothing to learn and
+  gives the largest effect. It satisfies §5.2.5's *Conforming* at the same time
+- **Given-When-Then** (only the notation, borrowed from Gherkin in Cucumber's official
+  specification) — the acceptance criteria. Requirements in EARS, their verification scenarios in
+  GWT
+- **the `[NEEDS CLARIFICATION]` marker** (from GitHub Spec Kit) — **the most important one**. It
+  stops something ambiguous from being implemented on a guess. Left unresolved, the lint fails
+- **Non-Goals / Alternatives Considered** (from Google's Design Doc) — the cheapest device there is
+  for stopping scope creep
 
-規定は `template/REQUIREMENTS.md`、検査は `tools/req_lint.py`。`/org-found` が両方を呼ぶ。
+The prescription is `template/REQUIREMENTS.md` and the check is `tools/req_lint.py`. `/org-found`
+calls both.
 
-### なぜ「RFP」をやめたか
+### Why "RFP" was dropped
 
-RFP (Request for Proposal) は**調達文書**である。発注者が**外部の競合ベンダー**に提案を求め、
-**比較評価して契約相手を選ぶ**ために発行する。中核は評価基準・配点・提案書式の指定・契約条項で、
-自社開発（実装主体が単一で、内部が可視で、常時交渉可能）ではこれらが**すべて無意味**になる。
+An RFP (Request for Proposal) is **a procurement document**. A commissioning party issues it to
+solicit proposals from **competing external vendors** and **evaluate them comparatively to select a
+party to contract with**. Its core is the evaluation criteria, the scoring, the required proposal
+format, and the contract terms — and in in-house development (a single implementing party, an
+interior that is visible, negotiation available at any time) **all of them become meaningless**.
 
-ここで書いているものの正確な対応物は 29148 の **StRS (Stakeholder Requirements Specification)**
-— 発注側の視点でニーズを記述し、まだ解に踏み込んでいない文書。ファイル名は `REQUIREMENTS.md`
-とする（規格の略語を背負わずに済み、誤解がない）。
+The exact counterpart of what is written here is 29148's **StRS (Stakeholder Requirements
+Specification)** — a document describing needs from the commissioning side, before stepping into a
+solution. The file is named `REQUIREMENTS.md` (it carries no standard's acronym, and misleads
+nobody).
 
-RFP から借りる価値があるのは**「評価基準を事前に文書化する」規律**だけで、それは自社開発では
-「**受入基準を実装前に確定する**」に翻訳される。本テンプレートでは §4（Acceptance）と
-§5（Success Criteria）がそれを担い、`coverage-manifest.md` がその契約への写像を担う。
+The one thing worth borrowing from an RFP is **the discipline of documenting the evaluation criteria
+in advance**, which in in-house development translates to "**settle the acceptance criteria before
+implementing**". In this template §4 (Acceptance) and §5 (Success Criteria) carry that, and
+`coverage-manifest.md` carries its mapping onto the contract.
 
 ---
 
-## 0c. 人間にしか実行できない作業も Issue にする — 散文に落とさない
+## 0c. Work only a human can carry out becomes an Issue too — it does not fall into prose
 
-§0a は founding 成果物の名前を、§0b は要求記述の書式を固定した。どちらも「org が作るもの」の話で
-ある。しかし実際の founding には、**org には構造的に実行できない作業**が必ず混ざる:
+§0a fixed the names of the founding artifacts and §0b the format of the requirements. Both concern
+"what the org produces". A real founding, however, always contains **work the org is structurally
+incapable of carrying out**:
 
-- 外部サービスのアカウント作成と課金（Supabase、決済事業者）
-- OAuth クライアントの登録、API キーの発行
-- ドメイン取得、ストアの開発者登録と審査提出
-- GitHub の管理設定（ブランチ保護、シークレット登録）
+- creating and billing accounts on external services (Supabase, a payment provider)
+- registering an OAuth client, issuing an API key
+- acquiring a domain, registering as a store developer and submitting for review
+- GitHub's administrative settings (branch protection, registering secrets)
 
-これらは org のツールでは完結しない。だから **CEO に依頼する**しかないのだが、その依頼が
-コマンドの出力する散文にしか現れていなかった。実地の founding で3件が「申し送り」として文章に
-書かれ、**Issue にも台帳にも残らなかった**。
+None of these complete within the org's tools, so **asking the CEO** is the only option — and that
+request appeared only in the prose a command printed. In a founding in the field, three of them were
+written into the text as "handover notes" and **left neither on an Issue nor in the ledger**.
 
-### なぜ散文では駄目なのか
+### Why prose does not work
 
-| 失われるもの | 具体的に何が起きるか |
+| what is lost | what actually happens |
 |---|---|
-| **永続性** | セッションが切れれば消える。`/org-resume` は ledger を読むので復元されない |
-| **board の正しさ** | `/org` が「全 Issue ready・GREEN」と出すのに、実際は着手できない |
-| **ready の正しさ** | 人間待ちを依存として表現できないので、ブロック済みの task が maker に渡る |
-| **coverage の正しさ** | `coverage-check` は「Issue になったか」しか見ない。前提が欠けても 66/66 と出る |
+| **persistence** | it vanishes when the session ends. `/org-resume` reads the ledger, so it is not restored |
+| **a correct board** | `/org` reports "every Issue ready, GREEN" while nothing can actually be started |
+| **a correct ready** | waiting on a human cannot be expressed as a dependency, so a blocked task reaches a maker |
+| **correct coverage** | `coverage-check` only asks "did it become an Issue". It reports 66/66 with a prerequisite missing |
 
-とりわけ最後の例が象徴的で、**ブランチ保護の設定は §4e の機械的拒否層の一部**でありながら
-GitHub の管理設定なのでコードでは実現できない。それが散文に消えると、「機械が守るはず」の層に
-穴が開いたまま誰も気づかない。
+The last is the most telling: **setting branch protection is part of §4e's layer of mechanical
+refusal**, and yet it is a GitHub administrative setting that code cannot achieve. Vanishing into
+prose, it leaves a hole in the layer that "the machine is supposed to guard", with nobody noticing.
 
-### 規定
+### The rule
 
-**`/org-found` と `/org-decompose` は、人間にしか実行できない前提条件を Issue にすること。**
-`github_sync needs-human` がその専用の口で、`orgforge:needs-human` ラベルを立てる。
+**`/org-found` and `/org-decompose` file the prerequisites only a human can carry out as Issues.**
+`github_sync needs-human` is the dedicated entry point for that, and it raises the
+`orgforge:needs-human` label.
 
-判定は単純: **org のツールで完結するか。** 完結しないなら人間タスクである。
+The test is simple: **does it complete within the org's tools?** If not, it is a human task.
 
-抽出源は既に手元にある — `REQUIREMENTS.md` の **Open Questions**（「実装前に決める」と自分で
-書いたもの）と **Assumptions**（「CEO が用意する」と書いたもの）は 29148 の標準節であり、
-機械的に読める場所にある。§0b でその節を必須にしたのは、ここに効かせるためでもある。
+The sources to extract from are already at hand — `REQUIREMENTS.md`'s **Open Questions** (what you
+yourself wrote as "decide before implementing") and **Assumptions** (what you wrote as "the CEO
+provides this") are standard 29148 sections and sit somewhere a machine can read. Making those
+sections required in §0b was partly to make this work.
 
-立てた Issue は通常の task と同じ形なので、下流を `--blocks` と `Depends on: #N` で縛れる。
-人間の作業が close されるまで、依存する task は `ready` に出てこない。
+The Issue it files has the same shape as an ordinary task, so a downstream one can be bound with
+`--blocks` and `Depends on: #N`. Until the human's work is closed, whatever depends on it does not
+appear in `ready`.
 
-**`/org` の board では RED として最上位に出す。** 「あなたを待っている」ものこそ board の意味で
-あり、それが見えないなら board は嘘をついている。
+**On `/org`'s board it appears at the top, as RED.** What "is waiting on you" is precisely what a
+board is for, and a board that does not show it is lying.
 
-> **人間への依頼は、忘れられると最も長く止まる種類の作業である。** org が自分の作業だけを
-> 構造化して人間への依頼を散文に落とすのは、いちばん止まりやすいものをいちばん失われやすい
-> 場所に置くということ。逆にすべきである。
+> **A request to a human is the kind of work that stops things longest when it is forgotten.** For
+> an org to structure only its own work and let its requests to a human fall into prose is to put
+> the thing most likely to stall in the place most likely to lose it. It should be the other way
+> around.
 
 ---
 
-## 0d. 配管は自動化する、判断は自動化しない
+## 0d. Automate the plumbing; do not automate the judgment
 
-§0a〜§0c は「何を書くか」を固定した。ここは「**誰が打つか**」の話である。
+§0a through §0c fixed "what is written". This section is about "**who types it**".
 
-`/org-work` は long らく「こういうイベントを打て」という散文の指示だった。実行するのは
-エージェントであり、実地では **Issue 2件あたり11コマンド**を手で叩いていた。18 Issue なら
-約90回で、そのうち1回の取り違えで台帳の整合が崩れる。
+`/org-work` was for a long time a prose instruction to "type these events". An agent was what
+executed it, and in the field **eleven commands were typed by hand per two Issues**. Eighteen Issues
+comes to around ninety, and one mistake among them breaks the ledger's consistency.
 
-さらに悪いのは `parent` の扱いだった。フェーズ連鎖は親 objective の admit を継承する（§2）のに、
-その値を**人が Issue から目で拾って手打ち**していた。**継承を実装しても、値が手打ちである限り
-取り違えが起きる** — 拾えるものを拾わせないのは設計の怠慢である。
+Worse was how `parent` was handled. A phase chain inherits the parent objective's admit (§2), and yet
+**a human picked that value out of the Issue by eye and typed it in**. **Implementing the inheritance
+changes nothing while the value is typed by hand** — not picking up what can be picked up is
+negligence in the design.
 
-### 線引き: 配管か、判断か
+### The line: plumbing, or judgment?
 
-| | 例 | 誰が |
+| | examples | who |
 |---|---|---|
-| **配管**（順序と actor が決まっている） | claim → spec_delegated → phase_started → cycle_started → log → stage / Issue ごとの worktree を切る / seam contract の生成 / 憲章とSPECの注入 / gate の所見を skeptic へ運ぶ / `decide` の雛形 | **ツール**（`org_cycle.py`） |
-| **判断**（役割の仕事） | 何を選ぶか / 誰に委ねるか / 分割するか / admit するか / verdict・why・risk / どのミューテーションを試すか | **役割**（自動化しない） |
+| **plumbing** (the order and actor are settled) | claim → spec_delegated → phase_started → cycle_started → log → stage / cutting a worktree per Issue / generating the seam contract / injecting the charter and the SPEC / carrying the gate's findings to the skeptic / the `decide` template | **the tool** (`org_cycle.py`) |
+| **judgment** (the role's work) | what to choose / whom to delegate to / whether to split / whether to admit / the verdict, why, and risk / which mutation to try | **the role** (not automated) |
 
-**`verify` が verdict を埋めないのは、線引きの中でもとりわけ譲れない一点である。** ツールが
-verdict を決めた瞬間に gate は形骸化し、admission は「ツールが出した文字列を役割が転記する
-儀式」に落ちる。埋めてよいのは**材料**（憲章・SPEC・seam・gate の所見）までで、**結論**は
-役割が出す。逆に、材料を毎回人が書き下ろす状態も同じくらい悪い: 検証手順を人が書けば、
-書くたびに厳しさが変わり、18 Issue なら18通りの基準になる。基準の出所は `agents/<role>.md`
-ただ1つにし、変更はそこ1箇所で効くようにする。
+**That `verify` does not fill in the verdict is the least negotiable point on this line.** The
+moment a tool decides the verdict, the gate becomes a formality and an admission falls to "a ritual
+in which a role transcribes a string the tool produced". What may be filled in is **the material**
+(the charter, the SPEC, the seam, the gate's findings); **the conclusion** comes from the role.
+The opposite state — a human writing the material out afresh each time — is equally bad: a human
+writing the verification procedure shifts the strictness with each writing, and eighteen Issues
+produce eighteen standards. The standard has one source, `agents/<role>.md`, and a change there
+takes effect everywhere.
 
-**二重管理はしない — 書くのは1コマンド。** 判断は Issue と台帳の両方に残る（Issue に理由、
-台帳に受領証と digest）が、**打つのは1回**である。以前は `decide` が Issue に書き、人が
-`ledger append` を別に打つ設計で、運用では片側落ちが繰り返し起きた（反証の記録が台帳に無い、`progress_recorded` が0件）。actor は `--by` で既に
-渡っているので、分ける理由が無かった。
+**No double bookkeeping — one command writes.** A judgment stays in both the Issue and the ledger
+(the reason on the Issue; the receipt and digest in the ledger), but **it is typed once**. The
+earlier design had `decide` write to the Issue and a human type `ledger append` separately, and in
+operation one side went missing again and again (no refutation record in the ledger; zero
+`progress_recorded`). The actor was already passed through `--by`, so there was no reason to
+separate them.
 
-順序は **台帳が先、Issue が後**。統制（自己承認拒否・順序違反）は台帳が持っているので、
-Issue に書いてから台帳が拒否すると「Issue には admit と書いてあるが台帳には無い」という
-最悪の食い違いが外に残る。拒否されるなら、外から見える記録を作る前に止める。
+The order is **the ledger first, the Issue second**. The controls (refusing self-approval, order
+violations) live in the ledger, so writing to the Issue first and then being refused leaves the
+worst kind of mismatch visible from outside: "the Issue says admit but the ledger has nothing". If
+it is refused, stop before any record visible from outside exists.
 
-**冪等キーは統制の裏口になってはいけない。** 冪等 no-op は「同じ actor による同じ論理
-イベントの再実行」に限る。`(class, natural_key)` だけを見ていたときは、キーさえ一致すれば
-actor が違っても no-op になり、DISTINCT_ACTOR も REQUIRES_PRIOR も**評価すらされなかった** —
-gate の判定と同じキーを maker が使えば、自己承認が exit 0 で通った。冪等性は再実行を守る
-仕組みであって、統制を迂回する経路ではない。
+**An idempotency key must not become a back door around the controls.** An idempotent no-op is
+limited to "a re-run of the same logical event by the same actor". While only
+`(class, natural_key)` was read, a matching key made it a no-op even with a different actor, and
+neither DISTINCT_ACTOR nor REQUIRES_PRIOR was **even evaluated** — a maker using the same key as
+the gate's judgment got a self-approval through at exit 0. Idempotency is a mechanism for
+protecting a re-run, not a path around the controls.
 
-**訂正は第一級のイベントである。** 台帳は追記型なので過去を消せない。誤って書いた記録も、
-仕様検証のために書いたプローブも、そこに残り続ける。これを自由記述の注記で済ませると
-**機械が読めない** — 検証用のプローブが実判定として集計され、board が「admit 済みだが
-skeptic の記録が無い」と現実と食い違う表示を出し続けた。`correction{corrects, kind}` で
-無効を宣言し、`kind: probe|mistake` は集計から除外する。`backfill`（後から書いた実判定）と
-`superseded`（後続判定で置き換わった）は除外しない — 前者は有効な判定であり、後者は
-「同一 deliverable は最新判定が有効」という時系列の解決が扱う領域だからである。
+**A correction is a first-class event.** An append-only ledger cannot erase the past. A record
+written in error, and a probe written to verify the specification, both stay there. Settling for a
+free-text note leaves it **unreadable by machine** — verification probes were counted as real
+judgments and the board kept displaying "admitted, but no record from the skeptic", at odds with
+reality. `correction{corrects, kind}` declares the void, and `kind: probe|mistake` is excluded from
+the counts. `backfill` (a real judgment written afterwards) and `superseded` (replaced by a later
+judgment) are not excluded — the first is a valid judgment, and the second belongs to the
+chronological resolution that "the latest judgment on a deliverable is the live one".
 
-**識別子の揺れで統制が消えてはいけない。** 人間側は Issue 番号（`deliverable` / `issue`）で
-書き、強制ロジックは `candidate_id` / `claim_id` を見ていた。同じ仕事を指しているのに片方しか
-見ないため、実地では自己承認も、反証を経ない deploy も素通りした。書き手がどのキーを使ったかで
-統制の有効性が変わるなら、それは統制ではない。台帳にある対応関係（`pack_manifest_id: "issue-7"`
-など）を辿って同一性を解決し、**相関の取れない判定は拒否する**。素通りが最悪なのは、統制が
-効いていないことが誰にも見えないまま、ハッシュ連鎖が偽造にお墨付きを与えるからである。
+**A control must not vanish through variation in identifiers.** The human side wrote Issue numbers
+(`deliverable` / `issue`) while the enforcement logic read `candidate_id` / `claim_id`. Both point
+at the same work, and reading only one let both a self-approval and a deploy without refutation
+walk straight through in the field. If a control's effectiveness depends on which key the writer
+used, it is not a control. The correspondences present in the ledger (`pack_manifest_id:
+"issue-7"` and the like) are followed to resolve identity, and **a judgment that cannot be
+correlated is refused**. Walking through is the worst outcome because the hash chain then lends its
+endorsement to a forgery, with nobody able to see that the control is not in effect.
 
-**worktree は「判断で守れない不変条件」の実例である。** 並列 fan-out で、ある Issue のコミットが
-`feat/issue-8-settle` に載る事故が実際に起きた。`git checkout` はツリー全体を切り替えるので、
-同一ツリーで並列 maker を走らせる限り、注意深さの問題ではなく構造の問題として再発する。
-**「毎回正しく判断する」前提の設計は破れる** — だから `begin` が `.orgforge/wt/issue-<N>/` を
-物理的に分ける。これは forced invariant であって forced delegation ではない。
+**A worktree is a worked example of an invariant judgment cannot protect.** In a parallel fan-out,
+the accident of one Issue's commits landing on `feat/issue-8-settle` actually happened. `git
+checkout` switches the whole tree, so for as long as parallel makers share one tree it recurs as a
+structural problem rather than a problem of care.
+**A design that assumes "judge correctly every time" breaks** — which is why `begin` separates
+`.orgforge/wt/issue-<N>/` physically. This is a forced invariant, not forced delegation.
 
-これは docs/03 §6.5 の線引きをそのまま踏襲している — **forced delegation は設計エラー、
-forced invariant は正しい**。`org_cycle` が自動化したのは後者だけで、fan-out するかどうかも、
-admit するかどうかも、依然として役割の判断である。
+This follows exactly the line docs/03 §6.5 draws — **forced delegation is a design error; a forced
+invariant is right**. What `org_cycle` automated is only the latter: whether to fan out and whether
+to admit both remain the role's judgment.
 
-### 三つの性質
+### Three properties
 
-1. **自動解決** — `parent` は Issue の `Parent: #N`（`create` が書く）とネイティブ sub-issue API
-   から解決する。`candidate_id` は Issue のトレーラから読む。**人が値を運ばない**
-2. **止まったら止まったまま** — 途中で失敗したら、そこから先は打たない。部分適用のまま
-   「成功」と報告するのが最悪（台帳の整合が崩れた状態を正常と見せる）
-3. **再実行が安全** — 各イベントは natural-key で冪等なので、済んだ分は no-op になる。
-   だから「止まったら直して再実行」が成立する
+1. **Automatic resolution** — `parent` resolves from the Issue's `Parent: #N` (written by `create`)
+   and from the native sub-issue API. `candidate_id` is read from the Issue's trailer. **No human
+   carries a value**
+2. **Stopped means stopped** — on a failure partway, nothing beyond it is typed. Reporting
+   "success" while half-applied is the worst outcome (it presents a ledger left inconsistent as
+   normal)
+3. **Re-running is safe** — each event is idempotent by natural key, so what is done becomes a
+   no-op. That is what makes "fix it and run it again" work
 
-`plan` サブコマンドは**何も実行せず**イベント列だけを印字する。打つ前に確認したいとき用。
+The `plan` subcommand **runs nothing** and prints only the sequence of events. For when you want to
+look before typing.
 
 ---
 
@@ -405,7 +434,7 @@ A candidate deliverable is **not admissible** past the phase named unless its re
 
 | Artifact | Phase gate | Why it is a reproducibility requirement |
 |---|---|---|
-| **A committed lockfile + a populated, version-pinned manifest** | implement → test | `clone → install` must resolve to *one* dependency tree on every machine and every day; a manifest with version ranges and no lockfile resolves differently over time (the タテカエ failure: manifest with no deps, no lock). |
+| **A committed lockfile + a populated, version-pinned manifest** | implement → test | `clone → install` must resolve to *one* dependency tree on every machine and every day; a manifest with version ranges and no lockfile resolves differently over time (the Tatekae failure: manifest with no deps, no lock). |
 | **A pinned toolchain** (`.nvmrc` / `.tool-versions` / `engines`, per-language) | implement → test | the same source transpiles/builds/tests identically only on a pinned runtime; an unpinned node/deno/python floats the result. |
 | **A one-command setup and a one-command test, documented in a README** | test → integrate → deploy | "verified end-to-end" must be reproducible *by a stranger from a clean clone*, not asserted by the maker; the **gate re-runs both from a fresh checkout** rather than trusting the claim. |
 | **Idempotent, re-runnable migrations + a one-command DB bring-up** | test → integrate → deploy | a second developer must be able to bring up state deterministically; bare `create table` (no `if not exists`, no seed, no apply command) is not re-runnable. |
@@ -660,316 +689,374 @@ re-split candidate (a *shape* check, not a quality judgment).
 
 ---
 
-### 分割の判断軸 — SDD の既存ツールが持つもの、持たないもの
+### The axes for deciding a split — what the existing SDD tools have, and what they do not
 
-タスクへの分割基準を Spec Kit と Kiro の実テンプレートで確認した（原文は docs/sources）。
+The criteria for splitting into tasks were checked against the real templates of Spec Kit and Kiro
+(the sources are in docs/sources).
 
 | | Spec Kit | Kiro | orgforge |
 |---|---|---|---|
-| 分割の第一軸 | ユーザーストーリー（P1/P2/P3） | design のコンポーネント + 逐次の依存連鎖 | coverage-manifest の must-have 行 |
-| 並列の判定 | `[P]` = *"different files, no dependencies"* | 概念なし（逐次前提） | `owns` の交わり（= Spec Kit と同じ判定） |
-| 粒度の明文規範 | 実質なし（"exact file path" 必須 + *"not vague"*） | *"Implement X function" rather than "Support X feature"* | 「壊れ方が1種類か」（下記） |
-| **過大タスクの検出** | **なし** | **なし**（人間の承認ゲートのみ） | `split-check`（警告） |
-| テスト | OPTIONAL（明示要求時のみ） | TDD 既定 | 必須（機械バー docs/11 §4e） |
+| the primary axis | user stories (P1/P2/P3) | design components + a sequential dependency chain | the must-have rows of coverage-manifest |
+| deciding parallelism | `[P]` = *"different files, no dependencies"* | no such concept (sequential by assumption) | the intersection of `owns` (= the same decision as Spec Kit) |
+| a written norm for granularity | effectively none ("exact file path" required + *"not vague"*) | *"Implement X function" rather than "Support X feature"* | "is there one way it breaks" (below) |
+| **detecting an oversized task** | **none** | **none** (a human approval gate only) | `split-check` (a warning) |
+| tests | OPTIONAL (only on explicit request) | TDD by default | required (the machine bar, docs/11 §4e) |
 
-**`owns` の交わりだけでは足りない、というのが実地で最も高くついた発見である。** これは
-Spec Kit の `[P]` と同じ判定であり、**同じ限界を継承していた**: `owns` が `supabase/` に
-1つのディレクトリに閉じていた Issue は分割されなかったが、中身は「スキーマの形（型・制約で守る）」と
-「認可（攻撃シナリオで守る）」という壊れ方も検証手段も別の2つだった。結果、gate が14回の
-判定のうち一度も同じ観点で連続できず、複数のマイグレーションが相互に干渉し、10周を超えても終わらなかった。
-同じ日に #8（1つの関数）と #10（CI 設定）は1〜2周で通っている。
+**That the intersection of `owns` is not enough was the most expensive discovery in the field.**
+It is the same decision as Spec Kit's `[P]`, and it **inherited the same limit**: an Issue whose
+`owns` was closed inside the single directory `supabase/` was not split, while its content held two
+things differing in both how they break and how they are verified — "the shape of the schema
+(guarded by types and constraints)" and "authorization (guarded by attack scenarios)". As a
+result the gate could not once sustain the same viewpoint across fourteen judgments, several
+migrations interfered with each other, and it did not finish in over ten rounds.
+On the same day #8 (one function) and #10 (a CI setting) passed in one or two.
 
-そこで軸を1本足す:
+So one more axis is added:
 
-> この deliverable が壊れたとき、**壊れ方は1種類か**。検証に必要な手段は**1種類か**。
+> When this deliverable breaks, **is there one way it breaks**? Does verifying it need **one
+> means**?
 
-Kiro の *"Implement X function" rather than "Support X feature"* は、同じことを別の言い方で
-述べている — 機能単位ではなく、**1つの壊れ方に対応する単位**に落とせ、ということである。
+Kiro's *"Implement X function" rather than "Support X feature"* says the same thing another way —
+bring it down not to a unit of feature but to **a unit answering one way of breaking**.
 
-**過大タスクの検出は、調べた範囲のどのツール・手法も持っていない**（docs/sources）。
-Spec Kit の `analyze` に粒度の検査は無く、Kiro は人間の承認ゲートのみ。BMAD は同じ機能要求
-（Issue #1471「タスク数が閾値を超えたら分解エージェントを起動」）が**未解決のまま放置**され、
-学術側の AQUSA も Estimatable（サイズ過大）の自動化を「意味理解を要する」として明示的に
-諦めている。定量的な閾値を持つのは Devin の *"if a task would take you three hours or less"*
-だけで、それも事前 lint ではない。人間の diff レビューを廃止した org（§4f）では承認ゲートが
-無いので、`github_sync split-check` が起票後に警告を出す — 壊れ方が複数か、認可の要求が
-境界だけを定めていないか。**止めない、警告する**: 何を守るべきかは人が決める。
+**Detecting an oversized task is something no tool or method surveyed has** (docs/sources).
+Spec Kit's `analyze` carries no granularity check, and Kiro has only a human approval gate. BMAD
+has the same feature request (Issue #1471, "start a decomposition agent once the task count
+exceeds a threshold") **left open and unresolved**, and on the academic side AQUSA explicitly
+gives up on automating Estimatable (oversized), calling it a matter requiring semantic
+understanding. The only quantitative threshold is Devin's *"if a task would take you three hours
+or less"*, and even that is not a pre-filing lint. An org that has retired human diff review (§4f)
+has no approval gate, so `github_sync split-check` warns after filing — are there several ways of
+breaking, and does the authorization requirement set only the boundary? **It does not stop; it
+warns**: what should be protected is a human's call.
 
-**「同じファイルを触るか」を分割基準にすることは、既存の規範体系ではむしろ反パターンである。**
-Humanizing Work の垂直スライスの定義は *"a work item that delivers a valuable change in system
-behavior such that you'll probably have to touch multiple architectural layers"* — **複数層に
-触ることを肯定的に含む**。層ごとに割る（UI で1つ、DB で1つ）のは independent と valuable に
-反する失敗パターンとして名指しされている。Tessl の spec:code 1:1 写像は逆の極で、Fowler の
-分析はそれを「コンポーネント横断の合成を制限する」限界として指摘している。
+**Making "does it touch the same file" the criterion for splitting is, in the existing normative
+bodies, an anti-pattern.** Humanizing Work defines a vertical slice as *"a work item that delivers
+a valuable change in system behavior such that you'll probably have to touch multiple architectural
+layers"* — it **positively includes touching several layers**. Splitting by layer (one for the UI,
+one for the DB) is named outright as a failure pattern, against both independent and valuable.
+Tessl's 1:1 spec-to-code mapping is the opposite pole, and Fowler's analysis names it as a limit
+that "restricts composition across components".
 
-orgforge の `owns` 基準は**衝突の回避**（並列 maker が同じファイルを書かない）には正しいが、
-**分割の判断**としてはこれ1本では足りない。だから「壊れ方」の軸を足す。
+orgforge's `owns` criterion is right for **avoiding collisions** (parallel makers not writing the
+same file), but as **the judgment about splitting** it is not sufficient on its own. Hence the
+"way of breaking" axis.
 
-### 検査を呼ぶかどうかを、検査される側が決めてはいけない
+### Whoever is checked must not decide whether the check runs
 
-`integrate` は gate の admit と skeptic の survives が台帳にあるかを確認して止める。しかし
-**呼ばれなければ何も起きない。** 運用では、質の高い maker 報告を受けた監督が `git merge` で
-`develop` に入れ、gate も skeptic も通らないまま複数の deliverable が統合された。台帳は後から
-正しく拒否したが、拒否が来たのは**コードが入った後**である。
+`integrate` confirms that the gate's admit and the skeptic's survives are in the ledger, and stops
+otherwise. But **nothing happens unless it is called.** In operation a supervisor who had received
+a high-quality maker report merged into `develop` with `git merge`, and several deliverables were
+integrated having passed neither the gate nor the skeptic. The ledger correctly refused them
+afterwards — but the refusal came **after the code was in**.
 
-これは「検査対象そのものの有無で判定するな」と同じ構造で、一段上にある: **道具の中に検査を
-足しても、その道具を呼ぶかどうかが呼ぶ側の裁量なら、検査は選択制になる。** 呼ばなかったことを
-検出できるのは、呼び出しの外側にある層（PreToolUse フック）だけである。
+This has the same structure as "do not decide by the presence of the subject itself", one level
+up: **adding a check inside a tool makes the check optional as long as calling that tool is at the
+caller's discretion.** The only thing that can detect it not being called is a layer outside the
+call — the PreToolUse hook.
 
-同じ形の穴が Issue の操作にもあった。`gh issue create` は `dept` / `objective` / `parent` /
-冪等キーを付けず、`gh issue close` は `cycle_completed`（`domain_model` を必須とする）を残さない。
-organ を通さない書き換えは、記録の必須項目を丸ごと飛ばす。
+A hole of the same shape existed in Issue operations. `gh issue create` attaches no `dept`,
+`objective`, `parent`, or idempotency key, and `gh issue close` leaves no `cycle_completed` (which
+requires `domain_model`). A rewrite that does not go through an organ skips the record's required
+fields wholesale.
 
-**hold には打つべきコマンドを必ず添える。** 迂回は速さのためではなく「道具の名前を思い出す
-コスト」を払わなかったために起きる。コマンドが目の前にあれば迂回する理由が消える。逆に hold
-だけして代替を示さないと、**逃げ道の宣言が覚えられて常用され、迂回が記録に残らないまま
-高速化する** — それは hold が無い状態より悪い。
+**Always attach the command to type to a hold.** A bypass happens not for speed but because "the
+cost of remembering the tool's name" went unpaid. With the command in front of you, the reason to
+bypass disappears. Conversely, holding without offering an alternative means **the escape-hatch
+declaration gets memorised, becomes routine, and bypassing accelerates while leaving no record** —
+which is worse than having no hold at all.
 
-**逃げ道は用意し、通ったことを記録する。** 完全に塞ぐと壊れたときに詰まるので、明示の宣言
-（`ORG_ALLOW_MANUAL_MERGE` / `ORG_ALLOW_MANUAL_GH`）で通せるようにし、**その宣言自体を
-`bypass_declared` として台帳に残す**。塞げないことを記録する形である。
+**Provide the escape hatch, and record that it was used.** Blocking it completely traps you when
+something breaks, so an explicit declaration (`ORG_ALLOW_MANUAL_MERGE` / `ORG_ALLOW_MANUAL_GH`)
+lets it through, and **the declaration itself is left in the ledger as `bypass_declared`**. It is
+the shape of recording what cannot be blocked.
 
-### 検査は、自分が要求している文面と同じ厳しさで書く
+### Write a check as strictly as the wording it demands
 
-ガードのメッセージが「子プロンプトの**冒頭に1行**書く」と言っているのに、検査は**全文の部分
-一致**だった。結果、**否定文が宣言として通った** — 「contract も `INDEPENDENT:` も付けて
-いません」がそのまま独立宣言として一致した（実地のプローブ）。
+The guard's message said to write **one line at the top** of the child prompt, while the check was
+**a substring match over the whole text**. As a result **a negation passed as a declaration** — the
+Japanese for "I attached neither a contract nor `INDEPENDENT:`" matched verbatim as a declaration
+of independence (a probe in the field).
 
-実害のある形は「この作業は independent ではないので contract を付ける」と書いた spawn が
-独立宣言と誤判定されることで、**独立宣言は `owns` の宣言を免除する**ので、偶然の一致で免除が
-取れる。**検査が文面より緩いと、正しく書いた人だけが厳しい制約を負う。**
+The harmful shape is a spawn written as "this work is not independent, so I attach a contract"
+being misjudged as a declaration of independence: **such a declaration exempts the `owns`
+declaration**, so a chance match takes the exemption. **When a check is looser than the wording,
+only whoever wrote it correctly bears the strict constraint.**
 
-同じ穴が seam 側にもあった: `"seam contract"` という**語**を見ていたため、「no seam contract is
-attached」が宣言として通った。語ではなく**構造**（`## Your slice` / `Inputs you receive:` /
-`Outputs you MUST produce:`）を見る — 構造は否定文に現れない。「`Inputs you receive:` が無い」と
-書くことはあっても、コロン付きの見出しを否定文の中に置くことはまずない。
+The same hole existed on the seam side: it read the **word** `"seam contract"`, so "no seam
+contract is attached" passed as a declaration. Read **structure** rather than words (`## Your
+slice`, `Inputs you receive:`, `Outputs you MUST produce:`) — structure does not appear in a
+negation. One may write "there is no `Inputs you receive:`", but one hardly ever places a
+colon-terminated heading inside a negation.
 
-**一般形**: 宣言や約束を検査するなら、**それが現れる位置と形**を見る。散文に混ざりうる語だけを
-見ると、その語について語っただけで検査を通過する。この org が繰り返し塞いできた「確かめて
-いないことを確かめたかのように述べる」の、**道具側の変種**である。
+**The general form**: when checking a declaration or a promise, read **the position and shape in
+which it appears**. Reading only a word that can occur in prose lets merely talking about that word
+pass the check. It is **the tool-side variant** of the failure this org has closed again and again:
+stating something unverified as though it were verified.
 
-### 観測経路が値を隠すことがある
+### The observation path can hide a value
 
-`intake` が「本命ケースだけ exit=0」と報告されたが、実装は3経路すべてで 10 を返していた。
-原因は**パイプ**で、`| tail` を通すとシェルの終了コードは最後のコマンドのものになる。
+`intake` was reported as "exit=0 on the main case only", while the implementation returned 10 on
+all three paths. The cause was **a pipe**: through `| tail` the shell's exit code becomes the last
+command's.
 
-**実装が正しくても、観測が違えば同じように誤判断が起きる。** 終了コードで判定させる設計は、
-パイプを挟まれた瞬間に無効になる — 機械が拾う判定は**出力の中**にも置く（`INCOMPLETE` の1行）。
+**A correct implementation still produces the same misjudgment when the observation differs.** A
+design that decides by exit code is void the moment a pipe is inserted — a decision a machine picks
+up also goes **into the output** (one `INCOMPLETE` line).
 
-### 報告の切断 — 判定として読む前に、形を見る
+### A truncated report — read the shape before reading it as a judgment
 
-subagent の turn が**作業の途中で終わる**ことがある: `status` は
-completed で返り、`result` は「Now the key attack:」のような宣言1文だけ。`SendMessage` で
-再開させると続きを実行して完走したので、**agent が死んだのではなく、報告が成果物の形になる
-前に turn が終わっている**。
+A subagent's turn sometimes **ends mid-work**: `status` returns completed and `result` holds a
+single declarative sentence like "Now the key attack:". Resuming with `SendMessage` ran the rest to
+completion, so **the agent did not die — the turn ended before the report took the shape of a
+deliverable**.
 
-**危ないのは、それらしく切れた形である。** 「Now the key attack:」なら verdict が無いと分かる
-が、「MUST 2 は防がれました」で切れていたら、それを verdict として読んで admit しかねない。
-この org が繰り返し検出した「確かめていないことを確かめたかのように述べる」が、**報告の切断**
-という経路で成立する — 誰も嘘をついていないのに、記録には確かめた判定が残る。
+**The dangerous shape is the one that cuts off plausibly.** "Now the key attack:" is visibly
+missing a verdict, but a report cut off at "MUST 2 is defended" could be read as a verdict and
+admitted.
+The failure mode this org has detected again and again — stating something unverified as though it
+were verified — holds through the path of **a truncated report**: nobody has lied, and the record
+still carries a judgment presented as verified.
 
-`org_cycle intake` が役割ごとの必須要素だけを見る（skeptic/gate は verdict と実行の痕跡、
-maker はコミットと DoD の実測出力）。**verdict の中身も妥当性も見ない** — 判定は役割の仕事で
-あって、見るのは「報告が成果物の形になっているか」だけである。
+`org_cycle intake` reads only the elements each role must carry (a verdict and a trace of what was
+run for skeptic/gate; commits and the measured DoD output for a maker). **It reads neither the
+content nor the soundness of the verdict** — judging is the role's work, and all this reads is
+whether the report has the shape of a deliverable.
 
-**「途中で切れたように読める語」を根拠にはしない。** `Now …` `次に…` のような語で判定すると、
-丁寧に途中経過を書いた完全な報告を弾く。必須要素が揃っていれば完走とみなし、語は補足として
-添えるだけにする。
+**A word that merely reads as though it were cut off is not grounds.** Deciding on words like
+`Now …` rejects a complete report that carefully wrote out its interim progress. With the required
+elements present it counts as having run to completion, and the word is attached only as a
+supplement.
 
-### 速さを変えるなら、支配的な項を測ってから
+### To change the speed, measure the dominant term first
 
-「全体的に遅い」に対してモデルや effort を下げるのは、**削る対象が支配的でない限り効かない**。
-実運用で測った（n=52、完了通知の `duration_ms`）:
+Lowering the model or the effort against "it is slow overall" **does not work unless what is being
+cut is the dominant term**. Measured in real operation (n=52, from the `duration_ms` of the
+completion notifications):
 
 ```
 maker 486.7s (54%) · gate 260.2s (29%) · skeptic 169.3s (17%)
-1周 ≈ 15.3分 ／ 反証による周回 = 214分 / 269分 = 79%
+one round ≈ 15.3 min / rounds driven by refutation = 214 min / 269 min = 79%
 ```
 
-**「1回の待ち時間」は21%しかなく、79%は周回数である。** さらに gate/skeptic のモデルを下げれば
-判定の質が落ち、周回が増えて**逆に遅くなる**。効くのは分割と完了の定義（§4b）であって、
-モデル層ではない。
+**"One wait" is only 21%; 79% is the number of rounds.** Lowering the gate's or skeptic's model on
+top of that degrades the quality of the judgments, adds rounds, and **makes it slower**. What works
+is the split and the definition of done (§4b), not the model layer.
 
-3つ、判断を誤りかけた点を記録する:
+Three points where the judgment nearly went wrong, recorded:
 
-1. **「実装役が過半だから質が足りていない」は誤り。** 最長の1回は数百行の SQL とテスト数十件に
-   対応する量で、遅さではなく仕事量だった。同じ成果物で skeptic が「一手隣」を探して見つけられず
-   「列挙をやめて述語に置き換えたので原理的に出にくくなっている」と述べた — **maker の設計判断が
-   反証を止めた実例**である。
-2. **「registrar を下げるのが唯一の安全な候補」も無意味。** 実運用で0回呼ばれており、効果が
-   測れない。安全性だけを見て**効果を見ていなかった**。
-3. **測れなかったものを判断材料にしない。** `registrar` の所要時間と `org-tick` の挙動は未測定
-   であることが明示され、それは判断から外した。
+1. **"The maker is the majority, so the quality is lacking" is wrong.** The longest single run
+   corresponded to several hundred lines of SQL and dozens of tests — volume of work, not
+   slowness. On the same deliverable a skeptic looked for "one move over", failed to find it, and
+   wrote that "enumeration was replaced with a predicate, so it is now hard to produce in
+   principle" — **a worked example of a maker's design decision stopping a refutation**.
+2. **"Lowering registrar is the only safe candidate" is equally meaningless.** It was called zero
+   times in real operation, so no effect can be measured. It read the safety and **not the
+   effect**.
+3. **What could not be measured is not used as material for a decision.** registrar's duration and
+   `org-tick`'s behaviour were explicitly unmeasured, and were left out of the decision.
 
-唯一削れたのは**プロンプトの重複**だった（`verify` が gate の最新判定を判定履歴と `prior` の
-2箇所で出しており、skeptic 457行のうち46行超が重複していた）。これは実測で見えた項であり、
-推測で下げたものではない。
+The only thing that could be cut was **duplication in the prompt** (`verify` printed the gate's
+latest judgment in two places, the judgment history and `prior`, and over 46 of the skeptic's 457
+lines were duplicates). That is a term measurement made visible, not something lowered on a guess.
 
-### 監督（supervisor）自身の記録も検査する
+### The supervisor's own records are checked too
 
-この org は **maker の成果物**（`cycle_completed` が薄い `--result` を拒否）と **gate/skeptic の
-判定**（`decide` が verdict の言い換えを拒否）を機械で検査している。**監督の記録だけが検査されて
-いなかった** — 運用して見ると、監督の失敗の多くが道具の側で捕まえられる形だった。
+This org checks **the maker's deliverable** (`cycle_completed` refuses a thin `--result`) and **the
+gate's and skeptic's judgments** (`decide` refuses a paraphrase of the verdict) by machine. **Only
+the supervisor's records went unchecked** — and in operation, most of the supervisor's failures
+turned out to be catchable on the tool side.
 
-この org が同じ晩に8回検出した失敗様式は「**確かめていないことを、確かめたかのように述べる**」
-であり、それが**成果物 → 判定 → 道具 → 監督**の4層すべてに現れた。**最初の3層には機械の検査が
-あり、4層目にだけ無かった。**
+The failure mode this org detected eight times in one night was **stating something unverified as
+though it were verified**, and it appeared in all four layers: **deliverable → judgment → tool →
+supervisor**. **The first three had a machine check; only the fourth did not.**
 
-| 何が漏れたか | 実測 | 対策 |
+| what went missing | measured | the fix |
 |---|---|---|
-| rework の発注が台帳に残らない | reject/refuted の多くに対し `rework_requested` が無い（4回 reject されて記録0件の Issue もあった） | `org_cycle rework` を専用コマンドにし、`verify` が reject 時に**判定の記録と同じ場所**でそのコマンドを出す |
-| 要約が条件節を落とす | maker の「**このブランチにはまだ無い**」が監督の要約で消え、それが gate への指示に流れて reject 事由になった | `decide --claimed / --verified` に分け、条件節が `--verified` で触れられていなければ警告 |
-| 古いパスの流用 | 0.26.0 のリリース後も 0.25.2 のパスを打った | 実行時のバージョンと cwd を stderr に1行 |
+| a commissioned rework leaves nothing in the ledger | many rejects and refutations had no `rework_requested` (one Issue was rejected four times with zero records) | make `org_cycle rework` a dedicated command, and have `verify` print it **in the same place as the judgment's record** on a reject |
+| a summary drops a qualifier | the maker's "**it is not on this branch yet**" vanished in the supervisor's summary, flowed into the instructions to the gate, and became a reason for rejection | split `decide` into `--claimed` / `--verified`, and warn where a qualifier goes untouched by `--verified` |
+| reusing an old path | the 0.25.2 path was still typed after 0.26.0 shipped | one line of the running version and cwd to stderr |
 
-**rework の記録漏れは、道具の警告を沈黙させた。** `show` の rework 警告（3回超で出る）は台帳の
-`rework_requested` を数えるので、監督が記録しなければ閾値に届かない — **道具は数えられないものを
-数えない**。専用コマンドが無く `ledger.py append --payload '{...}'` を手で組む必要があったことも
-漏れの一因である（発注は「判定 → 検証 → decide → **発注** → 記録」の順で、発注した subagent の
-通知が来ると記録が流れる）。
+**The missing rework records silenced the tool's warning.** `show`'s rework warning (which appears
+past three) counts `rework_requested` in the ledger, so it never reaches the threshold unless the
+supervisor records it — **a tool does not count what it cannot count**. Part of the cause was that
+no dedicated command existed and `ledger.py append --payload '{...}'` had to be assembled by hand
+(commissioning runs "judge → verify → decide → **commission** → record", and the record gets
+washed away when the commissioned subagent's notification arrives).
 
-**この検査は完全ではない。** `--verified` は「確かめた」と書くだけでも通り得るので、実行の痕跡
-（コマンド名・出力・exit）を粗く見ているが、それ自体が「コマンド名を書けば通る」形式化を招く。
-**塞げないことを正直に記録する**のがこの org の規律である。根拠として、`cycle_completed` が薄い
-`--result` を拒否したとき監督は実際に測り直した — 拒否が形式的な壁ではなく行動を変えた実例が
-ある一方で、それが常に成り立つ保証は無い。
+**This check is not complete.** `--verified` can pass on the words "I confirmed it" alone, so a
+trace of execution (a command name, output, an exit code) is read coarsely — and that itself
+invites the formalisation "write a command name and it passes".
+**Recording honestly what cannot be blocked** is this org's discipline. As evidence: when
+`cycle_completed` refused a thin `--result`, the supervisor actually measured again — a worked
+example of a refusal changing behaviour rather than being a formal wall, with no guarantee that it
+always holds.
 
-**worktree の占有ロックは、意図的に入れていない。** 「gate の稼働中に監督が同じ worktree で
-変異検査を走らせ、skeptic が偽の失敗を観測した」という実害があり、占有の警告は筋が通る。しかし
-同じ晩に gate が異常終了しており、**ロックの解放漏れが新しい詰まりを生む経路が実在する**。
-上の3件を入れたあとの再発を見てから判断する — 詰まりを直すために別の詰まりを作らない。
+**An exclusive lock on a worktree is deliberately absent.** There was real harm — "while a gate
+was running, a supervisor ran a mutation check in the same worktree and the skeptic observed a
+false failure" — and a warning about contention is reasonable. But a gate terminated abnormally
+that same night, and **a path where a lock left unreleased creates a new jam genuinely exists**.
+The decision waits on whether it recurs after the three fixes above — do not create another jam to
+fix a jam.
 
-### 指示と権限を食い違わせない
+### Do not put the instructions at odds with the permissions
 
-subagent に**渡っていない権限を要求する指示**を書いてはいけない。実地では `agents/gate.md` と
-`agents/skeptic.md` が「判定を台帳と Issue の両方に記録せよ」と指示していたが、subagent には
-`ORG_GITHUB_REPO` も台帳のパスも渡っていなかった。結果、gate と skeptic が繰り返し、判定を出した
-後に「記録は監督に委ねます」と述べて止まり、**一度は判定そのものが台帳に入らないまま失われ
-かけた**（監督が `org_cycle show` で気づいて再開させた）。
+Never write an instruction to a subagent **that demands a permission it was not given**. In the
+field `agents/gate.md` and `agents/skeptic.md` instructed it to "record the judgment in both the
+ledger and the Issue", while the subagent was given neither `ORG_GITHUB_REPO` nor the ledger path.
+As a result gate and skeptic repeatedly produced a judgment, said "I leave the recording to the
+supervisor", and stopped — and **once the judgment itself came close to being lost without ever
+entering the ledger** (the supervisor noticed through `org_cycle show` and resumed it).
 
-寄せる先は2つあり、**判定を返すところまでを subagent の責務とする**ほうを採った:
+There were two directions to resolve it in, and the one adopted makes **returning the judgment the
+limit of a subagent's responsibility**:
 
-| | 内容 | 判断 |
+| | what it is | the decision |
 |---|---|---|
-| (a) 記録権限を渡す | subagent に env と書き込み権を渡す | 採らない — 判定者が記録も持つと、独立性の検査（台帳の DISTINCT_ACTOR）が形式化しやすい |
-| (b) 責務を判定に絞る | verdict / why / evidence / standard / risk を**返す**まで | **採用** — 記録は監督の仕事。実地でも subagent は判定に集中したほうが質が上がった |
+| (a) grant the recording permission | give the subagent the env and write access | not adopted — a judge that also holds the recording makes the independence check (the ledger's DISTINCT_ACTOR) easy to formalise away |
+| (b) narrow the responsibility to judging | as far as **returning** verdict / why / evidence / standard / risk | **adopted** — recording is the supervisor's job. In the field, too, a subagent concentrating on the judgment produced better quality |
 
-`verify` の出力も分けた: **stdout（subagent に渡す本文）には記録コマンドを載せず**、
-「返すもの」の指定だけを置く。監督が打つコマンドは **stderr**（監督向け）に出す。
-配管が判定を運べなくなっては本末転倒なので、両方を残しつつ宛先を分ける。
+`verify`'s output was split too: **stdout (the body handed to the subagent) carries no recording
+command** and states only what to return. The command the supervisor types goes to **stderr** (for
+the supervisor).
+Plumbing that can no longer carry the judgment defeats the purpose, so both are kept and only their
+destinations are separated.
 
-### 道具は「見ていない」ことを言う
+### A tool says what it has not looked at
 
-`repro_lint` は baseline との差で「この変更で新たに悪化したか」を判定する。baseline が無い
-とき、以前は失敗全件に「これらは baseline に無い＝この変更で新たに悪化した」と付けていた —
-**読んでいないものについて断定していた**。実地で gate がそれを額面どおり受け取り、既存の
-負債を新規の悪化と読んで判定を止めた（対象の Issue は、まさにその項目を緑にする作業だった）。
+`repro_lint` decides "did this change newly break something" as a difference against the baseline.
+With no baseline it used to attach "these are not in the baseline = newly broken by this change"
+to every failure — **asserting about something it had not read**. In the field a gate took that at
+face value, read pre-existing debt as a new regression, and stopped the judgment (while the Issue
+in question was the work of turning those very items green).
 
-いまは「baseline が無いので、この変更による悪化か既存の負債かは**判定していない**」と言う。
-**何も言わないより、「この道具はここを見ていない」と述べるほうが、判定する側は正しく動ける。**
-`/org-init` も baseline を1回取るようにしたので、新規 org が最初の gate 判定でこれを踏むことは
-なくなる。
+Now it says "there is no baseline, so whether this is a regression from this change or
+pre-existing debt **has not been decided**".
+**Saying "this tool has not looked here" lets the judging side act correctly, where saying nothing
+does not.** `/org-init` now takes a baseline once as well, so a new org no longer steps on this at
+its first gate judgment.
 
-### 新しい検査を入れる前に — 実データで回す
+### Before adding a new check — run it on real data
 
-検査（lint / 警告 / 検出器）を足すときは、**合成したテスト文書ではなく、実際に運用中の
-成果物で回してから出す**。合成データは検査の設計を反映して作られるので、必ず通る。
+When adding a check (a lint, a warning, a detector), **run it against artifacts actually in
+operation before shipping it, not against a synthetic test document**. Synthetic data is built to
+reflect the check's design, so it always passes.
 
-実地で2回同じ失敗をした:
+The same mistake was made twice in the field:
 
-- `req_lint` の VOIDDEP（0.25.0 → 0.25.1 で取り下げ）— 合成文書では検出・非検出とも正しく
-  動いたが、実際の `REQUIREMENTS.md` にはバッククォート識別子が **0 件**で、**一度も発火
-  しなかった**。日本語の要求は「利用者が表示名を変更したとき」と書くのが自然で、識別子記法は
-  使わない。
-- テスト側の同型（0.22.1）— `CLAUDE_PLUGIN_ROOT` を設定してから呼ぶテストを書いたため、
-  **env が無い経路＝実際の使われ方**を検査しておらず、分割で verify が死んだのを見逃した。
+- `req_lint`'s VOIDDEP (added at 0.25.0, withdrawn at 0.25.1) — on a synthetic document both
+  detection and non-detection worked correctly, while a real `REQUIREMENTS.md` held **zero**
+  backtick identifiers and it **never once fired**. A Japanese requirement is naturally written as
+  「利用者が表示名を変更したとき」, without the identifier notation.
+- The same shape on the test side (0.22.1) — the test set `CLAUDE_PLUGIN_ROOT` before calling, so
+  it never checked **the path with no env, which is how it is actually used**, and it missed verify
+  dying in the split.
 
-どちらも「テストは書いてある・green である」を満たしている。**壊れる場所で検証していない
-テストは、無いのと同じ**（この org が製品側で捕まえたのと同じ形が、道具の側にある）。
+Both satisfy "the test is written, and it is green". **A test that does not verify at the place
+that breaks is the same as no test** (the same shape this org caught on the product side, present
+on the tool side).
 
-そして**誤検出しかしない検査は、無いより悪い** — 誤警告は正しい警告まで無効化する（実地では
-`complete` の狼少年が Issue コメントの目視統合を招き、台帳側の記録が落ちた）。届かないと
-分かった検査は、作り込むより**取り下げて理由を残す**ほうが安い。
+And **a check that only produces false positives is worse than none** — a false warning voids the
+correct warnings too (in the field, `complete` crying wolf led to Issue comments being integrated
+by eye, and the ledger-side record went missing). Once a check is known not to reach, **withdrawing
+it and leaving the reason** is cheaper than building it out.
 
-### 判定者の血統は、宣言ではなく実行で分かれる
+### A judge's lineage is separated by execution, not by declaration
 
-`role-settings.yaml` は skeptic に gate と別の系統を宣言できるが、**同一ハーネスの subagent は
-親のモデルを継ぐ**ので、宣言だけでは血統は分かれない。checker が maker と同じ base model なら、
-盲点も共有する。分けるには**別のハーネスで実際に走らせる**必要がある。
+`role-settings.yaml` can declare a family for the skeptic different from the gate's, but **a
+subagent in the same harness inherits the parent's model**, so the declaration alone does not
+separate the lineage. A checker on the same base model as the maker shares its blind spots.
+Separating them requires **actually running in another harness**.
 
-主系は設定で決め打ちしない。実行中のagentがClaude CodeならCodexを、CodexならClaude Codeを
-secondaryとして選ぶ。反対側の契約が無い場合もorg全体を使用不能にはしない。`adaptive`は同じ
-製品内のgate/skepticへ縮退するが、その判定は`same-harness`として扱い、**cross-harnessを実行した
-とは記録しない**。これは役割を擬似的に分ける品質層であり、blind spotの非相関は保証しない。
+The primary is not fixed by configuration. Where the running agent is Claude Code it picks Codex as
+the secondary, and where it is Codex it picks Claude Code. The absence of a subscription on the
+other side does not render the whole org unusable. `adaptive` degrades to a gate/skeptic inside the
+same product, but that judgment is treated as `same-harness` and **is not recorded as having run
+cross-harness**. It is a quality layer that separates the roles pseudonymously; it guarantees no
+decorrelation of blind spots.
 
-分ける場合、**judge は2人になる**（同一ハーネスの subagent と、別ハーネスの headless）。ここで
-決めておかなければならないのは、**2つの判定が食い違ったときにどう扱うか**である。決めずに二重に
-すると、監督が都合のいい方を採る余地が生まれ、**検査を増やしたのに緩くなる**。
+Where they are separated, **there are two judges** (a subagent in the same harness, and a headless
+one in another). What has to be settled here is **how the two are treated when they disagree**.
+Doubling up without settling it leaves the supervisor room to take whichever suits, and **more
+checking becomes looser checking**.
 
-採るのは「片方でも否なら否」— 厳しい側に倒す形である。多数決は 1:1 で決まらず、監督の裁量に
-戻る。そして **この一致要求は判定を採用する側（`decide`）が持つ**必要がある。判定を並べて見せる
-だけなら、それは「検査を呼ぶかどうかを検査される側が決めている」構造に戻る。
+The rule adopted is "negative from either side is negative" — falling to the stricter reading. A
+majority vote does not resolve at 1:1 and returns to the supervisor's discretion. And **the side
+that adopts the judgment (`decide`) must hold this agreement requirement**. Merely lining the
+judgments up for display returns us to the structure where "whoever is checked decides whether the
+check runs".
 
-**食い違いは異常ではなく、血統を分けた目的である。** 消さずに数えること。
+**A disagreement is not an anomaly; it is the point of separating the lineages.** Count it rather
+than erasing it.
 
-### read-only の judge は、実行を要する MUST を admit できない
+### A read-only judge cannot admit a MUST that requires execution
 
-judge を read-only で走らせるのは正しい（別ハーネスのガードレールが未検証でも、書けないなら
-安全側に倒れる）。ただしその選択には構造的な帰結がある — **テストの連続実行・実 DB への到達・
-ビルドを要する MUST は再導出できず、`park` になる。**
+Running a judge read-only is right (with another harness's guardrails unverified, being unable to
+write still falls on the safe side). That choice has a structural consequence, though — **a MUST
+requiring repeated test runs, reaching a real DB, or a build cannot be re-derived, and becomes a
+`park`.**
 
-`park` は正しい振る舞いである（測れないのに admit しない方が望ましい）。だが判定を回してから
-分かるのは無駄なので、**その MUST が admission の荷重を持つなら、判定の前に監督が実測して
-evidence として渡す**。道具は判定の前にこれを告げること。
+A `park` is the correct behaviour (better not to admit what cannot be measured). Learning it only
+after running the judgment is waste, though, so **where that MUST carries the weight of the
+admission, the supervisor measures it beforehand and passes it as evidence**. The tool says so
+before the judgment.
 
-### 1件ごとの検査は、共通因子を見ない
+### A per-item check does not see the common factor
 
-gate・skeptic・repro_lint・intake はすべて **1件ごとの判定**である。1件ずつ正しく効いていても、
-「今夜 reject が18回出た、その事由の共通因子は何か」を見る組織が無い。**同じ因子で複数落ちて
-いるなら、直すべきは個々の成果物ではなく、その因子を生んでいる側**かもしれない — spec の書き方、
-gate に渡している基準、conventions、分割の粒度。
+gate, skeptic, repro_lint, and intake are all **per-item judgments**. Each may work correctly item
+by item while nothing in the org asks "eighteen rejects came out tonight; what is the common factor
+in their reasons?" **Where several fail on the same factor, what needs fixing may not be the
+individual deliverables but whatever produces that factor** — how the specs are written, the
+standard handed to the gate, the conventions, the granularity of the split.
 
-これは判定ではなく**材料の提示**である。どれを直すかは監督が決める。道具が「spec が悪い」と
-決めた瞬間、それは judge になる。
+This is not a judgment but **presenting material**. Which one to fix is the supervisor's call. The
+moment a tool decides "the spec is bad", it has become a judge.
 
-**台帳だけでは事由を数えられない。** 判定イベントの payload は `reasoning_sha256` しか持たず、
-散文は Issue コメントにしかない。台帳で「どの Issue が何回落ちたか」を確定させ、事由は Issue
-から読む。そして**構造があるものを本文検索で当てない** — コメントを丸ごと正規表現に掛けると
-maker の報告や rework 指示まで拾い、8因子のうち4つが全 Issue に該当して分布が消える（実測）。
+**The ledger alone cannot count the reasons.** A judgment event's payload holds only
+`reasoning_sha256`, and the prose exists solely in the Issue comments. The ledger settles "which
+Issue failed how many times", and the reasons are read from the Issue. And **do not hit something
+structured with a full-text search** — running a regex over whole comments picks up the maker's
+reports and rework instructions too, and four of the eight factors then match every Issue, losing
+the distribution (measured).
 
-### 拒否できることを確かめて、通せることを確かめない
+### Confirming that it can refuse, without confirming that anything can pass
 
-新しい検査を入れたら、**拒否される側と通る側の両方を実データで回す。** 拒否だけを確かめると、
-「何をしても通らない」検査を通してしまう。
+When a new check goes in, **run both the refused side and the passing side against real data.**
+Confirming only the refusal ships a check that "nothing gets through, whatever you do".
 
-実例: 2血統の一致を要求する検査で、片側だけの admit が拒否されることを確認して出した。しかし
-**空の台帳ではどちらの順序でも拒否される**ため、その org は admit を1件も記録できなかった。
-拒否の確認は「検査が働いている」ことしか示さず、**その検査を満たせる経路が存在するか**は
-別の実験である。
+A worked example: the check requiring two lineages to agree shipped after confirming that a
+one-sided admit is refused. But **from an empty ledger either order is refused**, so that org could
+not record a single admit. Confirming a refusal shows only that "the check is working"; **whether
+a path exists that can satisfy it** is a separate experiment.
 
-受け入れ条件として書くなら「拒否されること」と対で「**空の状態から一巡できること**」を置く。
-そして判定関数の単体テストではこれを捕まえられない — **実 CLI を空の台帳から走らせる**。
+Written as acceptance criteria, "it is refused" is paired with "**a full round can be completed
+from an empty state**". And a unit test of the deciding function cannot catch this — **run the real
+CLI from an empty ledger**.
 
-### 案内するコマンドは、打って効くところまで検査する
+### A command you advise is tested as far as typing it and having it work
 
-拒否のメッセージに「こう打てば直る」と書くなら、**そのコマンドを実際に打って、効くことを
-テストする。** メッセージに正しい語が含まれていることの検査では足りない。
+If a refusal message says "type this and it is fixed", **actually type that command and test that
+it works.** Checking that the message contains the right words is not enough.
 
-実例: 判定の差し替えを拒否するとき `correction` の打ち方を案内していたが、payload の形が
-実物と違っていた（`corrects_seq` と書いたが、実物は `corrects: [seq]` と `kind` を要求する）。
-**append は成功するので効いたように見え、しかし何も無効化されず、拒否から抜け出せなかった。**
+A worked example: when refusing a substituted judgment, the message advised how to type
+`correction`, and the payload shape differed from the real one (it said `corrects_seq`, while the
+real one requires `corrects: [seq]` and `kind`).
+**The append succeeds, so it looks like it worked — and nothing is voided, and there is no way out
+of the refusal.**
 
-さらに `corrected_seqs` は既定で `probe`/`mistake` だけを除外し、`superseded` は時系列の解決に
-委ねている。案内する側がその区別を知らないと、正しい形で打っても効かない。**無効化の意味は
-kind ごとに違う** — 消すのか、置き換えるのか、後から補ったのか。
+On top of that, `corrected_seqs` excludes only `probe` and `mistake` by default and leaves
+`superseded` to the chronological resolution. Without knowing that distinction, whoever writes the
+advice produces something that does not work even when typed correctly. **What voiding means
+differs per kind** — erasing it, replacing it, or filling it in afterwards.
 
-### 判定の訂正は第三者authorityへhandbackする
+### Correcting a judgment hands back to a third-party authority
 
-`correction` は追記であって履歴の削除ではないが、`probe` / `mistake` / `superseded` が
-judgmentを対象にすれば、派生viewやjoint admissionからその判定を除外できる。したがって、
-判定を出したgate/skeptic自身にこの操作を案内すると、別judgeのrejectを空けて自分のadmitへ
-差し替える経路になる。
+`correction` is an append rather than a deletion from the history, but where `probe`, `mistake`, or
+`superseded` targets a judgment, that judgment can be excluded from derived views and from a joint
+admission. Advising this operation to the very gate or skeptic that produced the judgment therefore
+opens a path to clearing another judge's reject and substituting one's own admit.
 
-judgment correctionのauthorityはconstitutionに明示する:
+The authority for a judgment correction is stated explicitly in the constitution:
 
 ```yaml
 enforcement:
@@ -978,656 +1065,762 @@ enforcement:
       authority_roles: [supervisor]
 ```
 
-authorityはgate/skeptic以外のactive roleでなければならず、`org_lint`が存在・active状態・
-非judgingを検査する。さらにvoiding correctionは、org・ledger・対象seq・kind・authority role・
-理由digestへ束縛した署名receiptを必須とする。`--actor supervisor`と名乗るだけでは通らない。
-ledger writerは対象seqを実在イベントへ解決し、対象class・Issue・effect・authority principal・
-assuranceをcorrectionへ補う。`backfill`は対象を無効化しないため、このauthorityを消費しない。
-通常イベントのprobe/mistakeも従来どおり自己訂正できる。
+The authority must be an active role other than gate or skeptic, and `org_lint` checks that it
+exists, is active, and does not judge. A voiding correction additionally requires a signed receipt
+bound to the org, the ledger, the target seq, the kind, the authority role, and the digest of the
+reason. Merely claiming `--actor supervisor` does not pass.
+The ledger writer resolves the target seq to an event that exists and fills the correction in with
+the target class, Issue, effect, authority principal, and assurance. `backfill` does not void its
+target and therefore does not consume this authority. probe and mistake on ordinary events can
+still be self-corrected as before.
 
-共有鍵のCompatibility Modeは`attested`までであり、同一UIDのhostに対するsecurity boundaryでは
-ない。非対称鍵でもwriter隔離などが欠ける環境では保証の限界を併記する。それでも署名receiptを
-要求することで、「actor名だけを変えて独立性を装う」通常経路を閉じる。role名だけを
-`authenticated`とは呼ばず、実際に検証したassuranceを台帳へ残す。
+Compatibility Mode with a shared key reaches `attested` and no further; it is not a security
+boundary against a host under the same UID. Where an asymmetric key is used but writer isolation
+and the like are absent, the limits of the guarantee are stated alongside it. Requiring a signed
+receipt nonetheless closes the ordinary path of "changing the actor name alone to feign
+independence". A role name by itself is never called `authenticated`; the assurance actually
+verified is what stays in the ledger.
 
-### 「同じものを見たか」を判定の同一性に入れる
+### "Did they look at the same thing" belongs in a judgment's identity
 
-複数の judge の一致を要求するなら、**何を判定したのかを一致の条件に入れる。** verdict と役だけで
-一致を数えると、別の revision を見た2つの通過が一致になる。
+If agreement between several judges is required, **make what was judged a condition of that
+agreement.** Counting agreement from the verdict and the role alone makes two passes over different
+revisions count as agreement.
 
-判定対象の同一性は commit SHA より広く取る:
+The identity of what is judged is taken more broadly than a commit SHA:
 
     issue + role + phase + base_sha + reviewed_tree_sha + dirty + requirements_digest
 
-`reviewed_tree_sha` を commit ではなく tree にするのは、同じ内容の commit を作り直しても対象は
-変わらないからである。`requirements_digest` を含めるのは、**受け入れ基準が変われば別の判定**
-だからである。未コミットの変更（dirty）も隠さない — 「clean だったふり」をしてはいけない。
+`reviewed_tree_sha` is a tree rather than a commit because rebuilding a commit with the same
+content does not change the subject. `requirements_digest` is included because **different
+acceptance criteria make it a different judgment**. Uncommitted changes (dirty) are not hidden
+either — never pretend it was clean.
 
-そして **dirty を差分の要約で表さない。** `git diff HEAD` は未追跡ファイルの内容を含まないので、
-`status --porcelain` と併せても「名前は拾うが中身を見ない」形になる。実際に、未追跡ファイルの
-内容を丸ごと差し替えても id が一致した。judge が未追跡ファイルを読んで判定していれば、別の
-成果物を「同じもの」として一致させられる。
+And **do not express dirty as a summary of the diff.** `git diff HEAD` does not include untracked
+content, so even combined with `status --porcelain` it takes the shape of "pick up the names, read
+nothing inside". In practice, replacing an untracked file's content entirely still matched the id.
+Where a judge read untracked files to judge, two different deliverables could be made to agree as
+"the same thing".
 
-正しくは **一時 index に作業ツリーを読み込んで `git write-tree` する**。`GIT_INDEX_FILE` で別
-ファイルを指せば、tracked / staged / unstaged / untracked を1つの tree identity に束ねながら、
-**監督の staging 状態を壊さない**。`.gitignore` された生成物は除く — ビルド出力で id が動くと、
-同じレビューを2度行えなくなる。
+Correctly, **the working tree is read into a temporary index and `git write-tree` is run over it**.
+Pointing `GIT_INDEX_FILE` at a separate file bundles tracked, staged, unstaged, and untracked
+content into one tree identity while **not breaking the supervisor's staging state**. Artifacts
+excluded by `.gitignore` are left out — an id that moves with build output makes the same review
+impossible to perform twice.
 
-そして **この値を judge に作らせない。** judge が書けるなら、別の成果物を見た2件を「同じものを
-見た」と申告して一致を作れる。材料を組む側が一度だけ観測し、judge は運ぶだけにする。
+And **no judge produces this value.** If a judge could write it, two judgments over different
+deliverables could be declared as "having looked at the same thing" and made to agree. Whoever
+assembles the material observes it once, and the judge only carries it.
 
-### 早期リターンは、記録も飛ばす
+### An early return skips the record too
 
-「否は単独で成立する」は正しいが、**早期に返すと副作用の記録も落ちる。** 実例: park / reject を
-先に返すようにしたところ、「admit の後から reject が来た」経路で食い違いの記録が残らなくなった。
+"A negative stands alone" is correct, but **returning early drops the record of the side effects
+as well.** A worked example: making park and reject return first stopped the disagreement from
+being recorded on the path where "a reject arrived after the admit".
 
-順序に依存する分岐を入れたら、**両方の順序でテストする。** 片方だけ確かめると通ってしまう。
+When adding a branch that depends on order, **test both orders.** Confirming one lets it through.
 
-### 記録の手順が、判定の実行を要求してはいけない
+### A recording procedure must not require a judgment to be run
 
-判定を記録するために必要な値を得る手段が「判定をもう一度回すこと」なら、監督はその手順を
-飛ばす。実例: 判定対象の id を知るために材料を組むコマンドを打ち、別ハーネスの judge が
-実際に起動して数分待たされた（そして打ち切られた）。
+If the only way to obtain a value needed to record a judgment is "run the judgment again", the
+supervisor skips that step. A worked example: the command that assembles the material was typed to
+learn the id of what was judged, and a judge in another harness
+it actually started one and waited minutes (before being cut off).
 
-**読み取りだけで済む問いには、読み取りだけで答える経路を用意する。**
+**For a question that a read alone answers, provide a path that answers it with a read alone.**
 
-### 権威を持たない記録を先に置く
+### Place a record that carries no authority first
 
-一致を要求する検査を「相手が既に居ること」で書くと、初期状態で詰まる。**単独では権威を持たない
-記録**を先に置ける形にすれば、順序が問題にならない。
+Writing a check that requires agreement as "the peer is already there" jams in the initial state.
+Allowing **a record that carries no authority on its own** to be placed first makes the order
+irrelevant.
 
-    verdict_provisional   ある血統の判定。単独では何も許可しない
-    admission_decided     2件が一致したときに道具が組み立てる
+    verdict_provisional   one lineage's judgment. On its own it permits nothing
+    admission_decided     assembled by the tool once the two agree
 
-段2で verdict を作るのは配管であって判断ではない（一致という事実の関数）。**道具が新しい判断を
-足す箇所が無いこと**が、これが gate の形骸化にならない条件である。
+Producing the verdict at stage 2 is plumbing, not judgment (a function of the fact of agreement).
+**That there is no point at which the tool adds a new judgment** is the condition under which this
+does not turn the gate into a formality.
 
-### 安全側の設定は、読めなければ止まる
+### A setting on the safe side stops when it cannot be read
 
-強い検査モードを設定で選ばせるなら、**その設定を読めないときに弱いモードへ落ちてはいけない。**
-落ちると、宣言したはずの層が黙って消え、消えたことに気づく経路が無い。
+If a stronger checking mode is selected by configuration, **it must not fall back to the weaker
+mode when that configuration cannot be read.** Falling back makes the layer that was declared
+vanish silently, with no path by which anyone notices.
 
     except Exception:
-        return "same-harness"    # ← これが fail-open である
+        return "same-harness"    # ← this is fail-open
 
-「org を止めないため」は理由にならない。止まる方が、**分かれていない血統で判定し続けるより
-安全である**。読めない理由が当該の行にあるかどうかは、読めない時点では分からない。
+"So the org does not stop" is not a reason. Stopping is **safer than continuing to judge under a
+lineage that was never separated**. Whether the reason it cannot be read lies in that very line is
+unknowable at the point where it cannot be read.
 
-### 検証の版は、書く側が付ける
+### The validation version is stamped by the writer
 
-形式の版をクライアントが名指しできるなら、緩い版を指定して検証を素通りできる（downgrade）。
-**版は writer が付け、クライアントの指定は拒否する。**
+If a client can name the format version, it can name a looser one and walk past validation (a
+downgrade). **The writer stamps the version, and a client's specification is refused.**
 
-そして **版そのものを hash の対象に入れる。** 入れないと、版を書き換えても検出できないので、
-downgrade を拒否したことが意味を持たない。既存の鎖と非互換になるので、**hash が覆う範囲を版
-ごとに切り替える** — 版を持たない過去のイベントは従来の範囲で検証し、v1 以降は版を含める。
-validator は過去の版を変更せず追加する、という規律の具体形である。
+And **the version itself goes into what the hash covers.** Without that, rewriting the version is
+undetectable and refusing a downgrade means nothing. Since that is incompatible with the existing
+chain, **what the hash covers is switched per version** — a past event carrying no version is
+verified over the old range, and v1 onward includes the version. It is the concrete form of the
+discipline that a validator adds versions rather than changing past ones.
 
-禁止の範囲は広く取りすぎないこと。**版を名指しする値だけ**を禁じる。「スキーマ境界そのものを
-記録するイベント」は識別子を payload に持って自然で、それを弾くと記録したい事実が書けなくなる。
+Do not draw the prohibition too widely. Forbid **only a value that names a version**. An event that
+records the schema boundary itself naturally carries an identifier in its payload, and rejecting
+that makes the fact one wants recorded unwritable.
 
-### 遡って検証すると、移行できない
+### Validating retroactively makes migration impossible
 
-新しい検証を入れるとき、**既存の記録に遡って適用すると台帳が読めなくなる。** 検証の対象は新規の
-追記だけにし、版を持たない過去は `legacy_unvalidated` として読める状態を保つ。
+When new validation goes in, **applying it retroactively to existing records makes the ledger
+unreadable.** Validation applies to new appends only, and the past, which carries no version, stays
+readable as `legacy_unvalidated`.
 
-そして **2つの保証を混ぜない**。「形式が検証済みか」と「誰が書いたか認証済みか」は独立した性質
-である。schema を検証しただけで actor も信頼できるという読み違いを招く:
+And **do not mix the two assurances**. "Is the format validated" and "is the writer authenticated"
+are independent properties. Conflating them invites the misreading that validating the schema makes
+the actor trustworthy too:
 
     validation_assurance:  legacy_unvalidated | validated:v1
     identity_assurance:    claimed | observed | attested | authenticated
 
-既定のローカル運用では、非対称署名も `attested` が上限である。`authenticated` は
-外部custodyとcaller認証をホスト環境が保証するdeployment向けの予約値であり、
-「公開鍵で検証できた」だけでは選ばない。
+In the default local deployment, even an asymmetric signature reaches `attested` and no further.
+`authenticated` is a value reserved for deployments where the host environment guarantees external
+custody and caller authentication; "it verified against a public key" alone does not select it.
 
-境界の記録（いつから検証が効いているか）は**補助**に留める。規範的な判定根拠は各イベント自身が
-持つ版であって、境界を宣言する1件のイベントではない — それが消えたり複数あったりしたときの
-意味論を持ち込まないためである。
+The record of the boundary (since when validation has been in effect) stays **an aid**. The
+normative basis is the version each event carries itself, not the single event declaring the
+boundary — so that no semantics have to be introduced for that event vanishing or appearing twice.
 
-### 止めた状態は、警告ではない
+### A stopped state is not a warning
 
-「止まった」を記録するだけの仕組みは、止めていない。**止まっている状態は、次の行為が通らない
-ことで表される**。記録があるのに行為が通るなら、それは表示にすぎない。
+A mechanism that merely records "it stopped" has stopped nothing. **The state of being stopped is
+expressed by the next act not getting through.** A record with acts still getting through is only a
+display.
 
-止める判断は **宣言ではなく記録** から読む。宣言（設定や環境変数）で止めると、宣言を消せば動く。
+The decision to stop is read from **the record, not a declaration**. Stopping on a declaration (a
+setting, an environment variable) means deleting the declaration starts it again.
 
-そして **「記録できないなら宣言しない」は、制御としては fail-open である。** 止めるべき状況で
-止まらない。記録に失敗した呼び出しは、その呼び出し自体を通さないこと。さらに **次の呼び出しも
-止まる**必要がある — そのために、台帳より先に単純なラッチを書く第二経路を持つ。
+And **"do not declare what cannot be recorded" is fail-open as control.** It fails to stop in the
+situation where it should. A call whose recording failed does not itself get through. **The next
+call must stop too** — for which there is a second path that writes a simple latch ahead of the
+ledger.
 
-ラッチは台帳の代わりではない。**手でラッチを消しても、台帳の記録が残っていれば止まり続ける。**
-逆に台帳が読めなくてもラッチがあれば止まる。**どちらかが止めていれば止まる**形にする。
+The latch is not a substitute for the ledger. **Removing the latch by hand still stops things while
+the ledger's record remains.** Conversely, the latch stops things even when the ledger cannot be
+read. The shape is: **if either one is stopping, it stops**.
 
-**読めないことを「止まっていない」と読まない。** 止まっているか分からないなら止める。
+**Never read "it cannot be read" as "it is not stopped".** If it is unclear whether things are
+stopped, stop.
 
-### 全部止めると、復旧できない
+### Stopping everything makes recovery impossible
 
-止めた状態で通すものを決める。**観測・検証・安全な修復に限る** — 止まった状態を診断できなければ、
-何が起きたかも分からない。そして **通常の作業は止める**。通す範囲を広く取ると「止めたが止まって
-いない」に戻る。
+Decide what passes while stopped. **Limit it to observation, verification, and safe repair** —
+without being able to diagnose the stopped state, nobody can tell what happened. And **ordinary
+work stops**. Drawing the passable range widely returns us to "it halted and nothing stopped".
 
-解除を同じ層に置かないこと。**止めた本人が解除できるなら、止めたことの意味が薄い。** 独立した
-承認が要るが、それは行為者の識別が認証されていることに依存する。認証が無い段階では、**解除の
-仕組みを作らないほうが正しい** — 作れば、自己申告で解除できる経路になる。
+Do not put the release in the same layer. **If whoever stopped it can release it, stopping meant
+little.** An independent approval is needed, and that depends on the actor's identity being
+authenticated. While there is no authentication, **not building a release mechanism is the correct
+choice** — building one creates a path to releasing on a self-declaration.
 
-### 統制の判定を、判定対象と同じプロセスで走らせない
+### Do not run a control's judgment in the same process as what it judges
 
-判定に使う道具を import すると、**その道具のトップレベルが判定側のプロセスで走る**。差し替え
-られた（あるいは壊れた）道具が終了呼び出しを持っていれば、**判定側がそこで「許可」として終わる** —
-実測で、hook が何も出力せず exit 0 で通った。
+Importing the tool used for the judgment makes **that tool's top level run inside the judging
+process**. If a replaced (or broken) tool holds an exit call, **the judging side ends there as a
+"permit"** — measured: the hook printed nothing and passed at exit 0.
 
-別プロセスで聞き、**終了コードと結果の両方**を見る。統制の判断は、判断される対象の外側で行う。
+Ask in a separate process, and read **both the exit code and the result**. A control's judgment
+happens outside the thing being judged.
 
-### 書けた判断だけが allow になる
+### Only a judgment that was written becomes an allow
 
-上限を検査する仕組みを「集計 → 判断 → 記録」の3段に分けると、3つの穴が同時に開く。
+Splitting a cap check into three stages — aggregate → judge → record — opens three holes at once.
 
-- **集計と判断が排他の外にある**ので、並列の呼び出しが同じ合計を読んで**両方通る**。合計は上限を
-  超える。
-- **記録の失敗を無視する**と、通したのに曝露が残らない。次の呼び出しは合計 0 を見るので、
-  **集計する上限が、記憶を持たない個別検査に退化する**。
-- **止めた側を記録しない**と、上限が働いたことが残らない。効いていない状態と区別できない。
+- **the aggregation and the judgment sit outside the exclusion**, so parallel calls read the same
+  total and **both get through**. The total exceeds the cap.
+- **ignoring a failed record** means it passed while no exposure remains. The next call sees a
+  total of 0, so **an aggregating cap degrades into a memoryless per-item check**.
+- **not recording what was stopped** leaves nothing showing the cap worked. It cannot be told apart
+  from a cap that is not in effect.
 
-正しい形は、排他の中で
-**スキーマの取得 → 履歴の健全性 → 冪等性の照合 → 合計の算出 → 判断 → 記録 + fsync**
-を1つの操作にし、**記録が永続化されたあとにだけ通す**ことである。書けなかったら通さない。
-**止めた側の記録に失敗した場合も通さない** — 記録できない拒否を許可に読み替えるのが、いちばん
-危ない誤りである。
+The correct shape makes
+**fetch the schema → check the history's soundness → reconcile idempotency → compute the total →
+judge → record + fsync**
+one operation inside the exclusion, and **passes only after the record is persisted**. If it could
+not be written, it does not pass.
+**A failure to record a stop does not pass either** — reading an unrecordable refusal as a permit
+is the most dangerous mistake of all.
 
-合計は**書く側が数える**。呼ぶ側が申告できるなら、少なく申告して上限を通れる。壊れた過去の記録は
-0 として数えず拒否する — 0 と数えると合計が実際より小さく見える。
+**The writer counts the total.** If the caller can declare it, it can declare a smaller number and
+get past the cap. A broken past record is refused rather than counted as 0 — counting it as 0 makes
+the total look smaller than it is.
 
-**上限の予約に時刻の引数を定義しない。** 窓の外に予約を置けば、窓で集計する上限は迂回できる。
-過去を補う権限は通常の記録の側に残す。
+**Define no timestamp argument on a cap reservation.** Placing a reservation outside the window
+bypasses a cap that aggregates over a window. The authority to fill in the past stays on the side
+of ordinary records.
 
-### 「誰が」を1つの欄で表さない
+### Do not express "who" in one field
 
-行為の主体は、少なくとも3つに分かれる。**判断を形成した主体・それを転記した主体・記録を確定させた
-主体**である。1つの欄にまとめると、代理記録がある運用で職務分離が成立しなくなる — 監督が判定を
-代理で書けば、観測される主体は常に監督なので、「監督が監督を承認していない」しか言えない。
+The principal of an act separates into at least three: **the principal that formed the judgment,
+the one that transcribed it, and the one that committed the record**. Collapsing them into one
+field makes the separation of duties fail in any deployment with proxy recording — where a
+supervisor writes a judgment by proxy, the observed principal is always the supervisor, so all that
+can be said is "the supervisor did not approve the supervisor".
 
-**職務分離は判断した主体同士を比べる。** 転記した主体を比べてはいけない。
+**The separation of duties compares the principals that judged.** Never compare the ones that
+transcribed.
 
-そして **判断した主体は、自己申告では設定できない形にする**。申告できるなら、誰の判断とでも
-言える。必要なのは判断者による直接の記録ではなく、**改変不能な判断の receipt** である — それを
-第三者が運んでも、判断者の identity は失われない。**代理記録と認証は両立する。**
+And **the principal that judged takes a shape no self-declaration can set**. Anything declarable
+can be claimed as anyone's judgment. What is needed is not a direct record by the judge but **a
+judgment receipt that cannot be altered** — carried by a third party, it still does not lose the
+judge's identity. **Proxy recording and authentication coexist.**
 
-receipt は判定を特定する値すべてを束縛する（org・対象・役・段階・血統・結論・基準の digest・
-理由の digest・署名者・鍵・時刻・形式の版）。**束縛していない値は、後から差し替えられる。**
-そして別の org・別の対象・別の血統への再利用を拒否する。
+The receipt binds every value that identifies the judgment (the org, the subject, the role, the
+phase, the lineage, the conclusion, the digest of the standard, the digest of the reason, the
+signer, the key, the time, the format version). **A value that is not bound can be swapped
+afterwards.** And reuse against another org, another subject, or another lineage is refused.
 
-### 経路を1つにすることと、経路を守ることは別
+### Narrowing to one path and guarding that path are different things
 
-「検査に使う記録は検査する側だけが書ける」を宣言しても、**書ける経路が複数あれば強制できない**。
-経路を1つに絞る仕組み（1つのプロセスだけが書く）は、宣言を構造にする第一歩である。
+Declaring that "a record used in a check is writable only by whoever checks" **enforces nothing
+while several writable paths exist**. A mechanism that narrows it to one (only one process writes)
+is the first step from a declaration to a structure.
 
-ただし **経路を絞っただけでは境界にならない**。同じ権限で動く呼び出し側は、その仕組みを止められ、
-ファイルの権限を戻せ、仕組み自体を差し替えられる。だから保証は「**経路が1つである**」までで、
-「別の主体が守っている」ではない。名前を分けること。
+**Narrowing the path alone is not a boundary, though.** A caller running under the same privileges
+can stop that mechanism, restore the file permissions, and replace the mechanism itself. So the
+guarantee reaches "**there is one path**" and no further — not "a separate principal is guarding
+it". Keep the names apart.
 
-そして **書き込み経路と同じ強さで守るべきものが他にもある** — 停止のラッチ、鍵の登録簿、検証規則。
-台帳だけを1つの経路にしても、ラッチを消せる／署名者を差し替えられる／規則を緩められるなら、
-統制は迂回できる。
+And **other things need guarding as strongly as the write path** — the halt latch, the key
+registry, the validation rules. Narrowing the ledger alone to one path still leaves the controls
+bypassable if the latch can be deleted, the signers replaced, or the rules loosened.
 
-### 接続してきたことは、判断したことではない
+### Having connected is not having judged
 
-経路の相手を識別できても、それは「**記録した主体**」の材料にしかならない。判断した主体は、
-署名された receipt からしか確定しない。**接続の identity を判断の identity に流用しない。**
+Identifying the peer on a path yields material only for **the principal that recorded**. The
+principal that judged is settled solely from a signed receipt. **Do not repurpose a connection's
+identity as a judgment's identity.**
 
-### 依頼を1つの単位として検証する
+### Verify a request as one unit
 
-経路越しの依頼は、**本文全体を覆う digest** と **一度しか使えない値** を持たせる。前者が無ければ
-途中で書き換えられ、後者が無ければ同じ依頼を何度も通せる。
+A request across a path carries **a digest covering the whole body** and **a value usable once**.
+Without the first it can be rewritten in transit; without the second the same request can be
+replayed.
 
-そして **依頼側が書き込み先を指定できないようにする**。指定できるなら、その経路を通ってどこにでも
-書ける — 「所有者が決まっている」が意味を失う。書き込み先は受け側が起動時に固定し、依頼側は
-名前でしか選べない形にする。
+And **the requester must not be able to specify the write target**. If it can, it can write
+anywhere through that path — and "the owner is settled" loses its meaning. The receiving side fixes
+the write target at startup, and the requester can select only by name.
 
-### 一致は判断ではない — 専用の経路を用意する
+### Agreement is not a judgment — provide a dedicated path
 
-2つの判定が一致したことから生成する記録には、**判断者の署名が存在しない**。一致は判断ではなく
-事実の関数だからである。それを「署名を要求する経路」で書こうとすると、**一致しても記録できない
-デッドロック**になる。
+A record generated from two judgments agreeing carries **no judge's signature**, because agreement
+is a function of fact rather than a judgment. Trying to write it through "the path that requires a
+signature" produces **a deadlock where agreement still cannot be recorded**.
 
-派生の記録は **書き手の専用操作**にする。書き手が台帳の中の2件を読み、一致・対象・血統・
-identity の強さを自分で確かめて生成する。生成される記録の主体は「系による導出」であって、
-**誰かの判断として記録しない**。
+A derived record is **a dedicated operation of the writer**. The writer reads the two rows in the
+ledger and generates it having confirmed for itself the agreement, the subject, the lineage, and
+the strength of the identity. The principal of the generated record is "derived by the system", and
+**it is not recorded as anyone's judgment**.
 
-### 束縛は「全部か、無いか」である
+### Binding is all or nothing
 
-証拠を判定に結びつけるとき、**一部の項目だけを照合すると、見ていない項目が違う証拠を流用できる**。
-対象・段階・結論・理由の digest だけでなく、**どの組織の・どの台帳の・どの記録種別か**まで束縛する。
+When tying evidence to a judgment, **reconciling only some of the fields lets evidence differing in
+the unread fields be reused**. Beyond the subject, the phase, the conclusion, and the digest of the
+reason, it binds **which org, which ledger, and which record class**.
 
-そして **組織や台帳の識別子は、書き込み先から取る**。記録の本文に書かれた値と照合しても、
-その値は呼び出し側が書けるので、一致を確かめたことにならない。
+And **the org and ledger identifiers are taken from the write target**. Reconciling against a value
+written in the record's own body confirms nothing, since the caller can write that value.
 
-### 統制が自分の信頼を緩めてはいけない
+### A control must not loosen its own trust
 
-繋ぐ先を検証する仕組みを作ったあと、**統制の側が「今回は緩めてよい」と自分で判断する**なら、
-検証は無効である。緩めるかどうかは利用者が明示する。統制は緩めない。
+Having built a mechanism that verifies what it connects to, **the control deciding for itself that
+"this time it may be loosened"** voids the verification. Whether to loosen is stated by the user.
+The control does not loosen.
 
-### 後片付けの順序が、安全性そのものである
+### The order of the cleanup is the safety itself
 
-止める仕組みを外すときは順序が要る。**止める → 書き戻す → 参照を実体に置き換える → 所有者を戻す**。
+Removing a stopping mechanism needs an order: **stop → write back → replace the references with
+real content → restore the ownership**.
 
-先に所有者を戻すと、書き戻す側が書けない。先に止めないと、書き戻している最中に相手が書く。
-そして **共有しているものは、他の利用者が残っている間は消さない** — 1つ外したら全部壊れる形に
-しない。
+Restoring the ownership first leaves whoever writes back unable to write. Not stopping first lets
+the peer write mid-restore.
+And **what is shared is not removed while other users remain** — do not build a shape where
+removing one breaks them all.
 
-### 「検証済み」の印を、検証されない側が立てられてはいけない
+### The side that is not verified must not be able to raise the "verified" marker
 
-検査の入力を本文から締め出しても、**「検証済み」を意味する印を呼び出し側が立てられるなら、
-同じ穴が別の場所に開く**。実測で、環境変数を1つ足すだけで偽の identity が通り、
-**私が書いたテストがその変数を receipt 無しで立てていた**。
+Shutting the check's input out of the body still leaves **the same hole open elsewhere if the
+caller can raise a marker meaning "verified"**. Measured: merely adding one environment variable
+let a forged identity through, and **a test I had written was raising that variable with no
+receipt**.
 
-正しい形は、**証拠そのものを渡させ、受け取った側が検証する**ことである。呼び出し側は
-「検証してくれ」と渡せるだけで、「検証した」と主張できない。
+The correct shape is **having the evidence itself handed over, and the receiving side verifying
+it**. The caller can only hand it over saying "verify this"; it cannot assert "I verified it".
 
-そして **証拠が無いときも欄を埋める** — 「確かめた結果、自己申告だった」と「そもそも見ていない」
-を区別できなくなるからである。
+And **the field is filled in even where there is no evidence** — otherwise "checked, and it turned
+out to be self-declared" cannot be told apart from "never looked at all".
 
-### 設定を消すことは、無効にすることではない
+### Deleting a setting is not disabling it
 
-有効・無効を宣言で表すとき、**宣言が消えた状態を「無効」と読むと、消すだけで統制が外れる**。
-実測で、設定ファイルを削除するだけで強制が消えた。
+When enabled/disabled is expressed by a declaration, **reading the absence of the declaration as
+"disabled" takes the control off through deletion alone**. Measured: deleting the configuration
+file made the enforcement vanish.
 
-対策は2つある。**権威ある設定を呼び出し側の書けない場所に置く**こと、そして **一度有効にした
-痕跡を残し、宣言が消えたら止める**こと。本当に無効にするなら「無効」と明示させる。
+There are two answers: **put the authoritative configuration somewhere the caller cannot write**,
+and **leave a trace that it was once enabled, and stop when the declaration disappears**. To
+genuinely disable it, make them state "disabled" explicitly.
 
-環境変数での上書きを残すなら、**それが効いていることを明示させる**（別の変数を同時に要求する）。
-黙って効く逃げ道は、逃げ道ではなく穴である。
+If an environment-variable override is kept, **make its being in effect explicit** (require a second
+variable alongside it). An escape hatch that works silently is not an escape hatch but a hole.
 
-### 統制を入れたら、正規の経路が動くことを同じ回で確かめる
+### When a control goes in, confirm the legitimate path works in the same pass
 
-書き込みを1つの経路に絞ったなら、**その経路を使う側を同時に移す**。実測で、hook と記録の道具が
-古い経路を呼び続けており、統制を有効にした瞬間に **正規の運用が全部止まる**状態だった。
+Having narrowed writes to one path, **move the callers of that path at the same time**. Measured:
+the hook and the recording tools kept calling the old path, and the moment the control was enabled
+**every legitimate operation would have stopped**.
 
-拒否が効くことだけを確かめて、**通るべきものが通ることを確かめない**と、この形になる。
+Confirming only that the refusal works, and **not that what should pass does pass**, produces
+exactly this shape.
 
-### 読み取りの経路も固定する
+### Fix the read path too
 
-書き込みを守っても、**読み取りが呼び出し側の指すパスを見ているなら、状態を偽装できる**。
-実測で、参照を空の場所に張り替えると、停止中の org が「停止していない」と見えた。
+Guarding the writes still leaves the state forgeable **if the read follows a path the caller points
+at**. Measured: repointing the reference at an empty location made a halted org look "not
+halted".
 
-判定に使う読み取りは、書き手が起動時に固定した実体を見る。**参照を張り替えられても、
-見る先は動かない。**
+A read used in a judgment looks at the real content the writer fixed at startup. **Repointing the
+reference does not move what is read.**
 
-### 検査の入力を、検査される側が書けてはいけない
+### Whoever is checked must not be able to write the check's input
 
-統制の判定に使う値が **記録の本文に書けるもの**なら、それは検査ではない。実測で、2つの文字列を
-本文に書くだけで職務分離の強制を回避できた。
+If the value a control judges by is **something writable in the record's body**, it is not a check.
+Measured: writing two strings into the body was enough to bypass the enforcement of the separation
+of duties.
 
-**そして自分のテストがその偽装を「正しい経路」として固定していた。** 検査を足したとき、
-その検査が読む値を **誰が書けるか**を必ず確かめる。書ける側が書いた値を根拠にすると、
-検査は形だけになり、テストがそれを正常系として保存する。
+**And my own tests had pinned that forgery as "the correct path".** When adding a check, always
+confirm **who can write** the value it reads. Grounding a check in a value written by the side
+being checked makes it a formality, and the tests then preserve that as the happy path.
 
-判定に使う値は、**検証した経路だけが生成する**形にする。本文に書かれた同名の値は拒否する。
+A value used in a judgment takes a shape where **only the verified path generates it**. A
+same-named value written in the body is refused.
 
-### 設定は三値で読む
+### Read configuration as three values
 
-有効・無効の二値で読むと、**読めないときに無効へ倒れる**。有効にしていた org が、設定ファイルが
-壊れた瞬間に無防備になる（実測: 破損前 exit 3 → 破損後 exit 0）。
+Reading it as the two values enabled/disabled **falls to disabled when it cannot be read**. An org
+that had it enabled becomes defenceless the moment the configuration file breaks (measured: exit 3
+before corruption, exit 0 after).
 
-読み取りは **有効・無効・判定できない** の三値にし、判定できないなら止める。構文の破損だけでなく、
-**型が違う**場合（map であるべき所が文字列、真偽値であるべき所が別の値）も「判定できない」に
-含める — 曖昧な値を「無効」と読まない。
+The read gives three values — **enabled, disabled, undecidable** — and stops where it is
+undecidable. Beyond broken syntax, **a wrong type** (a string where a map belongs, something else
+where a boolean belongs) counts as undecidable too — an ambiguous value is never read as
+"disabled".
 
-### 評価に使う値は、署名が覆う
+### The signature covers the values used in an assessment
 
-署名された記録に、**署名の外側の欄**を混ぜてはいけない。実測で、独立性の評価に使う値が署名の外に
-あり、署名後にその値を強い方へ書き換えても検証が通った。
+A signed record must not mix in **a field outside the signature**. Measured: the value used to
+assess independence sat outside the signature, and rewriting it to the stronger value after signing
+still verified.
 
-評価に使うなら署名対象に入れる。そして **形式が変わったら版を上げる** — 古い版の記録を新しい
-規則で読むと、覆っていない値を覆っていると誤解する。
+If it is used in an assessment, it goes into what is signed. And **raise the version when the format
+changes** — reading an old-version record under the new rules mistakes an uncovered value for a
+covered one.
 
-### 中身の権限を絞っても、入れ物を差し替えられるなら意味が無い
+### Tightening the permissions on the contents means nothing if the container can be replaced
 
-権威データの権限を絞っても、**その親ディレクトリが呼び出し側の所有**なら、ディレクトリごと
-置き換えられる。実体を呼び出し側の管理下から出し、参照だけを残す。そして **実際に書く側には
-実体のパスを渡す** — 参照を張り替えられても、書き込み先は動かない。
+Tightening the permissions on the authoritative data still allows replacing the directory wholesale
+**where its parent is caller-owned**. Move the real content out from under the caller's control and
+leave only a reference. And **give the side that actually writes the real path** — repointing the
+reference does not move the write target.
 
-### 名乗りを変えられるなら、名乗りの比較に意味は無い
+### If the name can be changed, comparing names means nothing
 
-職務分離を「誰が書いたか」の比較で行うとき、**その「誰か」を自由に名乗れるなら統制は無い**。
-実測で、本人としての自己承認は拒否されるのに、同じプロセスが別名を名乗ると通った。
+Where the separation of duties is done by comparing "who wrote it", **there is no control if that
+"who" can be claimed freely**. Measured: self-approval under one's own name is refused, while the
+same process passed by claiming another.
 
-塞ぐには、統制の中核となる記録に **検証済みの署名由来の主体** を要求する。ただし要求を有効に
-すると、署名の仕組みを持たない既存の運用が全部止まる — **既定は無効にし、鍵を配ってから
-有効にする**。無効が安全という意味ではなく、移行を可能にするための既定である。
+Closing it requires **a principal derived from a verified signature** on the records at the core of
+the controls. Enabling that requirement stops every existing deployment without a signing mechanism,
+though — **the default is off, and it is turned on after the keys are distributed**. Off does not
+mean safe; it is a default that makes migration possible.
 
-### 権限は「作れること」と「守れること」の両方を満たす
+### Permissions satisfy both "it can be created" and "it can be guarded"
 
-経路を守るために親ディレクトリの権限を絞るとき、**その経路を作る側が作れるか**を確かめる。
-実測で、root 所有の読み取り専用ディレクトリには、別の主体として動く常駐プロセスが socket を
-**作れなかった** — 守りすぎて動かない。
+When tightening a parent directory's permissions to guard a path, confirm **whether the side that
+creates that path still can**. Measured: under a root-owned read-only directory, a resident process
+running as a different principal **could not create** the socket — guarded so far that it does not
+run.
 
-解決は階層を分けることである。**anchor**（呼び出し側が書けない）と **leaf**（作る側が書ける）
-に分け、保証は「anchor に書けないので leaf ごと差し替えられない」とする。
+The answer is to split the hierarchy: an **anchor** (unwritable by the caller) and a **leaf**
+(writable by the creating side), with the guarantee being "the anchor cannot be written to, so the
+leaf cannot be replaced wholesale".
 
-### 別の主体が守っていることと、判断が独立していることは別
+### A separate principal guarding it, and the judgments being independent, are different things
 
-書き込みを担う主体を隔離しても、**判断する主体同士が独立しているかは別の問い**である。実測で、
-書き手の隔離値が判断者の隔離として記録され、鍵が違うだけで「別ワークロード」に昇格していた。
+Isolating the principal that writes leaves **whether the judging principals are independent as a
+separate question**. Measured: the writer's isolation value was recorded as the judge's isolation,
+and a merely different key promoted it to "a separate workload".
 
-欄を分けること。書き手の隔離は書き手の性質であり、判断者の独立性は判断者が申告するか、
-分からなければ「不明」である。**借りてきた値で昇格させない。**
+Keep the fields apart. The writer's isolation is a property of the writer; a judge's independence is
+declared by the judge, or is "unknown" where it is unknown. **Do not promote on a borrowed value.**
 
-### 導入する側と、受け入れる側の条件を突き合わせる
+### Reconcile the conditions of the installing side and the accepting side
 
-設定を書く道具と、その設定で動く道具が別なら、**両者の条件が食い違っていないかを確かめる**。
-実例: 導入スクリプトが親ディレクトリを group から書ける形にし、**受け入れる側がまさにその形を
-拒否した** — 導入は成功し、daemon は起動しない。
+Where the tool that writes the configuration differs from the tool that runs under it, **confirm
+that their conditions do not diverge**. A worked example: the installer made the parent directory
+group-writable, and **the accepting side refused exactly that shape** — the install succeeded and
+the daemon would not start.
 
-そして **前提を検査する主体を間違えない**。利用者の環境に必要なものが揃っていても、実際に動く
-主体（別の利用者として起動される常駐プロセス）から見えなければ意味が無い。検査は**動く側の
-環境で**行う。
+And **do not mistake which principal checks the prerequisites**. Whatever is present in the user's
+environment means nothing if it is invisible to the principal that actually runs (a resident
+process started as a different user). The check happens **in the environment of the side that
+runs**.
 
-### 「書けない」と「見えない」を混同しない
+### Do not confuse "cannot be written" with "cannot be seen"
 
-統制が要求するのは書けないことであって、見えないことではない。**読めない記録は、監査のための
-記録ではない。** 権限を絞るときは、検査・集計・投影が動き続けることを同時に確かめる。
+What a control demands is that it cannot be written, not that it cannot be seen. **A record that
+cannot be read is not a record for auditing.** When tightening permissions, confirm at the same
+time that the checks, the aggregation, and the projections keep working.
 
-### 検証が検証対象を壊してはいけない
+### A verification must not break what it verifies
 
-境界を確かめるために「書いてみる」と、成功したときに本物が壊れる。**開けるかどうかだけを見て、
-1バイトも書かない。** 権限を変えられるかは、実際に変えるのではなく**所有者を見る**。停止できるか
-を確かめるために止めてはいけない — 止まったら、以降の検証も、実運用の統制も落ちる。
+"Trying a write" to confirm a boundary breaks the real thing when it succeeds. **Read only whether
+it opens, and write not one byte.** Whether the permissions can be changed is answered by **reading
+the owner**, not by changing them. Do not stop something to confirm it can be stopped — once it
+stops, every later check and the controls in real operation fall with it.
 
-副作用がゼロで回せる経路を用意する。そして **その経路では「通せること」を確かめていない**と
-明記する — 止まるだけの仕組みは運用できない。
+Provide a path that runs with zero side effects. And state explicitly that **that path has not
+confirmed anything can get through** — a mechanism that only stops cannot be operated.
 
-### 隔離を主張する前に、実測で確かめる
+### Measure before claiming isolation
 
-設定を書いたことは、境界があることではない。**通常の呼び出し側から実際に書けないこと**を測る。
-書き込み・権限変更・経路の差し替え・停止を、それぞれ試して失敗することを確かめる。
+Having written the configuration is not having a boundary. Measure **that a normal caller genuinely
+cannot write**. Try a write, a permission change, replacing the path, and a stop, and confirm each
+one fails.
 
-その検証は **特権で走らせてはいけない** — 特権なら全部できてしまい、何も確かめたことにならない。
+That verification **must not be run with privilege** — with privilege everything succeeds, and
+nothing has been confirmed.
 
-### 鍵が違うことは、主体が違うことではない
+### A different key is not a different principal
 
-共有鍵では、**検証できる側が署名も作れる**。したがって別の共有鍵を使っても示せるのは「鍵が
-違う」ことだけで、別の主体・別のプロセス・独立した承認は何も示さない。**それを独立性の根拠に
-すると、名前と保証がまた食い違う。**
+With a shared key, **whoever can verify can also produce the signature**. So using a different
+shared key shows only that "the key differs" — it shows nothing about a different principal, a
+different process, or an independent approval. **Making it the grounds for independence puts the
+name and the guarantee at odds again.**
 
-非対称にすると、判断する側が秘密鍵を持ち、**検証する側は公開鍵だけを持つ** — 検証する側は
-判断を作れない。これは「申告より強い」attestationの条件である。
+Going asymmetric gives the judging side the private key and **the verifying side only the public
+key** — the verifying side cannot produce a judgment. That is the condition for an attestation
+"stronger than a declaration".
 
-ただし鍵を非対称にしただけでは、**ワークロードは隔離されていない**。同じ利用者が書き手も鍵も
-差し替えられるなら、そこはまだidentity authenticationの境界ではない。隔離は別の軸として残す。
-orgforgeは異なるモデル系統によるレビュー品質の非相関化を狙う。別host/KMS/HSMをコアの
-前提にしてR0を破ってはいけない。
+Making the key asymmetric alone, however, leaves **the workload unisolated**. While the same user
+can replace both the writer and the keys, that is not yet a boundary of identity authentication.
+Isolation stays a separate axis.
+What orgforge aims at is decorrelating review quality through different model families. Do not
+break R0 by making a separate host, a KMS, or an HSM a premise of the core.
 
-### 署名が正しいことと、その判定を出してよいことは別
+### A valid signature and permission to issue that judgment are different things
 
-検証が通っても、**その主体がその役・その血統の判定を出す権限を持つか**は別の問いである。
-権限は宣言し、宣言の無いものは「許可されていない」と読む（認可の既定は拒否）。
+A verification passing leaves **whether that principal is permitted to issue a judgment for that
+role and that lineage** as a separate question. Permissions are declared, and what is undeclared
+reads as "not permitted" (authorization defaults to refusal).
 
-とくに **止めた状態を解除する権限は、止める権限と分ける**。同じ主体が両方を持つなら、独立した
-承認という考え方が成り立たない。
+In particular, **the permission to release a stopped state is separated from the permission to
+stop**. If one principal holds both, the idea of an independent approval does not hold.
 
-### 解除は、記録してから状態を変える
+### A release records first, then changes the state
 
-止まった状態を解く手順の順序が、そのまま安全性である。
+The order of the steps that lift a stopped state is the safety itself.
 
-    確認 → 独立した承認の検証 → 復旧の証拠の検証 → 記録の追記と永続化 → **その後で** 状態を解く
+    confirm → verify the independent approval → verify the recovery evidence → append and persist
+    the record → **and only then** lift the state
 
-逆順にすると、状態を解いたあとに記録が失敗して、**止まっていた証拠も、止まっている状態も無い**
-という最悪の形になる。記録できなかったら、**止まったままにする**。そして同じ承認での再実行が
-安全に後片付けを完了できるようにする。
+The reverse order produces the worst shape: the record fails after the state is lifted, and
+**neither the evidence that it was stopped nor the stopped state exists**. Where it cannot be
+recorded, **it stays stopped**. And a re-run under the same approval completes the cleanup safely.
 
-### 保証を1つの強弱値に潰さない
+### Do not collapse assurance into a single strong/weak value
 
-「署名されている」は「独立している」ではない。**同じ主体、あるいは同じ鍵が両方の血統を作れる
-なら、それは独立レビューではない。** 潰すと、この誤読がそのまま通る。
+"It is signed" is not "it is independent". **If one principal, or one key, can produce both
+lineages, it is not independent review.** Collapsing them lets that misreading through unchallenged.
 
-少なくとも次を別の軸にする:
+At minimum these are kept as separate axes:
 
-    identity assurance      判断者の identity をどこまで確かめたか
-    recorder assurance      記録者を観測したのか、申告なのか
-    workload isolation      同じプロセス／同じ利用者／別ホストか
-    reviewer independence   別の署名者か、別のワークロードか
+    identity assurance      how far the judge's identity was confirmed
+    recorder assurance      was the recorder observed, or declared?
+    workload isolation      same process / same user / separate host?
+    reviewer independence   a different signer, or a different workload?
 
-そして **確かめられていない段階を「確かめた」と呼ばない**。共有鍵で得られるのは、申告より強い
-という程度である。**認証と呼べるのは、隔離された書き手・限定された経路・鍵の保護・主体ごとの
-認可が揃ったときだけ**である。別プロセスに問い合わせることは、信頼境界ではない。
+And **a level that was not confirmed is never called confirmed**. What a shared key yields is
+roughly "stronger than a declaration". **Only an isolated writer, a limited path, protected keys,
+and per-principal authorization together earn the name authentication.** Asking a separate process
+is not a trust boundary.
 
-段階を分けたなら、**弱い段階の結果を「強制」に使わない**。証拠にはなるが、独立性を要求する
-根拠にはならない。
+Having separated the levels, **do not use a weaker level's result for enforcement**. It serves as
+evidence; it does not serve as grounds for demanding independence.
 
-### 検査に使う記録は、検査する側だけが書ける
+### A record used in a check is writable only by whoever checks
 
-上限や履歴を検査する仕組みは、その検査が読む記録を**自由に書けてはいけない**。実測で、負の曝露を
-1件通常の追記で入れるだけで、上限が完全に無効になった（しかも鎖は健全と報告された）。
+A mechanism checking a cap or a history **must not allow the records it reads to be written
+freely**. Measured: one negative exposure entered through an ordinary append voided the cap
+completely (and the chain was reported sound).
 
-**記録の種類ごとに「どの操作が書けるか」を宣言する。** これは identity の認証ではない（同じ権限
-なら writer を騙れる）が、「通常の経路で偶然にも意図的にも書けてしまう」ことは塞げる。
+**Declare per record class which operation may write it.** This is not identity authentication
+(under the same privileges one can impersonate the writer), but it does close "it can be written
+through the ordinary path, by accident or design".
 
-ただし**既に書かれたものを検証するときは、この規則を適用しない** — 経路は記録に残らないので、
-書いた時点でしか確かめられない。適用すると、正しく書かれた記録が「書けないはずのもの」として
-拒否され、健全な台帳が壊れていると報告される。
+**The rule is not applied when verifying what is already written**, though — the path leaves no
+trace in the record, so it can only be confirmed at the moment of writing. Applying it makes a
+correctly written record be refused as "something that should not have been writable", and reports
+a sound ledger as broken.
 
-### 再実行と、同じキーの別の要求は違う
+### A re-run and a different request under the same key are different
 
-冪等キーが一致しても、**要求の内容が違えば再実行ではない**。実測で、少ない量の許可を根拠に
-大きな量が通った。キーとは別に**要求内容の digest** を持ち、違えば衝突として拒否する。
+A matching idempotency key still **is not a re-run where the request's content differs**. Measured:
+a large amount got through on the grounds of a permit for a small one. Alongside the key there is
+**a digest of the request's content**, and a difference is refused as a conflict.
 
-そしてキーは**区切り文字での連結ではなく、正規化した組の hash** にする。値に区切り文字が入ると、
-別の組が同じキーになる。
+And the key is **a hash of a canonical tuple, not a concatenation with a separator**. A value
+containing the separator makes a different tuple produce the same key.
 
-### 終了コードだけを信じない
+### Do not trust the exit code alone
 
-構造化された結果を返す道具を呼ぶなら、**結果を読む**。終了コードだけを見ると、「拒否と言いながら
-0 で終わる」実装を通してしまう（実測でそうなった）。
+When calling a tool that returns a structured result, **read the result**. Reading the exit code
+alone lets through an implementation that "says refused and exits 0" (which is what happened).
 
-`終了コードが 0` かつ `結果が許可` の**組でしか通さない**。結果が無い・読めない・矛盾している —
-すべて拒否側に倒す。ただし「結果が読めない」と「読めた結果が拒否」は別の事象である。前者は環境の
-問題なので開発用の逃げ道が効いてよいが、**後者に逃げ道を効かせてはいけない**。
+It passes **only on the pair** of `exit code 0` and `the result is a permit`. No result, an
+unreadable result, a contradiction — all fall to refusal. "The result cannot be read" and "the
+result read as a refusal" are different events, though. The first is an environment problem, so a
+development escape hatch may apply; **the second must not have one**.
 
-### 無料と宣言したものを、検査で止めない
+### Do not stop, with a check, what was declared free
 
-「これは計量しない」と決めた操作（再生成できる対象の削除など）に、**量を要求する検査をかけると
-止まる**。実測で、`node_modules` の削除が「重み 0 なので予約できない」として拒否された — 無料だと
-決めたものを止めるのは、設計と真逆の結果である。**計量しないものは、計量の経路に入れない。**
+Applying **a check that demands a quantity** to an operation decided as "not metered" (deleting
+something regenerable, say) **stops it**. Measured: deleting `node_modules` was refused as "weight
+0, so it cannot be reserved" — stopping what was decided to be free is the exact opposite of the
+design. **What is not metered does not enter the metering path.**
 
-### 止まったことの呼び名を変えない
+### Do not rename what a stop is called
 
-判断の出所を組み替えたとき、**メッセージの語彙を維持する**。監督も検査も特定の語を探しているので、
-中身が同じでも呼び名が変わると「止まったことが見えなくなる」。
+When the source of a judgment is rearranged, **keep the message's vocabulary**. Supervisors and
+checks alike look for particular words, so renaming it while the substance is unchanged makes "the
+fact that it stopped" invisible.
 
-### 冪等キーは、識別子1つでは足りない
+### One identifier is not enough for an idempotency key
 
-同じ操作の再実行を二重に数えないためのキーは、**(セッション, 呼び出し, 規則, 記録の種類)** を
-束ねる。呼び出しの識別子だけでは、別のセッションや別の規則の間で衝突する。
+The key that stops a re-run of the same operation being double-counted bundles **(session, call,
+rule, record class)**. The call's identifier alone collides across sessions and across rules.
 
-そして **キーが欠けていれば、計量される操作を拒否する**。同一性を確かめられないなら、二重計上
-しないという保証そのものが成り立たない。
+And **a missing key refuses a metered operation**. Without being able to confirm identity, the
+guarantee of not double-counting does not hold at all.
 
-「同じ呼び出しで検査が二度走るか」が文書に書かれていないなら、**書かれていないことを「走らない」
-と読まない**。キーを付けておけば、走っても数えられる。
+Where the documentation does not say whether "the check runs twice within one call", **do not read
+the silence as "it does not"**. With a key attached, running twice is still counted once.
 
-### 逃げ道は、記録と引き換えである
+### An escape hatch is traded for a record
 
-塞ぎきれない経路に明示の逃げ道を置くのは正しい。ただし **宣言が記録されるから許される**のであって、
-宣言したと言えば許されるのではない。**記録に失敗した迂回は通さない。**
+Placing an explicit escape hatch on a path that cannot be fully blocked is right. It is permitted
+**because the declaration is recorded**, though — not because someone said they declared it. **A
+bypass whose recording failed does not pass.**
 
-### fail-closed は、故障注入できなければ主張できない
+### fail-closed cannot be claimed without fault injection
 
-「失敗したら止まる」という性質は、**失敗させてみなければ確かめられない**。正常系だけを試して
-「fail-closed にした」と書くのは、検査していないことを検査したと述べることである。
+The property "it stops on failure" **cannot be confirmed without making it fail**. Trying only the
+happy path and writing "it is fail-closed" is stating that something unchecked was checked.
 
-実例: ロックの失敗時に止まる、と書いた。しかし置換が一致せず適用されておらず、判定用の変数は
-初期化されるだけで設定されず、逃げ道の環境変数はコードのどこにも無かった。**正常系は通るので、
-何も気づかなかった。**
+A worked example: it was written that it stops when the lock fails. But the replacement did not
+match and was never applied, the deciding variable was initialised and never set, and the
+escape-hatch environment variable existed nowhere in the code. **The happy path passed, so nothing
+was noticed.**
 
-だから故障注入の口を道具に持たせる（`ORG_LEDGER_FORCE_LOCK_FAIL=1` のような）。異常系を
-再現できない検査は、書いた本人にも確かめられない。
+So the tools carry an entry point for fault injection (`ORG_LEDGER_FORCE_LOCK_FAIL=1` and the
+like). A check whose failure path cannot be reproduced cannot be confirmed even by whoever wrote
+it.
 
-### 時刻の形式検査は、実在性の検査ではない
+### Checking a timestamp's format is not checking that it exists
 
-`YYYY-MM-DDTHH:MM:SSZ` に合っていても、`2026-99-99T99:99:99Z` は実在しない。**実日時として
-parse する。** そして順序を偽れないよう、未来と遠すぎる過去を拒否する — どちらも「いま起きた
-こと」を窓の外に置き、窓で集計する上限を迂回できる。
+`2026-99-99T99:99:99Z` matches `YYYY-MM-DDTHH:MM:SSZ` and does not exist. **Parse it as a real
+datetime.** And refuse the future and the too-distant past, so the order cannot be faked — either
+one puts "what happened just now" outside the window and bypasses a cap that aggregates over it.
 
-時刻を指定できる経路は、**通常の書き込みから分ける**。名前に意図を出す（`--backfill-ts`）。
-同じ引数で「いまを記録する」と「過去を補う」の両方ができると、後者の検査が前者を邪魔する。
+The path that can specify a timestamp is **separated from ordinary writes**, with the intent in the
+name (`--backfill-ts`). One argument doing both "record now" and "fill in the past" makes the
+latter's checks get in the former's way.
 
-そして **時刻を検査するテストに固定日付を書かない。** その時刻が未来から過去に変わった瞬間に
-壊れる（実際に、この検査を入れた版で自分のテストがそう壊れた）。いまからの相対で組む。
+And **do not write a fixed date into a test that checks timestamps.** It breaks the moment that
+time turns from future into past (which is exactly how my own test broke in the version that added
+this check). Build it relative to now.
 
-### 検証規則の欠落は、宣言の欠落と同じくらい静かに効く
+### A missing validation rule works as quietly as a missing declaration
 
-設定の差分を「ブロックがあるか」で見てはいけない。**中身の欠落**を見る。検証規則が1つ消えて
-いれば、拒否されるべき記録が通り、通ったことは記録に残らない。
+Do not read a configuration diff as "is the block there". Read **what is missing inside it**. With
+one validation rule gone, a record that should be refused passes, and nothing records that it did.
 
-そして規則を埋めるときも、**足すだけにする**。ブロックごと差し替えると、org が自分で足した
-**厳格な**規則が消える — 実測で、org が加えた `required.progress_recorded: [milestone]` が
-修復で失われた。**修復が org 所有の安全設定を弱めるのは、修復ではなく退行である。**
+And when filling rules in, **only add**. Replacing the whole block deletes the **stricter** rules
+the org added itself — measured: an org's own `required.progress_recorded: [milestone]` was lost to
+a repair. **A repair that weakens an org's own safety settings is not a repair but a regression.**
 
-同じ位置に違う値があるときは、自動で上書きしない。org が意図して変えたのか、テンプレートが
-変わったのかは道具では判別できないので、**衝突として報告して人に決めさせる**。そして欠落と衝突は
-**1つの計算から出す** — 別々に判定すると、片方だけ検出して片方を見落とす（実測でそうなった）。
+Where a different value sits in the same position, do not overwrite automatically. A tool cannot
+tell whether the org changed it deliberately or the template changed, so **report it as a conflict
+and let a human decide**. And omissions and conflicts **come out of one computation** — deciding
+them separately detects one and misses the other (which is what happened).
 
-**設定ブロックの範囲を正規表現で切らない。** `\nkey:\n(?:(?: |\n).*\n)*` は、次のトップレベル
-キーの前にあるコメント行やその子行まで飲み込む。実際に、ある置換が別のブロックを丸ごと消し、
-**結果は YAML として読めた**ので気づきにくかった。範囲は「インデントの無い次の行」で決める。
+**Do not carve a configuration block's extent with a regex.** `\nkey:\n(?:(?: |\n).*\n)*` swallows
+the comment lines before the next top-level key, and their children. In practice one replacement
+deleted another block wholesale, and **the result parsed as YAML**, which made it hard to notice.
+The extent is decided by "the next line with no indentation".
 
-### 修復する道具は、途中で止まっても壊さない
+### A repairing tool does not break things when it stops partway
 
-設定ファイルを直接上書きする修復は、途中で止まると**その org が何も書けない状態**を作る。
-temp → fsync → rename → fsync(dir) で置き換える。修復が壊すのは最悪の形である。
+A repair that overwrites the configuration file in place creates **a state where that org can write
+nothing** if it stops partway. Replace via temp → fsync → rename → fsync(dir). A repair that breaks
+things is the worst shape there is.
 
-### 厳格化は、可用性事故になりうる
+### Tightening can become an availability incident
 
-「宣言の無いものを拒否する」を全体に一度にかけると、**宣言と実態の乖離が「組織全体の記録停止」に
-変わる**。それは fail-closed ではなく、**既知の移行不備による可用性事故**である。区別すること。
+Applying "refuse what is undeclared" to everything at once **turns a divergence between the
+declaration and reality into "the whole org stops recording"**. That is not fail-closed but **an
+availability incident caused by a known migration gap**. Keep them apart.
 
-検証は軸を分けて入れる:
+Validation goes in along separate axes:
 
-    required        宣言したクラスだけ、必須の欠落を拒否
-    require_any     相関キーは複数のうち1つでよい（経路によって違う）
-    enum / 型       宣言済みの項目は **存在する場合に** 検証
-    closed world    厳格化したい少数のクラスだけ、未宣言を拒否
+    required        refuse a missing required field, for declared classes only
+    require_any     any one of several correlation keys is enough (it differs by path)
+    enum / type     validate a declared field **where it is present**
+    closed world    refuse the undeclared, for the few classes to be tightened
 
-未宣言のものは既定で許し、**乖離として記録する**（見えるようにするが止めない）。統制の中核だけ
-最初から厳格にし、乖離しているクラスは**実態を宣言に反映してから**別の移行として厳格化する。
+The undeclared is allowed by default and **recorded as a divergence** (made visible without
+stopping anything). Only the core of the controls is strict from the start, and a diverging class
+is tightened as a separate migration **after reality is reflected into the declaration**.
 
-相関キーを1つに固定してはいけない。同じ対象を指すキーが経路によって違うなら、**どれか1つで
-足りる**形にする。固定すると正当な書き込みを弾く。
+Do not fix on one correlation key. Where the keys pointing at the same subject differ by path, the
+shape is **any one of them is enough**. Fixing on one rejects legitimate writes.
 
-### 所有物のコピーは、配らないと古くなる
+### A copy of what someone owns goes stale unless it is distributed
 
-org が自分の設定ファイルを所有する設計は正しい（org が自分の形式を決める）。しかし**プラグイン
-側が宣言を増やしても、org のコピーは古いまま**である。そこに「宣言の無いものは書けない」検査を
-入れると、更新直後に記録が止まる。
+A design where the org owns its own configuration file is right (the org decides its own format).
+But **when the plugin side adds a declaration, the org's copy stays old**. Adding a check that
+"the undeclared cannot be written" on top of that stops recording immediately after an update.
 
-だから検査より先に、**差分を診断する道具**と**明示的に埋める道具**を持つ。診断は「使われている
-かどうか」を言うこと — 実データで使われているクラスが欠けているなら、緊急度が違う。
+So before the check there is **a tool that diagnoses the difference** and **a tool that fills it in
+explicitly**. The diagnosis says whether it is in use — a missing class that real data uses carries
+a different urgency.
 
-そして **埋める側は既存の宣言を書き換えない。** org が実態に合わせて変えた宣言を上書きすると、
-検査が実態と食い違う。足すだけにする。
+And **the filling side does not rewrite an existing declaration.** Overwriting a declaration the
+org changed to match reality puts the check at odds with reality. It only adds.
 
-**修復の書き込み前に、結果を検証すること。** この修復の初版は、テンプレートのブロックを丸ごと
-挿入して `event_classes` を2つにし、YAML の後勝ちで65クラスの宣言を消した。**修復が壊す**のは
-最悪の形なので、書く前に「読めるか」「減っていないか」を確かめる。
+**Verify the result before a repair writes.** The first version of this repair inserted the
+template's block wholesale, produced two `event_classes`, and — YAML taking the later one — deleted
+the declarations of sixty-five classes. **A repair that breaks things** is the worst shape there
+is, so before writing it confirms "does it parse" and "has nothing been lost".
 
-### 宣言の無いクラスは、書けても読まれない
+### An undeclared class can be written and is never read
 
-台帳に書けるクラスと、schema が宣言しているクラスは、放っておくとずれる。**宣言の無いクラスは
-projection にも sensor にも乗らないので、書いても読まれない。** 実際に、道具が書いていた5つの
-クラスが宣言されておらず、そのうち2つは実データに5件・23件あった。`show` の警告が沈黙した一因
-でもある。
+The classes writable to the ledger and the classes the schema declares drift apart if left alone.
+**An undeclared class rides on neither a projection nor a sensor, so writing it leaves it unread.**
+In practice five classes the tools were writing went undeclared, and two of them had five and
+twenty-three rows in real data. It was part of why `show`'s warning went silent.
 
-検査を入れるときは、**宣言を実態に合わせる**こと。実データの payload を数えてから書く。
-宣言が実態と違えば、検査は嘘になる。
+When a check goes in, **bring the declaration in line with reality**. Count the payloads in real
+data before writing it. A declaration at odds with reality makes the check a lie.
 
-### HEAD は権威ではなく cache である
+### HEAD is a cache, not the authority
 
-追記型の記録で、末尾を指すファイルを別に持つなら、**それは log から再構築できる cache として
-扱う。** 権威にすると、cache が壊れたときに記録全体が読めなくなる。
+Where an append-only record keeps a separate file pointing at the tail, **treat it as a cache
+rebuildable from the log.** Making it authoritative means the whole record becomes unreadable when
+the cache breaks.
 
-ただし **途中の破損を自動修復してはいけない。** torn line、seq の飛び、hash 不一致の上に整合した
-HEAD を載せると、壊れていることが分からなくなる。破損は fail-closed で報告する。
+**Do not auto-repair corruption partway, though.** Laying a consistent HEAD over a torn line, a
+gap in seq, or a hash mismatch makes the corruption invisible. Corruption is reported fail-closed.
 
-### 偽の記録で試験すると、検査を入れたときに露見する
+### Testing with fake records comes to light when the check goes in
 
-手で組んだイベント（hash の無いもの）で台帳を seed していると、鎖の健全性を検査し始めた瞬間に
-落ちる。**それは検査が正しい** — 鎖の無い台帳に追記できてはいけない。試験も実際の追記経路を
-通すこと。
+Seeding the ledger with hand-assembled events (carrying no hash) fails the moment the chain's
+soundness starts being checked. **The check is right** — appending to a ledger with no chain must
+not be possible. Tests go through the real append path too.
 
-### 統制を配るなら、配ったものだけで動くこと
+### If controls are distributed, they run on what was distributed alone
 
-統制の仕組みを配布物にするなら、**その配布物の中だけで完結させる**。元の作業ツリーを参照する形は、
-そのツリーが動いた瞬間に統制が消える。しかも消えたことは静かで、通常の操作は成功し続ける。
+When a control mechanism becomes a distributed artifact, **make it complete within that artifact**.
+A shape that references the original working tree loses the controls the moment that tree moves.
+And their disappearance is silent: ordinary operations keep succeeding.
 
-自己完結を確かめる方法は1つしかない — **元のツリーを一時的に無くして動かす**。参照が残っていれば
-そこで落ちる。
+There is only one way to confirm self-containment — **remove the original tree temporarily and run
+it**. A remaining reference fails there.
 
-### 導入と有効化を、同じことだと思わない
+### Do not think installing and enabling are the same thing
 
-「入れた」と「効いている」は別である。実測した環境では、**配布物を入れて有効にしても、検査の
-仕組みは信頼されるまで黙って読み飛ばされた** — 警告も、記録も、何も出ない。「入れたのに効いて
-いない」は、この形でいちばん見えにくい。
+"It is installed" and "it is in effect" are different. In the environment measured, **installing
+and enabling the artifact still had the checking mechanism silently skipped until it was trusted** —
+no warning, no record, nothing. "Installed and not in effect" is at its least visible in this
+shape.
 
-したがって配布物の説明には、**有効化に何が必要か**と、**有効化されていない状態がどう見えるか**を
-書く。「入れれば効く」と読める書き方をしてはいけない。
+So the artifact's documentation states **what enabling requires** and **what the not-yet-enabled
+state looks like**. Do not write it in a way that reads as "install it and it works".
 
-そして**内容に束縛された署名で信頼を管理する仕組み**では、配布物を更新すると信頼が外れうる。
-更新が統制を無効化する経路として、これも書いておく。
+And in **a mechanism managing trust through a signature bound to the content**, updating the
+artifact can drop that trust. Write this down too, as a path by which an update voids the
+controls.
 
-### 他所の形式をそのまま持ち込まない
+### Do not carry another environment's format over as-is
 
-似た形式を採る2つの環境でも、**受け付けるものは違う**。実例として、設定ファイルにコメント用の
-キーを1つ入れたところ、片方の環境では通り、もう片方では**ファイル全体を読み飛ばされた**。
-統制の設定が丸ごと無効になり、しかも通常の操作は成功し続けた。
+Two environments adopting a similar format still **accept different things**. A worked example:
+adding one comment key to a configuration file passed in one environment and had **the whole file
+skipped** in the other. The controls' configuration was voided wholesale, and ordinary operations
+kept succeeding.
 
-移植するときは、**その環境で実際に読ませて確かめる**。形式が似ていることは、同じであることの
-証拠にならない。
+When porting, **have that environment actually read it and confirm**. Similar formats are no
+evidence of identical ones.
 
-### 拒否の検証は「1回だけ試して止まる」ことと対で行う
+### Verify a refusal paired with "try once and stop"
 
-拒否が効いたかを、行為者の最終結果で判定してはいけない。**正しく拒否された後に別の手段で目的を
-達成すると、「拒否が効かなかった」と読める**。
+Do not decide whether a refusal worked from the actor's final result. **Achieving the goal by
+another means after being correctly refused reads as "the refusal did not work".**
 
-検証のときは行為者に「**1回だけ試し、拒否されたら代替手段を使わず終了する**」と指示する。そして
-拒否の証拠は、行為者の報告ではなく**対象物が変わっていないこと**と**拒否が記録されていること**で
-確かめる。
+During verification the actor is instructed to "**try once and, if refused, stop without using an
+alternative**". And the evidence of the refusal is confirmed not from the actor's report but from
+**the subject being unchanged** and **the refusal being recorded**.
 
-### 誰に対して強制的なのかを書く
+### Write down whom it is mandatory for
 
-PreToolUse hook として動く道具は、**hook を有効にしたホスト上の agent**に対しては強制的だが、
-hook を無効化できるホスト所有者に対しては強制力を持たない。これは欠陥ではなく境界である。
+A tool running as a PreToolUse hook is mandatory for **an agent on a host where the hook is
+enabled**, and holds no force over a host owner who can disable it. That is a boundary, not a
+defect.
 
-問題になるのは限界そのものではなく、**境界を書かずに「回避不能」と述べること**である。
-信頼境界（TCB）と脅威モデルを明示すれば、同じ実装が正しく評価される。
+What becomes a problem is not the limit itself but **stating "unavoidable" without writing the
+boundary down**. State the trusted computing base and the threat model, and the same implementation
+is assessed correctly.
 
-そして境界の内側にも、**認証されていない属性**がある。台帳の `actor` は引数から採られるので、
-1つのプロセスが maker と gate を名乗り分けられる。したがって職務分離は「**レビューが行われた
-証拠**」であって「誰が行ったかの証明」ではない。血統の分離も同じ性質を持つ — 独立したレビュー
-であって、認証された独立性ではない。**ラベルを信頼境界と呼ばないこと。**
+And inside the boundary there are **attributes that are not authenticated**. The ledger's `actor`
+is taken from an argument, so one process can claim to be the maker and the gate in turn. The
+separation of duties is therefore **evidence that a review happened**, not proof of who performed
+it. Lineage separation has the same property — independent review, not authenticated independence.
+**Do not call a label a trust boundary.**
 
-### 摘発と、適応の理解を混同しない
+### Do not confuse catching a deviation with understanding an adaptation
 
-監督が正しい道具を使わずに同じ状態変更を行うのは、多くの場合**遅いからではなく、道具の名前を
-思い出すコストを払わなかったから**である。それは規律の欠如ではなく**適応**である。
+A supervisor making the same state change without the right tool is usually **not about speed but
+about not paying the cost of remembering the tool's name**. That is not a lack of discipline but
+**an adaptation**.
 
-したがって検査を足すときは、**逸脱の摘発**と**適応の構造を残すこと**を分けて設計する。摘発だけを
-足すと、次はその検査を形式的に満たすだけの逃げ方が生まれる（`--verified` を必須にすれば「確かめ
-た」と書くだけで通るのと同じ）。逃げ道は塞ぎきらず、**逃げたことが記録に残る**形にする
+So when adding a check, design **catching the deviation** and **preserving the structure of the
+adaptation** separately. Adding only the catching produces, next, a way out that merely satisfies
+the check formally (requiring `--verified` and having "I confirmed it" pass is the same thing).
+The escape hatch is not fully blocked; it takes a shape where **taking it leaves a record**
 （`bypass_declared`・`judges_disagreed`・`correction`）。
 
-**都合の悪い記録が消せないこと**が、この org の台帳が append-only である理由である。訂正は
-削除ではなく `correction` の追記で行う — 消せる記録は、消したい人がいるときに消える。
+**That an inconvenient record cannot be deleted** is why this org's ledger is append-only. A
+correction is an appended `correction` rather than a deletion — a deletable record gets deleted
+whenever someone wants it gone.
 
-### 分割の失敗は、しばしば要求の欠落として現れる
+### A failed split often shows up as a missing requirement
 
-10周を超えた Issue の後半は、その Issue の EARS のどれにも対応していない作業だった（メンバー間の
-UPDATE / INSERT 権限・同意の表現・前提の凍結 — MUST に1件も無い）。skeptic の言葉では
-**「装飾的なテキスト列を守り、金額・支払者・債務の向き・グループ所有権を無防備にしていた」**。
+The latter half of the Issue that went past ten rounds was work answering none of that Issue's EARS
+items (UPDATE/INSERT permissions between members, expressing consent, freezing the premises — not
+one of them in the MUSTs). In the skeptic's words, it **"protected a decorative text column while
+leaving the amount, the payer, the direction of the debt, and group ownership undefended"**.
 
-認可を扱う deliverable なのに、MUST が「誰が入れるか」しか定めておらず「入った後に何が
-できるか」を定めていない、という偏りは**起票時に検出できる**。切り方の問題として現れる前に、
-要求の問題として捕まえるほうが安い。
+In a deliverable that handles authorization, the lopsidedness of MUSTs setting only "who may enter"
+and never "what can be done once inside" **can be detected at filing time**. Catching it as a
+problem of the requirements is cheaper than waiting for it to surface as a problem of the split.
 
 ## 4c. The integration seam — feature → develop → main, and where fan-out fans back in
 

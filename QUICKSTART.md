@@ -18,122 +18,131 @@ that the company builds and ships something reproducibly through that mold.
 > the two coupled lifecycles (the org's metabolism and the product's SDLC) — read
 > [ARCHITECTURE.md](ARCHITECTURE.md). This quickstart is the hands-on path through it.
 
-> **保証範囲。** このQuickstartは幻覚・迎合・確認不足・phase省略・誤操作を対象にする。
-> `cross-harness` は異なるモデル系統によるレビューの非相関化、ローカル署名は `attested`、
-> writerは `process_mediated` が既定である。別UID、KMS/HSM、外部judgeは不要であり、
-> separate-UID writer isolationはsupported coreへ採用していない実験なので、この手順では使わない。
+> **The extent of the guarantee.** This Quickstart addresses hallucination, sycophancy, insufficient
+> checking, skipped phases, and mis-operation. `cross-harness` decorrelates review across model
+> families, local signing reaches `attested`, and the writer defaults to `process_mediated`. A
+> separate UID, a KMS/HSM, and an external judge are all unnecessary, and separate-UID writer
+> isolation is an experiment not adopted into the supported core, so it is not used here.
 
 ## 1. Install the plugin
 
-**先に PyYAML を入れること。** organ は `constitution.yaml` / `organization.yaml` を読んで
-enforcement を決めるので、これが無いと `org_lint.py` が `ModuleNotFoundError` で落ち、
-`judges.lineage` も読めない（cross-harness の宣言が黙って消える側の失敗になる）。
-プラグインが実際に使う interpreter（PATH 上の `python3`）へ入れる:
+**Install PyYAML first.** The organs read `constitution.yaml` and `organization.yaml` to decide the
+enforcement, so without it `org_lint.py` dies with `ModuleNotFoundError` and `judges.lineage`
+cannot be read either (the failure where a cross-harness declaration vanishes silently).
+Install it into the interpreter the plugin actually uses (the `python3` on PATH):
 
 ```
 python3 -m pip install pyyaml
-python3 -c "import yaml; print(yaml.__version__)"   # 確認
+python3 -c "import yaml; print(yaml.__version__)"   # confirm
 ```
 
 ```
-/plugin marketplace add <owner>/orgforge-plugin      # GitHub リポジトリを参照する
-/plugin install orgforge-plugin@orgforge-plugin      # scope は user を選ぶ（全プロジェクトで有効）
+/plugin marketplace add <owner>/orgforge-plugin      # reference the GitHub repository
+/plugin install orgforge-plugin@orgforge-plugin      # choose the user scope (active in every project)
 /reload-plugins
 ```
 
-**ローカルディレクトリ参照（`marketplace add /path/to/orgforge-plugin`）は使わないこと。**
-そのマシンでしか動かず、**未コミットの変更がそのまま動いてしまう** — 検証していないコードで
-org を動かすことになる。GitHub 参照なら、どのコミットで動いているかが `installed_plugins.json`
-に記録される。
+**Do not use a local directory reference (`marketplace add /path/to/orgforge-plugin`).** It works
+only on that machine and **runs your uncommitted changes as they are** — which means running the
+org on unverified code. With a GitHub reference, which commit is running is recorded in
+`installed_plugins.json`.
 
-プラグインを直したときの手順（GitHub 参照にすると push が必須になる）:
+The steps after fixing the plugin (a GitHub reference makes a push mandatory):
 
 ```
-integrations/claude-code/build.sh          # バンドルを neutral core から再生成
-integrations/claude-code/build.sh --check   # 同期を確認（CI ゲート）
-python3 -m pytest tests/ -q                 # テスト
+integrations/claude-code/build.sh           # regenerate the bundle from the neutral core
+integrations/claude-code/build.sh --check   # confirm they are in sync (the CI gate)
+python3 -m pytest tests/ -q                 # the tests
 git commit && git push
-/plugin marketplace update orgforge-plugin  # セッション側で取り込む
+/plugin marketplace update orgforge-plugin  # pick it up on the session side
 /plugin update orgforge-plugin@orgforge-plugin
 ```
 
-インストールせずヘッドレスで動かす場合:
+To run headless without installing:
 
 ```
 echo "your prompt" | claude -p --plugin-dir integrations/claude-code \
   --allowedTools "Bash,Write,Agent"
 ```
 
-マニフェストを触ったら `claude plugin validate integrations/claude-code --strict` で検証する。
+After touching a manifest, validate it with
+`claude plugin validate integrations/claude-code --strict`.
 
-## 2. セットアップは不要 — org は発見される
+## 2. No setup needed — the org is discovered
 
-**環境変数を設定する必要はない。** org はディスク上の場所（`organization.yaml` の隣の
-`.orgforge/`）であり、バックログのリポジトリは `git remote origin` が指す先。どちらも
-チェックアウトを見れば分かる事実なので、organ とガードレールのフックは**自分で見つける**
+**No environment variable has to be set.** An org is a place on disk (the `.orgforge/` beside
+`organization.yaml`), and the backlog repository is wherever `git remote origin` points. Both are
+facts readable from the checkout, so the organs and the guardrail hooks **find them themselves**
 （`tools/discover.py`）。
 
-これは利便性の話ではない。`/Users/someone/proj/.orgforge/ledger` のような絶対パスで
-アドレスされる org は**別のマシンで動かない**。Issue に仕様を全部書く意味は「どの環境でも
-拾える」ことにあるので、そこが壊れると設計全体が崩れる。さらに、**マシンごとに繰り返す
-セットアップ手順は必ず飛ばされる** — そして飛ばされたとき、ガードレールは ledger を
-見つけられず**黙って全部を許可する**。発見はその失敗モードを消す。
+This is not a matter of convenience. An org addressed by an absolute path like
+`/Users/someone/proj/.orgforge/ledger` **does not work on another machine**. The point of writing
+the whole specification onto the Issue is that it can be picked up in any environment, so breaking
+that collapses the whole design. On top of that, **a setup step repeated per machine always gets
+skipped** — and when it is skipped, the guardrails cannot find the ledger and **silently permit
+everything**. Discovery erases that failure mode.
 
-副次的な効果として、**1つの環境で複数のリポジトリの org を同時に運用できる**。
-`cd` するだけで対象の org が切り替わり、監査記録も blast-radius の予算も混線しない。
+As a side effect, **one environment can operate the orgs of several repositories at once**. A `cd`
+switches which org is addressed, and neither the audit records nor the blast-radius budgets get
+crossed.
 
 ```
-cd ~/product-a && /orgforge-plugin:org        # product-a の org
-cd ~/product-b && /orgforge-plugin:org        # product-b の org（独立）
+cd ~/product-a && /orgforge-plugin:org        # product-a's org
+cd ~/product-b && /orgforge-plugin:org        # product-b's org (independent)
 ```
 
-### 上書きが要る場合だけ環境変数を使う
+### Use an environment variable only where an override is needed
 
-明示的な引数 > 環境変数 > 発見、の順で優先される。既定の経路はどれも要らないが、
-ledger を意図的にチェックアウトの外に置く場合や CI で固定する場合には使える。
+Precedence runs: an explicit argument > an environment variable > discovery. The default path needs
+none of them, but they are available for deliberately placing the ledger outside the checkout, or
+for pinning it in CI.
 
-| 変数 | 用途 | 既定 |
+| variable | purpose | default |
 |---|---|---|
-| `ORG_LEDGER_ROOT` | ledger を別の場所に置く | 発見（`.orgforge/ledger`） |
-| `ORG_GITHUB_REPO` | バックログのリポジトリを固定する | 発見（`git remote origin`） |
-| `ORG_ROLE` | このセッションがどの役割か（doctrine 注入と resume のキー） | (なし) |
-| `ORG_DOCTRINE_ROOT` / `ORG_CONVENTIONS_ROOT` | 別の場所に置く | 発見（`.orgforge/…`） |
-| `ORG_HOOK_FAIL_OPEN` | organ がエラーのとき通す — **開発用のみ** | off（fail-safe） |
+| `ORG_LEDGER_ROOT` | put the ledger somewhere else | discovered (`.orgforge/ledger`) |
+| `ORG_GITHUB_REPO` | pin the backlog repository | discovered (`git remote origin`) |
+| `ORG_ROLE` | which role this session is (the key for doctrine injection and resume) | (none) |
+| `ORG_DOCTRINE_ROOT` / `ORG_CONVENTIONS_ROOT` | put them somewhere else | discovered (`.orgforge/…`) |
+| `ORG_HOOK_FAIL_OPEN` | pass when an organ errors — **development only** | off (fail-safe) |
 
-**blast-radius のキャップ・反復上限・seam ゲートは `constitution.yaml` の `enforcement:`
-ブロックで宣言する**（同じ org はどこにインストールしても同じ強度で効く）。`ORG_CAP_*` などの
-環境変数はその**開発用の上書き**であって、org の設定方法ではない。詳細は
+**The blast-radius caps, the iteration limits, and the seam gate are declared in
+`constitution.yaml`'s `enforcement:` block** (so the same org takes effect at the same strength
+wherever it is installed). Environment variables such as `ORG_CAP_*` are **development overrides**
+of that, not the way to configure an org. For details see
 [REFERENCE.md](REFERENCE.md)。
 
-## 3. 最初にやること
+## 3. What to do first
 
-既存リポジトリへ導入する場合は1コマンド:
+Adopting into an existing repository is one command:
 
 ```
 /orgforge-plugin:org-adopt
 ```
 
-local state準備、実在codeの読解、最小organization、architecture、remaining-work manifest、
-baseline、readiness doctorまでを同じworkflowで完了する。Issue分解は必要な場合だけ後で行う。
+Preparing local state, reading the code that exists, the minimal organization, the architecture,
+the remaining-work manifest, the baseline, and the readiness doctor all complete within the same
+workflow. Decomposing into Issues happens later, and only where it is needed.
 
-新規orgをbriefから設立する場合は3コマンド:
+Founding a new org from a brief is three commands:
 
 ```
-/orgforge-plugin:org-init タテカエ ja      # 1. セットアップ（設計はしない）
-/orgforge-plugin:org-found REQUIREMENTS.md # 2. 設計 → CEO 承認で停止
-/orgforge-plugin:org-decompose             # 3. アトミックな task Issue へ分解
+/orgforge-plugin:org-init Tatekae ja       # 1. set up (it does not design)
+/orgforge-plugin:org-found REQUIREMENTS.md # 2. design → stops for the CEO's approval
+/orgforge-plugin:org-decompose             # 3. decompose into atomic task Issues
 ```
 
-> **コマンド名はプラグイン名で修飾する。** 例: `/orgforge-plugin:org-init`。
-> 他のプラグインと名前が衝突しないための正式な形。
+> **Qualify a command name with the plugin's name**, e.g. `/orgforge-plugin:org-init`.
+> This is the formal form, so names do not collide with another plugin's.
 
-`/orgforge-plugin:org-init` は**実行時のカレントディレクトリ**に org を作る。プロダクトのリポジトリで
-実行すること — ステップ0が場所を表示し、プラグイン自身の開発ツリーなら停止する。
+`/orgforge-plugin:org-init` creates the org in **the current directory at run time**. Run it in the
+product's repository — step 0 prints the location and stops if it is the plugin's own development
+tree.
 
-`org-init` は `repro_lint` の **baseline** も1回取る（機械バーの現時点を記録する起点）。これが
-無いと、後の gate 判定で「この変更による悪化」と「元からあった負債」を区別できない — 実地では
-gate が既存の負債を新規の悪化と読んで判定を止めた。新規リポジトリなら失敗はほぼ無く、それが
-正しい出発点になる（以後の悪化が全部見える）。
+`org-init` also takes `repro_lint`'s **baseline** once (the starting point that records where the
+machine bar currently stands). Without it, a later gate judgment cannot tell "a regression from
+this change" from "debt that was already there" — in the field a gate read pre-existing debt as a
+new regression and stopped the judgment. In a new repository the failures are near zero, and that
+is the correct starting point (every later regression is visible).
 
 ## 4. Sanity-check: a guardrail actually fires
 
@@ -141,7 +150,7 @@ Before founding a company you'll trust to fan out, confirm the teeth are live. W
 set and a low cap, a runaway is blocked at the tool boundary — one quick check, not the headline:
 
 ```
-mkdir -p /tmp/myorg/.orgforge/ledger && cd /tmp/myorg   # org として発見される最小構成
+mkdir -p /tmp/myorg/.orgforge/ledger && cd /tmp/myorg   # the minimum discoverable as an org
 export ORG_CAP_DESTRUCTIVE_OPS=2
 echo '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/x"}}' \
   | python3 integrations/common/org_hook.py; echo "exit=$?  (2 = blocked)"
@@ -290,13 +299,13 @@ The plugin is the *engine*; your organization is `organization.yaml` + `constitu
   your review** before anything is built (founding is design; the build is the CEO's next call).
 
 ```
-/org-init      "タテカエ" ja          # 1. set up:     ledger root, spec files, .envrc, labels, develop, guard probe
+/org-init      "Tatekae" ja          # 1. set up:     ledger root, spec files, .envrc, labels, develop, guard probe
 /org-found     <RFP or path/to/brief> # 2. design:     the four fixed founding artifacts → STOP for your approval
 /org-decompose                        # 3. decompose:  the manifest → atomic SPEC task Issues, coverage-gated
 ```
 
 **Step 2 writes four files under fixed names** ([docs/11](docs/11-sdlc-mold.md) §0a) — `REQUIREMENTS.md`,
-`FEATURE-INVENTORY.md`, **`ARCHITECTURE.md` (the 全体設計書)**, `coverage-manifest.md`, plus
+`FEATURE-INVENTORY.md`, **`ARCHITECTURE.md` (the whole-system design)**, `coverage-manifest.md`, plus
 `organization.yaml`. The names are fixed because step 3 reads them *by name*; a renamed artifact is one
 no command can find. `/orgforge-plugin:org-found` is *design only* — you approve the scope. It is the moment the abstract
 "org" becomes a **company**: a purpose stated as a business, a feature inventory with an explicit exclude
@@ -349,42 +358,48 @@ What that buys you, concretely:
   there). See [docs/05](docs/05-lifecycle-operations.md) §reliability-budget / §DORA and
   [docs/11](docs/11-sdlc-mold.md) §4.
 
-### 1つの Issue を回す — 実際に打つコマンド
+### Running one Issue — the commands actually typed
 
-PM ループ（`/org-work`）の中身は、この並びである。**配管はツールが回し、判断は役割が下す。**
+This sequence is what the PM loop (`/org-work`) consists of. **The tool runs the plumbing; the role
+makes the judgment.**
 
 ```
 org_cycle.py begin     --role R --issue N [--agent A]
   # claim → worktree(.orgforge/wt/issue-N/) → spec_delegated → phase_started → cycle_started
-  #   → Issue へ log → stage。parent と candidate_id は Issue から自動解決
-  # 着手前の確認（依存が rework 中か・人間の作業待ちが残っていないか）も出す。止めない
+  #   → log to the Issue → stage. parent and candidate_id resolve from the Issue automatically
+  # it also prints the pre-start checks (is a dependency in rework, is anything waiting on a
+  #   human). It does not stop you
 
-  … maker が worktree の中で作る …
+  … the maker builds inside the worktree …
 
 org_cycle.py complete  --role R --issue N --outputs T --command CMD --result OUT
-                       (--domain-model-updated REF | --domain-model-none WHY) [--learned "学び"]
-  # 新しい公開面（SECURITY DEFINER 関数・grant・エンドポイント）が増えていれば、
-  #   申告するまで止まる — 認可ホールは「関数を1つ足した」ところから生まれる
-  # --learned は doctrine に propose される（admit は gate の仕事）
+                       (--domain-model-updated REF | --domain-model-none WHY) [--learned "a learning"]
+  # where new public surface has appeared (a SECURITY DEFINER function, a grant, an endpoint),
+  #   it stops until it is declared — an authorization hole is born where one function was added
+  # --learned is proposed to doctrine (the admit is the gate's job)
 
 org_cycle.py handback  --issue N --summary S --result OUT      # push → PR（Closes #N）→ log
-org_cycle.py verify    --issue N --role gate                   # 判定の材料を組み立てる
-  # stdout = subagent に渡す本文（憲章・SPEC/MUST・判定履歴・「返すもの」の指定）
-  # stderr = 監督が打つコマンド（gate が返した値を decide に流す）
-  #   → subagent は判定を返すまでが役割。記録は監督が行う
+org_cycle.py verify    --issue N --role gate                   # assemble the material for judging
+  # stdout = the body handed to the subagent (the charter, the SPEC/MUSTs, the judgment history,
+  #   and what to return)
+  # stderr = the command the supervisor types (feeding the gate's returned values into decide)
+  #   → the subagent's role ends at returning the judgment. The supervisor records it
 
-org_cycle.py verify    --issue N --role skeptic                 # gate の admit 後
-  # gate が既に見たことと「gate 自身が撃っていないと書いた領域」を引き渡す
+org_cycle.py verify    --issue N --role skeptic                 # after the gate's admit
+  # it hands over what the gate already looked at, and the areas the gate itself wrote it had not
+  #   fired at
 
 org_cycle.py integrate --issue N [--plan]
-  # --plan: 何を統合するか・並行 worktree との衝突を先に見せる
-  # gate の admit と skeptic の survives が**台帳に**無ければ止まる（exit 4）
+  # --plan: shows first what would be integrated, and conflicts with a parallel worktree
+  # it stops unless the gate's admit and the skeptic's survives are **in the ledger** (exit 4)
 ```
 
-途中の状態は `org_cycle.py show --issue N` で一望する（判定履歴・周回の性質・いま何待ちか・
-不可逆な変更の数）。本番資産（DB の DDL・権限）に触ったら `touched` で誰の権限で入れたかごと
-残す。溜まった worktree は `gc`。誤って書いた記録や検証用のプローブは `correction` で無効を
-宣言する（追記型なので消せない）。
+See the state at any point with `org_cycle.py show --issue N` (the judgment history, the character
+of the rounds, what it now waits on, and the number of irreversible changes). After touching a
+production asset (DDL or privileges on a DB), leave it with `touched`, together with under whose
+authority it went in. Accumulated worktrees go to `gc`. A record written in error, or a probe
+written for verification, is declared void with `correction` (an append-only ledger cannot delete
+it).
 
 The org and the system grow together: `operate` closes the loop back to `requirements`
 ([docs/11](docs/11-sdlc-mold.md) §4), and the doctrine that guides each role is retrained as the
