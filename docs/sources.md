@@ -421,34 +421,41 @@ industrialize under upstream guardrails), all bounded by "autonomy is bounded by
   (kiro.dev; "the spec is source-of-truth and code is a build artifact"; steering docs product/tech/
   structure.md; "spec-driven codebases benefit as models improve") — the SDD lineage docs/12 §1 maps
   onto orgforge's spec=organization / projection=generated-view.
-  **分割基準を実テンプレートで確認した（2026-07、main ブランチ）:** Spec Kit の `[P]` は
-  *"different files, no dependencies"*（`templates/tasks-template.md`）で、粒度そのものの規範は
-  実質「exact file path を1つ書けること」+ *"Avoid: vague tasks"* のみ。Kiro は粒度を直接
-  規範化しており *"Tasks should be scoped to specific coding activities (e.g., 'Implement X function'
-  rather than 'Support X feature')"* と例示する。**両者とも「タスクが大きすぎる」ことの検出機構を
-  持たない** — Spec Kit の `analyze` の Detection Passes（A duplication / B ambiguity /
-  C underspecification / D constitution / E coverage gaps / F inconsistency）に粒度の検査は無く、
-  Kiro は人間の承認ゲート（`spec-tasks-review`）だけである。人間の diff レビューを廃止した org
-  （docs/11 §4f）ではその頼り先が無いので、orgforge は `split-check` に警告を置く（docs/11 §4b）。
-- **[S] 分割基準の系譜（2026-07 に一次資料で確認）** — **INVEST**（Bill Wake, 2003）の *Small* の
-  根拠は見積精度ではなく *"Above this size, and it seems to be too hard to know what's in the
-  story's scope"*（スコープの境界が認識できなくなること）。*Testable* は *"I understand what I
-  want well enough that I could write a test for it"* という自己申告基準で、**Perspective-Based
-  Reading**（Basili et al.）のテスター視点 Q1 *"Can you make up reasonable test cases for each
-  item?"* がそれを他者検証の手続きに変える。**QUS**（Lucassen et al., Requirements Engineering
-  2016）は `Complete` を形式化し — *"to read, update or delete an item one first needs to create
-  it"*、述語 `voidDep(µ1) ↔ depends(av1,av2) ∧ ∄µ2∈U. do2=do1`。**req_lint に実装したが
-  取り下げた（0.25.1）** — 形式化は正しいが、日本語の要求記述から目的語を機械的に切り出せない。
-  実地の REQUIREMENTS.md にバッククォート識別子は0件で、検査が一度も発火しなかった。
-  AQUSA が意味理解を要する基準の自動化を諦めているのと、同じ壁に当たったことになる。
-  **Humanizing Work** の垂直スライス定義 *"you'll probably have to touch multiple architectural
-  layers"* は、**層/ファイル単位の分割を明示的な反パターンとする**（docs/11 §4b）。
-  **SPIDR**（Cohn）の5軸（Spike/Path/Interface/Data/Rules）はいずれも実装場所ではなく
-  外部から観測できる振る舞いの分岐。**BMAD** の PRD Quality Rubric は *"bounds, not adjectives"*
-  / *"omissions could be silently assumed"* / *"NFR theater"* という語彙で要求の薄さを狙う
-  （ただし story 側のサイズは一切検査しない、という非対称がある）。
-  **「壊れ方が違えば別単位」を規範として明文化した先例は見つからなかった** — PBR が
-  「検証手段を起点に据える」点で最も近いが、あれは分割ではなく検査の規範である。
+  **The split criteria were checked against the real templates (2026-07, the main branch):** Spec
+  Kit's `[P]` is *"different files, no dependencies"* (`templates/tasks-template.md`), and its norm
+  for granularity itself amounts to "one exact file path can be written" plus *"Avoid: vague
+  tasks"*. Kiro normativises granularity directly, illustrating it as *"Tasks should be scoped to
+  specific coding activities (e.g., 'Implement X function' rather than 'Support X feature')"*.
+  **Neither carries a mechanism for detecting that a task is too large** — the Detection Passes of
+  Spec Kit's `analyze` (A duplication / B ambiguity / C underspecification / D constitution /
+  E coverage gaps / F inconsistency) hold no granularity check, and Kiro has only a human approval
+  gate (`spec-tasks-review`). An org that has retired human diff review (docs/11 §4f) has nothing
+  to lean on there, so orgforge puts a warning in `split-check` (docs/11 §4b).
+- **[S] The lineage of the split criteria (verified against primary sources in 2026-07)** — the
+  grounds for *Small* in **INVEST** (Bill Wake, 2003) are not estimation accuracy but *"Above this
+  size, and it seems to be too hard to know what's in the story's scope"* (the boundary of the
+  scope stops being recognisable). *Testable* is the self-declared criterion *"I understand what I
+  want well enough that I could write a test for it"*, and Q1 of the tester's viewpoint in
+  **Perspective-Based Reading** (Basili et al.) — *"Can you make up reasonable test cases for each
+  item?"* — turns it into a procedure someone else can verify. **QUS** (Lucassen et al.,
+  Requirements Engineering 2016) formalises `Complete` — *"to read, update or delete an item one
+  first needs to create it"*, with the predicate
+  `voidDep(µ1) ↔ depends(av1,av2) ∧ ∄µ2∈U. do2=do1`. **It was implemented in req_lint and withdrawn
+  (0.25.1)** — the formalisation is right, but the object cannot be extracted mechanically from
+  requirements written in Japanese. A REQUIREMENTS.md in the field held zero backtick identifiers
+  and the check never once fired. That is the same wall AQUSA hits in giving up on automating the
+  criteria that require semantic understanding.
+  **Humanizing Work**'s definition of a vertical slice — *"you'll probably have to touch multiple
+  architectural layers"* — makes **splitting by layer or by file an explicit anti-pattern**
+  (docs/11 §4b).
+  The five axes of **SPIDR** (Cohn) — Spike/Path/Interface/Data/Rules — are each a branch in
+  externally observable behaviour rather than in where the implementation lives.
+  **BMAD**'s PRD Quality Rubric aims at thin requirements through the vocabulary *"bounds, not
+  adjectives"* / *"omissions could be silently assumed"* / *"NFR theater"* (with the asymmetry that
+  it never checks size on the story side).
+  **No precedent was found that normativises "a different way of breaking makes a different unit"**
+  — PBR comes closest in taking the means of verification as its starting point, but that is a norm
+  for checking rather than for splitting.
 - **[S] Osmani, "Software Factories, Light and Dark"** — the comprehension-debt failure mode (months of
   green tests while understanding erodes); move human judgment upstream. Anchors docs/12 §6's "don't
   measure by items-drained."
@@ -475,7 +482,7 @@ supplied four refinements folded in (labeled where):
   (folded into template/SPEC.md's seam contract). **Evaluate with one pass / one prompt / one verdict
   against end-state**, start from ~20 cases (folded into the gate's admission scoring). Multi-agent
   costs ~15× a chat's tokens (single agent ~4×) because each subagent holds its own window — worth it
-  only for high-value, parallelizable,超-context work; **not** for interdependent work like coding
+  only for high-value, parallelizable, beyond-context work; **not** for interdependent work like coding
   (reinforces docs/12's single-agent default, docs/03's decomposition-by-independence).
 - **Cognition, *Don't Build Multi-Agents*** (blog, 2025-06, Walden Yan) — the strongest skeptic. Two
   principles: **share the full decision *trace*, not just individual data**, and **every action embeds
@@ -486,7 +493,7 @@ supplied four refinements folded in (labeled where):
   resumable from it, not from an un-ledgered transcript).
 - **GitHub, *Run multiple agents at once with /fleet*** (blog, 2026-04); **Docker, *A virtual agent
   team / Ralph-loop*** (blog, 2026-05); **Cursor 2.0 changelog** (2025-10, up to 8 agents, git-worktree
-  isolation); **LangSmith Fleet** (2026-03) — vendor实装 of the same patterns orgforge already carries:
+  isolation); **LangSmith Fleet** (2026-03) — a vendor implementation of the same patterns orgforge already carries:
   orchestrator+subagents (Organ 2 / the O8 no-doctrine-capture tooth), generation-vs-evaluation split
   (maker→gate→skeptic), worktree isolation (the seam gate + owns-collision), PR-but-human-merges
   (constitution's charter tier). Cited as convergent industry evidence, not new mechanism.

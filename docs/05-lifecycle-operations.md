@@ -887,332 +887,363 @@ To not repeat the "described as if built" gap this repo has been audited for:
 
 ---
 
-## 9. 統制が効いていることを実測する（総合検証プロトコル）
+## 9. Measure that the controls are in effect (the end-to-end verification protocol)
 
-統制を入れたあと、**それが実際に効いているか**を実 org に対して確かめる手順。実装者の自己申告は証拠に数えない。
-# 総合検証プロトコル（0.32.1 → 0.39.0）
+The procedure for confirming, against a real org, **whether what was added is actually in effect**.
+The implementer's own word does not count as evidence.
 
-実 org に対して、これまでに入れた統制が**実際に効いているか**を確かめる手順。
+# The end-to-end verification protocol (0.32.1 → 0.39.0)
 
-### この文書の前提
+The procedure for confirming, against a real org, **whether the controls added so far are actually
+in effect**.
 
-**実装者の自己確認だけでは足りない。** 今回の一連の作業で、実装者（Claude）は次のような報告を
-繰り返した。
+### The premise of this document
 
-- 「lock は fail-closed にした」— 置換が適用されておらず、環境変数はコードに存在しなかった
-- 「必須 field を検証した」— 空の payload が通っていた
-- 「correction で無効化した」— payload の形が違い、何も無効化されていなかった
-- 「hook が発火した」— `//` キーで設定ファイルごと読み飛ばされ、何も gate していなかった
+**The implementer's own confirmation is not enough.** Over this stretch of work the implementer
+(Claude) repeatedly reported the following.
 
-どれも**正常系だけを見て達成と述べた**結果である。したがってこの検証は:
+- "the lock is fail-closed" — the replacement was never applied and the environment variable
+  existed nowhere in the code
+- "the required fields are validated" — an empty payload was passing
+- "it was voided with a correction" — the payload shape differed and nothing was voided
+- "the hook fired" — a `//` key had the whole configuration file skipped, and it gated nothing
 
-1. **成功系・拒否系・故障注入・control** を各項目で回す
-2. **終了コードだけを信じない** — 台帳の永続イベント、seq/hash、鎖、Issue 投影、実ファイルへの
-   効果まで確かめる
-3. **独立した視点で複数回レビューする**（下記のスイスチーズ方式）
-4. **検証中にコードを修正したら、結果を破棄して最初からやり直す**
+Each is the result of **reading the happy path alone and declaring it done**. So this verification:
 
-最後の点が重要である。修正を挟んだ検証結果は、修正前の状態と修正後の状態が混ざっており、
-どちらについても何も言っていない。
+1. runs **the success case, the refusal case, fault injection, and a control** for every item
+2. **does not trust the exit code alone** — it confirms the persisted ledger event, the seq/hash,
+   the chain, the Issue projection, and the effect on real files
+3. **reviews it several times from independent viewpoints** (the Swiss-cheese approach below)
+4. **discards the results and starts over if any code is fixed mid-verification**
+
+The last point matters. A verification result with a fix in the middle mixes the state before and
+the state after, and says nothing about either.
 
 
-### 実行の順序
+### The order of execution
 
 ```
-0. 前提の固定（版・schema・preflight）
-1. 単項目の検証（A〜K）— 各項目で 成功 / 拒否 / 故障注入 / control
-2. スイスチーズ・レビュー（claude -p を4視点 + Codex 1視点）
-3. 差異の突き合わせと、残った疑義の再測
+0. fix the premises (the version, the schema, the preflight)
+1. per-item verification (A-K) — success / refusal / fault injection / control for each
+2. the Swiss-cheese review (four viewpoints through claude -p, plus one through Codex)
+3. reconcile the differences and re-measure whatever doubt remains
 ```
 
 
-### 0. 前提の固定
+### 0. Fixing the premises
 
 ```bash
 cd <org>
-python3 <plugin>/tools/ledger.py schema            # exit 0 であること（--fix の 0 ではない）
-python3 <plugin>/tools/ledger.py verify            # chain intact であること
-git -C <plugin> rev-parse --short HEAD             # 検証対象の版を記録する
+python3 <plugin>/tools/ledger.py schema            # must exit 0 (not --fix's 0)
+python3 <plugin>/tools/ledger.py verify            # must report chain intact
+git -C <plugin> rev-parse --short HEAD             # record the version under verification
 ```
 
-**`schema --fix` の exit 0 を preflight 成功と読まない。** 上書きを避けた衝突が残っていても 0 を
-返す。必ず `--fix` なしの診断が 0 であることを確かめる。
+**Do not read `schema --fix`'s exit 0 as a successful preflight.** It returns 0 even with conflicts
+left unoverwritten. Always confirm that the diagnosis without `--fix` is 0.
 
-記録すること: プラグインの commit、org の台帳の件数と tip hash、`validated:v1` と
-`legacy_unvalidated` の件数。
+Record: the plugin's commit, the org ledger's row count and tip hash, and the counts of
+`validated:v1` and `legacy_unvalidated`.
 
 
-### 1. 単項目の検証
+### 1. Per-item verification
 
-各項目で必ず4種を回す。**拒否系だけを確かめて「通せること」を確かめない**のが、この一連で
-2回起きた失敗である。
+Always run all four kinds per item. **Confirming only the refusal case and not that anything can
+get through** is the failure that happened twice over this stretch.
 
-| 種別 | 何を見るか |
+| kind | what it reads |
 |---|---|
-| 成功系 | 正しい入力が **通る**こと（通らない検査は org を止める） |
-| 拒否系 | 誤った入力が **拒否される**こと、かつ **副作用が無い**こと |
-| 故障注入 | 記録に失敗したとき **fail-closed** になること |
-| control | 仕組みを外すと **同じ操作が通る**こと（= その仕組みが止めていた証拠） |
+| success | that correct input **passes** (a check nothing passes stops the org) |
+| refusal | that incorrect input **is refused**, and that **there are no side effects** |
+| fault injection | that it is **fail-closed** when the record fails |
+| control | that removing the mechanism lets **the same operation through** (= evidence that the mechanism was what stopped it) |
 
 ### A. subject / correction / integration freshness（0.32.2, 0.32.3, 2.0.27）
 
-- 成功: `verify --print-subject` が判定を回さずに subject を返す
-- **鮮度**: strict orgではsubjectが統合先ref・観測時head・merge-baseを保持し、判定記録時と
-  joint生成直前の双方で再解決する。統合先の移動・stale・diverged・deleted・unresolvableは
-  exit 7/11でfail-closedとし、自動fetch/rebaseは行わない
-- **移行**: `adopt doctor` が
-  `enforcement.judges.require_current_integration_head: true|false` の明示を要求する。旧subjectは
-  descriptorを持たないため、strict admissionへ再利用せずverifyからやり直す
-- **統合先**: strict orgは`enforcement.judges.integration_ref`を明示する。`main`と`develop`の
-  どちらも存在するだけでは実際のfan-in先を導出できないため、固定順で推測しない。個別reviewの
-  `verify --base <ref>`だけが宣言を明示的に上書きできる
-- 拒否: 別 subject の provisional が一致しない（exit 6）／同一血統の verdict 差し替え（exit 4）
-- **脱出**: 案内された `correction` を**実際に打って**、その後に新しい判定が入ること
-- **権限**: judgmentを出したjudge自身と別judgeのcorrectionは拒否し、constitutionで宣言した
-  第三者authorityの対象束縛済み署名receiptだけが通ること。`--actor`の名乗り替えだけでは拒否し、
-  通常イベントのprobe/mistakeとjudgmentのbackfillは残ること
-- **再構成**: correctionの対象class・Issue・effect・authority・assuranceが台帳と
-  `org-cycle show`から読めること
-- 未追跡ファイルの内容を変えると subject が変わること（`git diff HEAD` では見えない）
-- 生成物（`.gitignore` 済み）では subject が変わらないこと
-- 実 index を壊さないこと（`git status` が前後で同一）
+- success: `verify --print-subject` returns the subject without running a judgment
+- **freshness**: in a strict org the subject retains the integration ref, the head at observation,
+  and the merge-base, and at recording time
+  and again just before the joint is generated, it is resolved anew. An integration target that
+  moved, is stale, diverged, was deleted, or is unresolvable fails closed at exit 7/11, and no
+  automatic fetch or rebase happens
+- **migration**: `adopt doctor` requires
+  `enforcement.judges.require_current_integration_head: true|false` to be stated. An old subject
+  carries no descriptor, so it is not reused for a strict admission — start again from verify
+- **the integration target**: a strict org states `enforcement.judges.integration_ref`. The mere
+  existence of both `main` and `develop` does not derive the actual fan-in target, so it is not
+  guessed in a fixed order. Only a per-review `verify --base <ref>` overrides the declaration
+  explicitly
+- refusal: a provisional over a different subject does not agree (exit 6) / a verdict substituted
+  within one lineage (exit 4)
+- **the way out**: **actually type** the `correction` that was advised, and a new judgment enters
+  afterwards
+- **permission**: a correction from the judge that issued the judgment, and from another judge, are
+  both refused, and only a subject-bound signed receipt from the third-party authority the
+  constitution declares passes. Merely changing the `--actor` name is refused, and probe/mistake on
+  ordinary events and backfill on judgments both remain available
+- **reconstruction**: the correction's target class, Issue, effect, authority, and assurance are
+  readable from the ledger and from `org-cycle show`
+- changing an untracked file's content changes the subject (which `git diff HEAD` does not see)
+- build output (already in `.gitignore`) does not change the subject
+- the real index is not broken (`git status` is identical before and after)
 
-### B. 並行 append（0.33.0）
+### B. Concurrent appends (0.33.0)
 
-- 12〜16 並列で append し、**seq に重複が無く鎖が通る**こと
-- 故障注入: `ORG_LEDGER_FORCE_LOCK_FAIL=1` で exit 4、**ファイルが作られない**こと
-- `ORG_LEDGER_ALLOW_UNLOCKED=1` で通り、かつ「保証は確かめられない」と出力すること
-- torn line / seq 飛び / hash 不一致で exit 4（自動修復しない）
+- appending at 12-16 way parallelism, **no seq is duplicated and the chain verifies**
+- fault injection: `ORG_LEDGER_FORCE_LOCK_FAIL=1` gives exit 4 and **creates no file**
+- `ORG_LEDGER_ALLOW_UNLOCKED=1` passes and prints "the guarantee cannot be confirmed"
+- a torn line, a gap in seq, or a hash mismatch gives exit 4 (with no auto-repair)
 
-### C. schema migration（0.33.1, 0.33.3, H8）
+### C. Schema migration (0.33.1, 0.33.3, H8)
 
-- `ledger.py schema` が org とテンプレートの差分（クラス**と** validation 規則）を出す
-- `--fix` が org 独自の厳格規則を**保存**する（消さない）
-- 同じ path で値が違えば **conflict として報告し、上書きしない**
-- `--fix` 後に `event_classes` が1つだけであること（YAML の後勝ちで消えない）
-- **トップレベルキーの重複が無いこと**
+- `ledger.py schema` prints the difference between the org and the template (the classes **and**
+  the validation rules)
+- `--fix` **preserves** the org's own stricter rules (it does not delete them)
+- a differing value at the same path is **reported as a conflict rather than overwritten**
+- after `--fix` there is exactly one `event_classes` (nothing lost to YAML taking the later one)
+- **no top-level key is duplicated**
 
-### D. 原子的な cap 予約（0.34.0, 0.34.1）
+### D. The atomic cap reservation (0.34.0, 0.34.1)
 
-- 成功: cap 内で `allow` が記録され、実際に操作が通る
-- 拒否: cap 超過で hold、**hold が台帳に残る**、対象ファイルが変わらない
-- **16 並列で allow の合計が cap を超えない**こと
-- 予約を generic append で偽造できないこと（writer-only）
-- 同じ冪等キーで内容の違う要求が拒否されること
-- 負・NaN の delta / 過去の負の曝露で deny
-- 故障注入: append/fsync 失敗で **allow にならず、書きかけが残らない**
-- hook が **JSON の decision を読む**こと（deny を印字して exit 0 する偽 writer を通さない）
+- success: within the cap an `allow` is recorded and the operation actually passes
+- refusal: past the cap it holds, **the hold stays in the ledger**, and the target file is
+  unchanged
+- **at 16-way parallelism the allows never sum past the cap**
+- a reservation cannot be forged through a generic append (writer-only)
+- a request with the same idempotency key and different content is refused
+- a negative or NaN delta, or a past negative exposure, denies
+- fault injection: a failed append or fsync **produces no allow and leaves nothing half-written**
+- the hook **reads the JSON decision** (it does not pass a fake writer that prints deny and exits
+  0)
 
-### E. Codex plugin と hook の実効性（0.35.0）
+### E. The Codex plugin and the hook's effectiveness (0.35.0)
 
-- plugin を install し、**checkout を消した状態で hook が発火する**こと
-- cap 内は通り allow が残る／cap 超過は deny され sentinel が無傷で hold が残る
-- 壊れた台帳で deny
-- `session_id` / `tool_use_id` が**空でない**こと
-- 同一 `tool_use_id` の再送で二重計上しないこと
-- **control: plugin を remove すると同じ操作が通り、台帳が増えない**
-- trust を TUI で付与し、**bypass なしで**同じ結果になること
-- Codex には「**1回だけ試し、拒否されたら代替手段を使わず終了**」と指示すること
+- install the plugin and **the hook fires with the checkout deleted**
+- within the cap it passes and an allow remains / past the cap it denies, the sentinel is intact,
+  and a hold remains
+- a broken ledger denies
+- `session_id` and `tool_use_id` are **not empty**
+- a resend under the same `tool_use_id` does not double-count
+- **control: removing the plugin lets the same operation through, and the ledger does not grow**
+- granting trust through the TUI gives the same result **with no bypass**
+- instruct Codex to "**try once and, if refused, stop without using an alternative**"
 
-### F. halt / latch / release（0.36.0, 0.38.0）
+### F. halt / latch / release (0.36.0, 0.38.0)
 
-- 成功: halt 中に観測・検証・安全な修復が通る
-- 拒否: 通常作業（`npm test` / `git commit` / Write / Edit）が止まる
-- 故障注入: halt の記録に失敗しても **ラッチで次の呼び出しが止まる**
-- ラッチを手で消しても台帳の halt が止め続けること
-- 読めない台帳が **halt とみなされる**こと
-- 解除: 止めた主体・共有鍵・未認可の鍵・別 halt の receipt・証拠なし — **すべて拒否**
-- 解除の成功: 独立した認可済み approver で解除でき、その後 gated action が通る
-- 故障注入: 解除の記録に失敗したら **停止を維持**し、exact retry で完了できること
-- **halt の検査が別プロセスで行われること**（`ledger.py` を import しない）
+- success: observation, verification, and safe repair pass during a halt
+- refusal: ordinary work (`npm test`, `git commit`, Write, Edit) stops
+- fault injection: even where recording the halt fails, **the latch stops the next call**
+- removing the latch by hand still leaves the ledger's halt stopping things
+- an unreadable ledger **is treated as a halt**
+- release: the principal that stopped it, a shared key, an unauthorised key, a receipt from another
+  halt, no evidence — **all refused**
+- a successful release: an independent authorised approver can release it, and gated actions pass
+  afterwards
+- fault injection: where recording the release fails it **stays stopped**, and an exact retry
+  completes it
+- **the halt check runs in a separate process** (it does not import `ledger.py`)
 
-### G. 署名 receipt と認可（0.37.0, 0.38.0）
+### G. Signed receipts and authorization (0.37.0, 0.38.0)
 
-- 成功: local非対称receiptで `identity_assurance: attested`
-- receipt 無しなら `claimed`（**昇格しない**）
-- 共有鍵も `attested` が上限だが、検証側が署名も作れるため非対称鍵と同じ意味には読まない
-- 拒否: 再利用（別 issue / 別 subject / 別血統）・改変・失効鍵・trust store 読込失敗
-- **代理記録でも `decision_by` が judge のまま**であること
-- 職務分離が `decision_by` を比べ、`recorded_by` を比べないこと
-- 認可: 役・血統・解除権限それぞれで拒否されること
-- **同一 signer の二血統が `same_signer` として記録される**こと（独立性の証拠に数えない）
-- trust store に秘密鍵があれば読み込みを拒否すること
+- success: a local asymmetric receipt gives `identity_assurance: attested`
+- with no receipt it is `claimed` (**nothing is promoted**)
+- a shared key also reaches `attested` at most, but is not read as meaning the same as an
+  asymmetric key, since the verifying side can also produce the signature
+- refusal: reuse (a different issue, subject, or lineage), tampering, a revoked key, a trust store
+  that cannot be read
+- **`decision_by` stays the judge even under proxy recording**
+- the separation of duties compares `decision_by` and not `recorded_by`
+- authorization: it refuses on the role, the lineage, and the release permission each
+- **two lineages under one signer are recorded as `same_signer`** (not counted as evidence of
+  independence)
+- a trust store containing a private key is refused on load
 
-`authenticated` は外部custodyとcaller認証をhostが保証するdeployment向け予約値。
-非対称署名であることだけでは選ばない。
+`authenticated` is a value reserved for deployments where the host guarantees external custody and
+caller authentication. Being asymmetrically signed alone does not select it.
 
-### H. 同一UID writer mediation実験（0.39.0）
+### H. The same-UID writer mediation experiment (0.39.0)
 
-> **supported coreではない。** 同一UID daemonは通常運用に不要であり、R0の既存harness
-> 境界を越えて常駐runtimeを増やす。以下は実装済みmechanismの検証記録として残す。
+> **Not part of the supported core.** A same-UID daemon is unnecessary for ordinary operation and
+> adds a resident runtime beyond R0's existing harness boundary. What follows is kept as a
+> verification record of a mechanism that was implemented.
 
-- 成功: writerd 経由で書ける
-- 拒否: 直接 append／改変／再送／パス指定／未知 org／非書き込み op
-- **daemon 停止中は両経路とも fail-closed**（台帳が増えない）
-- socket 親が他者書き込み可・シンボリックリンクなら拒否
-- 同一 UID で `--require-root-owned` が拒否され、**なぜ `separate_uid` を主張できないか**を言うこと
-- peer credential が `recorded_by` にだけ入り、`decision_by` に流れないこと
-- ラッチ・鍵 registry・schema の権限が監査されること
+- success: it can write through writerd
+- refusal: a direct append, tampering, a resend, a path in the arguments, an unknown org, a
+  non-write op
+- **with the daemon stopped both paths are fail-closed** (the ledger does not grow)
+- a socket parent writable by others, or a symlink, is refused
+- under the same UID `--require-root-owned` is refused, and it says **why `separate_uid` cannot be
+  claimed**
+- the peer credential enters `recorded_by` only and does not flow into `decision_by`
+- the permissions of the latch, the key registry, and the schema are audited
 
-### I. separate-UID writer isolation — **非サポートの実験記録**
+### I. separate-UID writer isolation — **an unsupported experimental record**
 
-> **通常運用では実行しない。** separate-UID writer isolationはsupported coreへ採用しない。
-> 以下は過去の実験とfailure-mode検証を保存するためのrunbookであり、Quickstart、release、
-> local開発の
-> 前提ではない。production資産の境界はhost platformのsandbox、CI protected environment、
-> IAM、approval、credential custodyへ委譲する。
+> **Do not run this in ordinary operation.** separate-UID writer isolation is not adopted into the
+> supported core. What follows is a runbook preserving a past experiment and its failure-mode
+> verification; it is not a premise of the Quickstart, a release, or local development. The
+> boundary around production assets is delegated to the host platform's sandbox, CI protected
+> environments, IAM, approvals, and credential custody.
 >
-> repositoryにinstaller/writer daemonが存在してもsupported runtimeを意味しない。
-> `separate_uid`未実測はrelease blockerではない。
+> The presence of an installer and a writer daemon in the repository does not imply a supported
+> runtime. `separate_uid` being unmeasured is not a release blocker.
 
-同一UID writer mediationで強制できるのは「台帳への経路が1つであること」までである。
-同じ UID の caller はdaemon を止められ、`chmod` で権限を戻せる。
-**separate-UID writer isolationの主張は「通常の caller UID から
-台帳のファイルに書けない」ことであり、それは OS 権限でしか作れない。**
+Same-UID writer mediation can enforce no more than "there is one path to the ledger". A caller
+under the same UID can stop the daemon and restore the permissions with `chmod`.
+**What separate-UID writer isolation claims is that "a normal caller UID cannot write to the ledger
+files", and only OS permissions can create that.**
 
-> **実験で確認した保証範囲**
+> **The extent of the guarantee confirmed by the experiment**
 >
-> この実験が別 UID 化するのは **writer の資産**（台帳・trust store = 公開鍵）だけである。
-> `writer-install.sh` には **judge 秘密鍵に言及する行が1つも無い**。秘密鍵は
-> `identity.py keygen --private-out` が置いた場所（caller の UID 所有 0600）に残る。
+> What this experiment moves to a separate UID is **the writer's assets** alone (the ledger, and
+> the trust store = the public keys). `writer-install.sh` carries **not one line mentioning a
+> judge's private key**. A private key stays where `identity.py keygen --private-out` put it (owned
+> by the caller's UID at 0600).
 >
-> したがって個別deploymentでOS権限を実測できても、主張できるのはwriter資産の
-> `separate_uid`だけである。judge identityはlocal operationの`attested`のままで、
-> cross-harnessはreview非相関化の記録である。この限界はcore releaseのblockerではない。
+> So even where OS permissions are measured in a particular deployment, all that can be claimed is
+> `separate_uid` for the writer's assets. A judge's identity stays at local operation's `attested`,
+> and cross-harness is a record of decorrelated review. This limit is not a blocker for a core
+> release.
 
-以下は**非サポート実験を再現する場合だけ**のhistorical runbookである。通常利用者は実行しない。
-再現する場合もagentはsudoを実行せず、隔離した試験orgだけを使う。
+What follows is a historical runbook **for reproducing the unsupported experiment only**. An
+ordinary user does not run it. Even when reproducing it, an agent runs no sudo and uses an isolated
+test org alone.
 
-#### I-0. 前提条件（sudo 不要。**ここで落ちるなら install しない**）
+#### I-0. Preconditions (no sudo needed. **If this fails, do not install**)
 
-このinstallは、次の2つが揃っていないと **起動しない daemon を作る**か、
-**正規経路を全停止させる**。install の前に、この2つを先に確かめる。
+Without both of the following, this install either **creates a daemon that will not start** or
+**stops every legitimate path**. Confirm both before installing.
 
-**① daemon が使う python に PyYAML があること。**
+**① The python the daemon uses has PyYAML.**
 
 ```bash
-PYTHONNOUSERSITE=1 /usr/bin/python3 -c 'import yaml'   # これが通らなければ install しない
+PYTHONNOUSERSITE=1 /usr/bin/python3 -c 'import yaml'   # do not install if this does not pass
 ```
 
-`PYTHONNOUSERSITE=1` を付けるのは、`~/Library/Python/*/site-packages` にある PyYAML が
-**daemon からは見えない**からである（daemon は別 UID で走る）。利用者の `python3` で
-`import yaml` が通ることは根拠にならない。
+`PYTHONNOUSERSITE=1` is used because PyYAML in `~/Library/Python/*/site-packages` is **invisible to
+the daemon** (the daemon runs under a different UID). `import yaml` passing in the user's `python3`
+is no evidence.
 
-無ければ、**システム python を書き換えず**に root 所有の専用 venv を作る:
+Where it is absent, create a root-owned dedicated venv **without rewriting the system python**:
 
 ```bash
 sudo /usr/bin/python3 -m venv /usr/local/libexec/orgforge/venv
 sudo /usr/local/libexec/orgforge/venv/bin/pip install pyyaml
 sudo chown -R root:wheel /usr/local/libexec/orgforge/venv
-# 以降 install / verify には必ず --daemon-python を渡す
+# from here on, always pass --daemon-python to install and verify
 ```
 
-PyYAML が無いと `ledger.py` が schema を読めず、**すべての append が fail-closed で拒否**
-される。省略できる前提条件ではない。
+Without PyYAML, `ledger.py` cannot read the schema and **every append is refused fail-closed**. It
+is not a precondition that can be skipped.
 
-**② trust store（鍵 registry）が在って、中身が使えること。**
+**② The trust store (the key registry) exists and its content is usable.**
 
 ```bash
 ls -l <org>/.orgforge/trust/keys.json
 python3 -c "import sys; sys.path.insert(0,'<plugin>/tools'); import writerd; \
-  print(writerd._trust_store_defect('<org>/.orgforge/trust/keys.json'))"   # None なら健全
+  print(writerd._trust_store_defect('<org>/.orgforge/trust/keys.json'))"   # None means sound
 ```
 
-`writerd` は trust store が無い／壊れているとき **socket を作る前に exit 2 する**
-（0.39.5 でこの検査を bind の前へ移した）。`--trust` を渡さないまま install すると、
-daemon は `cwd=/` で鍵 registry を探せず、**正しく署名された receipt もすべて拒否**する
-= separate-UID writerの正規経路が完全に停止する。
+Where the trust store is missing or broken, `writerd` **exits 2 before creating the socket** (0.39.5
+moved this check ahead of the bind). Installing without passing `--trust` leaves the daemon unable
+to find the key registry at `cwd=/`, and it **refuses even correctly signed receipts** = the
+legitimate path of the separate-UID writer stops completely.
 
-#### I-1. 現状の記録（sudo 不要。**install 前に必ず1回**）
+#### I-1. Record the current state (no sudo. **Always once, before installing**)
 
 ```bash
-<plugin>/tools/writer-verify.sh --org-root <org> --no-write        # root で実行しない
+<plugin>/tools/writer-verify.sh --org-root <org> --no-write        # do not run as root
 python3 <plugin>/tools/ledger.py verify <org>/.orgforge/ledger | tail -1
-wc -l < <org>/.orgforge/ledger/ledger.jsonl                        # 件数を控える
-cat <org>/.orgforge/ledger/HEAD                                    # seq と hash を控える
+wc -l < <org>/.orgforge/ledger/ledger.jsonl                        # note the row count
+cat <org>/.orgforge/ledger/HEAD                                    # note the seq and hash
 ```
 
-install 前は **不合格が並ぶのが正しい**（まだ隔離していないのだから）。ここで控えた
-「件数 / seq / hash」が、install 後の判定の基準線になる。**控えずに install しない** —
-後から「増えていないこと」を言えなくなる。
+Before installing, **a line of failures is correct** (nothing is isolated yet). The row count, seq,
+and hash noted here become the baseline for the judgment after installing. **Do not install without
+noting them** — afterwards you cannot say "it did not grow".
 
-`--no-write` を付けると `⑧ writerd 経由で書けるか` を飛ばし、**台帳に1件も足さない**。
-飛ばした項目は `未測定` として数えられ、終了コードは 2 になる（不合格 0 でも
-「全部測った」とは言わせない）。
+`--no-write` skips "⑧ can it write through writerd" and **adds not one row to the ledger**. A
+skipped item is counted as unmeasured and the exit code becomes 2 (zero failures still does not let
+anyone say "everything was measured").
 
-#### I-2. install（**sudo。人間が実行する**）
+#### I-2. install (**sudo. A human runs this**)
 
 ```bash
 sudo <plugin>/tools/writer-install.sh --org-root <org> --dry-run \
-     --daemon-python /usr/local/libexec/orgforge/venv/bin/python3   # 先に差分を見る
+     --daemon-python /usr/local/libexec/orgforge/venv/bin/python3   # read the diff first
 sudo <plugin>/tools/writer-install.sh --org-root <org> \
      --daemon-python /usr/local/libexec/orgforge/venv/bin/python3
 ```
 
-`--dry-run` は root 不要である。**打つ前に必ず dry-run を読む。** install は台帳・鍵・
-schema を org tree の外（`/usr/local/var/orgforge/orgs/<ns>/`）へ移し、org 側を symlink に
-置き換える。何がどこへ動くのかを見ないまま実行しない。
+`--dry-run` needs no root. **Always read the dry-run before typing the real one.** The install moves
+the ledger, the keys, and the schema outside the org tree (to
+`/usr/local/var/orgforge/orgs/<ns>/`) and replaces the org side with symlinks. Do not run it without
+seeing what moves where.
 
-install が固定するもの（いずれも **caller が書けない場所**に置く）:
+What the install fixes (each placed **somewhere the caller cannot write**):
 
-| 対象 | なぜ固定するのか |
+| what | why it is fixed |
 |---|---|
-| `ledger-schema.yaml` | 渡さないと `ledger.py` が cwd から探し、**org の規則ではなくテンプレートの規則**で検証する |
-| `constitution.yaml` | daemon は org の外で動くので cwd から探せない。届かないと `require_attested_identity` が子に伝わらず **未認証 admission が通る** |
-| `trust/keys.json` | 渡さないと鍵 registry が見つからず **正規の receipt も全拒否**される |
-| `--allow-uid` | socket は 0666 なので繋げること自体は誰でもできる。**繋げることと書けることは別** |
+| `ledger-schema.yaml` | without it, `ledger.py` searches from the cwd and validates against **the template's rules rather than the org's** |
+| `constitution.yaml` | the daemon runs outside the org and cannot search from the cwd. Unreached, `require_attested_identity` never gets to the child and **unauthenticated admissions pass** |
+| `trust/keys.json` | without it the key registry is not found and **even legitimate receipts are all refused** |
+| `--allow-uid` | the socket is 0666, so anyone can connect. **Connecting and writing are different things** |
 
-**constitution は写しである。** install 後に org 側の `constitution.yaml` を編集しても
-daemon には届かない（届いたら caller が強制を消せてしまう）。宣言を変えたら installer を
-**再実行して固定し直す**。食い違いは writerd が起動時に警告する。
+**The constitution is a copy.** Editing the org-side `constitution.yaml` after installing does not
+reach the daemon (if it did, the caller could erase the enforcement). After changing a declaration,
+**run the installer again to fix it anew**. writerd warns about the divergence at startup.
 
-#### I-3. verify（**sudo 不要。root で実行しない**）
+#### I-3. verify (**no sudo. Do not run as root**)
 
 ```bash
 <plugin>/tools/writer-verify.sh --org-root <org>
 ```
 
-**root で走らせない。** root なら全部できてしまうので、検証にならない。通常の caller として
-走らせる。この検証は台帳・鍵・schema・socket を **破壊しない**（書き込みモードで開けるか
-だけを見て、1バイトも書かない）。唯一の副作用は ⑧ の `progress_recorded` が1件増えること。
+**Do not run it as root.** As root everything succeeds, which verifies nothing. Run it as a normal
+caller. This verification **destroys** neither the ledger, the keys, the schema, nor the socket (it
+reads only whether they open in write mode, and writes not one byte). The one side effect is one
+additional `progress_recorded` from ⑧.
 
-verify が満たさなければならないこと:
+What verify must satisfy:
 
-**1. caller UID が `ORG_INSIDE_WRITER` に任意の64桁 hex を設定しても、直接 append /
-   直接 admission が OS 権限で拒否され、台帳が増えないこと。**
+**1. Even with the caller UID setting any 64-character hex in `ORG_INSIDE_WRITER`, a direct append
+   and a direct admission are refused by OS permissions and the ledger does not grow.**
 
 ```bash
 BEFORE=$(wc -l < <org>/.orgforge/ledger/ledger.jsonl)
 FAKE=$(python3 -c "print('a'*64)")
 
-# ① 直接 append
+# ① a direct append
 ORG_INSIDE_WRITER=$FAKE python3 <plugin>/tools/ledger.py append <org>/.orgforge/ledger \
   --actor spoof --class progress_recorded \
   --payload '{"role":"spoof","candidate_id":"spoof-1","phase":"operate"}'; echo "exit=$?"
 
-# ② 直接 admission（最も強い権限の記録）
+# ② a direct admission (the record carrying the strongest authority)
 ORG_INSIDE_WRITER=$FAKE python3 <plugin>/tools/ledger.py derive-admission \
   <org>/.orgforge/ledger --issue 1 --event admission_decided; echo "exit=$?"
 
 AFTER=$(wc -l < <org>/.orgforge/ledger/ledger.jsonl)
-echo "before=$BEFORE after=$AFTER"    # **必ず等しいこと**
+echo "before=$BEFORE after=$AFTER"    # **they must be equal**
 ```
 
-**ここがseparate-UID実験の核心なので、判定の根拠を取り違えないこと。**
-64桁 hex は `_inside_writer()` を**通る**。実測（今回、sudo 無しで確認済み）:
+**This is the heart of the separate-UID experiment, so do not mistake the grounds for the
+judgment.** A 64-character hex **passes** `_inside_writer()`. Measured (confirmed here without
+sudo):
 
 ```
 _inside_writer() with fake 64-hex: True
-require_writer_path: None            ← アプリ層の gate は通過する
+require_writer_path: None            ← the application-layer gate is passed
 ```
 
-コード自身がそう書いている（`ledger.py::_inside_writer` の docstring）:
-「**これは境界ではない。** 同じ UID の caller は自分で 64 桁の hex を作って名乗れる …
-**本当の境界は別 UID**（OS 権限で台帳に書けない）である。」
+The code says so itself (the docstring of `ledger.py::_inside_writer`):
+"**This is not a boundary.** A caller under the same UID can make its own 64-character hex and
+claim it … **the real boundary is a separate UID** (unable to write to the ledger under OS
+permissions)."
 
-したがって **この項目の合格根拠は「exit≠0」ではなく「台帳が増えていないこと」であり、
-止めているのは Python の判定ではなく `EACCES` である。** 別UID境界が効いていれば、
-アプリ層を素通りした書き込みが **OS 権限で** 落ちる。権限の側を直接見る:
+So **the grounds for passing this item are "the ledger did not grow" rather than "exit≠0", and
+what stops it is `EACCES` rather than a decision in Python.** Where the separate-UID boundary is in
+effect, a write that walked past the application layer fails **on OS permissions**. Read the
+permission side directly:
 
 ```bash
 python3 - <<'PY'
@@ -1220,16 +1251,16 @@ import os
 p = "<org>/.orgforge/ledger/ledger.jsonl"
 try:
     fd = os.open(p, os.O_WRONLY | os.O_APPEND); os.close(fd)
-    print("✗ caller が書き込みモードで開けた — separate_uid ではない")
+    print("✗ the caller opened it in write mode — this is not separate_uid")
 except PermissionError as e:
-    print("✓ OS 権限で拒否:", e)
+    print("✓ refused by OS permissions:", e)
 PY
 ```
 
-**install 前にこれを走らせると「開けた」になる**（I-1 で実測済み）。install 後に
-「拒否」へ変わることが、別UID境界が効いた唯一の証拠である。
+**Run before installing, this comes out as "it opened"** (measured in I-1). Its turning into
+"refused" after installing is the only evidence that the separate-UID boundary took effect.
 
-**2. writer socket 経由の正規 append は成功し、台帳が1件増えること。**
+**2. A legitimate append through the writer socket succeeds and the ledger grows by one.**
 
 ```bash
 BEFORE=$(wc -l < <org>/.orgforge/ledger/ledger.jsonl)
@@ -1238,25 +1269,26 @@ python3 <plugin>/tools/writer_client.py append -- --actor verify \
   --class progress_recorded \
   --payload '{"role":"verify","candidate_id":"wv-manual","phase":"operate"}'
 AFTER=$(wc -l < <org>/.orgforge/ledger/ledger.jsonl)
-echo "before=$BEFORE after=$AFTER"    # **ちょうど +1 であること**
+echo "before=$BEFORE after=$AFTER"    # **it must be exactly +1**
 ```
 
-**止めるだけの org は運用できない。** 1 だけを確かめて「隔離した」と言わない。
-書けなくなっただけの状態は、隔離ではなく故障である。
+**An org that only stops cannot be operated.** Do not confirm 1 alone and say "it is isolated". A
+state where writing merely became impossible is a fault, not isolation.
 
-**3. daemon 再起動後も同じであること。**
+**3. It is the same after the daemon restarts.**
 
 ```bash
-sudo launchctl kickstart -k system/com.orgforge.writerd.<ns>   # 人間が実行
+sudo launchctl kickstart -k system/com.orgforge.writerd.<ns>   # a human runs this
 sleep 2
 sudo launchctl print system/com.orgforge.writerd.<ns> | head -20
 ```
 
-再起動後に **1 と 2 をもう一度**通す。とくに nonce の再送拒否は、プロセス内だけに
-持っていると **daemon を落として上げれば同じ要求を再送できる**（そのため nonce は
-writer が所有する台帳の隣に永続化してある）。再起動後に ⑨ の再送検査が通ることまで見る。
+After the restart, run **1 and 2 again**. The nonce replay refusal in particular, held only in
+process, would let **the same request be replayed by bringing the daemon down and up** (which is
+why the nonce is persisted beside the ledger the writer owns). Confirm as far as ⑨'s replay check
+passing after the restart.
 
-**4. policy / trust / schema / manifest / ledger を caller UID で変更できないこと。**
+**4. The policy, trust, schema, manifest, and ledger cannot be modified by the caller UID.**
 
 ```bash
 python3 - <<'PY'
@@ -1273,158 +1305,167 @@ targets = [
 ]
 for p in targets:
     if not os.path.exists(p):
-        print("  （無い）", p); continue
+        print("  (absent)", p); continue
     try:
         fd = os.open(p, os.O_WRONLY | os.O_APPEND); os.close(fd)
-        print("  ✗ 書き込みモードで開けた:", p)
+        print("  ✗ opened in write mode:", p)
     except PermissionError:
-        print("  ✓ 開けない:", p)
+        print("  ✓ does not open:", p)
 PY
 ```
 
-**1バイトも書かない。** 上書きを試すと本物の鍵 registry / schema を壊す。
-「開けるか」だけを見る。**検証が検証対象を壊すのは最悪の形である。**
+**Not one byte is written.** Trying an overwrite breaks the real key registry and schema. Read only
+whether it opens. **A verification that breaks what it verifies is the worst shape there is.**
 
-symlink の向き先も見る（`writer-verify.sh ⑤'`）。org tree の中に実体が残っていると、
-**入れ物ごと差し替えられる** — 中身が守られていても意味が無い。
+Read where the symlinks point too (`writer-verify.sh ⑤'`). Real content left inside the org tree
+means **the container can be replaced wholesale** — guarding the contents then means nothing.
 
-**5. chain / HEAD / seq が健全であること。**
+**5. The chain, HEAD, and seq are sound.**
 
 ```bash
 python3 <plugin>/tools/ledger.py verify <org>/.orgforge/ledger | tail -3
 cat <org>/.orgforge/ledger/HEAD
 ```
 
-`chain intact: N event(s), tip <hash>… — hash chain replays clean` が出ること。
-`HEAD` の `seq` が I-1 で控えた値 + （2 で足した分だけ）であること。
-**1 で試した spoof の分が入っていないこと** — 入っていたら 1 は不合格である。
+`chain intact: N event(s), tip <hash>… — hash chain replays clean` is printed.
+`HEAD`'s `seq` equals the value noted in I-1 plus exactly what 2 added.
+**Nothing from the spoof attempted in 1 is included** — if it is, 1 has failed.
 
-#### I-4. 判定
+#### I-4. The verdict
 
-`writer-verify.sh` は末尾に `合格 N / 不合格 N / 未測定 N` を出す。
+`writer-verify.sh` prints `passed N / failed N / unmeasured N` at the end.
 
-| 状態 | 終了コード | 主張してよいこと |
+| state | exit code | what may be claimed |
 |---|---|---|
-| 不合格あり | 1 | **`process_mediated` のまま。** 隔離したと書かない |
-| 不合格 0、未測定あり | 2 | **まだ何も主張しない。** 「不合格 0」は「全部確かめた」ではない |
-| 不合格 0、未測定 0 | 0 | `workload_isolation: separate_uid` を主張してよい |
+| something failed | 1 | **stays `process_mediated`.** Do not write that it is isolated |
+| zero failures, something unmeasured | 2 | **claim nothing yet.** "Zero failures" is not "everything was confirmed" |
+| zero failures, zero unmeasured | 0 | `workload_isolation: separate_uid` may be claimed |
 
-**保証の範囲は「通常の agent / caller UID から writer の資産を変更できない」ことである。**
-ホストの管理者（root）は脅威モデルの外 — daemon を止め、所有者を戻し、plist を書き換え
-られる。これは限界ではなく **境界の定義**である。
+**The extent of the guarantee is that "a normal agent / caller UID cannot modify the writer's
+assets".** The host's administrator (root) is outside the threat model — they can stop the daemon,
+restore the ownership, and rewrite the plist. That is not a limit but **the definition of the
+boundary**.
 
-#### I-5. rollback（**sudo。人間が実行する**）
+#### I-5. rollback (**sudo. A human runs this**)
 
 ```bash
-sudo <plugin>/tools/writer-install.sh --org-root <org> --uninstall --dry-run   # 先に読む
+sudo <plugin>/tools/writer-install.sh --org-root <org> --uninstall --dry-run   # read it first
 sudo <plugin>/tools/writer-install.sh --org-root <org> --uninstall
 ```
 
-uninstall は **台帳を消さない**。順序が安全性そのものである:
+The uninstall **does not delete the ledger**. The order is the safety itself:
 
-1. daemon を止める（**停止を確認する**。止まっていない writer が、書き戻している最中に書く）
-2. 権威側の内容を org へ書き戻す
-3. symlink を実体に置き換える
-4. 所有者を戻す（**書き戻したあとに行う** — 先に戻すと writer が書けなくなる）
-5. この org の socket / 権威データ / backup / 設定だけを消す
+1. stop the daemon (**confirm it stopped**. A writer that has not stopped writes mid-restore)
+2. write the authoritative content back to the org
+3. replace the symlinks with real content
+4. restore the ownership (**after writing back** — restoring first leaves the writer unable to
+   write)
+5. delete only this org's socket, authoritative data, backup, and configuration
 
-**復元できていないなら、5 は実行されない。** `RESTORE_OK=0` のとき uninstall は
-socket だけ消して **exit 1 で止まり、権威データと backup を残す**。org root が移動・消失
-していたり、org 側に権威側と中身の違う実体が置かれていた場合がこれにあたる
-（「在ること」を「戻っていること」と読まない。中身の digest で比べる）。
-その場合は原因を確かめてから **同じコマンドを再実行する** — uninstall は冪等である。
+**Where the restore did not succeed, 5 does not run.** At `RESTORE_OK=0` the uninstall deletes the
+socket alone and **stops at exit 1, leaving the authoritative data and the backup**. That covers an
+org root that moved or vanished, and real content on the org side whose content differs from the
+authoritative side ("it is there" is not read as "it was restored"; they are compared by a digest
+of the content).
+In that case, find the cause and **run the same command again** — the uninstall is idempotent.
 
-rollback 後に確かめること:
+What to confirm after a rollback:
 
 ```bash
 python3 <plugin>/tools/ledger.py verify <org>/.orgforge/ledger | tail -1   # chain intact
-wc -l < <org>/.orgforge/ledger/ledger.jsonl                                # 件数が減っていない
-ls -l <org>/.orgforge/ledger                                               # 実体（symlink でない）
-ls -l <org>/.orgforge/*.pre-writer <org>/*.pre-writer 2>/dev/null          # 控えは手で消す
+wc -l < <org>/.orgforge/ledger/ledger.jsonl                                # the count has not dropped
+ls -l <org>/.orgforge/ledger                                               # real content (not a symlink)
+ls -l <org>/.orgforge/*.pre-writer <org>/*.pre-writer 2>/dev/null          # the copies are removed by hand
 ```
 
-### J. Issue 投影
+### J. The Issue projection
 
-- `provisional` が Issue にコメントを投影し、`reasoning_sha256` が台帳の receipt と一致すること
-- repo が無い org では「照合対象が残らない」と告げること
-- `decide` が台帳を先に通し、拒否されたら Issue に書かないこと
+- `provisional` projects a comment onto the Issue, and `reasoning_sha256` matches the ledger's
+  receipt
+- in an org with no repo it says that nothing holds what it reconciles against
+- `decide` goes through the ledger first, and writes nothing to the Issue when refused
 
-### K. 実ファイルへの効果
+### K. The effect on real files
 
-**台帳のイベントだけを見て「効いた」と判断しない。** 各拒否系で:
+**Do not decide "it worked" from the ledger's events alone.** In each refusal case:
 
-- sentinel ファイルが変わっていないこと
-- ブランチが動いていないこと
-- Issue の状態が変わっていないこと
+- the sentinel file is unchanged
+- the branch has not moved
+- the Issue's state is unchanged
 
 
-### 2. スイスチーズ・レビュー
+### 2. The Swiss-cheese review
 
-**1つの視点では、その視点の盲点が見えない。** 独立した視点に分けて回す。
+**One viewpoint cannot see its own blind spot.** Run it split across independent viewpoints.
 
-### claude -p（4視点）
+### claude -p (four viewpoints)
 
-各視点に、その視点だけを与える。**同じプロンプトを4回投げるのではない。**
+Give each viewpoint that viewpoint alone. **This is not throwing the same prompt four times.**
 
 ```bash
-claude -p "INDEPENDENT: <視点の定義>。<対象>を検証し、
-  終了コードだけでなく台帳の永続イベント・seq/hash・鎖・実ファイルへの効果を確かめること。
-  **正常系だけで達成と述べないこと。** 拒否系・故障注入・control を必ず回すこと。
-  発見は「実測したコマンドと出力」を添えて報告すること。" \
+claude -p "INDEPENDENT: <the viewpoint's definition>. Verify <the subject>, and confirm not only
+  the exit code but the persisted ledger event, the seq/hash, the chain, and the effect on real
+  files.
+  **Do not declare it done from the happy path alone.** Always run the refusal case, fault
+  injection, and a control.
+  Report each finding with the command you ran and its output." \
   --model claude-opus-5
 ```
 
-| 視点 | 何を探すか |
+| viewpoint | what it looks for |
 |---|---|
-| レジリエンス工学 / Safety-II | 予見・監視・対応・学習の4能力。**適応を摘発に変えていないか** |
-| STPA / システム安全 | 制御構造、非安全な制御動作、**制御が届かない経路** |
-| 敵対的コード監査 | 迂回路、信頼境界、**名前と保証の乖離** |
-| SRE / 運用・人的要因 | 可用性事故、復旧不能、**検査が組織を止める形** |
+| resilience engineering / Safety-II | the four capabilities: anticipate, monitor, respond, learn. **Has an adaptation been turned into something to catch?** |
+| STPA / system safety | the control structure, unsafe control actions, **the paths control does not reach** |
+| adversarial code audit | bypasses, trust boundaries, **divergence between a name and a guarantee** |
+| SRE / operations and human factors | availability incidents, unrecoverable states, **shapes where a check stops the org** |
 
-### Codex（別血統）
+### Codex (a different lineage)
 
 ```bash
 codex exec --sandbox read-only -m gpt-5.5 \
   --output-schema <plugin>/template/schemas/gate-verdict.json \
-  "$(cat <検証材料>)" </dev/null
+  "$(cat <the verification material>)" </dev/null
 ```
 
-**別の base model であることが要点である。** 同じ血統の checker は maker と盲点を共有する。
+**Being a different base model is the point.** A checker of the same lineage shares the maker's
+blind spots.
 
-### 突き合わせ
+### Reconciliation
 
-- 複数の視点が同じ穴を指すなら、優先度が高い
-- 1つの視点だけが指す穴も**消さない** — 見えた視点があるということである
-- **視点間で結論が食い違ったら、食い違いそのものを記録する**（`judges_disagreed` と同じ扱い）
-
-
-### 3. 検証を無効化する条件
-
-次のいずれかが起きたら、**それまでの結果を破棄して 0 からやり直す**。
-
-- 検証中にプラグインのコードを修正した
-- 検証中に org の schema / 設定を変更した
-- 検証対象の版（commit）が途中で変わった
-- 故障注入の環境変数が、意図しない項目にも効いていた
-
-**部分的にやり直さない。** 修正の前後が混ざった結果は、どちらについても何も言っていない。
+- a hole several viewpoints point at carries higher priority
+- a hole only one viewpoint points at is **not erased** — it means one viewpoint could see it
+- **where the viewpoints' conclusions disagree, record the disagreement itself** (treated the same
+  as `judges_disagreed`)
 
 
-### 報告の形
+### 3. What voids a verification
 
-各項目について:
+If any of the following happens, **discard the results so far and start again from zero**.
+
+- the plugin's code was fixed mid-verification
+- the org's schema or configuration was changed mid-verification
+- the version (commit) under verification changed partway
+- a fault-injection environment variable was also taking effect on unintended items
+
+**Do not redo it partially.** A result mixing before and after a fix says nothing about either.
+
+
+### The shape of the report
+
+For each item:
 
 ```
-項目: D. 原子的な cap 予約
-  成功系:   16並列 cap=5 → allow 5件、合計 5.0、seq 重複 0、chain intact
-  拒否系:   generic append で予約 → exit 2、台帳に 0 件
-  故障注入: FORCE_APPEND_FAIL → deny、書きかけ無し、verify 通過
-  control:  ORG_WRITER_SOCKET を外す → 同じ直接 append が通る（= 経路の強制が効いていた）
-  実ファイル: sentinel 無傷
+item: D. the atomic cap reservation
+  success:         16-way parallel, cap=5 → 5 allows, total 5.0, 0 duplicate seq, chain intact
+  refusal:         reserving through a generic append → exit 2, 0 rows in the ledger
+  fault injection: FORCE_APPEND_FAIL → deny, nothing half-written, verify passes
+  control:         unset ORG_WRITER_SOCKET → the same direct append passes (= the path was
+                   being enforced)
+  real files:      the sentinel is intact
 ```
 
-**「確かめていないこと」を空欄にせず、確かめていないと書く。** この一連で最も多かった失敗は、
-確かめていないものを確かめたと述べることだった。
+**Do not leave "what was not confirmed" blank; write that it was not confirmed.** The most common
+failure over this stretch was stating that something unconfirmed had been confirmed.
 
 ## Sources
 
