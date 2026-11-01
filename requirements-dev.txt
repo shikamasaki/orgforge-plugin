@@ -9,5 +9,5 @@ pytest-xdist==3.8.0
 PyYAML==6.0.2
 referencing==0.37.0
 rfc8785==0.1.4
-rpds-py==2026.6.3
+rpds-py==2026.9.1
 typing_extensions==4.16.0
